@@ -1,4 +1,4 @@
-// The main window, as the approved design draws it (docs/design/gw2onmac.pen, Main — …): the
+// The main window, as the approved design draws it (its Main — … frames): the
 // ink-stroke header with the GW2 / ON MAC wordmark, the tagline and the Unofficial badge; on the
 // left this Mac's six checks and what GW2 on Mac does; on the right the painting and one panel:
 // choose the install route (Steam or ArenaNet's installer), the install's steps with progress and

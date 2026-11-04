@@ -6,22 +6,25 @@
 # its environment). Steam's and ArenaNet's downloads of the game are played by this script
 # (Steam's appmanifest, the game folder). Processes for the busy checks are copies of /bin/sleep
 # at the engine's paths. The ArenaNet installer is a clone of a file signed by ArenaNet (by
-# default the game's own Gw2-64.exe from Jan's bottle, only read).
+# default the game's own Gw2-64.exe from the development workspace's bottle, only read; without
+# one, those checks are skipped).
 #
-#   app/scripts/test-sandbox.sh [path/to/GW2 on Mac.app]
+#   scripts/test-sandbox.sh [path/to/GW2 on Mac.app]
 #
-# Env: SANDBOX (default work/app-sandbox/test, removed first), KEEP=1 (leave it for a look),
-#      SIGNED_PE (an x86_64 PE signed by ArenaNet; default the game's Gw2-64.exe in work/bottles)
+# Env: SANDBOX (default work/app-sandbox/test in this repository, removed first), KEEP=1 (leave it
+#      for a look), SIGNED_PE (an x86_64 PE signed by ArenaNet; default the game's Gw2-64.exe in
+#      $GW2_ON_MAC_WORKSPACE/work/bottles, the workspace defaulting to ../gw2-on-mac)
 # Runs under macOS's /bin/bash 3.2.
 set -uo pipefail
-cd "$(dirname "$0")/../.."
-REPO="$PWD"
-APP="$(cd "${1:-app/dist/GW2 on Mac.app}" && pwd)"
+cd "$(dirname "$0")/.."
+ROOT="$PWD"
+WS="${GW2_ON_MAC_WORKSPACE:-$ROOT/../gw2-on-mac}"
+APP="$(cd "${1:-dist/GW2 on Mac.app}" && pwd)"
 G="$APP/Contents/Resources/gw2om.sh"
-[ -f "$G" ] || { echo "no $G; run app/build.sh" >&2; exit 1; }
-SANDBOX="${SANDBOX:-$REPO/work/app-sandbox/test}"
-case "$SANDBOX" in "$REPO"/work/app-sandbox/*) ;; *) echo "SANDBOX must be under work/app-sandbox/" >&2; exit 1 ;; esac
-SIGNED_PE="${SIGNED_PE:-$REPO/work/bottles/gw2/drive_c/Program Files (x86)/Steam/steamapps/common/Guild Wars 2/Gw2-64.exe}"
+[ -f "$G" ] || { echo "no $G; run ./build.sh" >&2; exit 1; }
+SANDBOX="${SANDBOX:-$ROOT/work/app-sandbox/test}"
+case "$SANDBOX" in "$ROOT"/work/app-sandbox/*) ;; *) echo "SANDBOX must be under work/app-sandbox/" >&2; exit 1 ;; esac
+SIGNED_PE="${SIGNED_PE:-$WS/work/bottles/gw2/drive_c/Program Files (x86)/Steam/steamapps/common/Guild Wars 2/Gw2-64.exe}"
 rm -rf "$SANDBOX"
 mkdir -p "$SANDBOX"
 SANDBOX="$(cd "$SANDBOX" && pwd -P)"

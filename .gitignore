@@ -1,4 +1,7 @@
 /dist/
 /.cache/
 /prebuilt/
+/prebuilt.new/
 /release/
+/work/
+.DS_Store

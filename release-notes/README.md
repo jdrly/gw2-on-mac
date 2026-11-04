@@ -3,7 +3,7 @@
 `<version>.md` here are the notes of each release, in SWTOR on Mac's format (its
 `release-notes/README.md`). `scripts/release.sh` puts them, unchanged, into the GitHub release
 and the update window (Sparkle). Nothing is published yet: GW2 on Mac has no GitHub release and
-no feed (see `../README.md`, *Releasing*).
+no feed (see the [README](../README.md), *Releasing*).
 
 ```markdown
 ## GW2 on Mac 0.1.1

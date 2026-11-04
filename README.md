@@ -1,9 +1,35 @@
-# GW2 on Mac (the app)
+# GW2 on Mac
 
-A small SwiftUI app for macOS 26 and later on Apple silicon that sets up Guild Wars 2 on its own
-Wine engine with our DXMT build, and starts it. It reuses SWTOR on Mac's app (its structure,
-installer conventions, Collect Logs, session report, release system and Sparkle wiring),
-restyled to the approved design in [`docs/design/gw2onmac.pen`](../docs/design).
+A small macOS app that sets up [Guild Wars 2](https://www.guildwars2.com) on Apple silicon and
+starts it. It installs the game, through **Steam** or **ArenaNet's own installer**, into a Wine
+engine and bottle of its own (CrossOver 26.3 with Wine 11), with the game's Direct3D 11 going
+straight to Metal through our build of [DXMT](https://github.com/jdrly/dxmt), macOS Game Mode,
+Retina rendering and a Wine tuned for the game's busy maps. It changes nothing you already have
+installed. Website: [gw2onmac.com](https://gw2onmac.com).
+
+> **GW2 on Mac is an unofficial fan project.** It is not made, endorsed or supported by ArenaNet
+> or NCSOFT. ArenaNet doesn't support third-party tools or compatibility layers, so you use it at
+> your own risk.
+>
+> **It doesn't host or change the game.** Steam comes from Valve and the game from Steam or
+> ArenaNet. GW2 on Mac only provides the compatibility layer the game runs on (Wine, plus DXMT
+> for Direct3D 11 on Metal), the same kind of software as CrossOver or Proton. The one exception
+> is the optional *Larger interface* addon (off by default; it asks first), which changes the
+> game's memory for a sharper interface at 4K.
+>
+> **All support for GW2 on Mac comes from its developer, Jan Drlý (Pharaphobia).** For help,
+> contact Pharaphobia on [Discord](https://discord.gg/AnV3fZWz2b) or open a
+> [GitHub issue](https://github.com/jdrly/gw2-on-mac/issues). Please don't send logs or bug
+> reports about GW2 on Mac to ArenaNet's support.
+>
+> Guild Wars 2 is a trademark of NCSOFT Corporation. Steam is a trademark of Valve Corporation.
+> Mac is a trademark of Apple Inc.
+
+## About the app
+
+A SwiftUI app for macOS 26 and later on Apple silicon. It reuses SWTOR on Mac's app (its
+structure, installer conventions, Collect Logs, session report, release system and Sparkle
+wiring), restyled to the approved design.
 
 Unlike SWTOR on Mac it changes no existing install. It creates its own engine and bottle and
 installs the game into them, through **Steam** (Valve's installer; you sign in and install the
@@ -82,8 +108,8 @@ other settings, Play says Steam must quit first, because the game gets Steam's e
 bottle's settings, Game Mode and Steam (if gone) again. It keeps the game and the settings.
 
 **Game Mode**: macOS turns it on only for a process whose executable belongs to a bundle with
-`LSSupportsGameMode`, and every Wine process runs Wine's loader. As SWGL on Mac and
-`scripts/common.zsh` do it:
+`LSSupportsGameMode`, and every Wine process runs Wine's loader. As SWGL on Mac and Jan's
+development setup do it:
 - `gamemode/GW2.app` (`cz.jandrly.gw2onmac.game`) holds an unsigned copy of the loader named
   `Gw2-64.exe` and an `ntdll.so` link.
 - With `WINEDLLPATH` set, CrossOver's ntdll starts the game from `$TMPDIR/winetemp-…/Gw2-64.exe`,
@@ -114,7 +140,7 @@ route, the Settings pane, *Quit after launching*) are in its defaults domain,
 
 `gw2om.sh settings` prints them and `gw2om.sh set <key> <value>` changes one. They are kept in
 `settings.conf` and applied at each game start (`gw2om.sh env` prints the environment Play would
-use). The defaults are the mix Jan plays with (`scripts/common.zsh`).
+use). The defaults are the mix Jan plays with.
 
 | Pane | Setting (key) | Default | What it does |
 |---|---|---|---|
@@ -177,15 +203,33 @@ Support: Pharaphobia on [Discord](https://discord.gg/AnV3fZWz2b) or a
 Needs Xcode 27 (the macOS 27 SDK; the app targets macOS 26.0).
 
 ```sh
-app/scripts/stage-components.sh    # copy DXMT, the heat Wine pieces, winemac and the addon from work/
-app/build.sh                       # → app/dist/GW2 on Mac.app, ad-hoc signed
+scripts/stage-components.sh    # copy DXMT, the heat Wine pieces, winemac and the addon into prebuilt/
+./build.sh                     # → dist/GW2 on Mac.app, ad-hoc signed
 ```
 
-- `stage-components.sh` takes what the live engine runs (DXMT `work/dxmt-rollback/684f428-install`,
-  heat `work/heat/install-r7b`, `work/winemac/install`, `work/ui-scale/build`; override with
-  `DXMT_INSTALL`, `HEAT_INSTALL`, `WINEMAC_INSTALL`, `UISCALE_BUILD`). It changes nothing in
-  `work/` and checks each file against its build record and this repository's patches.
-  `app/prebuilt/` is ignored by git.
+- **Where the bundled binaries come from.** DXMT and the four Wine pieces (`ntdll.so`,
+  `wineserver`, `winemac.so`, `win32u.so`) are built today only in Jan's private development
+  workspace, whose build scripts are not in this repository. `stage-components.sh` copies them
+  from that workspace: `GW2_ON_MAC_WORKSPACE` (default `../gw2-on-mac`, next to this
+  repository), and in it what the live engine runs (`work/dxmt-rollback/684f428-install`,
+  `work/heat/install-r7b`, `work/winemac/install`, `work/ui-scale/build`; override with
+  `DXMT_INSTALL`, `HEAT_INSTALL`, `WINEMAC_INSTALL`, `UISCALE_BUILD`). It changes nothing in the
+  workspace and checks each file against its build record and this repository's
+  [`patches/`](patches). `prebuilt/` is ignored by git.
+- **Their complete corresponding source** (LGPL-2.1-or-later) is public: the pinned upstreams
+  plus this repository's patches. DXMT is [jdrly/dxmt at `684f428`](https://github.com/jdrly/dxmt/tree/684f428);
+  the Wine pieces are [athei/wine `d23b397`](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0)
+  (CodeWeavers' CrossOver 26.3 sources with athei's patches, the engine's own sources) with
+  [`patches/ntdll-msync-alert-fd.patch`](patches/ntdll-msync-alert-fd.patch) (from SWTOR on Mac),
+  [`patches/ntdll-heat.patch`](patches/ntdll-heat.patch),
+  [`patches/wineserver-msync-unregister.patch`](patches/wineserver-msync-unregister.patch) and
+  [`patches/winemac-gw2-launcher.patch`](patches/winemac-gw2-launcher.patch), configured as the
+  engine. Each component's `VERSION` record (also in the app, `Resources/Licenses`) names its
+  sources, patches and sha256. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+- The interface addon is this repository's own code, [`addon/ui-scale`](addon/ui-scale):
+  `scripts/build-addon.sh` builds `version.dll` with Homebrew's mingw-w64
+  (`brew install mingw-w64`) into `work/ui-scale/build` and runs its native test. Staging still
+  takes the workspace's build of the same sources (the same but for the link timestamps).
 - `build.sh` checks `prebuilt/` again and compiles `src/native/*.swift` (arm64) and the
   `procpaths` helper. It bundles the components, fonts, art and licences (`Resources/Licenses`,
   [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)), downloads Sparkle at a pinned version and
@@ -194,31 +238,33 @@ app/build.sh                       # → app/dist/GW2 on Mac.app, ad-hoc signed
   - `GW2_ON_MAC_VERSION` sets the version (0.1.0; `X.Y.Z-dev.N` makes a development build, as
     SWTOR on Mac's).
   - `GW2_ON_MAC_FEED_URL` and `GW2_ON_MAC_ED_PUBLIC_KEY` turn updates on.
-- The icon's layers: `swift app/src/make-icon.swift layers app/src/AppIcon.icon` (the wordmark;
-  the ensō is `docs/design/icon-ring.png`), and `… preview app/src/AppIcon.icon <sheet.png>` for a
-  review sheet of every appearance and size.
+- The icon's layers: `swift src/make-icon.swift layers src/AppIcon.icon` (the wordmark; the
+  ensō, `Assets/icon-ring.png`, is the approved design's artwork), and
+  `… preview src/AppIcon.icon <sheet.png>` for a review sheet of every appearance and size.
 - The icons in the window are Lucide's, drawn from path data: after adding an SVG to
-  `src/icons`, run `python3 -I app/scripts/gen-icons.py`.
+  `src/icons`, run `python3 -I scripts/gen-icons.py`.
 
 ## Testing
 
 Never against a real install, and never with Wine, Steam or the game running on Jan's screen.
 
-- `app/scripts/test-sandbox.sh` tests the backend of a built app end to end in
+- `scripts/test-sandbox.sh` tests the backend of a built app end to end in
   `work/app-sandbox/test` (148 checks). It uses a stand-in engine archive whose `bin/wine` only
   pretends, plays Steam's and ArenaNet's downloads itself, and uses a clone of the game's own
-  ArenaNet-signed `Gw2-64.exe` as the installer to check. It covers:
+  ArenaNet-signed `Gw2-64.exe` as the installer to check (`SIGNED_PE`, by default the one in
+  the development workspace's bottle; without one those checks are skipped). It covers:
   - dry runs, both routes, finish, every setting and what it does, the addon
   - play, the busy checks, repair, reset-shaders, reinstall-engine, the lock
   - Collect Logs' redaction, uninstall, a failed install's rollback
-- `app/scripts/ui-render.sh` renders every window state, light and dark, headlessly into
-  `work/app-renders/`. Nothing is shown on screen and the app never activates. It also writes
-  `compare-*.png`: the design's export next to the render.
+- `scripts/ui-render.sh` renders every window state, light and dark, headlessly into
+  `work/app-renders/`. Nothing is shown on screen and the app never activates. With the approved
+  design's exports (`DESIGN_EXPORTS`, by default the development workspace's; the design file is
+  not in this repository) it also writes `compare-*.png`: the design's export next to the render.
 - By hand, `GW2_ON_MAC_ROOT=/abs/dir` puts every path `gw2om.sh` and `collect-logs.sh` use under
   that folder, and `GW2_ON_MAC_DRY_RUN=1` prints what would change without changing anything:
 
   ```sh
-  R="app/dist/GW2 on Mac.app/Contents/Resources"
+  R="dist/GW2 on Mac.app/Contents/Resources"
   GW2_ON_MAC_ROOT=$PWD/work/app-sandbox/try GW2_ON_MAC_DRY_RUN=1 "$R/gw2om.sh" install steam
   ```
 
@@ -244,7 +290,7 @@ Then move the app to the Bin.
 
 Not yet: GW2 on Mac publishes nothing so far. The pieces are SWTOR on Mac's, ready:
 
-- `app/scripts/release.sh` signs with Developer ID inside out (the bundled Mach-O components and
+- `scripts/release.sh` signs with Developer ID inside out (the bundled Mach-O components and
   `procpaths`, Sparkle, the app; `src/entitlements/app.plist`), builds and notarizes the DMG, and
   builds and checks the Sparkle feed (`scripts/check-appcast.swift`, delta updates).
   - Every mode that creates or changes a GitHub release stops unless `GW2_ON_MAC_PUBLISH=1`.
@@ -259,18 +305,19 @@ Not yet: GW2 on Mac publishes nothing so far. The pieces are SWTOR on Mac's, rea
 ## Layout
 
 ```
-app/
-  build.sh                 the app bundle (see Building)
-  src/native/              SwiftUI: App (model, menus), MainWindow, Settings, Play, Updates
-                           (Sparkle), Brand (the design's tokens and pieces), Lucide (+ LucideData)
-  src/gw2om.sh             the backend (bash 3.2)
-  src/collect-logs.sh      Collect Logs…
-  src/helpers/procpaths.c  every process's real executable, for gw2om.sh's busy checks
-  src/fonts/, src/art/, src/icons/, src/AppIcon.icon, src/make-icon.swift, src/Info.plist
-  scripts/                 stage-components, test-sandbox, ui-render, session-report, release,
-                           check-appcast, gen-icons
-  release-notes/           the notes of each release
-  prebuilt/, dist/, release/, .cache/   build output (ignored)
+build.sh                 the app bundle (see Building)
+src/native/              SwiftUI: App (model, menus), MainWindow, Settings, Play, Updates
+                         (Sparkle), Brand (the design's tokens and pieces), Lucide (+ LucideData)
+src/gw2om.sh             the backend (bash 3.2)
+src/collect-logs.sh      Collect Logs…
+src/helpers/procpaths.c  every process's real executable, for gw2om.sh's busy checks
+src/fonts/, src/art/, src/icons/, src/AppIcon.icon, src/make-icon.swift, src/Info.plist
+addon/ui-scale/          the interface addon's source (version.dll) and its native test
+patches/                 the patches to Wine in the bundled ntdll.so, wineserver and winemac.so
+scripts/                 stage-components, build-addon, test-sandbox, ui-render, session-report,
+                         release, check-appcast, gen-icons
+release-notes/           the notes of each release
+prebuilt/, dist/, release/, work/, .cache/   build and test output (ignored)
 ```
 
 ## Known limits and follow-ups
@@ -282,4 +329,4 @@ app/
   development bottle on his Mac); a fork-side cache folder override would separate them.
 - A Steam library added outside the bottle (Steam › Settings › Storage) is not removed by
   Uninstall.
-- Blish HUD and macOS 28's Rosetta changes are not covered (see [`AGENTS.md`](../AGENTS.md)).
+- Blish HUD and macOS 28's Rosetta changes are not covered.

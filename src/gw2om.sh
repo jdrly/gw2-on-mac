@@ -36,7 +36,7 @@
 #                              $ROOT/usertmp/, $ROOT/usercache/)
 #   GW2_ON_MAC_DRY_RUN=1       print what would change and change nothing (no downloads, no Wine,
 #                              no log file)
-#   In a sandbox only, for app/scripts/test-sandbox.sh's stand-ins (never the real Wine there):
+#   In a sandbox only, for scripts/test-sandbox.sh's stand-ins (never the real Wine there):
 #   GW2_ON_MAC_ENGINE_URL, GW2_ON_MAC_ENGINE_SHA256, GW2_ON_MAC_ENGINE_SIZE   another engine
 #                              archive (a stand-in whose bin/wine only pretends)
 #   GW2_ON_MAC_ENGINE_CHECKS=0 don't check the unpacked engine's files against the real engine's
@@ -492,7 +492,7 @@ apply_registry() {
 
 # --- Settings
 #
-# The defaults are the mix Jan plays with (scripts/common.zsh, docs/research). Some are newer than
+# The defaults are the mix Jan plays with (in the development workspace). Some are newer than
 # the rest; Settings turns each off:
 #   warm=on          DXMT_WARM=all: pipelines built ahead by recent use (jdrly/dxmt #128)
 #   coolworkers=3    HEAT_QOS=1=utility:3: only the first 3 job workers on the cooler cores

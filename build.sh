@@ -1,6 +1,6 @@
 #!/bin/bash
-# Builds "app/dist/GW2 on Mac.app": a small SwiftUI app that sets up Guild Wars 2 on its own Wine
-# engine with DXMT (see app/README.md). Unlike SWTOR on Mac it changes no existing install: it
+# Builds "dist/GW2 on Mac.app": a small SwiftUI app that sets up Guild Wars 2 on its own Wine
+# engine with DXMT (see README.md). Unlike SWTOR on Mac it changes no existing install: it
 # creates its own engine and bottle and installs the game into them, through Steam or ArenaNet's
 # own installer. The app bundles only its own pieces:
 #   Contents/MacOS/GW2onMac            the window, menus, Settings and updates (src/native), arm64
@@ -9,8 +9,8 @@
 #   Contents/Resources/collect-logs.sh "Collect Logs…" (src/collect-logs.sh)
 #   Contents/Resources/session-report.sh  a game session in short (scripts/session-report.sh)
 #   Contents/Resources/components/     what gw2om.sh puts into its engine and bottle, staged in
-#                                      prebuilt/ by scripts/stage-components.sh from this repo's
-#                                      builds: dxmt/ (the jdrly/dxmt fork), heat/ (ntdll.so and
+#                                      prebuilt/ by scripts/stage-components.sh from the
+#                                      development workspace's builds: dxmt/ (the jdrly/dxmt fork), heat/ (ntdll.so and
 #                                      wineserver), winemac/ (winemac.so, win32u.so), ui-scale/
 #                                      (the interface addon)
 #   Contents/Resources/helpers/procpaths  every process's real executable (gw2om.sh's process
@@ -23,15 +23,14 @@
 #
 # Built with the macOS 27 SDK (Xcode 27) for macOS 26.0 and later.
 #
-#   app/build.sh                 build into app/dist/, ad-hoc signed
+#   ./build.sh                   build into dist/, ad-hoc signed
 #
-# Signing for distribution (Developer ID, hardened runtime, notarization) is app/scripts/release.sh,
+# Signing for distribution (Developer ID, hardened runtime, notarization) is scripts/release.sh,
 # which re-signs a copy of dist/ inside out. GW2_ON_MAC_VERSION=X.Y.Z[-dev.N] sets the version;
 # GW2_ON_MAC_FEED_URL and GW2_ON_MAC_ED_PUBLIC_KEY turn updates on (no feed yet: off).
 set -euo pipefail
 cd "$(dirname "$0")"
 ROOT="$PWD"
-REPO="$(cd .. && pwd)"
 
 # GW2_ON_MAC_VERSION overrides the version for test builds.
 APP_VERSION=${GW2_ON_MAC_VERSION:-0.1.0}
@@ -68,10 +67,11 @@ SPARKLE_VERSION=2.10.0
 SPARKLE_URL=https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz
 SPARKLE_SHA256=c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c
 
-fetch() { # url sha256 -> prints path of the verified download (from SWTOR on Mac's cache if it has it)
+fetch() { # url sha256 -> prints path of the verified download (from the cache of a SWTOR on Mac
+  # checkout next to this one, ../swtor-on-mac, if it has it)
   local url=$1 sha=$2 dir="$CACHE/$2" file sibling
   file="$dir/$(basename "$url")"
-  sibling="$REPO/../swtor-on-mac/.cache/$2/$(basename "$url")"
+  sibling="$ROOT/../swtor-on-mac/.cache/$2/$(basename "$url")"
   if [ ! -f "$file" ]; then
     mkdir -p "$dir"
     if [ -f "$sibling" ]; then
@@ -93,29 +93,33 @@ case "$sdk" in 2[7-9]*|[3-9]*) ;; *) echo "Needs the macOS 27 SDK (Xcode 27); fo
 # The bundled components (scripts/stage-components.sh), checked against their records and against
 # this repo's patches as they are now
 P=prebuilt
-[ -f "$P/STAGED" ] || { echo "No $P/; run app/scripts/stage-components.sh" >&2; exit 1; }
+[ -f "$P/STAGED" ] || { echo "No $P/; run scripts/stage-components.sh" >&2; exit 1; }
 for f in dxmt/VERSION dxmt/LICENSE dxmt/COPYING.LIB dxmt/x86_64-unix/winemetal.so \
   heat/ntdll.so heat/wineserver heat/VERSION heat/WINESERVER.txt heat/LICENSE heat/COPYING.LIB \
   winemac/winemac.so winemac/win32u.so winemac/VERSION winemac/LICENSE winemac/COPYING.LIB \
   ui-scale/version.dll ui-scale/gw2-ui-scale.ini; do
-  [ -f "$P/$f" ] || { echo "Missing $P/$f; run app/scripts/stage-components.sh" >&2; exit 1; }
+  [ -f "$P/$f" ] || { echo "Missing $P/$f; run scripts/stage-components.sh" >&2; exit 1; }
 done
 for a in x86_64-windows i386-windows; do for d in d3d11 dxgi d3d10core winemetal; do
   [ -f "$P/dxmt/$a/$d.dll" ] || { echo "Missing $P/dxmt/$a/$d.dll" >&2; exit 1; }
 done; done
 grep -q "^ntdll.so sha256 $(sha "$P/heat/ntdll.so")" "$P/heat/VERSION" || { echo "$P/heat/ntdll.so does not match its VERSION" >&2; exit 1; }
 grep -q "^wineserver sha256 $(sha "$P/heat/wineserver")" "$P/heat/WINESERVER.txt" || { echo "$P/heat/wineserver does not match its record" >&2; exit 1; }
-grep -q "patches/ntdll-heat.patch sha256 $(sha "$REPO/patches/ntdll-heat.patch")" "$P/heat/VERSION" ||
-  { echo "$P/heat was not built from patches/ntdll-heat.patch as it is now; rebuild and restage" >&2; exit 1; }
+for p in ntdll-heat.patch ntdll-msync-alert-fd.patch; do
+  grep -q "patches/$p sha256 $(sha "patches/$p")" "$P/heat/VERSION" ||
+    { echo "$P/heat was not built from patches/$p as it is now; rebuild and restage" >&2; exit 1; }
+done
 for l in winemac.so win32u.so; do
   grep -q "sha256 $(sha "$P/winemac/$l")" "$P/winemac/VERSION" || { echo "$P/winemac/$l does not match its VERSION" >&2; exit 1; }
 done
-grep -q "patches/winemac-gw2-launcher.patch sha256 $(sha "$REPO/patches/winemac-gw2-launcher.patch")" "$P/winemac/VERSION" ||
+grep -q "patches/winemac-gw2-launcher.patch sha256 $(sha patches/winemac-gw2-launcher.patch)" "$P/winemac/VERSION" ||
   { echo "$P/winemac was not built from patches/winemac-gw2-launcher.patch as it is now" >&2; exit 1; }
 grep -aq 'gw2-on-mac ui-scale' "$P/ui-scale/version.dll" || { echo "$P/ui-scale/version.dll is not the addon" >&2; exit 1; }
 DXMT_VERSION="$(cat "$P/dxmt/VERSION")"
 DXMT_COMMIT="${DXMT_VERSION##*-g}"
-WINE_COMMIT="$(sed -n 's/^WINE_COMMIT=//p' "$REPO/scripts/build-winemac.zsh")"
+# the athei/wine commit the Wine pieces were built from, as their record names it
+WINE_COMMIT="$(sed -n 's/^sources: athei\/wine \([0-9a-f]\{40\}\).*/\1/p' "$P/heat/VERSION")"
+[ -n "$WINE_COMMIT" ] || { echo "$P/heat/VERSION names no athei/wine commit" >&2; exit 1; }
 
 # Sparkle (app updates, as in SWTOR on Mac): the framework goes into the app, its tools are used
 # from here by scripts/release.sh.
@@ -181,8 +185,8 @@ cp "$P/heat/COPYING.LIB" "$P/heat/LICENSE" "$L/wine/"
 cp "$P/heat/VERSION" "$L/wine/ntdll-VERSION.txt"
 cp "$P/heat/WINESERVER.txt" "$L/wine/wineserver-VERSION.txt"
 cp "$P/winemac/VERSION" "$L/wine/winemac-win32u-VERSION.txt"
-cp "$REPO/patches/ntdll-heat.patch" "$REPO/patches/wineserver-msync-unregister.patch" "$REPO/patches/winemac-gw2-launcher.patch" "$L/wine/"
-[ -f "$REPO/../swtor-on-mac/patches/ntdll-msync-alert-fd.patch" ] && cp "$REPO/../swtor-on-mac/patches/ntdll-msync-alert-fd.patch" "$L/wine/"
+cp patches/ntdll-msync-alert-fd.patch patches/ntdll-heat.patch patches/wineserver-msync-unregister.patch \
+  patches/winemac-gw2-launcher.patch "$L/wine/"
 cp "$SPARKLE/LICENSE" "$L/sparkle/LICENSE"
 cp src/fonts/*-OFL.txt "$L/fonts/"
 cp src/icons/LICENSE.txt "$L/lucide/LICENSE.txt"
@@ -200,10 +204,11 @@ Its complete source is that commit of the fork.
 components/heat, components/winemac: Wine's ntdll.so, wineserver, winemac.so and win32u.so
 (x86_64 unix sides) from the sources of the app's Wine engine (CodeWeavers' CrossOver 26.3 with
 athei's patches, athei/wine $WINE_COMMIT), with the patches in wine/ (applied as their records,
-wine/*-VERSION.txt, say): LGPL-2.1-or-later, see wine/COPYING.LIB and wine/LICENSE. Build scripts:
-$REPO_URL/tree/v$APP_VERSION/scripts (build-ntdll-heat.zsh, build-winemac.zsh); the sources
-they apply to: https://github.com/athei/wine/tree/$WINE_COMMIT (CodeWeavers' CrossOver sources:
-https://www.codeweavers.com/crossover/source).
+wine/*-VERSION.txt, say): LGPL-2.1-or-later, see wine/COPYING.LIB and wine/LICENSE. Their
+complete source is https://github.com/athei/wine/tree/$WINE_COMMIT (CodeWeavers' CrossOver
+sources: https://www.codeweavers.com/crossover/source) plus those patches, which are also in
+$REPO_URL/tree/v$APP_VERSION/patches. They are configured as the engine (athei/wine-build's
+build-wine.sh) and built at the optimisation the records name.
 
 Sparkle $SPARKLE_VERSION (app updates), https://sparkle-project.org: MIT-style licence, see
 sparkle/LICENSE.

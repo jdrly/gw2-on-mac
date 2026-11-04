@@ -1,6 +1,6 @@
 // Headless renders of GW2 on Mac's windows, for reviews and the comparison with the approved
-// design (docs/design/exports). Compiled with the app's sources (-D GW2_RENDER, which drops the
-// app's own entry point) by app/scripts/ui-render.sh. No window is ever shown: each view is hosted
+// design (its exports, when given). Compiled with the app's sources (-D GW2_RENDER, which drops the
+// app's own entry point) by scripts/ui-render.sh. No window is ever shown: each view is hosted
 // in an NSHostingView inside a borderless window that is never ordered on screen, and drawn with
 // cacheDisplay at 2x into a PNG. The app never activates (activation policy .prohibited). The
 // installer state is made up here; nothing runs gw2om.sh (GW2OM_RENDER=1 keeps Settings from

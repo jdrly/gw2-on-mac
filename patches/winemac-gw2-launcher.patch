@@ -1,0 +1,94 @@
+winemac.drv: hand Cocoa a copy of a window surface's bits, and skip unchanged frames
+
+GW2 on Mac (scripts/build-winemac.zsh). For the engine athei/wine-build cx-26.3.0-8
+(athei/wine d23b39774528, CrossOver 26.3 / Wine 11.0).
+
+The GW2 launcher is a layered window updated with UpdateLayeredWindow. macdrv_surface_flush
+gave Cocoa a CGImage over the surface's own memory, and the main thread draws it later
+(-[WineContentView updateLayer] sets it as the layer's contents). By then the app thread is
+already in NtUserUpdateLayeredWindow for the next frame, which clears the dirty rect to
+transparent black (PatBlt BLACKNESS) and blends the new frame in from the top under the
+surface lock, which Cocoa never takes. The window showed empty frames with a top band of
+varying height drawn: the flashing in docs/research/launcher-flashing-2026-10-27.md.
+
+The flush now copies the bits into the image. A frame byte-identical to the last one handed
+over (same alpha mode, shape unchanged) is not handed over again: a static launcher page
+otherwise has the main thread, Core Animation and WindowServer redraw and reshadow the whole
+window on every update. WINEDEBUG=+timestamp,+macsurface prints each surface's size and flush
+counts every 600 flushes.
+
+--- a/dlls/winemac.drv/surface.c
++++ b/dlls/winemac.drv/surface.c
+@@ -30,6 +30,7 @@
+ #include "winuser.h"
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(bitblt);
++WINE_DECLARE_DEBUG_CHANNEL(macsurface);
+ 
+ static inline int get_dib_stride(int width, int bpp)
+ {
+@@ -48,6 +49,9 @@
+     struct window_surface   header;
+     macdrv_window           window;
+     CGDataProviderRef       provider;
++    CFDataRef               shown;          /* copy of the bits Cocoa was last given */
++    CGImageAlphaInfo        shown_alpha;
++    UINT                    flushes, unchanged;
+ };
+ 
+ static struct macdrv_window_surface *get_mac_surface(struct window_surface *surface);
+@@ -83,17 +87,44 @@
+ {
+     struct macdrv_window_surface *surface = get_mac_surface(window_surface);
+     CGImageAlphaInfo alpha_info = (window_surface->alpha_mask ? kCGImageAlphaPremultipliedFirst : kCGImageAlphaNoneSkipFirst);
++    UINT size = color_info->bmiHeader.biSizeImage;
++    CGDataProviderRef provider;
+     CGColorSpaceRef colorspace;
+     CGImageRef image;
++    CFDataRef bits;
+ 
++    /* GW2 on Mac: Cocoa gets a copy of the bits, not the surface's own memory. The main thread
++     * draws the image later (updateLayer), while the app already draws its next frame into the
++     * surface: NtUserUpdateLayeredWindow clears the dirty rect to transparent black and then
++     * blends the new frame in from the top, so a layered window (the GW2 launcher) flashed
++     * empty or half drawn. A frame equal to the last one is not handed over again; Cocoa, Core
++     * Animation and WindowServer would redraw and reshadow the whole window for nothing. */
++    surface->flushes++;
++    if (TRACE_ON(macsurface) && !(surface->flushes % 600))
++        TRACE_(macsurface)("hwnd %p %dx%d: %u flushes, %u unchanged\n", window_surface->hwnd,
++                           (int)color_info->bmiHeader.biWidth, abs(color_info->bmiHeader.biHeight),
++                           surface->flushes, surface->unchanged);
++    if (!shape_changed && surface->shown && surface->shown_alpha == alpha_info &&
++        CFDataGetLength(surface->shown) == size && !memcmp(CFDataGetBytePtr(surface->shown), color_bits, size))
++    {
++        surface->unchanged++;
++        return TRUE;
++    }
++    if (!(bits = CFDataCreate(kCFAllocatorDefault, color_bits, size))) return FALSE;
++    provider = CGDataProviderCreateWithCFData(bits);
++
+     colorspace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+     image = CGImageCreate(color_info->bmiHeader.biWidth, abs(color_info->bmiHeader.biHeight), 8, 32,
+-                          color_info->bmiHeader.biSizeImage / abs(color_info->bmiHeader.biHeight), colorspace,
+-                          alpha_info | kCGBitmapByteOrder32Little, surface->provider, NULL, retina_on, kCGRenderingIntentDefault);
++                          size / abs(color_info->bmiHeader.biHeight), colorspace,
++                          alpha_info | kCGBitmapByteOrder32Little, provider, NULL, retina_on, kCGRenderingIntentDefault);
+     CGColorSpaceRelease(colorspace);
++    CGDataProviderRelease(provider);
+ 
+     macdrv_window_set_color_image(surface->window, image, cgrect_from_rect(*rect), cgrect_from_rect(*dirty));
+     CGImageRelease(image);
++    if (surface->shown) CFRelease(surface->shown);
++    surface->shown = bits;
++    surface->shown_alpha = alpha_info;
+ 
+     if (shape_changed)
+     {
+@@ -132,6 +163,7 @@
+ 
+     TRACE("freeing %p\n", surface);
+     CGDataProviderRelease(surface->provider);
++    if (surface->shown) CFRelease(surface->shown);
+ }
+ 
+ static const struct window_surface_funcs macdrv_surface_funcs =

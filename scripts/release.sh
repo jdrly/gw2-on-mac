@@ -1,11 +1,11 @@
 #!/bin/bash
-# Signs, notarizes and packages app/dist/GW2 on Mac.app (run app/build.sh first), and prepares the
+# Signs, notarizes and packages dist/GW2 on Mac.app (run ./build.sh first), and prepares the
 # update feed for Sparkle (src/native/Updates.swift): SWTOR on Mac's release script, as is, for
-# GW2 on Mac (paths below are relative to app/).
+# GW2 on Mac (paths below are relative to the repository root).
 #
 # NOTHING IS PUBLISHED YET. GW2 on Mac has no GitHub release and no feed: every mode that creates
 # or changes a GitHub release (the default, --ci, --dev, --feed) stops unless GW2_ON_MAC_PUBLISH=1,
-# and a feed needs an app built with GW2_ON_MAC_FEED_URL and GW2_ON_MAC_ED_PUBLIC_KEY (app/build.sh
+# and a feed needs an app built with GW2_ON_MAC_FEED_URL and GW2_ON_MAC_ED_PUBLIC_KEY (./build.sh
 # puts them into Info.plist's SUFeedURL and SUPublicEDKey; without them Sparkle stays off).
 #
 #   release/<version>/GW2 on Mac.app                   Developer ID, hardened runtime
@@ -105,7 +105,7 @@ fi
 
 case "$MODE" in
   ""|--no-notarize|--no-release|--feed)
-    [ -x "$SPARKLE_BIN/generate_appcast" ] || { echo "Missing $SPARKLE_BIN; run app/build.sh" >&2; exit 1; }
+    [ -x "$SPARKLE_BIN/generate_appcast" ] || { echo "Missing $SPARKLE_BIN; run ./build.sh" >&2; exit 1; }
     [ -n "$(plutil -extract SUPublicEDKey raw "$SRC/Contents/Info.plist" 2>/dev/null || true)" ] &&
       [ -n "$(plutil -extract SUFeedURL raw "$SRC/Contents/Info.plist" 2>/dev/null || true)" ] ||
       { echo "Updates are off in this build (no SUFeedURL or SUPublicEDKey): build with GW2_ON_MAC_FEED_URL and GW2_ON_MAC_ED_PUBLIC_KEY for a feed, or use --sign-only" >&2; exit 1; } ;;

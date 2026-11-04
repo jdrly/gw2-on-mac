@@ -1,10 +1,10 @@
 // App updates with Sparkle 2 (Contents/Frameworks/Sparkle.framework), wired as in SWTOR on Mac:
 // the same update window (the app's own, in SwiftUI) and the same signing setup (SUFeedURL and
-// SUPublicEDKey in Info.plist; the feed is built by app/scripts/release.sh).
+// SUPublicEDKey in Info.plist; the feed is built by scripts/release.sh).
 //
 // OFF for now: GW2 on Mac has no feed yet, so Info.plist carries an empty SUFeedURL and no
 // SUPublicEDKey, and start() leaves Sparkle unstarted (Check for Updates… is disabled, the
-// Updates pane says so). Turning it on is setting both keys (app/README.md, Releasing).
+// Updates pane says so). Turning it on is setting both keys (README.md, Releasing).
 //
 // Sparkle keeps its settings in the app's defaults (cz.jandrly.gw2onmac). Installing an update
 // always takes a click. Only an install, repair or uninstall in progress holds an update.
@@ -14,7 +14,7 @@
 // Info.plist.
 //
 // Development builds (compiled with GW2_DEV, GW2Channel dev in Info.plist, version X.Y.Z-dev.N;
-// app/build.sh) never check automatically, whatever the setting says.
+// build.sh) never check automatically, whatever the setting says.
 
 import AppKit
 import Sparkle

@@ -1,4 +1,4 @@
-// The look of the approved design (docs/design/gw2onmac.pen) in SwiftUI: its colour tokens for
+// The look of the approved design in SwiftUI: its colour tokens for
 // light and dark (the .pen variables), its three typefaces (Cinzel for the wordmark and the big
 // buttons, Marcellus for headings, Alegreya Sans for text; all SIL OFL 1.1, in Resources/Fonts),
 // the artwork (the ink stroke behind the header, one per theme, and the painting) and the small
@@ -6,7 +6,7 @@
 // the toggle and the popup.
 //
 // Fonts and artwork are loaded from Brand.resources: the app's Resources, or GW2OM_RESOURCES
-// (the headless renders, app/scripts/ui-render.swift).
+// (the headless renders, scripts/ui-render.swift).
 
 import AppKit
 import CoreText

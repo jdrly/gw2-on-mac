@@ -1,33 +1,45 @@
 #!/bin/bash
-# Stages the components GW2 on Mac's app bundles into app/prebuilt/ (ignored by git: Wine and DXMT
-# binaries stay out of the repository), copied from the builds this repo's scripts made in work/,
-# the ones the live engine runs. Nothing in work/ is changed. app/build.sh checks prebuilt/
-# against the records copied here, the way SWTOR on Mac's build.sh checks its prebuilt/.
+# Stages the components GW2 on Mac's app bundles into prebuilt/ (ignored by git: Wine and DXMT
+# binaries stay out of the repository), copied from the builds in the development workspace's
+# work/, the ones the live engine runs. Nothing in the workspace is changed. build.sh checks
+# prebuilt/ against the records copied here, the way SWTOR on Mac's build.sh checks its prebuilt/.
 #
-#   prebuilt/dxmt/      DXMT, the jdrly/dxmt fork (scripts/build-dxmt.zsh; LGPL-2.1-or-later):
-#                       x86_64-windows/, i386-windows/ (d3d11, dxgi, d3d10core, winemetal) and
+# Only Jan's private development workspace (GW2_ON_MAC_WORKSPACE) builds these binaries today; its
+# build scripts are not part of this repository. What they build from is public: the complete
+# corresponding source of each LGPL component is its pinned upstream plus this repository's
+# patches/ (see THIRD_PARTY_NOTICES.md), and each component's VERSION record names both.
+#
+#   prebuilt/dxmt/      DXMT, the jdrly/dxmt fork (LGPL-2.1-or-later): x86_64-windows/,
+#                       i386-windows/ (d3d11, dxgi, d3d10core, winemetal) and
 #                       x86_64-unix/winemetal.so, VERSION, LICENSE, COPYING.LIB
-#   prebuilt/heat/      the engine's ntdll.so with the msync fix and the heat patch, and its
-#                       wineserver with the msync unregister fix (scripts/build-ntdll-heat.zsh;
-#                       LGPL): ntdll.so, wineserver, VERSION, WINESERVER.txt, LICENSE, COPYING.LIB
-#   prebuilt/winemac/   the engine's winemac.so with the launcher fix and win32u.so with its
-#                       layered-window drawing at -O2 (scripts/build-winemac.zsh; LGPL)
-#   prebuilt/ui-scale/  the interface-scale addon, version.dll and gw2-ui-scale.ini
-#                       (scripts/build-ui-scale.zsh; GW2 on Mac's own code)
+#   prebuilt/heat/      the engine's ntdll.so with patches/ntdll-msync-alert-fd.patch and
+#                       patches/ntdll-heat.patch, and its wineserver with
+#                       patches/wineserver-msync-unregister.patch (LGPL): ntdll.so, wineserver,
+#                       VERSION, WINESERVER.txt, LICENSE, COPYING.LIB
+#   prebuilt/winemac/   the engine's winemac.so with patches/winemac-gw2-launcher.patch and
+#                       win32u.so with its layered-window drawing at -O2 (LGPL)
+#   prebuilt/ui-scale/  the interface-scale addon, version.dll and gw2-ui-scale.ini (GW2 on Mac's
+#                       own code, addon/ui-scale; scripts/build-addon.sh builds the same thing)
 #
-# Sources (defaults: what the live engine runs on 2026-11-04):
+# Sources: GW2_ON_MAC_WORKSPACE (default ../gw2-on-mac, next to this repository) and in it
+# (defaults: what the live engine runs on 2026-11-04):
 #   DXMT_INSTALL=work/dxmt-rollback/684f428-install   HEAT_INSTALL=work/heat/install-r7b
 #   WINEMAC_INSTALL=work/winemac/install              UISCALE_BUILD=work/ui-scale/build
+# (relative to the workspace, or absolute)
 #
-#   app/scripts/stage-components.sh
+#   scripts/stage-components.sh
 set -euo pipefail
-cd "$(dirname "$0")/../.."
-REPO="$PWD"
-P="$REPO/app/prebuilt"
-DXMT_INSTALL="${DXMT_INSTALL:-work/dxmt-rollback/684f428-install}"
-HEAT_INSTALL="${HEAT_INSTALL:-work/heat/install-r7b}"
-WINEMAC_INSTALL="${WINEMAC_INSTALL:-work/winemac/install}"
-UISCALE_BUILD="${UISCALE_BUILD:-work/ui-scale/build}"
+cd "$(dirname "$0")/.."
+ROOT="$PWD"
+P="$ROOT/prebuilt"
+WS="${GW2_ON_MAC_WORKSPACE:-$ROOT/../gw2-on-mac}"
+[ -d "$WS" ] || { echo "stage-components: no workspace at $WS (set GW2_ON_MAC_WORKSPACE)" >&2; exit 1; }
+WS="$(cd "$WS" && pwd)"
+in_ws() { case "$1" in /*) echo "$1" ;; *) echo "$WS/$1" ;; esac; }
+DXMT_INSTALL="$(in_ws "${DXMT_INSTALL:-work/dxmt-rollback/684f428-install}")"
+HEAT_INSTALL="$(in_ws "${HEAT_INSTALL:-work/heat/install-r7b}")"
+WINEMAC_INSTALL="$(in_ws "${WINEMAC_INSTALL:-work/winemac/install}")"
+UISCALE_BUILD="$(in_ws "${UISCALE_BUILD:-work/ui-scale/build}")"
 
 die() { echo "stage-components: $*" >&2; exit 1; }
 sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
@@ -38,15 +50,17 @@ need "$DXMT_INSTALL/VERSION" "$DXMT_INSTALL/LICENSE" "$DXMT_INSTALL/COPYING.LIB"
 for a in x86_64-windows i386-windows; do
   for d in d3d11.dll dxgi.dll d3d10core.dll winemetal.dll; do need "$DXMT_INSTALL/$a/$d"; done
 done
-# heat: the files must be the ones their records name
+# heat: the files must be the ones their records name, built from this repository's patches
 need "$HEAT_INSTALL/ntdll.so" "$HEAT_INSTALL/wineserver" "$HEAT_INSTALL/VERSION" "$HEAT_INSTALL/WINESERVER.txt" \
   "$HEAT_INSTALL/LICENSE" "$HEAT_INSTALL/COPYING.LIB"
 grep -q "^ntdll.so sha256 $(sha "$HEAT_INSTALL/ntdll.so")" "$HEAT_INSTALL/VERSION" ||
   die "$HEAT_INSTALL/ntdll.so is not the file its VERSION names"
 grep -q "^wineserver sha256 $(sha "$HEAT_INSTALL/wineserver")" "$HEAT_INSTALL/WINESERVER.txt" ||
   die "$HEAT_INSTALL/wineserver is not the file its WINESERVER.txt names"
-grep -q "patches/ntdll-heat.patch sha256 $(sha patches/ntdll-heat.patch)" "$HEAT_INSTALL/VERSION" ||
-  die "$HEAT_INSTALL was not built from patches/ntdll-heat.patch as it is now"
+for p in ntdll-heat.patch ntdll-msync-alert-fd.patch; do
+  grep -q "patches/$p sha256 $(sha "patches/$p")" "$HEAT_INSTALL/VERSION" ||
+    die "$HEAT_INSTALL was not built from patches/$p as it is now"
+done
 need "$WINEMAC_INSTALL/winemac.so" "$WINEMAC_INSTALL/win32u.so" "$WINEMAC_INSTALL/VERSION" \
   "$WINEMAC_INSTALL/LICENSE" "$WINEMAC_INSTALL/COPYING.LIB"
 for l in winemac.so win32u.so; do
@@ -54,6 +68,10 @@ for l in winemac.so win32u.so; do
 done
 grep -q "patches/winemac-gw2-launcher.patch sha256 $(sha patches/winemac-gw2-launcher.patch)" "$WINEMAC_INSTALL/VERSION" ||
   die "$WINEMAC_INSTALL was not built from patches/winemac-gw2-launcher.patch as it is now"
+# the workspace's patches must be this repository's (the same content)
+for p in ntdll-heat.patch wineserver-msync-unregister.patch winemac-gw2-launcher.patch; do
+  [ ! -f "$WS/patches/$p" ] || cmp -s "$WS/patches/$p" "patches/$p" || die "$WS/patches/$p differs from patches/$p"
+done
 need "$UISCALE_BUILD/version.dll" "$UISCALE_BUILD/gw2-ui-scale.ini"
 grep -aq 'gw2-on-mac ui-scale' "$UISCALE_BUILD/version.dll" || die "$UISCALE_BUILD/version.dll is not the ui-scale addon"
 
@@ -63,10 +81,12 @@ mkdir -p "$P.new/dxmt" && cp -R "$DXMT_INSTALL/x86_64-windows" "$DXMT_INSTALL/i3
 mkdir -p "$P.new/heat" && cp "$HEAT_INSTALL"/{ntdll.so,wineserver,VERSION,WINESERVER.txt,LICENSE,COPYING.LIB} "$P.new/heat/"
 mkdir -p "$P.new/winemac" && cp "$WINEMAC_INSTALL"/{winemac.so,win32u.so,VERSION,LICENSE,COPYING.LIB} "$P.new/winemac/"
 mkdir -p "$P.new/ui-scale" && cp "$UISCALE_BUILD"/{version.dll,gw2-ui-scale.ini} "$P.new/ui-scale/"
-{ echo "staged $(date '+%F %T') by app/scripts/stage-components.sh"
-  echo "dxmt $(cat "$DXMT_INSTALL/VERSION") from $DXMT_INSTALL"
-  echo "heat $(sha "$HEAT_INSTALL/ntdll.so") wineserver $(sha "$HEAT_INSTALL/wineserver") from $HEAT_INSTALL"
-  echo "winemac $(sha "$WINEMAC_INSTALL/winemac.so") win32u $(sha "$WINEMAC_INSTALL/win32u.so") from $WINEMAC_INSTALL"
-  echo "ui-scale $(sha "$UISCALE_BUILD/version.dll") from $UISCALE_BUILD"; } >"$P.new/STAGED"
+# The record names the sources relative to the workspace (no home folder in it)
+rel() { echo "${1#"$WS"/}"; }
+{ echo "staged $(date '+%F %T') by scripts/stage-components.sh from the development workspace"
+  echo "dxmt $(cat "$DXMT_INSTALL/VERSION") from $(rel "$DXMT_INSTALL")"
+  echo "heat $(sha "$HEAT_INSTALL/ntdll.so") wineserver $(sha "$HEAT_INSTALL/wineserver") from $(rel "$HEAT_INSTALL")"
+  echo "winemac $(sha "$WINEMAC_INSTALL/winemac.so") win32u $(sha "$WINEMAC_INSTALL/win32u.so") from $(rel "$WINEMAC_INSTALL")"
+  echo "ui-scale $(sha "$UISCALE_BUILD/version.dll") from $(rel "$UISCALE_BUILD")"; } >"$P.new/STAGED"
 rm -rf "$P" && mv "$P.new" "$P"
 cat "$P/STAGED"

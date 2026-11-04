@@ -1,7 +1,7 @@
 // GW2 on Mac: the app (SwiftUI). The main window (MainWindow.swift) shows this Mac's state and
 // the launch panel, and runs Resources/gw2om.sh (status, install, finish, repair, uninstall,
 // play), which does the actual work and streams its progress back as "@" lines (see the header
-// of app/src/gw2om.sh). Also here: the app menu (About, Check for Updates…, Settings…, Collect
+// of src/gw2om.sh). Also here: the app menu (About, Check for Updates…, Settings…, Collect
 // Logs…, Quit), with Settings.swift (the Settings window) and Updates.swift (Sparkle, off until
 // there is a feed).
 //
@@ -600,7 +600,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 }
 
-// (app/scripts/ui-render.swift brings its own entry point)
+// (scripts/ui-render.swift brings its own entry point)
 #if !GW2_RENDER
 @main
 #endif

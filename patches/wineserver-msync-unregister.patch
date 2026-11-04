@@ -1,0 +1,14 @@
+dappermint/winecx 8df1826853: mach_message_pump's early out also unregisters object 0 (i == 1).
+Built into work/heat/install-r7*/wineserver (WINESERVER.txt there); build-ntdll-heat.zsh applies it
+to work/heat/src so the tree matches that binary (it doesn't touch ntdll.so).
+--- a/server/msync.c
++++ b/server/msync.c
+@@ -508,7 +508,7 @@
+             val = __atomic_load_n( &obj->low, __ATOMIC_SEQ_CST );
+             if ((is_mutex && (val == 0 || val == ~0 || val == tid)) || (!is_mutex && val != 0))
+             {
+-                if (i > 1) unregister_wait( &receive_message, tid, i );
++                if (i > 0) unregister_wait( &receive_message, tid, i );
+                 wake_tid( tid );
+                 break;
+             }

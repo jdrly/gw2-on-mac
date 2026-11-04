@@ -1,19 +1,19 @@
-// The app icon: an Icon Composer document (app/src/AppIcon.icon) that macOS 26 and later draws as a
+// The app icon: an Icon Composer document (src/AppIcon.icon) that macOS 26 and later draws as a
 // Liquid Glass icon (glass rim, specular highlights, shadow; Default, Dark, Tinted and Clear).
-// The design (Jan's, the .pen frame "App Icon", docs/design/exports/6-app-icon.png): the window's
+// The design (Jan's, the approved design's frame "App Icon"): the window's
 // "GW2 / ON MAC" wordmark in Cinzel over a crimson ensō with ink splatter, on dark ink. Original
 // artwork: no ArenaNet or Guild Wars logo. The layers carry no tile, rim or shadow: the system draws
 // those, and icon.json holds the background gradient and each group's glass settings (fine-tune
 // them in Xcode's Icon Composer). Structure and preview as SWTOR on Mac's src/make-icon.swift.
 //
-//   swift app/src/make-icon.swift layers app/src/AppIcon.icon
+//   swift src/make-icon.swift layers src/AppIcon.icon
 //       writes the wordmark layer into Assets/ (icon-ring.png is the design's own artwork,
-//       docs/design/icon-ring.png; icon.json is left as it is)
-//   swift app/src/make-icon.swift preview app/src/AppIcon.icon <sheet.png> [other.icns]
+//       already in Assets/; icon.json is left as it is)
+//   swift src/make-icon.swift preview src/AppIcon.icon <sheet.png> [other.icns]
 //       renders a review sheet with Icon Composer's ictool: the six appearances, and every size on
 //       light and on dark, optionally next to another app's .icns
 //
-// app/build.sh compiles the document with actool into Assets.car and a fallback AppIcon.icns.
+// build.sh compiles the document with actool into Assets.car and a fallback AppIcon.icns.
 import AppKit
 import CoreImage
 import CoreText
@@ -39,7 +39,7 @@ func svg(_ body: String) -> String {
   """
 }
 
-// --- wordmark: Cinzel Bold (the app's own copy, app/src/fonts, SIL OFL 1.1; the SVG carries the
+// --- wordmark: Cinzel Bold (the app's own copy, src/fonts, SIL OFL 1.1; the SVG carries the
 // outlines, so only `layers` needs the font). Returns the outline and the line's ascent/descent.
 func cinzel(_ s: String, size: CGFloat, spacing: CGFloat) -> (path: CGPath, width: CGFloat, ascent: CGFloat, descent: CGFloat) {
   let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("fonts/Cinzel-Variable.ttf") as CFURL
@@ -108,7 +108,7 @@ if args[1] == "layers" {
   try FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
   try wordSVG().write(to: assets.appendingPathComponent("wordmark.svg"), atomically: true, encoding: .utf8)
   guard FileManager.default.fileExists(atPath: assets.appendingPathComponent("icon-ring.png").path) else {
-    FileHandle.standardError.write("Assets/icon-ring.png is missing: copy docs/design/icon-ring.png there\n".data(using: .utf8)!)
+    FileHandle.standardError.write("Assets/icon-ring.png is missing: copy the design's icon-ring.png there\n".data(using: .utf8)!)
     exit(1)
   }
   print("layers written to \(assets.path)")

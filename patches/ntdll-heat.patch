@@ -1,0 +1,2225 @@
+--- a/dlls/ntdll/Makefile.in
++++ b/dlls/ntdll/Makefile.in
+@@ -50,6 +50,7 @@
+ 	unix/debug.c \
+ 	unix/env.c \
+ 	unix/file.c \
++	unix/heat.c \
+ 	unix/msync.c \
+ 	unix/loader.c \
+ 	unix/loadorder.c \
+--- a/dlls/ntdll/unix/file.c
++++ b/dlls/ntdll/unix/file.c
+@@ -7863,6 +7863,8 @@
+ 
+         if (len < sizeof(*p)) return STATUS_INVALID_BUFFER_SIZE;
+ 
++        heat_evpool_forget( handle );
++        heat_handle_gone( handle );
+         SERVER_START_REQ( set_handle_info )
+         {
+             req->handle = wine_server_obj_handle( handle );
+--- /dev/null
++++ b/dlls/ntdll/unix/heat.c
+@@ -0,0 +1,1434 @@
++/*
++ * GW2 on Mac heat probes and opt-in tweaks for one process (WINE_HEAT_*)
++ *
++ * Everything here is off unless one of these is set and the process's exe (the last part of
++ * its ImagePathName) is WINE_HEAT_EXE, default Gw2-64.exe; every other process decides "off"
++ * on its first probe:
++ *
++ *   WINE_HEAT_COUNT=1       per-thread counters of waits, sleeps, yields, event and server
++ *                           calls, and the game's callers of the busiest ones, dumped every
++ *                           WINE_HEAT_INTERVAL seconds (default 5) to
++ *                           $WINE_HEAT_LOG/heat-<pid>.log (default /tmp)
++ *   WINE_HEAT_EVPOOL=1      NtClose of an unnamed, non-inheritable EVENT_ALL_ACCESS event that
++ *                           was never duplicated or handed to the server (async I/O, registry
++ *                           notification) parks the handle instead of closing it, and
++ *                           NtCreateEvent of the same kind reuses one parked for at least
++ *                           WINE_HEAT_EVPOOL_AGE_US (default 2000) microseconds: no server
++ *                           round trips, and no fd_cache_mutex, for create, close and the
++ *                           first set or wait of each new handle
++ *   WINE_HEAT_QOS=1=utility a thread that sets its own base priority (SetThreadPriority on
++ *                           GetCurrentThread()) to one listed gets that macOS scheduling
++ *                           class instead of Wine's mapping: utility (base priority 20: the
++ *                           P cores, as utility QoS), default (31), background (Darwin
++ *                           background, throttled) or a base priority; a comma-separated
++ *                           list, e.g. "1=utility,-1=24"
++ *
++ *   WINE_HEAT_WAKE=one      a semaphore release of count n wakes at most n waiters, one wake
++ *                           syscall each, stopping at the first that finds none (msync wakes
++ *                           all of them on every release)
++ *   WINE_HEAT_WAKE=skip     a release of a semaphore only this process can wait on, with no
++ *                           thread asleep on it, makes no wake syscall; "one,skip" for both
++ *   WINE_HEAT_PROF=on       ~1 kHz SIGPROF samples of the game thread's x86 registers and PE
++ *                           stack to $WINE_HEAT_LOG/heat-prof-<pid>.bin (WINE_HEAT_PROF_HZ,
++ *                           WINE_HEAT_PROF_RENDER=1 for bgfx's render thread too)
++ *   WINE_HEAT_PROF_THREADS=game,render,encode,finish  the sampled threads (default game):
++ *                           bgfx's render thread and DXMT's encode and finish threads by name
++ *                           ("dxmt" = encode,finish; "all"); in Wine's unix code also the unix
++ *                           frame-pointer chain, named with dladdr in heat-prof-<pid>.usyms
++ *   WINE_HEAT_CONTROL=<file> read every second: "wake=…", "count=on|off", "prof=on|off",
++ *                           "targets=<as WINE_HEAT_PROF_THREADS>" switch
++ *                           at runtime (the skip's bookkeeping then runs from the start)
++ *   WINE_HEAT_SPIN=lock=<us>[:game|:all],event=<us>[:game|:all]  (round 7) spin up to that
++ *                           long before sleeping (1-1000 us):
++ *                           lock: in NtWaitForAlertByThreadId (contended critical sections, SRW
++ *                           locks, WaitOnAddress, condition variables); while it spins the
++ *                           thread's alert word holds 3, so NtAlertThreadByThreadId (unchanged)
++ *                           sees a nonzero word and makes no wake syscall. event: in an msync
++ *                           wait whose objects are all events (GW2's job-group waits; never a
++ *                           semaphore, so idle job workers don't spin). Per thread and kind,
++ *                           after 4 misses in a row the thread doesn't spin for its next
++ *                           WINE_HEAT_SPIN_PAUSE (default 32) waits; a hit resets the count.
++ *                           Scope "game" (the default): a thread that set its own priority above
++ *                           normal (GW2's job workers, ABOVE_NORMAL) never spins; the game thread
++ *                           and every other normal-priority thread do. "all": every thread. Spin
++ *                           loops use YieldProcessor() (pause), as RtlEnterCriticalSection does.
++ *   WINE_HEAT_LAZYCLOCK=1   (round 7) an msync wait reads the clock only when it has to turn a
++ *                           relative timeout into a deadline (athei/wine 7134955a, that part only)
++ *   WINE_HEAT_MSYNC_UNREG=1 (round 7) when a multiple-object wait finds an object signaled
++ *                           right after registering with the server, it unregisters (server
++ *                           message, and the alert object's count too) instead of only dropping
++ *                           the objects' local counts (dappermint/winecx 9be392b3b4)
++ *   WINE_HEAT_MSYNC_PORTFIX=1 (round 7) msync's shared-memory page request releases its reply
++ *                           port's receive right, not only the send right (athei/wine 7134955a)
++ *   WINE_HEAT_QOS=1=utility:3  (round 7) only the first 3 threads that set that priority get
++ *                           the class; the others keep Wine's mapping
++ *   WINE_HEAT_NAMEPRI=<name>=<class>;...  a thread that names itself <name>
++ *                           (SetThreadDescription) gets that class or base priority, as
++ *                           WINE_HEAT_QOS; e.g. "bgfx - renderer backend thread=35"
++ *
++ * See gw2-on-mac docs/research/heat-workers-2026-10-28.md and heat-locks-2026-10-29.md.
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ */
++
++#if 0
++#pragma makedep unix
++#endif
++
++#include "config.h"
++
++#include <errno.h>
++#include <signal.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++#include <pthread.h>
++#include <sys/mman.h>
++#include <dlfcn.h>
++#ifdef __APPLE__
++# include <libproc.h>
++# include <mach/mach.h>
++# include <mach/mach_time.h>
++# include <mach/thread_policy.h>
++# include <sys/resource.h>
++# include <sys/ucontext.h>
++# include <os/lock.h>
++#endif
++
++#include "ntstatus.h"
++#define WIN32_NO_STATUS
++#include "windef.h"
++#include "winternl.h"
++#include "wine/server.h"
++#include "unix_private.h"
++
++unsigned int heat_mode;
++int heat_decided;
++
++#define HEAT_MAX_THREADS 1024
++
++struct heat_thread
++{
++    LONG               tid;        /* Windows thread id */
++    pthread_t          pthread;    /* for the sampler's pthread_kill (HEAT_PROF) */
++    int                exited;     /* left through heat_thread_exit */
++    unsigned long long utid;       /* macOS thread id (pthread_threadid_np) */
++    void              *start;      /* thread entry point */
++    int                qos;        /* heat_qos_map value applied (0: none) */
++    int                qos_ret;    /* thread_policy_set or setpriority result */
++    LONG               prio;       /* the base priority that asked for it */
++    unsigned long long c[HC_NB];
++    unsigned long long t[HT_NB];   /* ns */
++    /* the dumper's previous values */
++    unsigned long long pc[HC_NB], pt[HT_NB], pcpu_user, pcpu_sys;
++};
++
++static struct heat_thread heat_threads[HEAT_MAX_THREADS];
++static LONG heat_nthreads;
++
++static unsigned long long heat_req_n[REQ_NB_REQUESTS], heat_req_t[REQ_NB_REQUESTS];
++static unsigned long long heat_req_pn[REQ_NB_REQUESTS], heat_req_pt[REQ_NB_REQUESTS];
++
++/* callers in the main exe, by kind: the first two return addresses on the PE stack */
++enum { HK_CREATE_EVENT, HK_CLOSE, HK_YIELD, HK_DELAY0, HK_DELAY, HK_RELSEM, HK_ALERTWAIT, HK_NB };
++static const char * const heat_kind_names[HK_NB] = { "create_event", "close", "yield", "delay0", "delay", "relsem", "alertwait" };
++#define HEAT_CALLERS 1024
++struct heat_caller { unsigned long long key, n, pn; };
++static struct heat_caller heat_callers[HEAT_CALLERS];
++static unsigned long long heat_callers_lost;
++static ULONG_PTR heat_image_base, heat_code_lo, heat_code_hi;
++
++static double heat_ns_per_tick = 1.0;
++static unsigned int heat_interval = 5;
++static char heat_log_path[1024];
++
++/* event pool */
++#define HEAT_EV_ELIGIBLE 1
++#define HEAT_EV_MANUAL   2
++#define HEAT_EV_INPOOL   4
++#define HEAT_EVFLAGS_SIZE (1 << 22)   /* handles up to 16M */
++#define HEAT_POOL_SIZE   1024
++struct heat_pool { HANDLE h[HEAT_POOL_SIZE]; unsigned long long t[HEAT_POOL_SIZE]; unsigned int head, count; };
++static unsigned char *heat_evflags;
++static struct heat_pool heat_pools[2];   /* [0] auto-reset, [1] manual-reset */
++static pthread_mutex_t heat_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
++static unsigned long long heat_pool_age_ns = 2000000;
++static unsigned long long heat_pool_evicted, heat_pool_forgotten, heat_pool_double_close;
++
++/* QoS per base priority -15..15 */
++static int heat_qos_map[31];
++static LONG heat_qos_limit[31], heat_qos_used[31];   /* "<prio>=<class>:<n>": at most n threads */
++static __thread int heat_spin_above;   /* this thread set itself above normal (HEAT_SPIN scope) */
++
++unsigned long long heat_now(void)
++{
++#ifdef __APPLE__
++    return (unsigned long long)(mach_absolute_time() * heat_ns_per_tick);
++#else
++    struct timespec ts;
++    clock_gettime( CLOCK_MONOTONIC, &ts );
++    return ts.tv_sec * 1000000000ull + ts.tv_nsec;
++#endif
++}
++
++static struct heat_thread *heat_self(void)
++{
++    struct ntdll_thread_data *data;
++    struct heat_thread *t;
++    LONG i;
++
++    /* D3DMetal calls some Nt functions from threads that have no TEB */
++    if (!NtCurrentTeb()) return NULL;
++    data = ntdll_get_thread_data();
++    if ((t = data->heat)) return t;
++    i = InterlockedIncrement( &heat_nthreads ) - 1;
++    if (i >= HEAT_MAX_THREADS) i = HEAT_MAX_THREADS - 1;  /* shared overflow row */
++    t = &heat_threads[i];
++    if (!t->tid)
++    {
++        t->tid = HandleToLong( NtCurrentTeb()->ClientId.UniqueThread );
++#ifdef __APPLE__
++        pthread_threadid_np( NULL, &t->utid );
++#endif
++        t->start = data->start;
++        t->pthread = pthread_self();
++    }
++    data->heat = t;
++    return t;
++}
++
++void heat_count( enum heat_counter c )
++{
++    struct heat_thread *t;
++    if (!(heat_on() & HEAT_COUNT) || !(t = heat_self())) return;
++    t->c[c]++;
++}
++
++void heat_time( enum heat_timer which, unsigned long long start )
++{
++    struct heat_thread *t;
++    if (!(heat_on() & HEAT_COUNT) || !(t = heat_self())) return;
++    t->t[which] += heat_now() - start;
++}
++
++void heat_wait_done( unsigned long long start, const LARGE_INTEGER *timeout, NTSTATUS ret )
++{
++    struct heat_thread *t;
++    unsigned long long d;
++
++    if (!(heat_on() & HEAT_COUNT) || !(t = heat_self())) return;
++    d = heat_now() - start;
++    t->c[HC_WAIT]++;
++    t->t[HT_WAIT] += d;
++    if (timeout && !timeout->QuadPart) t->c[HC_WAIT0]++;
++    if (ret == STATUS_TIMEOUT) t->c[HC_WAIT_TIMEOUT]++;
++    if (d < 20000) t->c[HC_WAIT_B20US]++;
++    else if (d < 200000) t->c[HC_WAIT_B200US]++;
++    else if (d < 2000000) t->c[HC_WAIT_B2MS]++;
++    else t->c[HC_WAIT_LONG]++;
++}
++
++void heat_alertwait_done( unsigned long long start )
++{
++    struct heat_thread *t;
++    unsigned long long d;
++
++    if (!(heat_on() & HEAT_COUNT) || !(t = heat_self())) return;
++    d = heat_now() - start;
++    t->c[HC_ALERTWAIT]++;
++    t->t[HT_ALERTWAIT] += d;
++    if (d < 5000) t->c[HC_AW_B5US]++;
++    else if (d < 20000) t->c[HC_AW_B20US]++;
++    else if (d < 100000) t->c[HC_AW_B100US]++;
++    else t->c[HC_AW_LONG]++;
++}
++
++void heat_server_done( int req, unsigned long long start )
++{
++    struct heat_thread *t;
++    unsigned long long d;
++
++    if (!(heat_on() & HEAT_COUNT) || !(t = heat_self())) return;
++    d = heat_now() - start;
++    t->c[HC_SERVER]++;
++    t->t[HT_SERVER] += d;
++    if (req >= 0 && req < REQ_NB_REQUESTS)
++    {
++        __atomic_fetch_add( &heat_req_n[req], 1, __ATOMIC_RELAXED );
++        __atomic_fetch_add( &heat_req_t[req], d, __ATOMIC_RELAXED );
++    }
++}
++
++void heat_note_caller( int kind )
++{
++#ifdef __x86_64__
++    ULONG_PTR *sp, *top, found[2] = { 0, 0 };
++    unsigned long long key, zero;
++    unsigned int i, n = 0, h;
++
++    if (!(heat_on() & HEAT_COUNT) || !heat_code_hi || !heat_self()) return;
++    if (!(sp = heat_syscall_rsp())) return;
++    top = NtCurrentTeb()->Tib.StackBase;
++    for (i = 0; i < 256 && sp + 1 <= top && n < 2; i++, sp++)
++        if (*sp >= heat_code_lo && *sp < heat_code_hi) found[n++] = *sp - heat_image_base;
++    if (!n) return;
++    key = ((unsigned long long)(kind + 1) << 60) | ((found[0] & 0x3fffffff) << 30) | (found[1] & 0x3fffffff);
++    h = (unsigned int)((key * 0x9e3779b97f4a7c15ull) >> 54);
++    for (i = 0; i < 32; i++)
++    {
++        struct heat_caller *e = &heat_callers[(h + i) % HEAT_CALLERS];
++        unsigned long long k = __atomic_load_n( &e->key, __ATOMIC_ACQUIRE );
++        zero = 0;
++        if (k == key || (!k && (__atomic_compare_exchange_n( &e->key, &zero, key, FALSE, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE ) || zero == key)))
++        {
++            __atomic_fetch_add( &e->n, 1, __ATOMIC_RELAXED );
++            return;
++        }
++    }
++    __atomic_fetch_add( &heat_callers_lost, 1, __ATOMIC_RELAXED );
++#endif
++}
++
++/***********************************************************************
++ *  event pool
++ */
++
++static BOOL heat_evpool_args( ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr )
++{
++    if (access != EVENT_ALL_ACCESS) return FALSE;
++    if (!attr) return TRUE;
++    return !attr->RootDirectory && (!attr->ObjectName || !attr->ObjectName->Length) &&
++           !attr->SecurityDescriptor && !(attr->Attributes & OBJ_INHERIT);
++}
++
++static inline unsigned int heat_ev_index( HANDLE handle )
++{
++    return (unsigned int)(wine_server_obj_handle( handle ) >> 2);
++}
++
++BOOL heat_evpool_get( HANDLE *handle, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
++                      EVENT_TYPE type, BOOLEAN state )
++{
++    struct heat_pool *pool = &heat_pools[type == NotificationEvent];
++    HANDLE h = 0;
++    sigset_t sigset;
++
++    if (!(heat_on() & HEAT_EVPOOL) || !heat_evpool_args( access, attr )) return FALSE;
++    server_enter_uninterrupted_section( &heat_pool_mutex, &sigset );
++    if (pool->count && heat_now() - pool->t[pool->head] >= heat_pool_age_ns)
++    {
++        h = pool->h[pool->head];
++        pool->head = (pool->head + 1) % HEAT_POOL_SIZE;
++        pool->count--;
++        heat_evflags[heat_ev_index( h )] &= ~HEAT_EV_INPOOL;
++    }
++    server_leave_uninterrupted_section( &heat_pool_mutex, &sigset );
++    if (!h) return FALSE;
++
++    if ((state ? NtSetEvent( h, NULL ) : NtResetEvent( h, NULL )))
++    {
++        heat_evpool_forget( h );
++        NtClose( h );
++        return FALSE;
++    }
++    *handle = h;
++    heat_count( HC_EVPOOL_HIT );
++    return TRUE;
++}
++
++void heat_evpool_created( HANDLE handle, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
++                          EVENT_TYPE type )
++{
++    unsigned int idx;
++
++    if (!(heat_on() & HEAT_EVPOOL) || !heat_evpool_args( access, attr )) return;
++    if ((idx = heat_ev_index( handle )) >= HEAT_EVFLAGS_SIZE) return;
++    heat_evflags[idx] = HEAT_EV_ELIGIBLE | (type == NotificationEvent ? HEAT_EV_MANUAL : 0);
++}
++
++/* STATUS_PENDING: not ours, close it as usual */
++NTSTATUS heat_evpool_close( HANDLE handle )
++{
++    struct heat_pool *pool;
++    HANDLE evict = 0;
++    unsigned int idx, slot;
++    unsigned char flags;
++    sigset_t sigset;
++
++    if (!(heat_on() & HEAT_EVPOOL)) return STATUS_PENDING;
++    if ((idx = heat_ev_index( handle )) >= HEAT_EVFLAGS_SIZE) return STATUS_PENDING;
++    if (!(heat_evflags[idx] & HEAT_EV_ELIGIBLE)) return STATUS_PENDING;
++
++    server_enter_uninterrupted_section( &heat_pool_mutex, &sigset );
++    flags = heat_evflags[idx];
++    if (!(flags & HEAT_EV_ELIGIBLE))
++    {
++        server_leave_uninterrupted_section( &heat_pool_mutex, &sigset );
++        return STATUS_PENDING;
++    }
++    if (flags & HEAT_EV_INPOOL)  /* closed twice: what Windows says */
++    {
++        heat_pool_double_close++;
++        server_leave_uninterrupted_section( &heat_pool_mutex, &sigset );
++        return STATUS_INVALID_HANDLE;
++    }
++    pool = &heat_pools[!!(flags & HEAT_EV_MANUAL)];
++    if (pool->count == HEAT_POOL_SIZE)
++    {
++        evict = pool->h[pool->head];
++        pool->head = (pool->head + 1) % HEAT_POOL_SIZE;
++        pool->count--;
++        heat_evflags[heat_ev_index( evict )] = 0;
++        heat_pool_evicted++;
++    }
++    slot = (pool->head + pool->count) % HEAT_POOL_SIZE;
++    pool->h[slot] = handle;
++    pool->t[slot] = heat_now();
++    pool->count++;
++    heat_evflags[idx] = flags | HEAT_EV_INPOOL;
++    server_leave_uninterrupted_section( &heat_pool_mutex, &sigset );
++
++    if (evict) NtClose( evict );
++    heat_count( HC_EVPOOL_PUT );
++    return STATUS_SUCCESS;
++}
++
++/* the handle is duplicated or the server keeps a reference: close it for real later */
++void heat_evpool_forget( HANDLE handle )
++{
++    unsigned int idx;
++    sigset_t sigset;
++
++    if (!(heat_on() & HEAT_EVPOOL) || !handle) return;
++    if ((idx = heat_ev_index( handle )) >= HEAT_EVFLAGS_SIZE) return;
++    if (!(heat_evflags[idx] & HEAT_EV_ELIGIBLE)) return;
++    server_enter_uninterrupted_section( &heat_pool_mutex, &sigset );
++    if ((heat_evflags[idx] & (HEAT_EV_ELIGIBLE | HEAT_EV_INPOOL)) == HEAT_EV_ELIGIBLE)
++    {
++        heat_evflags[idx] = 0;
++        heat_pool_forgotten++;
++    }
++    server_leave_uninterrupted_section( &heat_pool_mutex, &sigset );
++}
++
++/***********************************************************************
++ *  private semaphores and their waiters (HEAT_WAKESKIP)
++ *
++ * msync wakes a semaphore's ulock address on every release, even with no thread asleep on it.
++ * Here each msync object counts the threads of this process asleep on its address
++ * (msync_wait_single), and a release of a semaphore that only this process can wait on (created
++ * here unnamed and non-inheritable, never duplicated, never had its handle flags changed) skips
++ * the wake when that count is 0. No lost wake: a waiter adds itself (sequentially consistent)
++ * before it sleeps, and the kernel's compare-and-wait sleeps only while the count it compares is
++ * still 0; the releaser changes the count (a full-barrier CAS) before it reads the waiters. If
++ * it reads none, the waiter's add comes later in that order, so its compare sees the new count
++ * and it doesn't sleep. Waits through the server (alertable or multi-object) are woken by msync's
++ * message to the server, which stays.
++ *
++ * With WINE_HEAT_CONTROL (HEAT_TRACK) the flags and counts are kept from the process's start
++ * whatever the wake mode, so "skip" can be switched on and off at runtime without a lost wake.
++ */
++#define HEAT_SEMFLAGS_SIZE (1 << 22)   /* handles up to 16M */
++#define HEAT_WAITERS_SIZE  (1 << 22)   /* msync objects up to 4M */
++static unsigned char *heat_semflags;
++static int *heat_waiters;
++__thread int heat_releasing_private;
++
++void heat_sem_created( HANDLE handle, const OBJECT_ATTRIBUTES *attr )
++{
++    unsigned int idx = heat_ev_index( handle );
++
++    if (!(heat_on() & (HEAT_WAKESKIP | HEAT_TRACK)) || !heat_semflags || idx >= HEAT_SEMFLAGS_SIZE) return;
++    if (attr && (attr->RootDirectory || (attr->ObjectName && attr->ObjectName->Length) ||
++                 (attr->Attributes & OBJ_INHERIT)))
++        return;
++    __atomic_store_n( &heat_semflags[idx], 1, __ATOMIC_RELEASE );
++}
++
++/* closed, duplicated, or its handle flags changed: no longer known to be private */
++void heat_handle_gone( HANDLE handle )
++{
++    unsigned int idx = heat_ev_index( handle );
++
++    if (!(heat_on() & (HEAT_WAKESKIP | HEAT_TRACK)) || !heat_semflags || idx >= HEAT_SEMFLAGS_SIZE) return;
++    if (__atomic_load_n( &heat_semflags[idx], __ATOMIC_RELAXED ))
++        __atomic_store_n( &heat_semflags[idx], 0, __ATOMIC_SEQ_CST );
++}
++
++BOOL heat_sem_private( HANDLE handle )
++{
++    unsigned int idx = heat_ev_index( handle );
++
++    if (!(heat_on() & (HEAT_WAKESKIP | HEAT_TRACK)) || !heat_semflags || idx >= HEAT_SEMFLAGS_SIZE) return FALSE;
++    return __atomic_load_n( &heat_semflags[idx], __ATOMIC_ACQUIRE );
++}
++
++void heat_waiters_add( int obj, int delta )
++{
++    if (!(heat_on() & (HEAT_WAKESKIP | HEAT_TRACK)) || !heat_waiters || obj <= 0 || obj >= HEAT_WAITERS_SIZE) return;
++    __atomic_fetch_add( &heat_waiters[obj], delta, __ATOMIC_SEQ_CST );
++}
++
++BOOL heat_waiters_none( int obj )
++{
++    if (!(heat_on() & (HEAT_WAKESKIP | HEAT_TRACK)) || !heat_waiters || obj <= 0 || obj >= HEAT_WAITERS_SIZE) return FALSE;
++    return !__atomic_load_n( &heat_waiters[obj], __ATOMIC_SEQ_CST );
++}
++
++/***********************************************************************
++ *  QoS
++ */
++
++/* Wine's server maps a priority to Mach policies (importance, timeshare, QoS tiers) and never
++ * to a QoS class, and once a thread has a Mach policy macOS refuses pthread QoS (EPERM). Cores
++ * follow the base priority: on the M5 Max at load, a thread at base priority 20 (the utility
++ * band) gets the P cores as utility QoS does, one below that the P cores' clock drops, and Wine's
++ * ABOVE_NORMAL (task priority + 5) takes the S cores. The task's priority differs (31 for a
++ * console program, 26 for GW2), so the map sets a base priority: it sets the thread's precedence
++ * importance to that minus the task's, after the server's, or Darwin background. */
++#define HEAT_CLASS_BG  1000   /* setpriority( PRIO_DARWIN_THREAD, PRIO_DARWIN_BG ) */
++#define HEAT_CLASS_PRI 100    /* map value = HEAT_CLASS_PRI + base priority */
++
++static const struct { const char *name; int value; } heat_qos_names[] =
++{
++    { "default", HEAT_CLASS_PRI + 31 },
++    { "utility", HEAT_CLASS_PRI + 20 },
++    { "background", HEAT_CLASS_BG },
++};
++
++static void heat_qos_format( int value, char *buf, size_t size )
++{
++    unsigned int i;
++    for (i = 0; i < ARRAY_SIZE(heat_qos_names); i++)
++        if (heat_qos_names[i].value == value)
++        {
++            snprintf( buf, size, "%s", heat_qos_names[i].name );
++            return;
++        }
++    snprintf( buf, size, "priority %d", value - HEAT_CLASS_PRI );
++}
++
++/* "<Windows priority>=<utility|default|background|base priority>,..." */
++static BOOL heat_parse_qos( const char *spec )
++{
++    char buf[256], *p, *save = NULL, *end;
++    BOOL any = FALSE;
++    unsigned int i;
++
++    snprintf( buf, sizeof(buf), "%s", spec );
++    for (p = strtok_r( buf, ",", &save ); p; p = strtok_r( NULL, ",", &save ))
++    {
++        char *eq = strchr( p, '=' ), *colon;
++        long prio, imp, limit = 0;
++        if (!eq) continue;
++        *eq = 0;
++        prio = strtol( p, NULL, 10 );
++        if (prio < -15 || prio > 15) continue;
++        if ((colon = strchr( eq + 1, ':' )))
++        {
++            *colon = 0;
++            limit = strtol( colon + 1, &end, 10 );
++            if (end == colon + 1 || *end || limit < 1) continue;
++        }
++        heat_qos_limit[prio + 15] = limit;
++        for (i = 0; i < ARRAY_SIZE(heat_qos_names); i++)
++            if (!strcmp( eq + 1, heat_qos_names[i].name ))
++            {
++                heat_qos_map[prio + 15] = heat_qos_names[i].value;
++                any = TRUE;
++            }
++        imp = strtol( eq + 1, &end, 10 );
++        if (end != eq + 1 && !*end && imp >= 4 && imp <= 63)
++        {
++            heat_qos_map[prio + 15] = HEAT_CLASS_PRI + imp;
++            any = TRUE;
++        }
++    }
++    return any;
++}
++
++/* the current thread gets a heat_qos_map value; returns the system call's result */
++static int heat_apply_class( int value )
++{
++    int ret = -1;
++#ifdef __APPLE__
++    if (value == HEAT_CLASS_BG)
++        ret = setpriority( PRIO_DARWIN_THREAD, 0, PRIO_DARWIN_BG );
++    else
++    {
++        /* the task's priority: the thread's base priority less the importance the server set */
++        mach_port_t port = pthread_mach_thread_np( pthread_self() );
++        struct thread_precedence_policy policy;
++        mach_msg_type_number_t count = THREAD_PRECEDENCE_POLICY_COUNT;
++        boolean_t get_default = FALSE;
++        struct proc_threadinfo pti;
++        unsigned long long utid;
++
++        pthread_threadid_np( NULL, &utid );
++        if (thread_policy_get( port, THREAD_PRECEDENCE_POLICY, (thread_policy_t)&policy, &count, &get_default ) ||
++            proc_pidinfo( getpid(), PROC_PIDTHREADID64INFO, utid, &pti, sizeof(pti) ) != sizeof(pti))
++            ret = -2;
++        else
++        {
++            policy.importance = (value - HEAT_CLASS_PRI) - (pti.pth_priority - policy.importance);
++            ret = thread_policy_set( port, THREAD_PRECEDENCE_POLICY, (thread_policy_t)&policy,
++                                     THREAD_PRECEDENCE_POLICY_COUNT );
++        }
++    }
++#endif
++    return ret;
++}
++
++void heat_thread_priority( HANDLE handle, LONG priority )
++{
++    struct heat_thread *t;
++    int value, ret;
++
++    if ((heat_on() & (HEAT_SPINLOCK | HEAT_SPINEVENT)) && handle == NtCurrentThread())
++        heat_spin_above = priority > 0;
++    if (!(heat_on() & HEAT_QOS) || handle != NtCurrentThread()) return;
++    if (priority < -15 || priority > 15 || !(value = heat_qos_map[priority + 15])) return;
++    if (heat_qos_limit[priority + 15])
++    {
++        /* a thread already given this class doesn't count again */
++        if (!(t = heat_self())) return;
++        if (!(t->qos == value && t->prio == priority) &&
++            InterlockedIncrement( &heat_qos_used[priority + 15] ) > heat_qos_limit[priority + 15]) return;
++    }
++    ret = heat_apply_class( value );
++    if ((t = heat_self()))
++    {
++        t->qos = value;
++        t->qos_ret = ret;
++        t->prio = priority;
++    }
++}
++
++/* WINE_HEAT_NAMEPRI: "<thread name>=<class or base priority>;..." (names may hold commas) */
++#define HEAT_NAMES 8
++static struct { WCHAR name[64]; int value; } heat_names[HEAT_NAMES];
++static unsigned int heat_nnames;
++
++static BOOL heat_parse_names( const char *spec )
++{
++    char buf[512], *p, *save = NULL;
++    unsigned int i, len;
++
++    snprintf( buf, sizeof(buf), "%s", spec );
++    for (p = strtok_r( buf, ";", &save ); p && heat_nnames < HEAT_NAMES; p = strtok_r( NULL, ";", &save ))
++    {
++        char *eq = strrchr( p, '=' ), *end;
++        int value = 0;
++        long pri;
++        if (!eq || eq == p) continue;
++        *eq = 0;
++        for (i = 0; i < ARRAY_SIZE(heat_qos_names); i++)
++            if (!strcmp( eq + 1, heat_qos_names[i].name )) value = heat_qos_names[i].value;
++        pri = strtol( eq + 1, &end, 10 );
++        if (end != eq + 1 && !*end && pri >= 4 && pri <= 63) value = HEAT_CLASS_PRI + pri;
++        if (!value) continue;
++        len = strlen( p );
++        if (len >= ARRAY_SIZE(heat_names[0].name)) continue;
++        for (i = 0; i <= len; i++) heat_names[heat_nnames].name[i] = (unsigned char)p[i];
++        heat_names[heat_nnames++].value = value;
++    }
++    return heat_nnames != 0;
++}
++
++void heat_thread_named( HANDLE handle, const UNICODE_STRING *name )
++{
++    THREAD_BASIC_INFORMATION tbi;
++    struct heat_thread *t;
++    unsigned int i, j, len;
++    int ret;
++
++    if (!(heat_on() & HEAT_NAMEPRI) || !name || !name->Buffer) return;
++    if (handle != NtCurrentThread() &&
++        (NtQueryInformationThread( handle, ThreadBasicInformation, &tbi, sizeof(tbi), NULL ) ||
++         tbi.ClientId.UniqueThread != NtCurrentTeb()->ClientId.UniqueThread))
++        return;  /* only a thread naming itself */
++    len = name->Length / sizeof(WCHAR);
++    for (i = 0; i < heat_nnames; i++)
++    {
++        for (j = 0; j < len && heat_names[i].name[j] == name->Buffer[j]; j++) ;
++        if (j != len || heat_names[i].name[len]) continue;
++        ret = heat_apply_class( heat_names[i].value );
++        if ((t = heat_self()))
++        {
++            t->qos = heat_names[i].value;
++            t->qos_ret = ret;
++            t->prio = 99;  /* by name */
++        }
++        return;
++    }
++}
++
++/***********************************************************************
++ *  HEAT_PROF: a SIGPROF sampler of the game thread's x86 context
++ *
++ * A raw pthread (no Windows code, every signal blocked) sends SIGPROF to the target threads at
++ * WINE_HEAT_PROF_HZ (default 1000). Under Rosetta the handler's ucontext holds the emulated x86
++ * registers. If the thread was in Wine's unix code (its rsp on the thread's kernel stack), the PE
++ * registers come from the syscall frame instead, so the sample belongs to the PE code that made
++ * the call. The handler copies the PE registers and up to HEAT_PROF_STACK bytes of the PE stack
++ * into a per-target ring; the sampler thread writes the rings to
++ * $WINE_HEAT_LOG/heat-prof-<pid>.bin, and the loaded modules to heat-prof-<pid>.modules, for
++ * work/heat/tools/profread.py (unwinds with each image's .pdata). Targets (WINE_HEAT_PROF_THREADS,
++ * the control file's "targets="): the busiest unnamed thread that started in the exe (the game
++ * thread), and by name bgfx's render thread and DXMT's encode and finish threads. A sample in
++ * unix code also records the unix rbp chain (bounded by the kernel stack); the sampler thread
++ * names each new unix address with dladdr in heat-prof-<pid>.usyms, and writes each target's CPU
++ * time per second to heat-prof-<pid>.threads (wall-clock samples include blocked time).
++ * WINE_HEAT_PROF=on starts it; WINE_HEAT_CONTROL's "prof=on" too.
++ * A thread leaves the targets in heat_thread_exit, under the same lock the sampler holds
++ * around pthread_kill, so no signal goes to a thread that has exited.
++ */
++#define HEAT_PROF_STACK 2048
++#define HEAT_PROF_RING  1024
++#define HEAT_PROF_TARGETS 4 /* 0 game, 1 render (bgfx), 2 dxmt-encode, 3 dxmt-finish */
++#define HEAT_PROF_UNIX  1   /* the thread was in Wine's unix code; regs are the syscall's PE regs */
++#define HEAT_PROF_UFRAMES 24 /* unix return addresses from the rbp chain on the kernel stack */
++#define HEAT_PROF_USYMS (1 << 17)
++
++static const char * const heat_prof_target_names[HEAT_PROF_TARGETS] = { "game", "render", "encode", "finish" };
++
++struct heat_prof_rec
++{
++    unsigned long long t;         /* mach ticks */
++    unsigned int       target;    /* 0 game, 1 render, 2 encode, 3 finish */
++    unsigned int       flags;     /* HEAT_PROF_UNIX */
++    unsigned int       stack_len; /* bytes of stack[] valid, from regs[7] up */
++    unsigned int       tid;
++    unsigned long long unix_rip;  /* where in the unix side, with HEAT_PROF_UNIX */
++    ULONG64            regs[17];  /* rax rbx rcx rdx rsi rdi rbp rsp r8-r15 rip */
++    unsigned long long unix_rsp0; /* with HEAT_PROF_UNIX: the word at the unix rsp (a frameless leaf's return) */
++    unsigned int       nuframes;  /* valid uframes[] */
++    unsigned int       pad;
++    unsigned long long uframes[HEAT_PROF_UFRAMES]; /* the unix rbp chain's return addresses */
++    unsigned char      stack[HEAT_PROF_STACK];
++};
++
++struct heat_prof_ring
++{
++    pthread_t                    thread;   /* 0: no target */
++    struct heat_thread          *slot;
++    unsigned int                 write, read;
++    unsigned long long           sent, dropped;
++    struct heat_prof_rec         recs[HEAT_PROF_RING];
++};
++
++static struct heat_prof_ring *heat_prof_rings;  /* [HEAT_PROF_TARGETS], mmapped */
++static os_unfair_lock heat_prof_lock = OS_UNFAIR_LOCK_INIT;
++static unsigned int heat_prof_hz = 1000, heat_prof_want = 1;  /* bit per target */
++static char heat_prof_path[1024], heat_prof_modules_path[1024], heat_control_path[1024];
++static char heat_prof_usyms_path[1024], heat_prof_threads_path[1024];
++static unsigned long long *heat_prof_usyms;  /* unix addresses already named, open addressing */
++
++/* "game,render,encode,finish", "dxmt" (encode and finish), "all": a bit per target */
++static unsigned int heat_prof_parse_targets( const char *s )
++{
++    unsigned int mask = 0, i;
++    const char *p = s;
++
++    while (*p && *p != ' ' && *p != '\n')
++    {
++        size_t len = strcspn( p, ", \n" );
++        if (len == 4 && !strncmp( p, "dxmt", 4 )) mask |= 4 | 8;
++        else if (len == 3 && !strncmp( p, "all", 3 )) mask |= (1 << HEAT_PROF_TARGETS) - 1;
++        else
++            for (i = 0; i < HEAT_PROF_TARGETS; i++)
++                if (len == strlen( heat_prof_target_names[i] ) && !strncmp( p, heat_prof_target_names[i], len )) mask |= 1 << i;
++        p += len;
++        if (*p == ',') p++;
++    }
++    return mask;
++}
++
++static void heat_prof_handler( int sig, siginfo_t *info, void *ucv )
++{
++    ucontext_t *uc = ucv;
++    struct heat_prof_ring *r = NULL;
++    struct heat_prof_rec *rec;
++    struct ntdll_thread_data *data;
++    pthread_t self = pthread_self();
++    unsigned int i, w;
++    ULONG_PTR rsp, lo, hi;
++    TEB *teb;
++    int saved_errno = errno;
++
++    if (!heat_prof_rings || !(teb = NtCurrentTeb())) goto done;
++    for (i = 0; i < HEAT_PROF_TARGETS; i++)
++        if (heat_prof_rings[i].thread == self) { r = &heat_prof_rings[i]; break; }
++    if (!r) goto done;
++    w = r->write;
++    if (w - __atomic_load_n( &r->read, __ATOMIC_ACQUIRE ) >= HEAT_PROF_RING) { r->dropped++; goto done; }
++    rec = &r->recs[w % HEAT_PROF_RING];
++    rec->t = mach_absolute_time();
++    rec->target = i;
++    rec->tid = HandleToULong( teb->ClientId.UniqueThread );
++    rec->flags = 0;
++    rec->unix_rip = 0;
++    rec->unix_rsp0 = 0;
++    rec->nuframes = 0;
++    rec->stack_len = 0;
++    data = (struct ntdll_thread_data *)&teb->GdiTebBatch;
++    rsp = uc->uc_mcontext->__ss.__rsp;
++    if (rsp >= (ULONG_PTR)data->kernel_stack && rsp < (ULONG_PTR)data->kernel_stack + kernel_stack_size)
++    {
++        ULONG_PTR ks = (ULONG_PTR)data->kernel_stack, ke = ks + kernel_stack_size, fp, next;
++        unsigned int n = 0;
++
++        rec->flags = HEAT_PROF_UNIX;
++        rec->unix_rip = uc->uc_mcontext->__ss.__rip;
++        heat_syscall_pe_regs( rec->regs );
++        /* the unix side's frame-pointer chain, only within this thread's kernel stack */
++        rec->unix_rsp0 = !(rsp & 7) && rsp + 8 <= ke ? *(const unsigned long long *)rsp : 0;
++        fp = uc->uc_mcontext->__ss.__rbp;
++        while (n < HEAT_PROF_UFRAMES && fp >= rsp && fp >= ks && fp + 16 <= ke && !(fp & 7))
++        {
++            rec->uframes[n++] = ((const unsigned long long *)fp)[1];
++            next = ((const unsigned long long *)fp)[0];
++            if (next <= fp) break;
++            fp = next;
++        }
++        rec->nuframes = n;
++    }
++    else
++    {
++        const _STRUCT_X86_THREAD_STATE64 *ss = &uc->uc_mcontext->__ss;
++        rec->regs[0] = ss->__rax; rec->regs[1] = ss->__rbx; rec->regs[2] = ss->__rcx; rec->regs[3] = ss->__rdx;
++        rec->regs[4] = ss->__rsi; rec->regs[5] = ss->__rdi; rec->regs[6] = ss->__rbp; rec->regs[7] = ss->__rsp;
++        rec->regs[8] = ss->__r8; rec->regs[9] = ss->__r9; rec->regs[10] = ss->__r10; rec->regs[11] = ss->__r11;
++        rec->regs[12] = ss->__r12; rec->regs[13] = ss->__r13; rec->regs[14] = ss->__r14; rec->regs[15] = ss->__r15;
++        rec->regs[16] = ss->__rip;
++    }
++    /* the PE stack above rsp, within the thread's PE stack only */
++    lo = rec->regs[7];
++    hi = (ULONG_PTR)teb->Tib.StackBase;
++    if (lo >= (ULONG_PTR)teb->Tib.StackLimit && lo < hi)
++    {
++        rec->stack_len = hi - lo < HEAT_PROF_STACK ? hi - lo : HEAT_PROF_STACK;
++        memcpy( rec->stack, (const void *)lo, rec->stack_len );
++    }
++    __atomic_store_n( &r->write, w + 1, __ATOMIC_RELEASE );
++done:
++    errno = saved_errno;
++}
++
++void heat_thread_start(void)
++{
++    if (heat_on() & (HEAT_PROF | HEAT_LIVE)) heat_self();
++}
++
++void heat_thread_exit(void)
++{
++    struct ntdll_thread_data *data;
++    unsigned int i;
++
++    if (!heat_prof_rings || !NtCurrentTeb()) return;
++    data = ntdll_get_thread_data();
++    os_unfair_lock_lock( &heat_prof_lock );
++    for (i = 0; i < HEAT_PROF_TARGETS; i++)
++        if (heat_prof_rings[i].thread == pthread_self()) heat_prof_rings[i].thread = 0;
++    if (data->heat) ((struct heat_thread *)data->heat)->exited = 1;
++    os_unfair_lock_unlock( &heat_prof_lock );
++}
++
++/* the targets heat_prof_want asks for: the busiest thread over the last second that started in
++ * the exe and has no name (the game thread), and by name (the busiest of each) bgfx's render
++ * thread and DXMT's encode and finish threads. With a threads file, each target's CPU time since
++ * the last call: "C <s> <target> <tid> <cpu ms> <wall ms>". */
++static void heat_prof_retarget( FILE *tf, unsigned long long wall_ns )
++{
++    static unsigned long long prev[HEAT_MAX_THREADS];
++    LONG i, n = heat_nthreads < HEAT_MAX_THREADS ? heat_nthreads : HEAT_MAX_THREADS;
++    struct heat_thread *best[HEAT_PROF_TARGETS] = { NULL };
++    unsigned long long best_d[HEAT_PROF_TARGETS] = { 0 };
++    unsigned int want = __atomic_load_n( &heat_prof_want, __ATOMIC_RELAXED ), k;
++
++    for (i = 0; i < n; i++)
++    {
++        struct heat_thread *t = &heat_threads[i];
++        struct proc_threadinfo pti;
++        unsigned long long cpu, d;
++
++        if (t->exited || !t->pthread || !t->utid) continue;
++        if (proc_pidinfo( getpid(), PROC_PIDTHREADID64INFO, t->utid, &pti, sizeof(pti) ) != sizeof(pti)) continue;
++        cpu = pti.pth_user_time + pti.pth_system_time;
++        d = cpu - prev[i];
++        prev[i] = cpu;
++        if (!strncmp( pti.pth_name, "bgfx - renderer", 15 )) k = 1;
++        else if (!strncmp( pti.pth_name, "dxmt-encode", 11 )) k = 2;
++        else if (!strncmp( pti.pth_name, "dxmt-finish", 11 )) k = 3;
++        else if (pti.pth_name[0]) continue;
++        else if ((ULONG_PTR)t->start < heat_image_base || (ULONG_PTR)t->start >= heat_code_hi) continue;
++        else k = 0;
++        if (!best[k] || d > best_d[k]) { best_d[k] = d; best[k] = t; }
++    }
++    os_unfair_lock_lock( &heat_prof_lock );
++    for (k = 0; k < HEAT_PROF_TARGETS; k++)
++    {
++        if (!(want & (1 << k))) { heat_prof_rings[k].thread = 0; continue; }
++        if (!best[k] || best[k]->exited) continue;  /* keep the last one until it exits */
++        heat_prof_rings[k].thread = best[k]->pthread;
++        heat_prof_rings[k].slot = best[k];
++    }
++    os_unfair_lock_unlock( &heat_prof_lock );
++    if (tf && wall_ns)
++    {
++        for (k = 0; k < HEAT_PROF_TARGETS; k++)
++            if ((want & (1 << k)) && best[k])
++                fprintf( tf, "C %.3f %s %x %.3f %.3f\n", heat_now() / 1e9, heat_prof_target_names[k],
++                         (unsigned int)best[k]->tid, best_d[k] / 1e6, wall_ns / 1e6 );
++        fflush( tf );
++    }
++}
++
++/* the loaded PE modules, again whenever their number changed (a sampler on from the process's
++ * start sees an empty list first) */
++static void heat_prof_write_modules(void)
++{
++    static unsigned int last;
++    LIST_ENTRY *head, *e;
++    unsigned int count = 0;
++    FILE *f;
++
++    if (!peb || !peb->LdrData) return;
++    head = &peb->LdrData->InLoadOrderModuleList;
++    for (e = head->Flink; e && e != head && count < 4096; e = e->Flink) count++;
++    if (!count || count == last || !(f = fopen( heat_prof_modules_path, "a" ))) return;
++    last = count;
++    fprintf( f, "T %.3f\n", heat_now() / 1e9 );
++    head = &peb->LdrData->InLoadOrderModuleList;
++    for (e = head->Flink; e && e != head; e = e->Flink)
++    {
++        const LDR_DATA_TABLE_ENTRY *m = CONTAINING_RECORD( e, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks );
++        char name[260];
++        unsigned int k, len = m->FullDllName.Length / sizeof(WCHAR);
++        if (len >= sizeof(name)) len = sizeof(name) - 1;
++        for (k = 0; k < len; k++) name[k] = m->FullDllName.Buffer[k] < 128 ? (char)m->FullDllName.Buffer[k] : '?';
++        name[len] = 0;
++        fprintf( f, "%p %#lx %s\n", m->DllBase, (unsigned long)m->SizeOfImage, name );
++    }
++    fclose( f );
++}
++
++/* names a unix address once per process in the .usyms file: "<addr> <image base> <image> <symbol> <symbol addr>" */
++static void heat_prof_usym( FILE *uf, unsigned long long addr )
++{
++    unsigned int h, k;
++    Dl_info info;
++
++    if (!addr || !heat_prof_usyms || !uf) return;
++    h = (unsigned int)((addr * 0x9E3779B97F4A7C15ull) >> 47) & (HEAT_PROF_USYMS - 1);
++    for (k = 0; k < 64; k++, h = (h + 1) & (HEAT_PROF_USYMS - 1))
++    {
++        if (heat_prof_usyms[h] == addr) return;
++        if (!heat_prof_usyms[h]) break;
++    }
++    if (k == 64) return;  /* full around here: leave it unnamed */
++    heat_prof_usyms[h] = addr;
++    memset( &info, 0, sizeof(info) );
++    if (dladdr( (void *)addr, &info ) && info.dli_fname)
++        fprintf( uf, "%#llx %p %s %s %p\n", addr, info.dli_fbase, info.dli_fname,
++                 info.dli_sname ? info.dli_sname : "?", info.dli_saddr );
++    else
++        fprintf( uf, "%#llx 0 ? ? 0\n", addr );
++}
++
++static void heat_prof_drain( FILE *f, FILE *uf )
++{
++    unsigned int i, k;
++
++    for (i = 0; i < HEAT_PROF_TARGETS; i++)
++    {
++        struct heat_prof_ring *r = &heat_prof_rings[i];
++        unsigned int w = __atomic_load_n( &r->write, __ATOMIC_ACQUIRE );
++        while (r->read != w)
++        {
++            const struct heat_prof_rec *rec = &r->recs[r->read % HEAT_PROF_RING];
++            fwrite( rec, offsetof(struct heat_prof_rec, stack) + rec->stack_len, 1, f );
++            if (rec->flags & HEAT_PROF_UNIX)
++            {
++                heat_prof_usym( uf, rec->unix_rip );
++                heat_prof_usym( uf, rec->unix_rsp0 );
++                for (k = 0; k < rec->nuframes && k < HEAT_PROF_UFRAMES; k++) heat_prof_usym( uf, rec->uframes[k] );
++            }
++            __atomic_store_n( &r->read, r->read + 1, __ATOMIC_RELEASE );
++        }
++    }
++    fflush( f );
++    if (uf) fflush( uf );
++}
++
++static void *heat_prof_thread( void *arg )
++{
++    struct timespec tick = { 0, 1000000000 / heat_prof_hz };
++    unsigned long long last_target = 0, last_drain = 0;
++    unsigned int was_on = 0, i;
++    FILE *f = NULL, *uf = NULL, *tf = NULL;
++
++    for (;;)
++    {
++        unsigned long long now = heat_now();
++        unsigned int on = __atomic_load_n( &heat_mode, __ATOMIC_RELAXED ) & HEAT_PROF;
++
++        if (on && !was_on)
++        {
++            if (!f && (f = fopen( heat_prof_path, "ab" )))
++            {
++                /* header: magic, record layout, image, tick rate */
++                fprintf( f, "HEATPRF2 rec %u stack %u image %#lx code %#lx-%#lx ns_per_tick %.9f hz %u uframes %u\n",
++                         (unsigned int)offsetof(struct heat_prof_rec, stack), HEAT_PROF_STACK,
++                         (unsigned long)heat_image_base, (unsigned long)heat_code_lo,
++                         (unsigned long)heat_code_hi, heat_ns_per_tick, heat_prof_hz, HEAT_PROF_UFRAMES );
++                fflush( f );
++            }
++            if (!uf) uf = fopen( heat_prof_usyms_path, "a" );
++            if (!tf) tf = fopen( heat_prof_threads_path, "a" );
++            if (tf) { fprintf( tf, "T %.3f want %#x\n", heat_now() / 1e9, heat_prof_want ); fflush( tf ); }
++            heat_prof_write_modules();
++            heat_prof_retarget( NULL, 0 );
++            last_target = now;
++        }
++        if (!on && was_on)
++        {
++            os_unfair_lock_lock( &heat_prof_lock );
++            for (i = 0; i < HEAT_PROF_TARGETS; i++) heat_prof_rings[i].thread = 0;
++            os_unfair_lock_unlock( &heat_prof_lock );
++        }
++        was_on = on;
++        if (on)
++        {
++            if (now - last_target >= 1000000000ull)
++            {
++                heat_prof_retarget( tf, now - last_target );
++                heat_prof_write_modules();
++                last_target = now;
++            }
++            os_unfair_lock_lock( &heat_prof_lock );
++            for (i = 0; i < HEAT_PROF_TARGETS; i++)
++                if (heat_prof_rings[i].thread && !pthread_kill( heat_prof_rings[i].thread, SIGPROF ))
++                    heat_prof_rings[i].sent++;
++            os_unfair_lock_unlock( &heat_prof_lock );
++        }
++        if (f && now - last_drain >= 100000000ull) { heat_prof_drain( f, uf ); last_drain = now; }
++        if (on) nanosleep( &tick, NULL );
++        else { struct timespec idle = { 0, 100000000 }; nanosleep( &idle, NULL ); }
++    }
++    return NULL;
++}
++
++/* WINE_HEAT_CONTROL: "wake=off|one|skip|one,skip count=on|off prof=on|off", read every second */
++static void heat_control_poll( FILE *log )
++{
++    static char last[256];
++    char buf[256], *p;
++    unsigned int mode, newmode;
++    FILE *f;
++    size_t n;
++
++    if (!heat_control_path[0] || !(f = fopen( heat_control_path, "r" ))) return;
++    n = fread( buf, 1, sizeof(buf) - 1, f );
++    fclose( f );
++    buf[n] = 0;
++    if (!strcmp( buf, last )) return;
++    strcpy( last, buf );
++    mode = newmode = __atomic_load_n( &heat_mode, __ATOMIC_RELAXED );
++    if ((p = strstr( buf, "wake=" )))
++    {
++        newmode &= ~(HEAT_WAKE | HEAT_WAKESKIP);
++        if (!strncmp( p + 5, "one", 3 ) || strstr( p, ",one" )) newmode |= HEAT_WAKE;
++        if (strstr( p, "skip" ) && (mode & HEAT_TRACK)) newmode |= HEAT_WAKESKIP;
++    }
++    if ((p = strstr( buf, "count=" ))) newmode = (newmode & ~HEAT_COUNT) | (!strncmp( p + 6, "on", 2 ) ? HEAT_COUNT : 0);
++    if ((p = strstr( buf, "prof=" ))) newmode = (newmode & ~HEAT_PROF) | (!strncmp( p + 5, "on", 2 ) && heat_prof_rings ? HEAT_PROF : 0);
++    if ((p = strstr( buf, "targets=" )) && heat_prof_parse_targets( p + 8 ))
++        __atomic_store_n( &heat_prof_want, heat_prof_parse_targets( p + 8 ), __ATOMIC_RELAXED );
++    __atomic_store_n( &heat_mode, newmode, __ATOMIC_SEQ_CST );
++    if (log)
++    {
++        fprintf( log, "control %.1f mode %#x -> %#x (%s)\n", heat_now() / 1e9, mode, newmode, strtok( buf, "\n" ) ? buf : "" );
++        fflush( log );
++    }
++}
++
++/***********************************************************************
++ *  spin (HEAT_SPINLOCK, HEAT_SPINEVENT)
++ */
++
++static unsigned long long heat_spin_max[2];   /* ns, from WINE_HEAT_SPIN */
++static unsigned int heat_spin_pause = 32;
++static int heat_spin_all[2];                            /* ":all" scope; default ":game" */
++static __thread unsigned int heat_spin_misses[2];      /* this thread's misses in a row */
++static __thread unsigned int heat_spin_skip[2];        /* waits left without spinning */
++#define HEAT_SPIN_MISSES 4
++
++/* "lock=<us>,event=<us>" */
++static unsigned int heat_parse_spin( const char *spec )
++{
++    char buf[128], *p, *save = NULL, *end;
++    unsigned int mode = 0;
++    long us;
++
++    snprintf( buf, sizeof(buf), "%s", spec );
++    for (p = strtok_r( buf, ",", &save ); p; p = strtok_r( NULL, ",", &save ))
++    {
++        char *eq = strchr( p, '=' );
++        if (!eq) continue;
++        *eq = 0;
++        us = strtol( eq + 1, &end, 10 );
++        if (end == eq + 1 || us < 1 || us > 1000) continue;
++        if (*end && strcmp( end, ":game" ) && strcmp( end, ":all" )) continue;
++        if (!strcmp( p, "lock" ))
++        {
++            heat_spin_max[HEAT_SPIN_LOCK] = us * 1000;
++            heat_spin_all[HEAT_SPIN_LOCK] = !strcmp( end, ":all" );
++            mode |= HEAT_SPINLOCK;
++        }
++        if (!strcmp( p, "event" ))
++        {
++            heat_spin_max[HEAT_SPIN_EVENT] = us * 1000;
++            heat_spin_all[HEAT_SPIN_EVENT] = !strcmp( end, ":all" );
++            mode |= HEAT_SPINEVENT;
++        }
++    }
++    return mode;
++}
++
++/* how long this thread may spin now (ns), 0 for not at all */
++unsigned long long heat_spin_budget( int kind )
++{
++    if (heat_spin_above && !heat_spin_all[kind]) { heat_count( HC_SPIN_SCOPED ); return 0; }
++    if (heat_spin_skip[kind])
++    {
++        heat_spin_skip[kind]--;
++        heat_count( HC_SPIN_OFF );
++        return 0;
++    }
++    return heat_spin_max[kind];
++}
++
++void heat_spin_result( int kind, int hit, unsigned long long start )
++{
++    heat_time( HT_SPIN, start );
++    if (hit)
++    {
++        heat_count( kind == HEAT_SPIN_LOCK ? HC_LSPIN_HIT : HC_ESPIN_HIT );
++        heat_spin_misses[kind] = 0;
++        return;
++    }
++    heat_count( kind == HEAT_SPIN_LOCK ? HC_LSPIN_MISS : HC_ESPIN_MISS );
++    if (++heat_spin_misses[kind] >= HEAT_SPIN_MISSES)
++    {
++        heat_spin_misses[kind] = 0;
++        heat_spin_skip[kind] = heat_spin_pause;
++    }
++}
++
++/* NtWaitForAlertByThreadId's futex word: 0 idle, 1 alerted; 3 while this spins. The waker
++ * (InterlockedExchange to 1, a wake syscall only if it was 0) needs no change. Returns 1 if the
++ * alert came and was taken, 0 to sleep as before (the word is back to 0 or 1). */
++int heat_spin_alert( LONG *futex )
++{
++    unsigned long long budget = heat_spin_budget( HEAT_SPIN_LOCK ), start;
++    LONG expected = 0;
++    unsigned int i;
++
++    if (!budget) return 0;
++    if (!__atomic_compare_exchange_n( futex, &expected, 3, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST ))
++        return 0;   /* already alerted: the old path takes it */
++    start = heat_now();
++    for (i = 1;; i++)
++    {
++        if (__atomic_load_n( futex, __ATOMIC_ACQUIRE ) != 3) break;
++        YieldProcessor();
++        if (!(i & 15) && heat_now() - start >= budget) break;
++    }
++    expected = 3;
++    if (__atomic_compare_exchange_n( futex, &expected, 0, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST ))
++    {
++        heat_spin_result( HEAT_SPIN_LOCK, 0, start );
++        return 0;
++    }
++    __atomic_store_n( futex, 0, __ATOMIC_SEQ_CST );   /* it is 1: take the alert */
++    heat_spin_result( HEAT_SPIN_LOCK, 1, start );
++    return 1;
++}
++
++/***********************************************************************
++ *  dump
++ */
++
++static const char * const heat_counter_names[HC_NB] =
++{
++    "yield", "delay0", "delay",
++    "wait", "wait0", "wait_to", "w<20us", "w<200us", "w<2ms", "w>=2ms",
++    "alertwait", "alert", "cevent", "close", "setev", "resetev",
++    "relsem", "dup", "qpc", "srv", "pool_hit", "pool_put",
++    "wake_none", "wake_one", "woken", "spurious",
++    "aw<5us", "aw<20us", "aw<100us", "aw>=100us", "wake_skipped",
++    "lspin_hit", "lspin_miss", "espin_hit", "espin_miss", "spin_off", "clock_skipped", "spin_scoped", "unreg", "portfix",
++};
++static const char * const heat_timer_names[HT_NB] = { "delay", "wait", "alertwait", "srv", "cevent", "close", "spin" };
++
++static void heat_dump( FILE *f, double secs, double dt )
++{
++    LONG i, n = heat_nthreads < HEAT_MAX_THREADS ? heat_nthreads : HEAT_MAX_THREADS;
++    unsigned long long tot_user = 0, tot_sys = 0;
++    unsigned int k;
++
++    fprintf( f, "T %.1f dt %.2f threads %d\n", secs, dt, (int)n );
++    for (i = 0; i < n; i++)
++    {
++        struct heat_thread *t = &heat_threads[i];
++        unsigned long long user = t->pcpu_user, sys = t->pcpu_sys, c[HC_NB], tm[HT_NB];
++        const char *name = "";
++        BOOL alive = FALSE, any = FALSE;
++#ifdef __APPLE__
++        struct proc_threadinfo pti;
++        if (t->utid && proc_pidinfo( getpid(), PROC_PIDTHREADID64INFO, t->utid, &pti, sizeof(pti) ) == sizeof(pti))
++        {
++            alive = TRUE;
++            user = pti.pth_user_time;
++            sys = pti.pth_system_time;
++            name = pti.pth_name;
++        }
++#endif
++        for (k = 0; k < HC_NB; k++) { c[k] = t->c[k]; any |= c[k] != t->pc[k]; }
++        for (k = 0; k < HT_NB; k++) tm[k] = t->t[k];
++        if (!any && user == t->pcpu_user && sys == t->pcpu_sys) continue;
++        tot_user += user - t->pcpu_user;
++        tot_sys += sys - t->pcpu_sys;
++        fprintf( f, "thr %5x start %p%s%s cpu %5.1f%% usr %5.1f%% sys %5.1f%%",
++                 (unsigned int)t->tid, t->start, alive ? "" : " exited", "",
++                 (user + sys - t->pcpu_user - t->pcpu_sys) / (dt * 1e7),
++                 (user - t->pcpu_user) / (dt * 1e7), (sys - t->pcpu_sys) / (dt * 1e7) );
++#ifdef __APPLE__
++        if (alive) fprintf( f, " pri %d/%d", pti.pth_priority, pti.pth_curpri );
++#endif
++        if (t->qos)
++        {
++            char qos[32];
++            heat_qos_format( t->qos, qos, sizeof(qos) );
++            if (t->prio == 99) fprintf( f, " qos %s(by name ret %d)", qos, t->qos_ret );
++            else fprintf( f, " qos %s(prio %d ret %d)", qos, (int)t->prio, t->qos_ret );
++        }
++        if (name[0]) fprintf( f, " name \"%s\"", name );
++        fprintf( f, "\n    per s:" );
++        for (k = 0; k < HC_NB; k++)
++            if (c[k] != t->pc[k]) fprintf( f, " %s %.0f", heat_counter_names[k], (c[k] - t->pc[k]) / dt );
++        fprintf( f, "\n    ms/s:" );
++        for (k = 0; k < HT_NB; k++)
++            if (tm[k] != t->pt[k]) fprintf( f, " %s %.2f", heat_timer_names[k], (tm[k] - t->pt[k]) / (dt * 1e6) );
++        fprintf( f, "\n" );
++        memcpy( t->pc, c, sizeof(c) );
++        memcpy( t->pt, tm, sizeof(tm) );
++        t->pcpu_user = user;
++        t->pcpu_sys = sys;
++    }
++    fprintf( f, "total cpu %.1f%% usr %.1f%% sys %.1f%% (threads with a probe)\n",
++             (tot_user + tot_sys) / (dt * 1e7), tot_user / (dt * 1e7), tot_sys / (dt * 1e7) );
++
++    for (k = 0; k < REQ_NB_REQUESTS; k++)
++    {
++        unsigned long long rn = heat_req_n[k], rt = heat_req_t[k];
++        if (rn == heat_req_pn[k]) continue;
++        fprintf( f, "req %3u per s %.0f ms/s %.2f\n", k, (rn - heat_req_pn[k]) / dt, (rt - heat_req_pt[k]) / (dt * 1e6) );
++        heat_req_pn[k] = rn;
++        heat_req_pt[k] = rt;
++    }
++    for (k = 0; k < HEAT_CALLERS; k++)
++    {
++        struct heat_caller *e = &heat_callers[k];
++        unsigned long long key = e->key, cn = e->n;
++        if (!key || cn == e->pn) continue;
++        fprintf( f, "caller %s rva %#llx %#llx per s %.0f\n", heat_kind_names[(key >> 60) - 1],
++                 (key >> 30) & 0x3fffffff, key & 0x3fffffff, (cn - e->pn) / dt );
++        e->pn = cn;
++    }
++    if (heat_callers_lost) fprintf( f, "callers lost %llu\n", heat_callers_lost );
++    if (heat_mode & HEAT_EVPOOL)
++        fprintf( f, "evpool parked auto %u manual %u evicted %llu forgotten %llu double_close %llu\n",
++                 heat_pools[0].count, heat_pools[1].count, heat_pool_evicted, heat_pool_forgotten,
++                 heat_pool_double_close );
++    fflush( f );
++}
++
++static void *heat_dump_thread( void *arg )
++{
++    unsigned long long t0 = heat_now(), prev = t0;
++    unsigned int ticks = 0;
++    FILE *f;
++
++    if (!(f = fopen( heat_log_path, "a" ))) return NULL;
++    fprintf( f, "heat pid %d mode %#x image %#lx code %#lx-%#lx protocol %d interval %u\n",
++             (int)getpid(), heat_mode, (unsigned long)heat_image_base, (unsigned long)heat_code_lo,
++             (unsigned long)heat_code_hi, SERVER_PROTOCOL_VERSION, heat_interval );
++    fflush( f );
++    for (;;)
++    {
++        unsigned long long now;
++        sleep( 1 );
++        heat_control_poll( f );
++        if (++ticks < heat_interval) continue;
++        ticks = 0;
++        now = heat_now();
++        /* the counts keep running while counting is off; a dump after it, a long interval */
++        if (heat_mode & HEAT_COUNT)
++        {
++            heat_dump( f, (now - t0) / 1e9, (now - prev) / 1e9 );
++            if (heat_prof_rings)
++                fprintf( f, "prof sent %llu/%llu/%llu/%llu dropped %llu/%llu/%llu/%llu\n",
++                         heat_prof_rings[0].sent, heat_prof_rings[1].sent, heat_prof_rings[2].sent,
++                         heat_prof_rings[3].sent, heat_prof_rings[0].dropped, heat_prof_rings[1].dropped,
++                         heat_prof_rings[2].dropped, heat_prof_rings[3].dropped );
++        }
++        prev = now;
++    }
++    return NULL;
++}
++
++/***********************************************************************
++ *  heat_decide
++ *
++ * Called by the first probe; returns the mode, 0 while the process parameters aren't there yet.
++ */
++unsigned int heat_decide(void)
++{
++    static LONG deciding;
++    const char *count = getenv( "WINE_HEAT_COUNT" ), *evpool = getenv( "WINE_HEAT_EVPOOL" );
++    const char *qos = getenv( "WINE_HEAT_QOS" ), *exe = getenv( "WINE_HEAT_EXE" ), *s;
++    const char *wake = getenv( "WINE_HEAT_WAKE" ), *names = getenv( "WINE_HEAT_NAMEPRI" );
++    const char *prof = getenv( "WINE_HEAT_PROF" ), *control = getenv( "WINE_HEAT_CONTROL" );
++    const char *spin = getenv( "WINE_HEAT_SPIN" ), *lazyclock = getenv( "WINE_HEAT_LAZYCLOCK" );
++    const char *unreg = getenv( "WINE_HEAT_MSYNC_UNREG" ), *portfix = getenv( "WINE_HEAT_MSYNC_PORTFIX" );
++    RTL_USER_PROCESS_PARAMETERS *params;
++    const WCHAR *path, *base;
++    unsigned int mode = 0, i, len;
++
++    if (!count && !evpool && !qos && !wake && !names && !prof && !control && !spin && !lazyclock && !unreg && !portfix) goto done;
++    if (!peb || !(params = peb->ProcessParameters) || !params->ImagePathName.Length) return 0;
++    path = params->ImagePathName.Buffer;
++    if (!(params->Flags & PROCESS_PARAMS_FLAG_NORMALIZED)) path = (const WCHAR *)((const char *)params + (ULONG_PTR)path);
++    if (!path) return 0;
++    if (InterlockedCompareExchange( &deciding, 1, 0 )) return 0;
++
++    len = params->ImagePathName.Length / sizeof(WCHAR);
++    for (base = path, i = 0; i < len; i++) if (path[i] == '\\' || path[i] == '/') base = path + i + 1;
++    if (!exe) exe = "Gw2-64.exe";
++    for (s = exe; base < path + len && *s; base++, s++)
++    {
++        WCHAR a = *base, b = (unsigned char)*s;
++        if (a >= 'A' && a <= 'Z') a += 'a' - 'A';
++        if (b >= 'A' && b <= 'Z') b += 'a' - 'A';
++        if (a != b) break;
++    }
++    if (*s || base != path + len) goto done;
++
++    if (count && atoi( count )) mode |= HEAT_COUNT;
++    if (evpool && atoi( evpool )) mode |= HEAT_EVPOOL;
++    if (qos && heat_parse_qos( qos )) mode |= HEAT_QOS;
++    if (wake && strstr( wake, "one" )) mode |= HEAT_WAKE;
++    if (wake && strstr( wake, "skip" )) mode |= HEAT_WAKESKIP;
++    if (names && heat_parse_names( names )) mode |= HEAT_NAMEPRI;
++    if (prof && (!strcmp( prof, "on" ) || !strcmp( prof, "1" ))) mode |= HEAT_PROF;
++    if (spin) mode |= heat_parse_spin( spin );
++    if (lazyclock && atoi( lazyclock )) mode |= HEAT_LAZYCLOCK;
++    if (unreg && atoi( unreg )) mode |= HEAT_UNREG;
++    if (portfix && atoi( portfix )) mode |= HEAT_PORTFIX;
++    if ((s = getenv( "WINE_HEAT_SPIN_PAUSE" )) && atoi( s ) > 0) heat_spin_pause = atoi( s );
++    if ((s = getenv( "WINE_HEAT_PROF_RENDER" )) && atoi( s )) heat_prof_want |= 2;
++    if ((s = getenv( "WINE_HEAT_PROF_THREADS" )) && heat_prof_parse_targets( s )) heat_prof_want = heat_prof_parse_targets( s );
++    if (control && *control)
++    {
++        snprintf( heat_control_path, sizeof(heat_control_path), "%s", control );
++        mode |= HEAT_LIVE | HEAT_TRACK;
++    }
++
++#ifdef __APPLE__
++    {
++        mach_timebase_info_data_t tb;
++        if (mach_timebase_info( &tb ) == KERN_SUCCESS && tb.denom) heat_ns_per_tick = (double)tb.numer / tb.denom;
++    }
++#endif
++    if ((s = getenv( "WINE_HEAT_EVPOOL_AGE_US" ))) heat_pool_age_ns = strtoull( s, NULL, 10 ) * 1000;
++    if ((s = getenv( "WINE_HEAT_INTERVAL" )) && atoi( s ) > 0) heat_interval = atoi( s );
++    if (mode & HEAT_EVPOOL)
++    {
++        heat_evflags = anon_mmap_alloc( HEAT_EVFLAGS_SIZE, PROT_READ | PROT_WRITE );
++        if (heat_evflags == MAP_FAILED) { heat_evflags = NULL; mode &= ~HEAT_EVPOOL; }
++    }
++    if (mode & (HEAT_WAKESKIP | HEAT_TRACK))
++    {
++        heat_semflags = anon_mmap_alloc( HEAT_SEMFLAGS_SIZE, PROT_READ | PROT_WRITE );
++        heat_waiters = anon_mmap_alloc( HEAT_WAITERS_SIZE * sizeof(int), PROT_READ | PROT_WRITE );
++        if (heat_semflags == MAP_FAILED || heat_waiters == MAP_FAILED)
++        {
++            heat_semflags = NULL;
++            heat_waiters = NULL;
++            mode &= ~(HEAT_WAKESKIP | HEAT_TRACK);
++        }
++    }
++    if ((s = getenv( "WINE_HEAT_PROF_HZ" )) && atoi( s ) > 0 && atoi( s ) <= 10000) heat_prof_hz = atoi( s );
++    if (mode & (HEAT_PROF | HEAT_LIVE))
++    {
++        struct sigaction sa;
++
++        heat_prof_rings = anon_mmap_alloc( (HEAT_PROF_TARGETS * sizeof(*heat_prof_rings) + 0xffff) & ~(SIZE_T)0xffff,
++                                           PROT_READ | PROT_WRITE );
++        if (heat_prof_rings == MAP_FAILED) { heat_prof_rings = NULL; mode &= ~HEAT_PROF; }
++        else
++        {
++            heat_prof_usyms = anon_mmap_alloc( HEAT_PROF_USYMS * sizeof(*heat_prof_usyms), PROT_READ | PROT_WRITE );
++            if (heat_prof_usyms == MAP_FAILED) heat_prof_usyms = NULL;
++            /* not SA_ONSTACK: it runs on the interrupted stack (PE stacks have no red zone to
++             * keep, and the kernel skips the unix one's), and stays off Wine's signal stack */
++            memset( &sa, 0, sizeof(sa) );
++            sa.sa_sigaction = heat_prof_handler;
++            sa.sa_flags = SA_SIGINFO | SA_RESTART;
++            sigemptyset( &sa.sa_mask );
++            sigaction( SIGPROF, &sa, NULL );
++        }
++    }
++    if (peb->ImageBaseAddress)
++    {
++        const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)peb->ImageBaseAddress;
++        const IMAGE_NT_HEADERS *nt = (const IMAGE_NT_HEADERS *)((const char *)dos + dos->e_lfanew);
++        heat_image_base = (ULONG_PTR)dos;
++        heat_code_lo = heat_image_base + nt->OptionalHeader.BaseOfCode;
++        heat_code_hi = heat_code_lo + nt->OptionalHeader.SizeOfCode;
++    }
++    if (mode & (HEAT_COUNT | HEAT_LIVE | HEAT_PROF))
++    {
++        pthread_t thread;
++        pthread_attr_t attr;
++        sigset_t all, old;
++        const char *dir = (s = getenv( "WINE_HEAT_LOG" )) && *s ? s : "/tmp";
++
++        snprintf( heat_log_path, sizeof(heat_log_path), "%s/heat-%d.log", dir, (int)getpid() );
++        snprintf( heat_prof_path, sizeof(heat_prof_path), "%s/heat-prof-%d.bin", dir, (int)getpid() );
++        snprintf( heat_prof_modules_path, sizeof(heat_prof_modules_path), "%s/heat-prof-%d.modules", dir, (int)getpid() );
++        snprintf( heat_prof_usyms_path, sizeof(heat_prof_usyms_path), "%s/heat-prof-%d.usyms", dir, (int)getpid() );
++        snprintf( heat_prof_threads_path, sizeof(heat_prof_threads_path), "%s/heat-prof-%d.threads", dir, (int)getpid() );
++        /* the dumper never runs Windows code and must take none of Wine's signals */
++        sigfillset( &all );
++        pthread_sigmask( SIG_BLOCK, &all, &old );
++        pthread_attr_init( &attr );
++        pthread_attr_setdetachstate( &attr, PTHREAD_CREATE_DETACHED );
++        heat_mode = mode;  /* the dumper prints it */
++        pthread_create( &thread, &attr, heat_dump_thread, NULL );
++        if (heat_prof_rings) pthread_create( &thread, &attr, heat_prof_thread, NULL );
++        pthread_attr_destroy( &attr );
++        pthread_sigmask( SIG_SETMASK, &old, NULL );
++    }
++
++done:
++    heat_mode = mode;
++    __atomic_store_n( &heat_decided, 1, __ATOMIC_RELEASE );
++    return mode;
++}
+--- /dev/null
++++ b/dlls/ntdll/unix/heat.h
+@@ -0,0 +1,107 @@
++/*
++ * GW2 on Mac heat probes and opt-in tweaks for one process (WINE_HEAT_*)
++ *
++ * Off unless WINE_HEAT_COUNT, WINE_HEAT_EVPOOL or WINE_HEAT_QOS is set and the process's exe is
++ * WINE_HEAT_EXE (default Gw2-64.exe). See gw2-on-mac docs/research/heat-workers-2026-10-28.md.
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ */
++
++#ifndef __NTDLL_UNIX_HEAT_H
++#define __NTDLL_UNIX_HEAT_H
++
++#define HEAT_COUNT   1  /* per-thread syscall counters, dumped to WINE_HEAT_LOG */
++#define HEAT_EVPOOL  2  /* recycle closed unnamed events instead of server create/close */
++#define HEAT_QOS     4  /* macOS QoS class per Windows thread priority (WINE_HEAT_QOS) */
++#define HEAT_WAKE    8  /* a semaphore release wakes as many waiters as its count, not all */
++#define HEAT_NAMEPRI 16 /* base priority for threads that name themselves (WINE_HEAT_NAMEPRI) */
++#define HEAT_WAKESKIP 32 /* a release of a private semaphore with no waiter makes no wake call */
++#define HEAT_PROF    64  /* ~1 kHz SIGPROF sampler of the game thread's x86 context (WINE_HEAT_PROF) */
++#define HEAT_TRACK   128 /* keep the skip's private flags and waiter counts (for runtime switching) */
++#define HEAT_LIVE    256 /* WINE_HEAT_CONTROL: wake, count and prof switch at runtime */
++#define HEAT_SPINLOCK  512  /* WINE_HEAT_SPIN lock=: spin before a lock's alert wait sleeps */
++#define HEAT_SPINEVENT 1024 /* WINE_HEAT_SPIN event=: spin before an msync wait on events sleeps */
++#define HEAT_LAZYCLOCK 2048 /* msync waits read the clock only for a relative timeout */
++#define HEAT_UNREG     4096 /* msync's contention bailout unregisters from the server (9be392b3b4) */
++#define HEAT_PORTFIX   8192 /* msync's shm request releases its reply port's receive right (7134955a) */
++
++enum heat_counter
++{
++    HC_YIELD, HC_DELAY0, HC_DELAY,
++    HC_WAIT, HC_WAIT0, HC_WAIT_TIMEOUT, HC_WAIT_B20US, HC_WAIT_B200US, HC_WAIT_B2MS, HC_WAIT_LONG,
++    HC_ALERTWAIT, HC_ALERT, HC_CREATE_EVENT, HC_CLOSE, HC_SET_EVENT, HC_RESET_EVENT,
++    HC_RELEASE_SEM, HC_DUP, HC_QPC, HC_SERVER, HC_EVPOOL_HIT, HC_EVPOOL_PUT,
++    HC_WAKE_NONE,    /* a release's or set's wake syscall that found no waiter */
++    HC_WAKE_ONE,     /* wake-one syscalls of HEAT_WAKE releases (one thread each) */
++    HC_WOKEN,        /* msync single waits woken (not timed out) */
++    HC_SPURIOUS,     /* ... that found nothing to grab and slept again */
++    HC_AW_B5US, HC_AW_B20US, HC_AW_B100US, HC_AW_LONG,  /* lock (alert) waits by duration */
++    HC_WAKE_SKIPPED, /* HEAT_WAKE=skip: a private semaphore's release with no waiter, no syscall */
++    HC_LSPIN_HIT,    /* HEAT_SPINLOCK: the alert came while spinning (no sleep, no wake syscall) */
++    HC_LSPIN_MISS,   /* ... it didn't: slept as before */
++    HC_ESPIN_HIT,    /* HEAT_SPINEVENT: an event came up while spinning */
++    HC_ESPIN_MISS,   /* ... it didn't: slept as before */
++    HC_SPIN_OFF,     /* a spin skipped because this thread's spins kept missing (adaptive) */
++    HC_CLOCK_SKIPPED, /* HEAT_LAZYCLOCK: an msync wait that didn't read the clock */
++    HC_SPIN_SCOPED,  /* a spin not made: the thread is above normal priority, the scope "game" */
++    HC_UNREG,        /* HEAT_UNREG: a multiple wait's contention bailout that unregistered */
++    HC_PORTFIX,      /* HEAT_PORTFIX: a reply port's receive right released */
++    HC_NB
++};
++
++enum heat_timer { HT_DELAY, HT_WAIT, HT_ALERTWAIT, HT_SERVER, HT_CREATE_EVENT, HT_CLOSE, HT_SPIN, HT_NB };
++
++extern unsigned int heat_mode;  /* HEAT_* once decided, see heat_on() */
++extern int heat_decided;
++extern unsigned int heat_decide(void);
++
++static inline unsigned int heat_on(void)
++{
++    return heat_decided ? heat_mode : heat_decide();
++}
++
++extern unsigned long long heat_now(void);
++extern void heat_count( enum heat_counter c );
++extern void heat_time( enum heat_timer t, unsigned long long start );
++extern void heat_wait_done( unsigned long long start, const LARGE_INTEGER *timeout, NTSTATUS ret );
++extern void heat_alertwait_done( unsigned long long start );
++extern void heat_server_done( int req, unsigned long long start );
++extern void heat_note_caller( int kind );
++
++extern BOOL heat_evpool_get( HANDLE *handle, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
++                             EVENT_TYPE type, BOOLEAN state );
++extern void heat_evpool_created( HANDLE handle, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
++                                 EVENT_TYPE type );
++extern NTSTATUS heat_evpool_close( HANDLE handle );
++extern void heat_evpool_forget( HANDLE handle );
++
++extern void heat_thread_priority( HANDLE handle, LONG priority );
++
++/* HEAT_SPINLOCK / HEAT_SPINEVENT: a short adaptive spin before sleeping (kind 0 lock, 1 event) */
++#define HEAT_SPIN_LOCK  0
++#define HEAT_SPIN_EVENT 1
++extern unsigned long long heat_spin_budget( int kind );
++extern void heat_spin_result( int kind, int hit, unsigned long long start );
++extern int heat_spin_alert( LONG *futex );
++extern void heat_thread_named( HANDLE handle, const UNICODE_STRING *name );
++
++/* HEAT_WAKESKIP: semaphores only this process can wait on, and their sleeping waiters */
++extern void heat_sem_created( HANDLE handle, const OBJECT_ATTRIBUTES *attr );
++extern void heat_handle_gone( HANDLE handle );
++extern BOOL heat_sem_private( HANDLE handle );
++extern void heat_waiters_add( int obj, int delta );
++extern BOOL heat_waiters_none( int obj );
++extern __thread int heat_releasing_private;
++
++extern void *heat_syscall_rsp(void);
++extern void heat_syscall_pe_regs( ULONG64 regs[17] );
++
++/* HEAT_PROF: threads register at start so the sampler can find the game thread, and leave
++ * before they exit so it never signals a dead thread */
++extern void heat_thread_start(void);
++extern void heat_thread_exit(void);
++
++#endif /* __NTDLL_UNIX_HEAT_H */
+--- a/dlls/ntdll/unix/msync.c
++++ b/dlls/ntdll/unix/msync.c
+@@ -321,7 +321,9 @@
+             ns_timeleft = update_timeout( *end ) * 100;
+             if (!ns_timeleft) return STATUS_TIMEOUT;
+         }
++        heat_waiters_add( obj, 1 );
+         ret = ulock_wait( UL_COMPARE_AND_WAIT_SHARED | ULF_NO_ERRNO, obj_shm, val, ns_timeleft );
++        heat_waiters_add( obj, -1 );
+     } while (ret == -EINTR || ret == -EFAULT);
+ 
+     if (ret == -ETIMEDOUT)
+@@ -355,7 +357,32 @@
+ 
+     return 0;
+ }
++
++/* HEAT_SPINEVENT: if every object is an event, spin until one (or the alert object) is
++ * signaled or this thread's budget runs out; 1 if one was seen (the caller tries to grab it) */
++static int heat_spin_events( void **objs_shm, void *alert_obj_shm, int count, int tid )
++{
++    unsigned long long budget, start;
++    unsigned int i;
++    int hit;
+ 
++    for (i = 0; i < count; i++)
++    {
++        unsigned short type = ((struct event *)objs_shm[i])->msync_type;
++        if (type != MSYNC_AUTO_EVENT && type != MSYNC_MANUAL_EVENT) return 0;
++    }
++    if (!(budget = heat_spin_budget( HEAT_SPIN_EVENT ))) return 0;
++    start = heat_now();
++    for (i = 1;; i++)
++    {
++        if ((hit = check_shm_contention( objs_shm, alert_obj_shm, count, tid ))) break;
++        YieldProcessor();
++        if (!(i & 15) && heat_now() - start >= budget) break;
++    }
++    heat_spin_result( HEAT_SPIN_EVENT, hit, start );
++    return hit;
++}
++
+ static NTSTATUS msync_wait_multiple( const int *objs, void **objs_shm, int alert_obj, void *alert_obj_shm,
+                                      int count, ULONGLONG *end, int tid )
+ {
+@@ -378,6 +405,14 @@
+         if (check_shm_contention( objs_shm, alert_obj_shm, count, tid ))
+         {
+             int i;
++            /* HEAT_UNREG (dappermint/winecx 9be392b3b4): unregister from the server too, and
++             * drop the alert object's count, instead of only the objects' local counts */
++            if (heat_on() & HEAT_UNREG)
++            {
++                heat_count( HC_UNREG );
++                server_remove_wait( msgh_id, objs, objs_shm, alert_obj, alert_obj_shm, count );
++                return STATUS_PENDING;
++            }
+             for (i = 0; i < count; i++)
+             {
+                 struct event *obj = (struct event *)objs_shm[i];
+@@ -467,7 +502,10 @@
+     if (kr != KERN_SUCCESS)
+     {
+         ERR( "Failed to insert right into reply port: %s\n", mach_error_string( kr ) );
+-        mach_port_deallocate( mach_task_self(), reply_port );
++        /* HEAT_PORTFIX (athei/wine 7134955a, this part only): the port has only its receive
++         * right here, which mach_port_deallocate doesn't release */
++        if (heat_on() & HEAT_PORTFIX) mach_port_mod_refs( mach_task_self(), reply_port, MACH_PORT_RIGHT_RECEIVE, -1 );
++        else mach_port_deallocate( mach_task_self(), reply_port );
+         return NULL;
+     }
+ 
+@@ -504,6 +542,13 @@
+     }
+ 
+     mach_port_deallocate( mach_task_self(), reply_port );
++    /* HEAT_PORTFIX: that released the send right; release the receive right too (one leaked
++     * port name per shared-memory page request otherwise) */
++    if (heat_on() & HEAT_PORTFIX)
++    {
++        heat_count( HC_PORTFIX );
++        mach_port_mod_refs( mach_task_self(), reply_port, MACH_PORT_RIGHT_RECEIVE, -1 );
++    }
+     mach_port_deallocate( mach_task_self(), receive_message.descriptor.name );
+     return (void *)map_address;
+ }
+@@ -646,12 +691,25 @@
+     }
+ }
+ 
+-static inline void signal_all( void *shm, unsigned int shm_idx )
++/* wake: 0 wakes every waiter; n > 0 (HEAT_WAKE, semaphores) at most n, one syscall each */
++static inline void signal_all( void *shm, unsigned int shm_idx, ULONG wake )
+ {
+     __thread static mach_msg_header_t send_header;
+     struct event *event_obj = (struct event *)shm;
+ 
+-    __ulock_wake( UL_COMPARE_AND_WAIT_SHARED | ULF_WAKE_ALL, shm, 0 );
++    if (wake && heat_releasing_private && heat_waiters_none( shm_idx ))
++        heat_count( HC_WAKE_SKIPPED );  /* HEAT_WAKESKIP: nobody here sleeps on it, nobody elsewhere can */
++    else if (wake && (heat_on() & HEAT_WAKE))
++    {
++        while (wake--)
++        {
++            int ret = __ulock_wake( UL_COMPARE_AND_WAIT_SHARED | ULF_NO_ERRNO, shm, 0 );
++            heat_count( ret == -ENOENT ? HC_WAKE_NONE : HC_WAKE_ONE );
++            if (ret == -ENOENT) break;
++        }
++    }
++    else if (__ulock_wake( UL_COMPARE_AND_WAIT_SHARED | ULF_WAKE_ALL, shm, 0 ) == -1 && errno == ENOENT)
++        heat_count( HC_WAKE_NONE );
+ 
+     if (!__atomic_load_n( &event_obj->multiple_waiters, __ATOMIC_SEQ_CST ))
+         return;
+@@ -680,7 +738,7 @@
+ 
+     if (prev_count) *prev_count = current;
+ 
+-    signal_all( (void *)semaphore, obj );
++    signal_all( (void *)semaphore, obj, count );
+     return STATUS_SUCCESS;
+ }
+ 
+@@ -700,7 +758,7 @@
+     LONG current;
+ 
+     if (!(current = __atomic_exchange_n( &event->signaled, 1, __ATOMIC_SEQ_CST )))
+-        signal_all( (void *)event, obj );
++        signal_all( (void *)event, obj, 0 );
+ 
+     if (prev_state) *prev_state = current;
+ 
+@@ -728,7 +786,7 @@
+      * Unfortunately we can't really do much better. Fortunately this is rarely
+      * used (and publicly deprecated). */
+     if (!(current = __atomic_exchange_n( &event->signaled, 1, __ATOMIC_SEQ_CST )))
+-        signal_all( (void *)event, obj );
++        signal_all( (void *)event, obj, 0 );
+ 
+     /* Try to give other threads a chance to wake up. Hopefully erring on this
+      * side is the better thing to do... */
+@@ -763,7 +821,7 @@
+     if (!--mutex->count)
+     {
+         __atomic_store_n( &mutex->tid, 0, __ATOMIC_SEQ_CST );
+-        signal_all( (void *)mutex, obj );
++        signal_all( (void *)mutex, obj, 0 );
+     }
+ 
+     return STATUS_SUCCESS;
+@@ -826,7 +884,12 @@
+         if (count == 1) single_wait = 1;
+     }
+ 
+-    NtQuerySystemTime( &now );
++    /* HEAT_LAZYCLOCK (athei/wine 7134955a's lazy clock read only): the clock is needed only
++     * to turn a relative timeout into a deadline */
++    if (!(heat_on() & HEAT_LAZYCLOCK) || (timeout && timeout->QuadPart != TIMEOUT_INFINITE && timeout->QuadPart <= 0))
++        NtQuerySystemTime( &now );
++    else
++        heat_count( HC_CLOCK_SKIPPED );
+     if (timeout)
+     {
+         if (timeout->QuadPart == TIMEOUT_INFINITE)
+@@ -842,6 +905,9 @@
+ 
+     if (wait_any || count <= 1)
+     {
++        BOOL woken = FALSE;
++        int spun = 0;
++
+         while (1)
+         {
+             /* Try to grab anything. */
+@@ -925,6 +991,7 @@
+ 
+             /* Looks like everything is contended, so wait. */
+ 
++            if (woken) heat_count( HC_SPURIOUS );
+             if (timeout && !timeout->QuadPart)
+             {
+                 /* Unlike esync, we already know that we've timed out, so we
+@@ -932,6 +999,13 @@
+                 return STATUS_TIMEOUT;
+             }
+ 
++            /* HEAT_SPINEVENT: once per wait, spin a little before sleeping on events only */
++            if (!spun && count && (heat_on() & HEAT_SPINEVENT))
++            {
++                spun = 1;
++                if (heat_spin_events( objs_shm, alert_obj_shm, count, current_tid )) continue;
++            }
++
+             if (alert_obj && single_wait)
+                 ret = msync_wait_single( alert_obj, alert_obj_shm, timeout ? &end : NULL, current_tid );
+             else if (single_wait)
+@@ -940,6 +1014,7 @@
+                 ret = msync_wait_multiple( objs, objs_shm, alert_obj, alert_obj_shm, count, timeout ? &end : NULL, current_tid );
+ 
+             if (ret == STATUS_TIMEOUT) return STATUS_TIMEOUT;
++            if ((woken = (ret == STATUS_SUCCESS))) heat_count( HC_WOKEN );
+         } /* while (1) */
+     }
+     else
+@@ -970,9 +1045,11 @@
+         while (1)
+         {
+             BOOL abandoned;
++            ULONGLONG grabbed; /* mutexes this pass took (count <= MAXIMUM_WAIT_OBJECTS == 64) */
+ 
+ tryagain:
+             abandoned = FALSE;
++            grabbed = 0;
+ 
+             /* First step: try to wait on each object in sequence. */
+ 
+@@ -1003,6 +1080,11 @@
+                         if (status != STATUS_PENDING)
+                             break;
+                     }
++                    /* With HEAT_WAKE a release wakes only as many waiters as its count, and we
++                     * may have taken one of those wakes without taking the count: pass it on. */
++                    /* (always while the mode can change at runtime: HEAT_TRACK) */
++                    if (event->msync_type == MSYNC_SEMAPHORE && (heat_on() & (HEAT_WAKE | HEAT_TRACK)))
++                        __ulock_wake( UL_COMPARE_AND_WAIT_SHARED | ULF_NO_ERRNO, objs_shm[i], 0 );
+                 }
+ 
+                 if (status == STATUS_TIMEOUT) return STATUS_TIMEOUT;
+@@ -1046,6 +1128,7 @@
+                         goto tooslow;
+                     if (__sync_val_compare_and_swap( &mutex->tid, tid, current_tid ) != tid)
+                         goto tooslow;
++                    grabbed |= 1ull << i;
+                     if (tid == ~0)
+                         abandoned = TRUE;
+                     break;
+@@ -1106,7 +1189,9 @@
+                     /* HACK: This won't do the right thing with abandoned
+                      * mutexes, but fixing it is probably more trouble than
+                      * it's worth. */
+-                    __atomic_store_n( &mutex->tid, 0, __ATOMIC_SEQ_CST );
++                    /* Only a mutex this pass took: one the caller already owned keeps its owner. */
++                    if (grabbed & (1ull << i))
++                        __atomic_store_n( &mutex->tid, 0, __ATOMIC_SEQ_CST );
+                     break;
+                 }
+                 case MSYNC_SEMAPHORE:
+--- a/dlls/ntdll/unix/registry.c
++++ b/dlls/ntdll/unix/registry.c
+@@ -642,6 +642,7 @@
+         if (ret) return ret;
+     }
+ 
++    heat_evpool_forget( event );  /* the server signals it on a change */
+     SERVER_START_REQ( set_registry_notification )
+     {
+         req->hkey    = wine_server_obj_handle( key );
+--- a/dlls/ntdll/unix/server.c
++++ b/dlls/ntdll/unix/server.c
+@@ -289,9 +289,13 @@
+ {
+     struct __server_request_info * const req = req_ptr;
+     unsigned int ret;
++    int code = req->u.req.request_header.req;  /* the reply overwrites it */
++    unsigned long long start = heat_on() ? heat_now() : 0;
+ 
+     if ((ret = send_request( req ))) return ret;
+-    return wait_reply( req );
++    ret = wait_reply( req );
++    if (start) heat_server_done( code, start );
++    return ret;
+ }
+ 
+ 
+@@ -1872,6 +1876,16 @@
+     int fd = -1;
+ 
+     if (dest) *dest = 0;
++
++    if (heat_on())
++    {
++        heat_count( HC_DUP );
++        /* Any source process, not only the NtCurrentProcess() pseudo-handle: a real handle to this
++         * process duplicates our handle too. Forgetting a remote process's value that happens to
++         * match one of ours only costs that handle the pool and the skipped wake. */
++        heat_evpool_forget( source );
++        heat_handle_gone( source );
++    }
+ 
+     if ((options & DUPLICATE_CLOSE_SOURCE) && source_process != NtCurrentProcess())
+     {
+@@ -1967,9 +1981,24 @@
+     unsigned int ret;
+     int fd;
+ 
++    unsigned long long start = 0;
++
+     if (HandleToLong( handle ) >= ~5 && HandleToLong( handle ) <= ~0)
+         return STATUS_SUCCESS;
+ 
++    if (heat_on())
++    {
++        start = heat_now();
++        heat_count( HC_CLOSE );
++        heat_note_caller( 1 /* HK_CLOSE */ );
++        heat_handle_gone( handle );  /* before the value can be reused */
++        if ((ret = heat_evpool_close( handle )) != STATUS_PENDING)
++        {
++            heat_time( HT_CLOSE, start );
++            return ret;
++        }
++    }
++
+     /* hold fd_cache_mutex to prevent the fd from being added again between the
+      * call to remove_fd_from_cache and close_handle */
+     server_enter_uninterrupted_section( &fd_cache_mutex, &sigset );
+@@ -1989,6 +2018,7 @@
+     server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
+ 
+     if (fd != -1) close( fd );
++    if (start) heat_time( HT_CLOSE, start );
+ 
+     if (ret != STATUS_INVALID_HANDLE || !handle) return ret;
+     if (!peb->BeingDebugged) return ret;
+--- a/dlls/ntdll/unix/signal_x86_64.c
++++ b/dlls/ntdll/unix/signal_x86_64.c
+@@ -3625,5 +3625,26 @@
+                       __ASM_LOCAL_LABEL("__wine_unix_call_dispatcher_prolog_end") )
+ __ASM_GLOBAL_POINTER( __ASM_NAME("__wine_unix_call_dispatcher_gs_load_ptr"),
+                       __ASM_LOCAL_LABEL("__wine_unix_call_dispatcher_gs_load") )
++
++/* the PE stack pointer of the current syscall, for heat.c */
++void *heat_syscall_rsp(void)
++{
++    struct syscall_frame *frame = get_syscall_frame();
++    return frame ? (void *)frame->rsp : NULL;
++}
+ 
++/* the PE registers saved by the current syscall, for heat.c's sampler (runs in a signal handler:
++ * reads only): rax rbx rcx rdx rsi rdi rbp rsp r8-r15 rip, all 0 without a frame */
++void heat_syscall_pe_regs( ULONG64 regs[17] )
++{
++    struct syscall_frame *frame = get_syscall_frame();
++
++    if (!frame) { memset( regs, 0, 17 * sizeof(*regs) ); return; }
++    regs[0] = frame->rax; regs[1] = frame->rbx; regs[2] = frame->rcx; regs[3] = frame->rdx;
++    regs[4] = frame->rsi; regs[5] = frame->rdi; regs[6] = frame->rbp; regs[7] = frame->rsp;
++    regs[8] = frame->r8; regs[9] = frame->r9; regs[10] = frame->r10; regs[11] = frame->r11;
++    regs[12] = frame->r12; regs[13] = frame->r13; regs[14] = frame->r14; regs[15] = frame->r15;
++    regs[16] = frame->rip;
++}
++
+ #endif  /* __x86_64__ */
+--- a/dlls/ntdll/unix/sync.c
++++ b/dlls/ntdll/unix/sync.c
+@@ -1058,6 +1058,7 @@
+     SERVER_END_REQ;
+ 
+     free( objattr );
++    if (!ret && heat_on()) heat_sem_created( *handle, attr );
+     return ret;
+ }
+ 
+@@ -1150,7 +1151,15 @@
+ 
+     TRACE( "handle %p, count %u, prev_count %p\n", handle, count, previous );
+ 
+-    if ((ret = inproc_release_semaphore( handle, count, previous )) != STATUS_NOT_IMPLEMENTED)
++    if (heat_on())
++    {
++        heat_count( HC_RELEASE_SEM );
++        heat_note_caller( 5 /* HK_RELSEM */ );
++        heat_releasing_private = (heat_on() & HEAT_WAKESKIP) && heat_sem_private( handle );
++    }
++    ret = inproc_release_semaphore( handle, count, previous );
++    heat_releasing_private = 0;
++    if (ret != STATUS_NOT_IMPLEMENTED)
+         return ret;
+ 
+     SERVER_START_REQ( release_semaphore )
+@@ -1187,12 +1196,24 @@
+     unsigned int ret;
+     data_size_t len;
+     struct object_attributes *objattr;
++    unsigned long long start = 0;
+ 
+     TRACE( "access %#x, name %s, type %u, state %u\n", access,
+            attr ? debugstr_us(attr->ObjectName) : "(null)", type, state );
+ 
+     *handle = 0;
+     if (type != NotificationEvent && type != SynchronizationEvent) return STATUS_INVALID_PARAMETER;
++    if (heat_on())
++    {
++        start = heat_now();
++        heat_count( HC_CREATE_EVENT );
++        heat_note_caller( 0 /* HK_CREATE_EVENT */ );
++        if (heat_evpool_get( handle, access, attr, type, state ))
++        {
++            heat_time( HT_CREATE_EVENT, start );
++            return STATUS_SUCCESS;
++        }
++    }
+     if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
+ 
+     SERVER_START_REQ( create_event )
+@@ -1207,6 +1228,11 @@
+     SERVER_END_REQ;
+ 
+     free( objattr );
++    if (start)
++    {
++        if (!ret) heat_evpool_created( *handle, access, attr, type );
++        heat_time( HT_CREATE_EVENT, start );
++    }
+     return ret;
+ }
+ 
+@@ -1260,6 +1286,7 @@
+ 
+     TRACE( "handle %p, prev_state %p\n", handle, prev_state );
+ 
++    heat_count( HC_SET_EVENT );
+     if ((ret = inproc_set_event( handle, prev_state )) != STATUS_NOT_IMPLEMENTED)
+         return ret;
+ 
+@@ -1305,6 +1332,7 @@
+ 
+     TRACE( "handle %p, prev_state %p\n", handle, prev_state );
+ 
++    heat_count( HC_RESET_EVENT );
+     if ((ret = inproc_reset_event( handle, prev_state )) != STATUS_NOT_IMPLEMENTED)
+         return ret;
+ 
+@@ -2459,6 +2487,7 @@
+     union select_op select_op;
+     UINT i, flags = SELECT_INTERRUPTIBLE;
+     unsigned int ret;
++    unsigned long long start = 0;
+ 
+     if (!count || count > MAXIMUM_WAIT_OBJECTS) return STATUS_INVALID_PARAMETER_1;
+     if (type != WaitAll && type != WaitAny) FIXME( "Unsupported wait type %u\n", type );
+@@ -2476,9 +2505,11 @@
+         if (is_pseudo_handle( handles[i] )) return STATUS_INVALID_HANDLE;
+     }
+ 
++    if (heat_on()) start = heat_now();
+     if ((ret = inproc_wait( count, handles, type, alertable, timeout )) != STATUS_NOT_IMPLEMENTED)
+     {
+         TRACE( "-> %#x\n", ret );
++        if (start) heat_wait_done( start, timeout, ret );
+         return ret;
+     }
+ 
+@@ -2487,6 +2518,7 @@
+     for (i = 0; i < count; i++) select_op.wait.handles[i] = wine_server_obj_handle( handles[i] );
+     ret = server_wait( &select_op, offsetof( union select_op, wait.handles[count] ), flags, timeout );
+     TRACE( "-> %#x\n", ret );
++    if (start) heat_wait_done( start, timeout, ret );
+     return ret;
+ }
+ 
+@@ -2499,12 +2531,15 @@
+     union select_op select_op;
+     UINT flags = SELECT_INTERRUPTIBLE;
+     unsigned int ret;
++    unsigned long long start = 0;
+ 
+     TRACE( "handle %p, alertable %u, timeout %s\n", handle, alertable, debugstr_timeout(timeout) );
+ 
++    if (heat_on()) start = heat_now();
+     if ((ret = inproc_wait( 1, &handle, WaitAny, alertable, timeout )) != STATUS_NOT_IMPLEMENTED)
+     {
+         TRACE( "-> %#x\n", ret );
++        if (start) heat_wait_done( start, timeout, ret );
+         return ret;
+     }
+ 
+@@ -2513,6 +2548,7 @@
+     select_op.wait.handles[0] = wine_server_obj_handle( handle );
+     ret = server_wait( &select_op, offsetof( union select_op, wait.handles[1] ), flags, timeout );
+     TRACE( "-> %#x\n", ret );
++    if (start) heat_wait_done( start, timeout, ret );
+     return ret;
+ }
+ 
+@@ -2545,7 +2581,20 @@
+ /******************************************************************
+  *		NtYieldExecution (NTDLL.@)
+  */
++static NTSTATUS yield_execution(void);
++
+ NTSTATUS WINAPI NtYieldExecution(void)
++{
++    if (heat_on())
++    {
++        heat_count( HC_YIELD );
++        heat_note_caller( 2 /* HK_YIELD */ );
++    }
++    return yield_execution();
++}
++
++/* NtYieldExecution without the probe, for NtDelayExecution */
++static NTSTATUS yield_execution(void)
+ {
+ #ifdef HAVE_SCHED_YIELD
+ #ifdef RUSAGE_THREAD
+@@ -2569,7 +2618,31 @@
+ /******************************************************************
+  *		NtDelayExecution (NTDLL.@)
+  */
++static NTSTATUS delay_execution( BOOLEAN alertable, const LARGE_INTEGER *timeout );
++
+ NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeout )
++{
++    unsigned long long start;
++    NTSTATUS ret;
++
++    if (!heat_on()) return delay_execution( alertable, timeout );
++    start = heat_now();
++    if (timeout && !timeout->QuadPart)
++    {
++        heat_count( HC_DELAY0 );
++        heat_note_caller( 3 /* HK_DELAY0 */ );
++    }
++    else
++    {
++        heat_count( HC_DELAY );
++        heat_note_caller( 4 /* HK_DELAY */ );
++    }
++    ret = delay_execution( alertable, timeout );
++    heat_time( HT_DELAY, start );
++    return ret;
++}
++
++static NTSTATUS delay_execution( BOOLEAN alertable, const LARGE_INTEGER *timeout )
+ {
+     unsigned int status = STATUS_SUCCESS;
+ 
+@@ -2600,7 +2673,7 @@
+ 
+         /* Note that we yield after establishing the desired timeout, but
+            we only care about the result of the yield for zero timeouts */
+-        status = NtYieldExecution();
++        status = yield_execution();
+         if (!when) return status;
+ 
+         for (;;)
+@@ -2623,6 +2696,7 @@
+  */
+ NTSTATUS WINAPI NtQueryPerformanceCounter( LARGE_INTEGER *counter, LARGE_INTEGER *frequency )
+ {
++    heat_count( HC_QPC );
+     counter->QuadPart = monotonic_counter();
+     if (frequency) frequency->QuadPart = TICKSPERSEC;
+     return STATUS_SUCCESS;
+@@ -3677,6 +3751,7 @@
+     union tid_alert_entry *entry = get_tid_alert_entry( tid );
+ 
+     TRACE( "%p\n", tid );
++    heat_count( HC_ALERT );
+ 
+     if (!entry) return STATUS_INVALID_CID;
+ 
+@@ -3734,8 +3809,23 @@
+ /***********************************************************************
+  *             NtWaitForAlertByThreadId (NTDLL.@)
+  */
++static NTSTATUS wait_for_alert_by_thread_id( const void *address, const LARGE_INTEGER *timeout );
++
+ NTSTATUS WINAPI NtWaitForAlertByThreadId( const void *address, const LARGE_INTEGER *timeout )
+ {
++    unsigned long long start;
++    NTSTATUS ret;
++
++    if (!heat_on()) return wait_for_alert_by_thread_id( address, timeout );
++    start = heat_now();
++    heat_note_caller( 6 /* HK_ALERTWAIT */ );
++    ret = wait_for_alert_by_thread_id( address, timeout );
++    heat_alertwait_done( start );
++    return ret;
++}
++
++static NTSTATUS wait_for_alert_by_thread_id( const void *address, const LARGE_INTEGER *timeout )
++{
+     union tid_alert_entry *entry = get_tid_alert_entry( NtCurrentTeb()->ClientId.UniqueThread );
+ 
+     TRACE( "%p %s\n", address, debugstr_timeout( timeout ) );
+@@ -3756,6 +3846,10 @@
+                 end = get_absolute_timeout( timeout );
+         }
+ 
++        /* HEAT_SPINLOCK: spin a little first; nothing is written to the word without it */
++        if ((heat_on() & HEAT_SPINLOCK) && (!timeout || timeout->QuadPart) && heat_spin_alert( futex ))
++            return STATUS_ALERTED;
++
+         while (!InterlockedExchange( futex, 0 ))
+         {
+             if (timeout)
+--- a/dlls/ntdll/unix/thread.c
++++ b/dlls/ntdll/unix/thread.c
+@@ -1105,6 +1105,7 @@
+  */
+ static DECLSPEC_NORETURN void pthread_exit_wrapper( int status )
+ {
++    heat_thread_exit();  /* the heat sampler must not signal this thread any more */
+     /* with msync, alert_fd is the msync shared-memory index of the thread's alert object
+      * (get_inproc_alert_fd), not a file descriptor; the server owns that object */
+     if (!do_msync()) close( ntdll_get_thread_data()->alert_fd );
+@@ -1141,6 +1142,7 @@
+     thread_data->pthread_id = pthread_self();
+     pthread_setspecific( teb_key, teb );
+     server_init_thread( thread_data->start, &suspend );
++    heat_thread_start();
+     signal_start_thread( thread_data->start, thread_data->param, suspend, teb );
+ }
+ 
+@@ -2502,6 +2504,7 @@
+             status = wine_server_call( req );
+         }
+         SERVER_END_REQ;
++        if (!status) heat_thread_priority( handle, *base_priority );
+         return status;
+     }
+ 
+@@ -2606,6 +2609,7 @@
+         SERVER_END_REQ;
+ 
+         set_native_thread_name( handle, &info->ThreadName );
++        if (!status) heat_thread_named( handle, &info->ThreadName );
+ 
+         return status;
+     }
+--- a/dlls/ntdll/unix/unix_private.h
++++ b/dlls/ntdll/unix/unix_private.h
+@@ -116,6 +116,7 @@
+     PRTL_THREAD_START_ROUTINE start;         /* thread entry point */
+     void                     *param;         /* thread entry point parameter */
+     void                     *jmp_buf;       /* setjmp buffer for exception handling */
++    void                     *heat;          /* heat probes of the thread (heat.c) */
+ };
+ 
+ C_ASSERT( sizeof(struct ntdll_thread_data) <= sizeof(((TEB *)0)->GdiTebBatch) );
+@@ -463,11 +464,14 @@
+ {
+     if (!process_exiting) pthread_mutex_unlock( mutex );
+ }
++
++#include "heat.h"
+ 
+ static inline struct async_data server_async( HANDLE handle, struct async_fileio *user, HANDLE event,
+                                               PIO_APC_ROUTINE apc, void *apc_context, client_ptr_t iosb )
+ {
+     struct async_data async;
++    heat_evpool_forget( event );  /* the server signals it when the I/O completes */
+     async.handle      = wine_server_obj_handle( handle );
+     async.user        = wine_server_client_ptr( user );
+     async.iosb        = iosb;
