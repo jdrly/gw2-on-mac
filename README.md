@@ -68,7 +68,7 @@ failed or cancelled first install leaves nothing behind):
 1. **The Wine engine**: athei's `cx-26.3.0-8` (CrossOver 26.3, Wine 11), the same pinned
    archive as SWTOR on Mac's (size and sha256, resumed and retried, a second GitHub address),
    unpacked and checked. GW2 on Mac's pieces then go into it:
-   - DXMT `9eb7668` over the engine's `dxgi/dxmt` tree
+   - DXMT `e02a4d6` over the engine's `dxgi/dxmt` tree
    - the heat `ntdll.so` and `wineserver`
    - `winemac.so` (the launcher fix) and `win32u.so` (its drawing at -O2)
 
@@ -262,13 +262,13 @@ scripts/stage-components.sh    # copy DXMT, the heat Wine pieces, winemac and th
   `wineserver`, `winemac.so`, `win32u.so`) are built today only in Jan's private development
   workspace, whose build scripts are not in this repository. `stage-components.sh` copies them
   from that workspace: `GW2_ON_MAC_WORKSPACE` (default `../gw2-on-mac`, next to this
-  repository), and in it the builds the app ships (`work/dxmt-rollback/9eb7668-install`,
+  repository), and in it the builds the app ships (`work/dxmt-rollback/e02a4d6-install`,
   `work/heat/install-r7c`, `work/winemac/install`, `work/ui-scale/build`; override with
   `DXMT_INSTALL`, `HEAT_INSTALL`, `WINEMAC_INSTALL`, `UISCALE_BUILD`). It changes nothing in the
   workspace and checks each file against its build record and this repository's
   [`patches/`](patches). `prebuilt/` is ignored by git.
 - **Their complete corresponding source** (LGPL-2.1-or-later) is public: the pinned upstreams
-  plus this repository's patches. DXMT is [jdrly/dxmt at `9eb7668`](https://github.com/jdrly/dxmt/tree/9eb7668);
+  plus this repository's patches. DXMT is [jdrly/dxmt at `e02a4d6`](https://github.com/jdrly/dxmt/tree/e02a4d6);
   the Wine pieces are [athei/wine `d23b397`](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0)
   (CodeWeavers' CrossOver 26.3 sources with athei's patches, the engine's own sources) with
   [`patches/ntdll-msync-alert-fd.patch`](patches/ntdll-msync-alert-fd.patch) (from SWTOR on Mac),

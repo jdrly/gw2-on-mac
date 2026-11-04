@@ -571,7 +571,7 @@ enum AppActions {
     ])
   }
 
-  // "DXMT 9eb7668 · Wine cx-26.3.0-8 · Sparkle 2.10.0" from Resources/VERSIONS
+  // "DXMT e02a4d6 · Wine cx-26.3.0-8 · Sparkle 2.10.0" from Resources/VERSIONS
   static func componentVersions() -> String {
     let url = Brand.resources.appendingPathComponent("VERSIONS")
     guard let text = try? String(contentsOf: url, encoding: .utf8) else { return "" }
