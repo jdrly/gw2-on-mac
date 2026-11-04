@@ -1,0 +1,285 @@
+# GW2 on Mac (the app)
+
+A small SwiftUI app for macOS 26 and later on Apple silicon that sets up Guild Wars 2 on its own
+Wine engine with our DXMT build, and starts it. It reuses SWTOR on Mac's app (its structure,
+installer conventions, Collect Logs, session report, release system and Sparkle wiring),
+restyled to the approved design in [`docs/design/gw2onmac.pen`](../docs/design).
+
+Unlike SWTOR on Mac it changes no existing install. It creates its own engine and bottle and
+installs the game into them, through **Steam** (Valve's installer; you sign in and install the
+game in Steam) or **ArenaNet's own installer** (`Gw2Setup-64.exe`, which you download from
+ArenaNet's site and drop into the window). Every download of the game or Steam comes from Valve
+or ArenaNet; GW2 on Mac hosts nothing of the game.
+
+Status: version 0.1.0, built and tested in a sandbox. Nobody has run a real install yet (Jan
+does the first one), and nothing is published.
+
+## The window
+
+- **Main window**, three states: choose the route → the install's steps with progress and
+  Cancel → Ready (Play, Repair, Settings, Uninstall…).
+  - *This Mac* checks Rosetta, the engine, the graphics (DXMT), Game Mode, the game and disk space
+    (a warning under 75 GB).
+  - Light and dark follow the system, each with its own header stroke.
+- **Settings** (⌘, or the main window's Settings), one pane each: Graphics, Performance,
+  Interface, Game, Updates, Troubleshooting. Changes take effect the next time the game starts.
+  - There is no Keyboard or Mouse pane: SWTOR on Mac's game-keys-by-position and raw mouse-look
+    are patches of Wine's Mac driver that our `winemac.so` doesn't carry yet (a follow-up).
+- **Menus**: About, Check for Updates… (off until there is a feed), Settings…, Collect Logs…, and
+  Help (Discord, GitHub issues).
+
+## Install, step by step
+
+`Resources/gw2om.sh install <route>` runs these, all or nothing for what this run created (a
+failed or cancelled first install leaves nothing behind):
+
+1. **The Wine engine**: athei's `cx-26.3.0-8` (CrossOver 26.3, Wine 11), the same pinned
+   archive as SWTOR on Mac's (size and sha256, resumed and retried, a second GitHub address),
+   unpacked and checked. GW2 on Mac's pieces then go into it:
+   - DXMT `684f428` over the engine's `dxgi/dxmt` tree
+   - the heat `ntdll.so` and `wineserver`
+   - `winemac.so` (the launcher fix) and `win32u.so` (its drawing at -O2)
+
+   The engine's own files stay as `<name>.stock`, checked against their known sha256 first.
+2. **The game's own bottle**: `wineboot`, then Retina mode (`RetinaMode` in `user.reg`),
+   `settings.conf`, `dxmt.conf` and the Game Mode bundle.
+3. **Steam, from Valve** (`SteamSetup.exe` from Valve's CDN, `/S`), or **ArenaNet's installer**,
+   checked by `gw2om.sh check-setup` before anything changes:
+   - it must be a PE x86_64 executable
+   - its Authenticode signature must be valid: the signer's signature over the signed attributes,
+     whose message digest covers the SpcIndirectData content
+   - the signature must cover this very file (the PE hash, recomputed)
+   - the signer's certificate must be ArenaNet's
+
+   It uses macOS's own `/usr/bin/openssl` and nothing else. Not checked: the chain up to
+   Windows' root certificates, which macOS doesn't have.
+4. **The game's download**: Steam starts with `steam://install/1284210` (you sign in; the login
+   stays in Steam), or ArenaNet's installer starts. The install command ends here with
+   `stage=waiting_game`. The window follows the download from its status:
+   - Steam: `appmanifest_1284210.acf`, `BytesDownloaded`/`BytesToDownload`, done at
+     `StateFlags` 4.
+   - ArenaNet's installer gives no completion record: the game counts as there once `Gw2.dat`
+     has more than 1 GB and neither the installer nor `Gw2-64.exe` runs.
+
+   This picks up again after the app restarts. *Stop waiting* keeps the engine and the bottle.
+5. **Finishing touches** (`gw2om.sh finish`, which the window starts by itself):
+   - DXMT's cache folder
+   - the interface addon, if it's on
+   - the registry settings
+   - `stage=finished`, then Ready
+
+**Play** (`gw2om.sh play`) starts `steam.exe -applaunch 1284210 <launch options>` (Steam route),
+or the game's own launcher `Gw2-64.exe <launch options>` (ArenaNet route), detached, with the
+settings as its environment. It also:
+- makes the Game Mode link
+- writes `session.env`
+- rotates the logs (when no session runs)
+
+If the game runs, Play brings it to the front instead. If Steam still runs from before with
+other settings, Play says Steam must quit first, because the game gets Steam's environment.
+
+**Repair** sets up the engine (unpacked again if its loader changed), GW2 on Mac's pieces, the
+bottle's settings, Game Mode and Steam (if gone) again. It keeps the game and the settings.
+
+**Game Mode**: macOS turns it on only for a process whose executable belongs to a bundle with
+`LSSupportsGameMode`, and every Wine process runs Wine's loader. As SWGL on Mac and
+`scripts/common.zsh` do it:
+- `gamemode/GW2.app` (`cz.jandrly.gw2onmac.game`) holds an unsigned copy of the loader named
+  `Gw2-64.exe` and an `ntdll.so` link.
+- With `WINEDLLPATH` set, CrossOver's ntdll starts the game from `$TMPDIR/winetemp-…/Gw2-64.exe`,
+  which Play points at that bundle.
+
+## What it changes on disk
+
+Everything lives in these places; nothing else on the Mac is touched (no launch agents, no login
+items, nothing in `/Applications` besides the app itself):
+
+| Path | What | Uninstall |
+|---|---|---|
+| `~/Library/Application Support/GW2 on Mac/engine/` | the Wine engine with GW2 on Mac's pieces (about 1 GB) | removed |
+| `…/GW2 on Mac/bottle/` | the game's Wine prefix: Steam, **the game's files** (about 75 GB), the game's own settings | removed, with the game |
+| `…/GW2 on Mac/gamemode/GW2.app` | the Game Mode bundle | removed |
+| `…/GW2 on Mac/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf` | the settings, the route and stage, what was installed, DXMT's options | removed |
+| `~/Library/Caches/GW2 on Mac/downloads/` | the engine archive, `SteamSetup.exe`, a copy of `Gw2Setup-64.exe` | removed |
+| `$(getconf DARWIN_USER_CACHE_DIR)dxmt/Gw2-64.exe/` | DXMT's shader cache, pipeline archives and recorded pipelines for the game | removed (shared by any other DXMT setup of the game on this Mac: the confirmation says so) |
+| `$(getconf DARWIN_USER_TEMP_DIR)winetemp-…/Gw2-64.exe` | the Game Mode link | removed |
+| `~/Library/Logs/GW2 on Mac/` | `install.log`, `wine.log`, DXMT's `Gw2-64_d3d11.log`, `session.env`, `gamemode.log`, heat logs (Debug logging) | **kept** |
+
+The game folder gets `version.dll` and `gw2-ui-scale.ini` only while *Larger interface* is on.
+Another program's `version.dll` there is never touched. The app's own preferences (the chosen
+route, the Settings pane, *Quit after launching*) are in its defaults domain,
+`cz.jandrly.gw2onmac`.
+
+## Settings
+
+`gw2om.sh settings` prints them and `gw2om.sh set <key> <value>` changes one. They are kept in
+`settings.conf` and applied at each game start (`gw2om.sh env` prints the environment Play would
+use). The defaults are the mix Jan plays with (`scripts/common.zsh`).
+
+| Pane | Setting (key) | Default | What it does |
+|---|---|---|---|
+| Graphics | Retina (`retina`) | on | `RetinaMode` in the bottle (Wine's High Resolution Mode) |
+| | Frame cap (`fpscap`) | off | `d3d11.preferredMaxFrameRate` in `dxmt.conf` (30, 40, 60, 120) |
+| | MetalFX for Subsample (`metalfx`) | off | `DXMT_SUBSAMPLE_METALFX=1` (experimental) |
+| | Metal HUD (`hud`) | off | `MTL_HUD_ENABLED=1` |
+| Performance | Shader warming (`warm`) | on | `DXMT_WARM=all`: pipelines built ahead by recent use, up to 8,192 |
+| | Cooler job workers (`coolworkers`) | 3 | `WINE_HEAT_QOS=1=utility:<n>`: the first n ABOVE_NORMAL job workers on the cooler cores; off |
+| | Faster locks (`fastlocks`) | on | `WINE_HEAT_SPIN=lock=20:game,event=30:game` |
+| | CPUs the game sees (`ncpu`) | 8 | `WINENCPU` (4, 6, 8, 10, 12, all) |
+| Interface | Larger interface (`uiscale`) | off | the addon in the game folder, and `version=native,builtin` for `Gw2-64.exe`. Turning it on asks first: it changes the game's memory and patches one piece of its code (the cinema text), which ArenaNet doesn't support |
+| | Interface Size "Larger" (`uiscale_size`) | 1.75 | the ini's `scale` (1.5, 1.75, 1.8, 2.0) |
+| | Small text in Cronos (`uiscale_sans`) | on | the ini's `sans=cronos` (else `keep`) |
+| | Cinematic dialogue (`uiscale_cinema`) | on | the ini's `cinema=1` |
+| Game | Game Mode (`gamemode`) | on | the bundle and link above |
+| | Launch options (`launchopts`) | none | arguments for `Gw2-64.exe` (letters, digits, `-_.:=,/+` only) |
+| | Quit GW2 on Mac after launching | off | the app's own preference |
+| Updates | Check automatically (`updates`) | on | Sparkle's automatic checks, once there is a feed |
+| Troubleshooting | Debug logging (`debug`) | off (on in development builds) | `DXMT_LOG_LEVEL=debug`, the heat counters (`WINE_HEAT_COUNT`), `WINEDEBUG=err+all,fixme-all` |
+
+Always set: `WINEMSYNC=1`, `ROSETTA_X87_PATH=` (x87sidecar off), `WINEDLLOVERRIDES=winemenubuilder.exe=d`,
+the compatdb rule that gives every process DXMT (`dxgi=dxmt`, the game launcher's `CefHost.exe`
+too), `DXMT_CONFIG_FILE`, `DXMT_LOG_PATH`, `DXMT_DEPENDENCY_COMPRESSION=1`, and the heat ntdll's
+`WINE_HEAT_EVPOOL=1`, `WINE_HEAT_WAKE=one,skip`, `WINE_HEAT_LAZYCLOCK=1`,
+`WINE_HEAT_MSYNC_UNREG=1`, `WINE_HEAT_MSYNC_PORTFIX=1`.
+
+Registry settings (Retina, the addon's override) are written straight into the bottle's
+`user.reg`, as SWTOR on Mac does, and only while no Wine session of the bottle runs. Otherwise
+they wait for the next Play that finds none.
+
+## Logs and bug reports
+
+- **Collect Logs…** (menu and Settings › Troubleshooting) zips the logs to the Desktop. It is
+  SWTOR on Mac's `collect-logs.sh` for this app's files, with the same redaction, crash reports,
+  unified-log GPU errors and leak check. In the zip:
+  - GW2 on Mac's logs (`wine.log` and DXMT's `Gw2-64_d3d11.log`, each with the 4 sessions
+    before), the newest heat logs, `session.env`, the settings and state files
+  - `session-report.txt`
+  - from the game: `ArenaNet.log` and `GFXSettings.Gw2-64.exe.xml`
+  - Steam's bootstrap, content, gameprocess and shader logs
+  - crash reports of the last 7 days, the GPU errors of the last 2 hours, `system-info.txt`
+
+  Redacted on the way in: account, persona and Mac names, Steam IDs, e-mail addresses, home
+  folders, tokens, the crash log's machine, account and address fields. Never in it: `Local.dat`,
+  Steam's config and its login and connection logs. A file that still has one of those after
+  redaction is left out (`left-out.txt`).
+- **Session report** (`Resources/session-report.sh [--keep] [log]`, `--compare A B`) sums up the
+  last session from DXMT's own lines:
+  - frame rate (median, 10th percentile, minimum), frame times, hitches and DXMT's share of them
+  - compiles and the render thread's waits for them
+  - shader warming, presentation, Metal 4 errors
+- **Debug logging** (Settings › Troubleshooting): more detail for a bug report, at some cost.
+
+Support: Pharaphobia on [Discord](https://discord.gg/AnV3fZWz2b) or a
+[GitHub issue](https://github.com/jdrly/gw2-on-mac/issues), never ArenaNet's support.
+
+## Building
+
+Needs Xcode 27 (the macOS 27 SDK; the app targets macOS 26.0).
+
+```sh
+app/scripts/stage-components.sh    # copy DXMT, the heat Wine pieces, winemac and the addon from work/
+app/build.sh                       # → app/dist/GW2 on Mac.app, ad-hoc signed
+```
+
+- `stage-components.sh` takes what the live engine runs (DXMT `work/dxmt-rollback/684f428-install`,
+  heat `work/heat/install-r7b`, `work/winemac/install`, `work/ui-scale/build`; override with
+  `DXMT_INSTALL`, `HEAT_INSTALL`, `WINEMAC_INSTALL`, `UISCALE_BUILD`). It changes nothing in
+  `work/` and checks each file against its build record and this repository's patches.
+  `app/prebuilt/` is ignored by git.
+- `build.sh` checks `prebuilt/` again and compiles `src/native/*.swift` (arm64) and the
+  `procpaths` helper. It bundles the components, fonts, art and licences (`Resources/Licenses`,
+  [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)), downloads Sparkle at a pinned version and
+  sha256, and compiles the Icon Composer icon (`src/AppIcon.icon`) with actool into
+  `Assets.car` plus the fallback `AppIcon.icns`.
+  - `GW2_ON_MAC_VERSION` sets the version (0.1.0; `X.Y.Z-dev.N` makes a development build, as
+    SWTOR on Mac's).
+  - `GW2_ON_MAC_FEED_URL` and `GW2_ON_MAC_ED_PUBLIC_KEY` turn updates on.
+- The icon's layers: `swift app/src/make-icon.swift layers app/src/AppIcon.icon` (the wordmark;
+  the ensō is `docs/design/icon-ring.png`), and `… preview app/src/AppIcon.icon <sheet.png>` for a
+  review sheet of every appearance and size.
+- The icons in the window are Lucide's, drawn from path data: after adding an SVG to
+  `src/icons`, run `python3 -I app/scripts/gen-icons.py`.
+
+## Testing
+
+Never against a real install, and never with Wine, Steam or the game running on Jan's screen.
+
+- `app/scripts/test-sandbox.sh` tests the backend of a built app end to end in
+  `work/app-sandbox/test` (148 checks). It uses a stand-in engine archive whose `bin/wine` only
+  pretends, plays Steam's and ArenaNet's downloads itself, and uses a clone of the game's own
+  ArenaNet-signed `Gw2-64.exe` as the installer to check. It covers:
+  - dry runs, both routes, finish, every setting and what it does, the addon
+  - play, the busy checks, repair, reset-shaders, reinstall-engine, the lock
+  - Collect Logs' redaction, uninstall, a failed install's rollback
+- `app/scripts/ui-render.sh` renders every window state, light and dark, headlessly into
+  `work/app-renders/`. Nothing is shown on screen and the app never activates. It also writes
+  `compare-*.png`: the design's export next to the render.
+- By hand, `GW2_ON_MAC_ROOT=/abs/dir` puts every path `gw2om.sh` and `collect-logs.sh` use under
+  that folder, and `GW2_ON_MAC_DRY_RUN=1` prints what would change without changing anything:
+
+  ```sh
+  R="app/dist/GW2 on Mac.app/Contents/Resources"
+  GW2_ON_MAC_ROOT=$PWD/work/app-sandbox/try GW2_ON_MAC_DRY_RUN=1 "$R/gw2om.sh" install steam
+  ```
+
+  The app passes both variables on, so the window can run against a sandbox too. In a sandbox,
+  `gw2om.sh` refuses to run the real engine's Wine (`GW2_ON_MAC_ALLOW_WINE=1` overrides it, for a
+  deliberate test only).
+
+## Uninstall
+
+*Uninstall…* in the window asks first, and says that the game's files go with the bottle. It
+then removes everything in the table above except the logs. Steam and the game have to be
+closed. Removing it by hand:
+
+```sh
+rm -rf ~/Library/"Application Support/GW2 on Mac" ~/Library/Caches/"GW2 on Mac" \
+  "$(getconf DARWIN_USER_CACHE_DIR)dxmt/Gw2-64.exe"
+rm -rf ~/Library/Logs/"GW2 on Mac"      # the logs, if you want them gone too
+```
+
+Then move the app to the Bin.
+
+## Releasing
+
+Not yet: GW2 on Mac publishes nothing so far. The pieces are SWTOR on Mac's, ready:
+
+- `app/scripts/release.sh` signs with Developer ID inside out (the bundled Mach-O components and
+  `procpaths`, Sparkle, the app; `src/entitlements/app.plist`), builds and notarizes the DMG, and
+  builds and checks the Sparkle feed (`scripts/check-appcast.swift`, delta updates).
+  - Every mode that creates or changes a GitHub release stops unless `GW2_ON_MAC_PUBLISH=1`.
+  - The feed needs an app built with `GW2_ON_MAC_FEED_URL` (the latest release's `appcast.xml`)
+    and `GW2_ON_MAC_ED_PUBLIC_KEY`.
+  - `--sign-only` and `--no-notarize` work locally today.
+  - Untested: `wineserver` under the hardened runtime.
+- Release notes: [`release-notes/`](release-notes) in SWTOR on Mac's format (`0.1.0.md`).
+- Versioning: `X.Y.Z` for releases, `X.Y.Z-dev.N` for development builds, with SWTOR on Mac's
+  bundle-version scheme. The `release/` output is ignored by git.
+
+## Layout
+
+```
+app/
+  build.sh                 the app bundle (see Building)
+  src/native/              SwiftUI: App (model, menus), MainWindow, Settings, Play, Updates
+                           (Sparkle), Brand (the design's tokens and pieces), Lucide (+ LucideData)
+  src/gw2om.sh             the backend (bash 3.2)
+  src/collect-logs.sh      Collect Logs…
+  src/helpers/procpaths.c  every process's real executable, for gw2om.sh's busy checks
+  src/fonts/, src/art/, src/icons/, src/AppIcon.icon, src/make-icon.swift, src/Info.plist
+  scripts/                 stage-components, test-sandbox, ui-render, session-report, release,
+                           check-appcast, gen-icons
+  release-notes/           the notes of each release
+  prebuilt/, dist/, release/, .cache/   build output (ignored)
+```
+
+## Known limits and follow-ups
+
+- The first real install hasn't run yet: Jan does it, after which the Steam route's `StateFlags`
+  and the ArenaNet route's completion heuristic should be checked against what really happens.
+- No Keyboard or Mouse pane until SWTOR on Mac's winemac patches are ported to our build.
+- DXMT's cache for `Gw2-64.exe` is per user, shared with any other DXMT setup of the game (Jan's
+  development bottle on his Mac); a fork-side cache folder override would separate them.
+- A Steam library added outside the bottle (Steam › Settings › Storage) is not removed by
+  Uninstall.
+- Blish HUD and macOS 28's Rosetta changes are not covered (see [`AGENTS.md`](../AGENTS.md)).

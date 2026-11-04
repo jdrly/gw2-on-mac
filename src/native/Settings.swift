@@ -378,6 +378,15 @@ struct SettingsView: View {
         }
       }
       if let result = settings.actionResult { note("info", result, Brand.fg3) }
+      SettingsGroup {
+        SettingRow("Get help", "Ask Pharaphobia on Discord or open a GitHub issue, with the zip from Collect Logs. Never ArenaNet's support: GW2 on Mac is unofficial.") {
+          HStack(spacing: 8) {
+            Link(destination: Support.discord) { Text("Discord ↗").font(.body(13, .bold)).foregroundStyle(Brand.accent) }
+            Link(destination: Support.issues) { Text("GitHub ↗").font(.body(13, .bold)).foregroundStyle(Brand.accent) }
+          }
+          .fixedSize()
+        }
+      }
     }
   }
 

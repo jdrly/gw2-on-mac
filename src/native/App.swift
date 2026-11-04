@@ -415,6 +415,12 @@ final class LineReader: @unchecked Sendable {
 
 // MARK: - App menu actions
 
+// Where to get help: the Discord server SWTOR on Mac and gw2onmac.com use, and GitHub issues
+enum Support {
+  static let discord = URL(string: "https://discord.gg/AnV3fZWz2b")!
+  static let issues = URL(string: "https://github.com/jdrly/gw2-on-mac/issues")!
+}
+
 // The design's disclaimer (the window's footer, the badge's popover, About)
 let disclaimer = "Unofficial. Not made, endorsed or supported by ArenaNet or NCSOFT. Guild Wars 2 is a "
   + "trademark of NCSOFT Corporation."
@@ -430,7 +436,14 @@ enum AppActions {
     let text = NSMutableAttributedString(string:
       "Guild Wars 2 on its own Wine engine, with DXMT (Direct3D 11 on Metal)\n"
       + "Developed by \(credits["author"] ?? "Jan Drlý")\n\n"
-      + "An unofficial fan project. " + disclaimer + "\n", attributes: body)
+      + "An unofficial fan project. " + disclaimer + "\n"
+      + "For help: Pharaphobia on Discord or a GitHub issue, never ArenaNet's support.\n", attributes: body)
+    for link in [Support.discord, Support.issues] {
+      var attributes = body
+      attributes[.link] = link
+      text.append(NSAttributedString(string: "\n", attributes: body))
+      text.append(NSAttributedString(string: link.absoluteString.replacingOccurrences(of: "https://", with: ""), attributes: attributes))
+    }
     for key in ["repo", "github"] {
       guard let url = credits[key], !url.isEmpty, let link = URL(string: url) else { continue }
       var attributes = body
@@ -519,8 +532,9 @@ final class LogCollector {
     if let zip {
       let folder = FileManager.default.displayName(atPath: (zip as NSString).deletingLastPathComponent)
       alert.messageText = "Logs collected"
-      alert.informativeText = "\((zip as NSString).lastPathComponent) is in your \(folder) folder. Attach it to a "
-        + "GitHub issue with a short description of the problem, not to ArenaNet's support. It includes "
+      alert.informativeText = "\((zip as NSString).lastPathComponent) is in your \(folder) folder. Send it with a "
+        + "short description of the problem to Pharaphobia on Discord or attach it to a GitHub issue, "
+        + "not to ArenaNet's support. It includes "
         + "the crash reports of the game, Wine and GW2 on Mac from the last 7 days, and contains no "
         + "account names or passwords."
       alert.addButton(withTitle: "Show in Finder")
@@ -560,6 +574,10 @@ struct AppCommands: Commands {
         .disabled(logs.busy)
     }
     CommandGroup(replacing: .newItem) {}
+    CommandGroup(replacing: .help) {
+      Link("Get Help on Discord", destination: Support.discord)
+      Link("Report a Problem on GitHub", destination: Support.issues)
+    }
   }
 }
 

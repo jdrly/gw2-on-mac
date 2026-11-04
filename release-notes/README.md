@@ -23,8 +23,9 @@ Open GW2 on Mac and click *Repair* in the window (with the game and Steam closed
 
 ### Support
 GW2 on Mac is an unofficial project, not made, endorsed or supported by ArenaNet or NCSOFT, and
-you use it at your own risk. Please send questions and bug reports as a
-[GitHub issue](https://github.com/jdrly/gw2-on-mac/issues), never to ArenaNet's support.
+you use it at your own risk. Please send questions and bug reports to Pharaphobia on
+[Discord](https://discord.gg/AnV3fZWz2b) or as a [GitHub issue](https://github.com/jdrly/gw2-on-mac/issues),
+never to ArenaNet's support.
 ```
 
 | Part | Required |
@@ -41,3 +42,5 @@ you use it at your own risk. Please send questions and bug reports as a
   the update window doesn't format them.
 - Development builds (`<version>-dev.N`) use the same structure, with `(development build)` after
   the version in the title.
+- Support links both [Discord](https://discord.gg/AnV3fZWz2b) (the server SWTOR on Mac and
+  gw2onmac.com use) and the GitHub issues: not everybody who plays has a GitHub account.
