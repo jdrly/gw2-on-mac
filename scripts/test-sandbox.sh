@@ -184,7 +184,8 @@ check "set ncpu 6: WINENCPU=6" sh -c "'$G' set ncpu 6 >/dev/null && '$G' env | g
 check "set fpscap 60: dxmt.conf caps at 60" sh -c "'$G' set fpscap 60 >/dev/null && grep -q 'd3d11.preferredMaxFrameRate = 60' '$AD/dxmt.conf'"
 check "set fpscap off: no cap" sh -c "'$G' set fpscap off >/dev/null && ! grep -q preferredMaxFrameRate '$AD/dxmt.conf'"
 check "set metalfx on: DXMT_SUBSAMPLE_METALFX=1" sh -c "'$G' set metalfx on >/dev/null && '$G' env | grep -qx DXMT_SUBSAMPLE_METALFX=1"
-check "set hud on: MTL_HUD_ENABLED=1" sh -c "'$G' set hud on >/dev/null && '$G' env | grep -qx MTL_HUD_ENABLED=1"
+check "set hud on: WINE_HEAT_METAL_HUD=1, no MTL_HUD_ENABLED in Steam's environment" sh -c "'$G' set hud on >/dev/null && '$G' env | grep -qx WINE_HEAT_METAL_HUD=1 && ! '$G' env | grep -q MTL_HUD_ENABLED"
+check "set hud off: no WINE_HEAT_METAL_HUD" sh -c "'$G' set hud off >/dev/null && ! '$G' env | grep -q WINE_HEAT_METAL_HUD"
 check "set debug on: DXMT_LOG_LEVEL=debug and the heat counters" sh -c "'$G' set debug on >/dev/null && '$G' env | grep -qx DXMT_LOG_LEVEL=debug && '$G' env | grep -qx WINE_HEAT_COUNT=1"
 g set retina off >/dev/null; check "set retina off: RetinaMode=n" reg 'Software\\\\Wine\\\\Mac Driver' RetinaMode n
 g set retina on >/dev/null; check "set retina on: RetinaMode=y" reg 'Software\\\\Wine\\\\Mac Driver' RetinaMode y

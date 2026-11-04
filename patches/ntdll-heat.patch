@@ -21,7 +21,7 @@
              req->handle = wine_server_obj_handle( handle );
 --- /dev/null
 +++ b/dlls/ntdll/unix/heat.c
-@@ -0,0 +1,1434 @@
+@@ -0,0 +1,1470 @@
 +/*
 + * GW2 on Mac heat probes and opt-in tweaks for one process (WINE_HEAT_*)
 + *
@@ -89,6 +89,12 @@
 + *   WINE_HEAT_NAMEPRI=<name>=<class>;...  a thread that names itself <name>
 + *                           (SetThreadDescription) gets that class or base priority, as
 + *                           WINE_HEAT_QOS; e.g. "bgfx - renderer backend thread=35"
++ *   WINE_HEAT_METAL_HUD=1   sets MTL_HUD_ENABLED=1 in this process's unix environment, unless
++ *                           it is already set: the Metal HUD on the game only, not on Steam.
++ *                           Metal reads it once, at the process's first device, and winemac
++ *                           creates that device before d3d11/dxgi load, so it can't be done there
++ *                           (jdrly/dxmt #138). The Windows environment isn't changed: the game's
++ *                           own child processes don't inherit it.
 + *
 + * See gw2-on-mac docs/research/heat-workers-2026-10-28.md and heat-locks-2026-10-29.md.
 + *
@@ -1317,6 +1323,33 @@
 +    return NULL;
 +}
 +
++/* WINE_HEAT_METAL_HUD: called once by heat_decide, before any PE code (and so before winemac's
++ * first Metal device); one line to stderr, and to the heat log when WINE_HEAT_LOG is set */
++static void heat_metal_hud(void)
++{
++    const char *old = getenv( "MTL_HUD_ENABLED" ), *dir = getenv( "WINE_HEAT_LOG" );
++    char path[1024], line[256];
++    FILE *f;
++
++    if (old)
++        snprintf( line, sizeof(line), "heat pid %d metal_hud: MTL_HUD_ENABLED=%s already set, kept\n",
++                  (int)getpid(), old );
++    else
++    {
++        setenv( "MTL_HUD_ENABLED", "1", 0 );
++        snprintf( line, sizeof(line), "heat pid %d metal_hud: MTL_HUD_ENABLED=1 set (WINE_HEAT_METAL_HUD)\n",
++                  (int)getpid() );
++    }
++    fputs( line, stderr );
++    if (!dir || !*dir) return;
++    snprintf( path, sizeof(path), "%s/heat-%d.log", dir, (int)getpid() );
++    if ((f = fopen( path, "a" )))
++    {
++        fputs( line, f );
++        fclose( f );
++    }
++}
++
 +/***********************************************************************
 + *  heat_decide
 + *
@@ -1331,11 +1364,13 @@
 +    const char *prof = getenv( "WINE_HEAT_PROF" ), *control = getenv( "WINE_HEAT_CONTROL" );
 +    const char *spin = getenv( "WINE_HEAT_SPIN" ), *lazyclock = getenv( "WINE_HEAT_LAZYCLOCK" );
 +    const char *unreg = getenv( "WINE_HEAT_MSYNC_UNREG" ), *portfix = getenv( "WINE_HEAT_MSYNC_PORTFIX" );
++    const char *metalhud = getenv( "WINE_HEAT_METAL_HUD" );
 +    RTL_USER_PROCESS_PARAMETERS *params;
 +    const WCHAR *path, *base;
 +    unsigned int mode = 0, i, len;
 +
-+    if (!count && !evpool && !qos && !wake && !names && !prof && !control && !spin && !lazyclock && !unreg && !portfix) goto done;
++    if (!count && !evpool && !qos && !wake && !names && !prof && !control && !spin && !lazyclock && !unreg && !portfix
++        && !metalhud) goto done;
 +    if (!peb || !(params = peb->ProcessParameters) || !params->ImagePathName.Length) return 0;
 +    path = params->ImagePathName.Buffer;
 +    if (!(params->Flags & PROCESS_PARAMS_FLAG_NORMALIZED)) path = (const WCHAR *)((const char *)params + (ULONG_PTR)path);
@@ -1354,6 +1389,7 @@
 +    }
 +    if (*s || base != path + len) goto done;
 +
++    if (metalhud && atoi( metalhud )) heat_metal_hud();  /* not a mode: nothing to probe */
 +    if (count && atoi( count )) mode |= HEAT_COUNT;
 +    if (evpool && atoi( evpool )) mode |= HEAT_EVPOOL;
 +    if (qos && heat_parse_qos( qos )) mode |= HEAT_QOS;

@@ -593,7 +593,10 @@ game_env() {
   )
   n=$(setting ncpu)
   [ "$n" = all ] || E+=("WINENCPU=$n")
-  [ "$(setting hud)" = on ] && E+=("MTL_HUD_ENABLED=1")
+  # the Metal HUD on the game only: the heat ntdll.so sets MTL_HUD_ENABLED=1 in Gw2-64.exe at its
+  # start (Metal reads it at a process's first device); in Steam's environment every process
+  # Steam starts would show it (jdrly/dxmt #138)
+  [ "$(setting hud)" = on ] && E+=("WINE_HEAT_METAL_HUD=1")
   [ "$(setting warm)" = on ] && E+=("DXMT_WARM=all")
   [ "$(setting metalfx)" = on ] && E+=("DXMT_SUBSAMPLE_METALFX=1")
   qos=$(setting coolworkers)

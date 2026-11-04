@@ -23,7 +23,7 @@
 #
 # Sources: GW2_ON_MAC_WORKSPACE (default ../gw2-on-mac, next to this repository) and in it
 # (defaults: the live engine's builds on 2026-11-04, DXMT the fork's 9eb7668 with DXMT_CACHE_DIR):
-#   DXMT_INSTALL=work/dxmt-rollback/9eb7668-install   HEAT_INSTALL=work/heat/install-r7b
+#   DXMT_INSTALL=work/dxmt-rollback/9eb7668-install   HEAT_INSTALL=work/heat/install-r7c
 #   WINEMAC_INSTALL=work/winemac/install              UISCALE_BUILD=work/ui-scale/build
 # (relative to the workspace, or absolute)
 #
@@ -37,7 +37,7 @@ WS="${GW2_ON_MAC_WORKSPACE:-$ROOT/../gw2-on-mac}"
 WS="$(cd "$WS" && pwd)"
 in_ws() { case "$1" in /*) echo "$1" ;; *) echo "$WS/$1" ;; esac; }
 DXMT_INSTALL="$(in_ws "${DXMT_INSTALL:-work/dxmt-rollback/9eb7668-install}")"
-HEAT_INSTALL="$(in_ws "${HEAT_INSTALL:-work/heat/install-r7b}")"
+HEAT_INSTALL="$(in_ws "${HEAT_INSTALL:-work/heat/install-r7c}")"
 WINEMAC_INSTALL="$(in_ws "${WINEMAC_INSTALL:-work/winemac/install}")"
 UISCALE_BUILD="$(in_ws "${UISCALE_BUILD:-work/ui-scale/build}")"
 

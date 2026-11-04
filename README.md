@@ -147,7 +147,7 @@ use). The defaults are the mix Jan plays with.
 | Graphics | Retina (`retina`) | on | `RetinaMode` in the bottle (Wine's High Resolution Mode) |
 | | Frame cap (`fpscap`) | off | `d3d11.preferredMaxFrameRate` in `dxmt.conf` (30, 40, 60, 120) |
 | | MetalFX for Subsample (`metalfx`) | off | `DXMT_SUBSAMPLE_METALFX=1` (experimental) |
-| | Metal HUD (`hud`) | off | `MTL_HUD_ENABLED=1` |
+| | Metal HUD (`hud`) | off | `WINE_HEAT_METAL_HUD=1`: the heat `ntdll.so` sets `MTL_HUD_ENABLED=1` in `Gw2-64.exe` only, at its start, so Steam's windows don't show the HUD |
 | Performance | Shader warming (`warm`) | on | `DXMT_WARM=all`: pipelines built ahead by recent use, up to 8,192 |
 | | Cooler job workers (`coolworkers`) | 3 | `WINE_HEAT_QOS=1=utility:<n>`: the first n ABOVE_NORMAL job workers on the cooler cores; off |
 | | Faster locks (`fastlocks`) | on | `WINE_HEAT_SPIN=lock=20:game,event=30:game` |
@@ -212,7 +212,7 @@ scripts/stage-components.sh    # copy DXMT, the heat Wine pieces, winemac and th
   workspace, whose build scripts are not in this repository. `stage-components.sh` copies them
   from that workspace: `GW2_ON_MAC_WORKSPACE` (default `../gw2-on-mac`, next to this
   repository), and in it the builds the app ships (`work/dxmt-rollback/9eb7668-install`,
-  `work/heat/install-r7b`, `work/winemac/install`, `work/ui-scale/build`; override with
+  `work/heat/install-r7c`, `work/winemac/install`, `work/ui-scale/build`; override with
   `DXMT_INSTALL`, `HEAT_INSTALL`, `WINEMAC_INSTALL`, `UISCALE_BUILD`). It changes nothing in the
   workspace and checks each file against its build record and this repository's
   [`patches/`](patches). `prebuilt/` is ignored by git.
