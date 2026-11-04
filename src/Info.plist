@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>GW2 on Mac</string>
+	<key>CFBundleExecutable</key>
+	<string>GW2onMac</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>cz.jandrly.gw2onmac</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>GW2 on Mac</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@BUILD@</string>
+	<!-- release or dev (build.sh: development builds X.Y.Z-dev.N) -->
+	<key>GW2Channel</key>
+	<string>@CHANNEL@</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<key>LSArchitecturePriority</key>
+	<array>
+		<string>arm64</string>
+	</array>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Collect Logs saves its zip file to your Desktop.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Unofficial. Not made, endorsed or supported by ArenaNet or NCSOFT. Guild Wars 2 is a trademark of NCSOFT Corporation.</string>
+	<!-- Sparkle (src/native/Updates.swift), wired as in SWTOR on Mac but OFF: there is no feed
+	     yet, so SUFeedURL is empty and there is no SUPublicEDKey; the app then never starts
+	     Sparkle. Releasing (README) sets both: the feed of the latest GitHub release and the
+	     public EdDSA key. Installing always takes a click. -->
+	<key>SUFeedURL</key>
+	<string></string>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<false/>
+	<key>SUAllowsAutomaticUpdates</key>
+	<false/>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+</dict>
+</plist>
