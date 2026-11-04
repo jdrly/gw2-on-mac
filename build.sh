@@ -12,7 +12,9 @@
 #                                      prebuilt/ by scripts/stage-components.sh from this repo's
 #                                      builds: dxmt/ (the jdrly/dxmt fork), heat/ (ntdll.so and
 #                                      wineserver), winemac/ (winemac.so, win32u.so), ui-scale/
-#                                      (the interface addon), gamemode-Info.plist
+#                                      (the interface addon)
+#   Contents/Resources/helpers/procpaths  every process's real executable (gw2om.sh's process
+#                                      check; src/helpers/procpaths.c)
 #   Contents/Resources/Fonts/, Art/    the design's typefaces (SIL OFL) and artwork
 #   Contents/Resources/Licenses/       licences of the app and everything bundled
 # The Wine engine is not bundled: gw2om.sh downloads it at install time from athei's wine-build
@@ -154,7 +156,10 @@ C="$R/components"
 mkdir -p "$C"
 cp -R "$P/dxmt" "$P/heat" "$P/winemac" "$P/ui-scale" "$C/"
 chmod 755 "$C/dxmt/x86_64-unix/winemetal.so" "$C/heat/ntdll.so" "$C/heat/wineserver" "$C/winemac/winemac.so" "$C/winemac/win32u.so"
-install -m 644 "$REPO/config/gamemode-Info.plist" "$C/gamemode-Info.plist"
+
+# The process lister gw2om.sh tells its own Wine processes by (proc_pidpath)
+mkdir -p "$R/helpers"
+clang -O2 -arch arm64 -mmacosx-version-min=$MACOS_MIN -o "$R/helpers/procpaths" src/helpers/procpaths.c
 
 # Licences: the app's own (zlib), the overview of what is bundled and what is downloaded
 # (THIRD_PARTY_NOTICES.md), and each component's
@@ -231,6 +236,7 @@ xattr -cr "$APP"
 # matches its own signature (release.sh signs it for real, in the same order).
 fw="$APP/Contents/Frameworks/Sparkle.framework"
 for f in "$fw/Versions/B/Autoupdate" "$fw/Versions/B/Updater.app" "$fw"; do codesign --force --sign - "$f"; done
+codesign --force --sign - "$R/helpers/procpaths"
 codesign --force --sign - "$APP"
 codesign --verify --strict "$APP"
 echo "Built $APP ($(du -sh "$APP" | cut -f1))"

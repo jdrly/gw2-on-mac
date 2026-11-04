@@ -11,26 +11,29 @@ import AppKit
 extension Installer {
   nonisolated static let gameBundleID = "cz.jandrly.gw2onmac.game"
 
-  // Starts the game (or brings it to the front); then: an error to show, or nil
-  func play(then: @escaping (String?) -> Void) {
+  // Starts the game (or brings it to the front); then: a message to show (an error, or a notice
+  // when it started), or nil
+  func play(then: @escaping (_ message: String?, _ started: Bool) -> Void) {
     if let game = NSRunningApplication.runningApplications(withBundleIdentifier: Installer.gameBundleID).first {
       game.activate()
-      then(nil)
+      then(nil, true)
       return
     }
-    guard ready else { then("Install Guild Wars 2 first."); return }
+    guard ready else { then("Install Guild Wars 2 first.", false); return }
     guard !launching else { return }
     launching = true
     let script = script
     Task {
       let output = await Installer.capture(script: script, arguments: ["play"])
       launching = false
-      let error = output.contains("@done ") ? nil
+      // an error, or a notice worth showing (Steam still runs with the settings it started with)
+      let notice = output.split(separator: "\n").first { $0.hasPrefix("@notice ") }.map { String($0.dropFirst(8)) }
+      let error = output.contains("@done ") ? notice
         : output.split(separator: "\n").first { $0.hasPrefix("@error ") }.map { String($0.dropFirst(7)) }
           ?? "The game could not be started. Details are in ~/Library/Logs/GW2 on Mac/wine.log."
       refresh()
-      then(error)
-      if error == nil, UserDefaults.standard.bool(forKey: Installer.quitAfterLaunchKey) {
+      then(error, output.contains("@done "))
+      if output.contains("@done "), UserDefaults.standard.bool(forKey: Installer.quitAfterLaunchKey) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { NSApp.terminate(nil) }
       }
     }

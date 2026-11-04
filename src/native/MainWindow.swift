@@ -133,8 +133,10 @@ struct MainView: View {
   }
 
   private func play() {
-    installer.play { error in
-      if let error { blocked = Blocked(title: "Can't start Guild Wars 2", message: error) }
+    installer.play { message, started in
+      if let message {
+        blocked = Blocked(title: started ? "Starting Guild Wars 2" : "Can't start Guild Wars 2", message: message)
+      }
     }
   }
 }
@@ -702,7 +704,8 @@ struct InstallingPanel: View {
 
   // The current step's detail shows what it downloads ("SteamSetup.exe · 2.1 of 3.4 MB")
   private func detail(_ index: Int, _ step: Installer.Step) -> String {
-    guard index == installer.stepIndex, let p = installer.progress, p.total > 0 else { return step.detail }
+    guard index == installer.stepIndex, let p = installer.progress else { return step.detail }
+    if p.total <= 0 { return p.done > 0 ? "\(p.label) · \(Installer.gigabytes(p.done)) so far" : step.detail }
     if p.total > 2_000_000_000 {
       return "\(p.label) · \(Installer.gigabytes(p.done)) of \(Installer.gigabytes(p.total))"
     }

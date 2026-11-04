@@ -169,24 +169,28 @@ final class Installer {
   private func applyStatus(_ values: [String: String]) {
     status = values
     // A game install that waits for Steam or ArenaNet's installer picks up where it was after
-    // the app restarts; once the game is there, the finishing touches run
+    // the app restarts; once the game is there, the finishing touches run (once: a failed finish
+    // waits for Install or Repair)
+    guard !isOperating else { return }
     if values["stage"] == "waiting_game" {
       if values["game"] == "yes" {
-        if phase == .waitingForGame || phase == .idle { start(.finish) }
-      } else if phase == .idle || phase == .waitingForGame {
+        if phase != .failed(.finish, lastFinishError) { start(.finish) }
+      } else {
         operation = .install
         phase = .waitingForGame
         stepIndex = 3
-        if let done = Int64(values["game_bytes"] ?? ""), let total = Int64(values["game_total"] ?? ""), total > 0 {
-          progress = Progress(label: "Guild Wars 2", done: done, total: total)
-        } else {
-          progress = nil
-        }
+        let done = Int64(values["game_bytes"] ?? "") ?? 0, total = Int64(values["game_total"] ?? "") ?? 0
+        // (ArenaNet's installer: how much is there, no total)
+        progress = done > 0 || total > 0 ? Progress(label: "Guild Wars 2", done: done, total: total) : nil
         scheduleGameWatch()
       }
     } else if phase == .waitingForGame {
       phase = .idle
     }
+  }
+  private var lastFinishError: String {
+    if case .failed(.finish, let m) = phase { return m }
+    return ""
   }
 
   // While Steam or ArenaNet's installer downloads the game: a look every few seconds (status

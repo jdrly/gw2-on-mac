@@ -1,0 +1,312 @@
+#!/bin/bash
+# End-to-end test of the backend (Resources/gw2om.sh of a built app) in a sandbox, without the real
+# Wine and without touching anything outside the sandbox: GW2_ON_MAC_ROOT puts every path the app
+# uses under $SANDBOX, and the engine is a stand-in archive whose bin/wine only pretends (it makes
+# a bottle's files for wineboot, "installs" Steam for SteamSetup.exe /S and logs every start with
+# its environment). Steam's and ArenaNet's downloads of the game are played by this script
+# (Steam's appmanifest, the game folder). Processes for the busy checks are copies of /bin/sleep
+# at the engine's paths. The ArenaNet installer is a clone of a file signed by ArenaNet (by
+# default the game's own Gw2-64.exe from Jan's bottle, only read).
+#
+#   app/scripts/test-sandbox.sh [path/to/GW2 on Mac.app]
+#
+# Env: SANDBOX (default work/app-sandbox/test, removed first), KEEP=1 (leave it for a look),
+#      SIGNED_PE (an x86_64 PE signed by ArenaNet; default the game's Gw2-64.exe in work/bottles)
+# Runs under macOS's /bin/bash 3.2.
+set -uo pipefail
+cd "$(dirname "$0")/../.."
+REPO="$PWD"
+APP="$(cd "${1:-app/dist/GW2 on Mac.app}" && pwd)"
+G="$APP/Contents/Resources/gw2om.sh"
+[ -f "$G" ] || { echo "no $G; run app/build.sh" >&2; exit 1; }
+SANDBOX="${SANDBOX:-$REPO/work/app-sandbox/test}"
+case "$SANDBOX" in "$REPO"/work/app-sandbox/*) ;; *) echo "SANDBOX must be under work/app-sandbox/" >&2; exit 1 ;; esac
+SIGNED_PE="${SIGNED_PE:-$REPO/work/bottles/gw2/drive_c/Program Files (x86)/Steam/steamapps/common/Guild Wars 2/Gw2-64.exe}"
+rm -rf "$SANDBOX"
+mkdir -p "$SANDBOX"
+SANDBOX="$(cd "$SANDBOX" && pwd -P)"
+H="$SANDBOX/home"
+AD="$H/Library/Application Support/GW2 on Mac"
+LOGS="$H/Library/Logs/GW2 on Mac"
+CACHE="$H/Library/Caches/GW2 on Mac"
+ENG="$AD/engine"
+BOTTLE="$AD/bottle"
+STEAM="$BOTTLE/drive_c/Program Files (x86)/Steam"
+DXMT_CACHE="$SANDBOX/usercache/dxmt/Gw2-64.exe"
+STANDIN_LOG="$SANDBOX/standin.log"
+COMP="$APP/Contents/Resources/components"
+mkdir -p "$H" "$SANDBOX/usertmp" "$SANDBOX/usercache"
+
+pass=0 fail=0
+ok() { pass=$((pass + 1)); echo "  ok   $*"; }
+bad() { fail=$((fail + 1)); echo "  FAIL $*"; }
+check() { local what=$1; shift; if "$@"; then ok "$what"; else bad "$what"; fi; }
+section() { echo; echo "== $*"; }
+g() { "$G" "$@"; }
+st() { g status | sed -n "s/^$1=//p"; }
+sett() { g settings | sed -n "s/^$1=//p"; }
+has() { grep -q -- "$2" "$1" 2>/dev/null; }
+reg() { grep -A3 "^\[$1\]" "$BOTTLE/user.reg" 2>/dev/null | grep -q "^\"$2\"=\"$3\""; }
+same() { cmp -s "$1" "$2"; }
+
+# --- The stand-in engine: the real engine's layout, files that only pretend
+section "Stand-in engine and downloads"
+S="$SANDBOX/standin/wine"
+mkdir -p "$S/bin" "$S/lib/wine/x86_64-unix" "$S/include" "$S/share/man"
+for a in x86_64-windows i386-windows x86_64-unix; do
+  mkdir -p "$S/lib/wine/dxgi/dxmt/$a"
+  for f in d3d11.dll dxgi.dll d3d10core.dll winemetal.dll d3d10.dll; do echo "engine's $f" >"$S/lib/wine/dxgi/dxmt/$a/$f"; done
+done
+rm -f "$S/lib/wine/dxgi/dxmt/x86_64-unix/"*.dll && echo "engine's winemetal.so" >"$S/lib/wine/dxgi/dxmt/x86_64-unix/winemetal.so"
+for f in ntdll.so winemac.so win32u.so; do echo "engine's $f" >"$S/lib/wine/x86_64-unix/$f"; done
+cp /usr/bin/true "$S/lib/wine/x86_64-unix/wine"
+cat >"$S/bin/wineserver" <<'EOF'
+#!/bin/bash
+# stand-in wineserver: nothing runs, so -k and -w have nothing to do
+echo "wineserver $*" >>"$STANDIN_LOG"
+EOF
+cat >"$S/bin/wine" <<'EOF'
+#!/bin/bash
+# stand-in wine: pretends, and logs each start with the environment the game would get
+{ echo "wine $*"; env | grep -E '^(WINE|DXMT_|MTL_|ROSETTA_)' | grep -v '^WINE_COMPATDB' | sort | sed 's/^/  /'; } >>"$STANDIN_LOG"
+case "${1:-}" in
+  wineboot)
+    mkdir -p "$WINEPREFIX/drive_c/windows/system32" "$WINEPREFIX/drive_c/users/crossover"
+    printf 'WINE REGISTRY Version 2\n;; All keys relative to \\\\Machine\n' >"$WINEPREFIX/system.reg"
+    printf 'WINE REGISTRY Version 2\n;; All keys relative to \\\\User\\\\S-1-5-21\n\n[Software\\\\Wine] 1700000000\n#time=1\n' >"$WINEPREFIX/user.reg"
+    cp "$WINEPREFIX/system.reg" "$WINEPREFIX/userdef.reg" ;;
+  *SteamSetup.exe)
+    mkdir -p "$WINEPREFIX/drive_c/Program Files (x86)/Steam/steamapps"
+    echo "stand-in steam" >"$WINEPREFIX/drive_c/Program Files (x86)/Steam/steam.exe" ;;
+esac
+EOF
+chmod 755 "$S/bin/wine" "$S/bin/wineserver"
+export STANDIN_LOG
+( cd "$SANDBOX/standin" && tar -cJf ../engine.tar.xz wine )
+echo "stand-in SteamSetup.exe" >"$SANDBOX/SteamSetup.exe"
+export GW2_ON_MAC_ROOT="$SANDBOX"
+export GW2_ON_MAC_ENGINE_URL="file://$SANDBOX/engine.tar.xz"
+export GW2_ON_MAC_ENGINE_SHA256="$(shasum -a 256 "$SANDBOX/engine.tar.xz" | cut -d' ' -f1)"
+export GW2_ON_MAC_ENGINE_SIZE="$(stat -f %z "$SANDBOX/engine.tar.xz")"
+export GW2_ON_MAC_ENGINE_CHECKS=0
+export GW2_ON_MAC_STEAMSETUP_URL="file://$SANDBOX/SteamSetup.exe"
+unset GW2_ON_MAC_DRY_RUN GW2_ON_MAC_ALLOW_WINE GW2_ON_MAC_SIGNER
+ok "stand-in engine ($GW2_ON_MAC_ENGINE_SIZE bytes) and SteamSetup.exe"
+
+# --- Dry runs change nothing
+section "Dry runs"
+out=$(GW2_ON_MAC_DRY_RUN=1 g install steam 2>&1); rc=$?
+check "dry-run install steam exits 0" [ "$rc" = 0 ]
+check "dry-run install steam reaches phase 4" has <(echo "$out") "@phase 4"
+check "dry-run prints the game's environment" has <(echo "$out") "WINE_HEAT_EVPOOL=1"
+check "dry-run creates nothing" eval '[ ! -e "$AD" ] && [ ! -e "$CACHE" ]'
+check "fresh status: not installed" [ "$(st installed)" = no ]
+check "fresh status: no engine" [ "$(st engine_installed)" = no ]
+check "fresh status: rosetta answered" [ -n "$(st rosetta)" ]
+check "fresh status: disk_free is a number" [ "$(st disk_free)" -gt 0 ]
+
+# --- Steam route
+section "Install through Steam"
+out=$(g install steam 2>&1) && rc=0 || rc=$?
+check "install steam exits 0" [ "$rc" = 0 ]
+check "the phases 1-4 in order" [ "$(echo "$out" | grep '^@phase' | tr '\n' ' ')" = "@phase 1 @phase 2 @phase 3 @phase 4 " ]
+check "@progress lines for the engine" has <(echo "$out") "@progress Wine engine"
+check "installed=yes" [ "$(st installed)" = yes ]
+check "engine_installed=yes" [ "$(st engine_installed)" = yes ]
+check "graphics=yes (DXMT and the Wine pieces in place)" [ "$(st graphics)" = yes ]
+check "gamemode=yes" [ "$(st gamemode)" = yes ]
+check "steam=yes" [ "$(st steam)" = yes ]
+check "stage=waiting_game" [ "$(st stage)" = waiting_game ]
+check "route=steam" [ "$(st route)" = steam ]
+check "game=no yet" [ "$(st game)" = no ]
+check "DXMT's d3d11.dll in the engine's dxmt tree" same "$COMP/dxmt/x86_64-windows/d3d11.dll" "$ENG/lib/wine/dxgi/dxmt/x86_64-windows/d3d11.dll"
+check "DXMT's winemetal.so in the tree" same "$COMP/dxmt/x86_64-unix/winemetal.so" "$ENG/lib/wine/dxgi/dxmt/x86_64-unix/winemetal.so"
+check "the engine's own d3d10.dll stays in the tree" has "$ENG/lib/wine/dxgi/dxmt/x86_64-windows/d3d10.dll" "engine's"
+check "heat ntdll.so in, the engine's kept as .stock" eval 'same "$COMP/heat/ntdll.so" "$ENG/lib/wine/x86_64-unix/ntdll.so" && has "$ENG/lib/wine/x86_64-unix/ntdll.so.stock" "engine"'
+check "wineserver in, the stand-in kept as .stock" eval 'same "$COMP/heat/wineserver" "$ENG/bin/wineserver" && [ -f "$ENG/bin/wineserver.stock" ]'
+check "winemac.so and win32u.so in" eval 'same "$COMP/winemac/winemac.so" "$ENG/lib/wine/x86_64-unix/winemac.so" && same "$COMP/winemac/win32u.so" "$ENG/lib/wine/x86_64-unix/win32u.so"'
+check "the engine's SDK removed" eval '[ ! -e "$ENG/include" ] && [ ! -e "$ENG/share/man" ]'
+check "RetinaMode=y in the bottle" reg 'Software\\\\Wine\\\\Mac Driver' RetinaMode y
+check "Game Mode bundle with LSSupportsGameMode" has "$AD/gamemode/GW2.app/Contents/Info.plist" LSSupportsGameMode
+check "Game Mode bundle's ntdll.so link resolves" [ -f "$AD/gamemode/GW2.app/Contents/MacOS/ntdll.so" ]
+check "Steam started with the install page" has "$STANDIN_LOG" 'wine C:\\Program Files (x86)\\Steam\\steam.exe steam://install/1284210'
+check "  with the heat event pool" has "$STANDIN_LOG" "WINE_HEAT_EVPOOL=1"
+check "  with shader warming by use" has "$STANDIN_LOG" "DXMT_WARM=all"
+check "  with 3 cooler workers" has "$STANDIN_LOG" "WINE_HEAT_QOS=1=utility:3"
+check "  with WINEDLLPATH (Game Mode)" has "$STANDIN_LOG" "WINEDLLPATH=$ENG/lib/wine"
+check "  with x87sidecar off" has "$STANDIN_LOG" "ROSETTA_X87_PATH="
+check "the Game Mode link in the sandbox's temp folder" sh -c "ls '$SANDBOX/usertmp/'winetemp-*/Gw2-64.exe >/dev/null 2>&1"
+check "logs/session.env written" has "$LOGS/session.env" "SETTING_warm=on"
+check "the manifest" has "$AD/install-manifest.json" '"route": "steam"'
+check "install.log" has "$LOGS/install.log" "install steam"
+
+section "Steam downloads the game (played by the test)"
+m="$STEAM/steamapps/appmanifest_1284210.acf"
+printf '"AppState"\n{\n\t"appid"\t\t"1284210"\n\t"installdir"\t\t"Guild Wars 2"\n\t"StateFlags"\t\t"1026"\n\t"BytesToDownload"\t\t"58900000000"\n\t"BytesDownloaded"\t\t"21400000000"\n}\n' >"$m"
+check "game=no while downloading" [ "$(st game)" = no ]
+check "game_bytes/game_total from the appmanifest" [ "$(st game_bytes)/$(st game_total)" = 21400000000/58900000000 ]
+mkdir -p "$STEAM/steamapps/common/Guild Wars 2"
+echo "stand-in game" >"$STEAM/steamapps/common/Guild Wars 2/Gw2-64.exe"
+sed -i '' 's/"1026"/"4"/' "$m"
+check "game=yes once StateFlags is 4" [ "$(st game)" = yes ]
+out=$(g play 2>&1) && rc=0 || rc=$?
+check "play refuses before the finishing touches" [ "$rc" != 0 ]
+out=$(g finish 2>&1) && rc=0 || rc=$?
+check "finish exits 0" [ "$rc" = 0 ]
+check "  phase 5" has <(echo "$out") "@phase 5"
+check "stage=finished" [ "$(st stage)" = finished ]
+check "DXMT's cache folder" [ -d "$DXMT_CACHE" ]
+
+section "Settings"
+check "defaults: warm on, coolworkers 3, fastlocks on, ncpu 8, uiscale off" \
+  [ "$(sett warm)$(sett coolworkers)$(sett fastlocks)$(sett ncpu)$(sett uiscale)" = on3on8off ]
+check "set coolworkers 5" g set coolworkers 5
+check "  WINE_HEAT_QOS=1=utility:5 in the environment" has <(g env) "WINE_HEAT_QOS=1=utility:5"
+check "set coolworkers off: no WINE_HEAT_QOS" sh -c "'$G' set coolworkers off >/dev/null && ! '$G' env | grep -q WINE_HEAT_QOS"
+check "set fastlocks off: no WINE_HEAT_SPIN" sh -c "'$G' set fastlocks off >/dev/null && ! '$G' env | grep -q WINE_HEAT_SPIN"
+check "set warm off: no DXMT_WARM" sh -c "'$G' set warm off >/dev/null && ! '$G' env | grep -q DXMT_WARM"
+check "set ncpu all: no WINENCPU" sh -c "'$G' set ncpu all >/dev/null && ! '$G' env | grep -q WINENCPU"
+check "set ncpu 6: WINENCPU=6" sh -c "'$G' set ncpu 6 >/dev/null && '$G' env | grep -qx WINENCPU=6"
+check "set fpscap 60: dxmt.conf caps at 60" sh -c "'$G' set fpscap 60 >/dev/null && grep -q 'd3d11.preferredMaxFrameRate = 60' '$AD/dxmt.conf'"
+check "set fpscap off: no cap" sh -c "'$G' set fpscap off >/dev/null && ! grep -q preferredMaxFrameRate '$AD/dxmt.conf'"
+check "set metalfx on: DXMT_SUBSAMPLE_METALFX=1" sh -c "'$G' set metalfx on >/dev/null && '$G' env | grep -qx DXMT_SUBSAMPLE_METALFX=1"
+check "set hud on: MTL_HUD_ENABLED=1" sh -c "'$G' set hud on >/dev/null && '$G' env | grep -qx MTL_HUD_ENABLED=1"
+check "set debug on: DXMT_LOG_LEVEL=debug and the heat counters" sh -c "'$G' set debug on >/dev/null && '$G' env | grep -qx DXMT_LOG_LEVEL=debug && '$G' env | grep -qx WINE_HEAT_COUNT=1"
+g set retina off >/dev/null; check "set retina off: RetinaMode=n" reg 'Software\\\\Wine\\\\Mac Driver' RetinaMode n
+g set retina on >/dev/null; check "set retina on: RetinaMode=y" reg 'Software\\\\Wine\\\\Mac Driver' RetinaMode y
+check "set gamemode off: no WINEDLLPATH" sh -c "'$G' set gamemode off >/dev/null && ! '$G' env | grep -q WINEDLLPATH && [ \"\$('$G' status | sed -n 's/^gamemode=//p')\" = off ]"
+g set gamemode on >/dev/null
+check "set launchopts -maploadinfo" g set launchopts "-maploadinfo"
+check "launchopts with a ; refused" sh -c "! '$G' set launchopts '-x; rm -rf /' >/dev/null"
+check "unknown value refused (exit 2)" sh -c "'$G' set ncpu 7 >/dev/null; [ \$? = 2 ]"
+check "unknown key refused" sh -c "! '$G' set colour red >/dev/null"
+check "settings.conf has every key" [ "$(grep -c '=' "$AD/settings.conf")" = 16 ]
+
+section "The larger interface (addon)"
+GD="$STEAM/steamapps/common/Guild Wars 2"
+check "uiscale_state=off by default" [ "$(sett uiscale_state)" = off ]
+check "set uiscale on" g set uiscale on
+check "  version.dll in the game folder" same "$COMP/ui-scale/version.dll" "$GD/version.dll"
+check "  the ini: scale 1.75, sans cronos, cinema 1" sh -c "grep -qx 'scale=1.75' '$GD/gw2-ui-scale.ini' && grep -qx 'sans=cronos' '$GD/gw2-ui-scale.ini' && grep -qx 'cinema=1' '$GD/gw2-ui-scale.ini'"
+check "  the override for Gw2-64.exe" reg 'Software\\\\Wine\\\\AppDefaults\\\\Gw2-64.exe\\\\DllOverrides' version native,builtin
+check "  uiscale_state=on" [ "$(sett uiscale_state)" = on ]
+check "set uiscale_size 2.0 and sans off: the ini follows" sh -c "'$G' set uiscale_size 2.0 >/dev/null && '$G' set uiscale_sans off >/dev/null && grep -qx 'scale=2.0' '$GD/gw2-ui-scale.ini' && grep -qx 'sans=keep' '$GD/gw2-ui-scale.ini'"
+echo "addon log" >"$GD/gw2-ui-scale.log"
+check "set uiscale off: dll, ini and override gone, the log moved to Logs" sh -c "'$G' set uiscale off >/dev/null && [ ! -e '$GD/version.dll' ] && [ ! -e '$GD/gw2-ui-scale.ini' ] && [ ! -e '$GD/gw2-ui-scale.log' ] && ls '$LOGS'/gw2-ui-scale-*.log >/dev/null"
+check "  the override removed" sh -c "! grep -q '^\"version\"=' '$BOTTLE/user.reg'"
+echo "another addon" >"$GD/version.dll"
+check "another version.dll: uiscale_state=foreign" [ "$(sett uiscale_state)" = foreign ]
+g set uiscale on >/dev/null 2>&1 || true
+check "  turning it on leaves the other dll alone" has "$GD/version.dll" "another addon"
+g set uiscale off >/dev/null 2>&1 || true
+check "  turning it off leaves it alone too" has "$GD/version.dll" "another addon"
+rm -f "$GD/version.dll"
+
+section "Play"
+: >"$STANDIN_LOG"
+out=$(g play 2>&1) && rc=0 || rc=$?
+check "play exits 0" [ "$rc" = 0 ]
+check "Steam -applaunch 1284210 with the launch options" has "$STANDIN_LOG" 'steam.exe -applaunch 1284210 -maploadinfo'
+check "  with DXMT's config file" has "$STANDIN_LOG" "DXMT_CONFIG_FILE=$AD/dxmt.conf"
+
+section "Busy checks (a sleeper at the engine's paths)"
+# (macOS kills copies of /bin/sleep: an ad-hoc signed program of our own keeps its signature)
+printf '#include <unistd.h>\n#include <stdlib.h>\nint main(int c, char **v) { sleep(c > 1 ? atoi(v[1]) : 60); return 0; }\n' >"$SANDBOX/sleeper.c"
+clang -O2 -o "$SANDBOX/sleeper" "$SANDBOX/sleeper.c"
+cp "$SANDBOX/sleeper" "$ENG/bin/leftover"
+"$ENG/bin/leftover" 60 & lp=$!
+sleep 0.3
+check "busy=leftovers with an engine process and no wineserver" [ "$(st busy)" = leftovers ]
+check "end-leftovers ends it" sh -c "'$G' end-leftovers | grep -q '@done'"
+sleep 0.3
+check "  gone" sh -c "! kill -0 $lp 2>/dev/null"
+mv "$ENG/bin/wineserver" "$ENG/bin/wineserver.heat" && cp "$SANDBOX/sleeper" "$ENG/bin/wineserver"
+"$ENG/bin/wineserver" 60 & sp=$!
+sleep 0.3
+check "busy=session with the engine's wineserver" [ "$(st busy)" = session ]
+check "uninstall refused while it runs" sh -c "! '$G' uninstall >/dev/null 2>&1"
+check "repair refused while it runs" sh -c "! '$G' repair >/dev/null 2>&1"
+kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
+mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
+mv "$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe" "$SANDBOX/gw2-loader-copy"
+cp "$SANDBOX/sleeper" "$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe"
+"$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe" 60 & gp=$!
+sleep 0.3
+check "busy=game with the Game Mode bundle's Gw2-64.exe running" [ "$(st busy)" = game ]
+check "play brings it up instead of starting another" sh -c "'$G' play | grep -q 'already running'"
+check "reset-shaders refused while the game runs" sh -c "! '$G' reset-shaders >/dev/null 2>&1"
+kill $gp 2>/dev/null || true; wait $gp 2>/dev/null || true
+mv -f "$SANDBOX/gw2-loader-copy" "$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe"
+check "busy=none again" [ "$(st busy)" = none ]
+
+section "Repair and Troubleshooting"
+echo "something else" >"$ENG/lib/wine/dxgi/dxmt/x86_64-windows/d3d11.dll"
+check "graphics=other after a change in the engine" [ "$(st graphics)" = other ]
+out=$(g repair 2>&1) && rc=0 || rc=$?
+check "repair exits 0" [ "$rc" = 0 ]
+check "graphics=yes after repair" [ "$(st graphics)" = yes ]
+check "the game and the settings stay" [ "$(st game)/$(sett launchopts)" = yes/-maploadinfo ]
+echo "shader" >"$DXMT_CACHE/shaders_320.db"
+check "reset-shaders empties DXMT's cache" sh -c "'$G' reset-shaders | grep -q '@done' && [ -d '$DXMT_CACHE' ] && [ ! -e '$DXMT_CACHE/shaders_320.db' ]"
+check "reinstall-engine" sh -c "'$G' reinstall-engine | grep -q '@done'"
+check "  graphics=yes after it" [ "$(st graphics)" = yes ]
+mkdir "$AD/.lock"
+check "a second operation is refused while one runs (lock)" sh -c "'$G' repair 2>&1 | grep -q 'Another GW2 on Mac'"
+rmdir "$AD/.lock"
+GW2_ON_MAC_ENGINE_CHECKS=1 "$G" play >"$SANDBOX/realwine.txt" 2>&1 || true
+check "the real engine's Wine never runs in a sandbox" has "$SANDBOX/realwine.txt" "Refusing to run the real Wine"
+
+section "Uninstall"
+mkdir -p "$CACHE/downloads" && echo x >"$CACHE/downloads/x"
+out=$(g uninstall 2>&1) && rc=0 || rc=$?
+check "uninstall exits 0" [ "$rc" = 0 ]
+check "the phases 1-3" [ "$(echo "$out" | grep '^@phase' | tr '\n' ' ')" = "@phase 1 @phase 2 @phase 3 " ]
+check "the app's folder is gone (engine, bottle with the game, Game Mode, settings)" [ ! -e "$AD" ]
+check "its caches are gone" eval '[ ! -e "$CACHE" ] && [ ! -e "$DXMT_CACHE" ]'
+check "the Game Mode link is gone" sh -c "! ls '$SANDBOX/usertmp/'winetemp-*/Gw2-64.exe >/dev/null 2>&1"
+check "the logs stay" [ -f "$LOGS/install.log" ]
+check "status: not installed" [ "$(st installed)/$(st engine_installed)" = no/no ]
+
+section "ArenaNet route"
+if [ -f "$SIGNED_PE" ]; then
+  cp -c "$SIGNED_PE" "$SANDBOX/Gw2Setup-64.exe"
+  check "check-setup accepts a file signed by ArenaNet" sh -c "'$G' check-setup '$SANDBOX/Gw2Setup-64.exe' | grep -q '@done Gw2Setup-64.exe · signed by ArenaNet'"
+  cp "$SANDBOX/Gw2Setup-64.exe" "$SANDBOX/changed.exe" && printf X | dd of="$SANDBOX/changed.exe" bs=1 seek=5000 conv=notrunc 2>/dev/null
+  check "check-setup refuses a changed file" sh -c "'$G' check-setup '$SANDBOX/changed.exe' | grep -q 'changed after it was signed'"
+  check "check-setup refuses a non-PE" sh -c "'$G' check-setup '$APP/Contents/Info.plist' | grep -q 'not a Windows program'"
+  check "install arenanet with the changed file refused, nothing created" sh -c "! '$G' install arenanet '$SANDBOX/changed.exe' >/dev/null && [ ! -e '$AD/engine' ]"
+  check "  and says why" sh -c "'$G' install arenanet '$SANDBOX/changed.exe' | grep -q '@error This file was changed'"
+  : >"$STANDIN_LOG"
+  out=$(g install arenanet "$SANDBOX/Gw2Setup-64.exe" 2>&1) && rc=0 || rc=$?
+  check "install arenanet exits 0" [ "$rc" = 0 ]
+  check "route=arenanet, stage=waiting_game, no Steam" [ "$(st route)$(st stage)$(st steam)" = arenanetwaiting_gameno ]
+  check "ArenaNet's installer started in the bottle" has "$STANDIN_LOG" "Gw2Setup-64.exe"
+  GD2="$BOTTLE/drive_c/Program Files/Guild Wars 2"
+  mkdir -p "$GD2" && echo "stand-in game" >"$GD2/Gw2-64.exe" && mkfile -n 2g "$GD2/Gw2.dat"
+  check "game=yes once Gw2.dat has data" [ "$(st game)" = yes ]
+  check "finish" sh -c "'$G' finish | grep -q '@done'"
+  : >"$STANDIN_LOG"
+  g set launchopts -maploadinfo >/dev/null
+  g play >/dev/null 2>&1
+  check "play starts the game's own launcher with the launch options" has "$STANDIN_LOG" 'wine C:\\Program Files\\Guild Wars 2\\Gw2-64.exe -maploadinfo'
+  check "uninstall" sh -c "'$G' uninstall | grep -q '@done'"
+else
+  echo "  skip (no $SIGNED_PE)"
+fi
+
+section "A failed first install leaves nothing behind"
+GW2_ON_MAC_STEAMSETUP_URL="file://$SANDBOX/missing.exe" "$G" install steam >"$SANDBOX/failed.txt" 2>&1 && rc=0 || rc=$?
+check "install fails at Steam's download" eval '[ "$rc" != 0 ] && has "$SANDBOX/failed.txt" "@error The download of SteamSetup.exe"'
+check "the engine, bottle, settings, state and manifest it made are gone" sh -c "[ ! -e '$AD/engine' ] && [ ! -e '$AD/bottle' ] && [ ! -e '$AD/settings.conf' ] && [ ! -e '$AD/state' ] && [ ! -e '$AD/install-manifest.json' ]"
+check "no lock left" [ ! -e "$AD/.lock" ]
+
+section "Stop waiting keeps the engine and the bottle"
+g install steam >/dev/null 2>&1
+check "stop-waiting" sh -c "'$G' stop-waiting | grep -q '@done'"
+check "  stage=none, engine and bottle stay" [ "$(st stage)/$(st installed)" = none/yes ]
+g uninstall >/dev/null 2>&1
+
+echo
+echo "$pass passed, $fail failed"
+[ -n "${KEEP:-}" ] || rm -rf "$SANDBOX"
+[ "$fail" = 0 ]
