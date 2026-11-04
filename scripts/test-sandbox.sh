@@ -174,6 +174,7 @@ check "DXMT's cache folder" [ -d "$DXMT_CACHE" ]
 section "Settings"
 check "defaults: warm on, coolworkers 3, fastlocks on, ncpu 8, uiscale off" \
   [ "$(sett warm)$(sett coolworkers)$(sett fastlocks)$(sett ncpu)$(sett uiscale)" = on3on8off ]
+check "default: Steam in the background on" [ "$(sett steambg)" = on ]
 check "set coolworkers 5" g set coolworkers 5
 check "  WINE_HEAT_QOS=1=utility:5 in the environment" has <(g env) "WINE_HEAT_QOS=1=utility:5"
 check "set coolworkers off: no WINE_HEAT_QOS" sh -c "'$G' set coolworkers off >/dev/null && ! '$G' env | grep -q WINE_HEAT_QOS"
@@ -181,6 +182,14 @@ check "set fastlocks off: no WINE_HEAT_SPIN" sh -c "'$G' set fastlocks off >/dev
 check "set warm off: no DXMT_WARM" sh -c "'$G' set warm off >/dev/null && ! '$G' env | grep -q DXMT_WARM"
 check "set ncpu all: no WINENCPU" sh -c "'$G' set ncpu all >/dev/null && ! '$G' env | grep -q WINENCPU"
 check "set ncpu 6: WINENCPU=6" sh -c "'$G' set ncpu 6 >/dev/null && '$G' env | grep -qx WINENCPU=6"
+MAXC=$(sysctl -n hw.logicalcpu)
+check "settings: cpus=$MAXC (the Mac's logical CPUs)" [ "$(sett cpus)" = "$MAXC" ]
+check "set ncpu 2 (the fewest): WINENCPU=2" sh -c "'$G' set ncpu 2 >/dev/null && '$G' env | grep -qx WINENCPU=2"
+check "set ncpu 7 (steps of 1)" sh -c "[ $MAXC -lt 7 ] || '$G' set ncpu 7 >/dev/null"
+check "set ncpu $MAXC (every CPU, by number): WINENCPU=$MAXC" sh -c "'$G' set ncpu $MAXC >/dev/null && '$G' env | grep -qx WINENCPU=$MAXC"
+check "ncpu 1 refused" sh -c "'$G' set ncpu 1 >/dev/null; [ \$? = 2 ]"
+check "ncpu $((MAXC + 1)) (more than the Mac has) refused" sh -c "'$G' set ncpu $((MAXC + 1)) >/dev/null; [ \$? = 2 ]"
+check "ncpu 8 again" g set ncpu 8
 check "set fpscap 60: dxmt.conf caps at 60" sh -c "'$G' set fpscap 60 >/dev/null && grep -q 'd3d11.preferredMaxFrameRate = 60' '$AD/dxmt.conf'"
 check "set fpscap off: no cap" sh -c "'$G' set fpscap off >/dev/null && ! grep -q preferredMaxFrameRate '$AD/dxmt.conf'"
 check "set metalfx on: DXMT_SUBSAMPLE_METALFX=1" sh -c "'$G' set metalfx on >/dev/null && '$G' env | grep -qx DXMT_SUBSAMPLE_METALFX=1"
@@ -193,9 +202,9 @@ check "set gamemode off: no WINEDLLPATH" sh -c "'$G' set gamemode off >/dev/null
 g set gamemode on >/dev/null
 check "set launchopts -maploadinfo" g set launchopts "-maploadinfo"
 check "launchopts with a ; refused" sh -c "! '$G' set launchopts '-x; rm -rf /' >/dev/null"
-check "unknown value refused (exit 2)" sh -c "'$G' set ncpu 7 >/dev/null; [ \$? = 2 ]"
+check "unknown value refused (exit 2)" sh -c "'$G' set fpscap 45 >/dev/null; [ \$? = 2 ]"
 check "unknown key refused" sh -c "! '$G' set colour red >/dev/null"
-check "settings.conf has every key" [ "$(grep -c '=' "$AD/settings.conf")" = 16 ]
+check "settings.conf has every key" [ "$(grep -c '=' "$AD/settings.conf")" = 17 ]
 
 section "The larger interface (addon)"
 GD="$STEAM/steamapps/common/Guild Wars 2"
@@ -252,6 +261,22 @@ check "  the token value is gone" sh -c "! grep -rq abcDEF123secret '$Z'"
 check "  the home folder is gone" sh -c "! grep -rqF '$HOME/' '$Z'"
 check "  never Local.dat or Steam's config" sh -c "! find '$Z' -name Local.dat -o -name loginusers.vdf | grep -q ."
 check "  the crash log kept its exception" has "$Z/game-logs/ArenaNet.log" "Exception: c0000005"
+
+section "Steam in the background after the first login"
+LU="$STEAM/config/loginusers.vdf"
+# the command play started (the stand-in's log of it)
+play_cmd() { : >"$STANDIN_LOG"; g play >/dev/null 2>&1; started; grep -m1 '^wine ' "$STANDIN_LOG"; }
+rm -f "$LU"
+check "no login yet (no loginusers.vdf): Steam with its window" sh -c "'$G' settings | grep -qx steam_login=no"
+c=$(play_cmd); check "  steam.exe -applaunch 1284210, no -silent" eval '[[ "$c" == *"steam.exe -applaunch 1284210 -maploadinfo" ]]'
+printf '"users"\n{\n\t"76561198000000042"\n\t{\n\t\t"AccountName"\t\t"zz_acct_name"\n\t\t"RememberPassword"\t\t"0"\n\t\t"MostRecent"\t\t"1"\n\t}\n}\n' >"$LU"
+c=$(play_cmd); check "a user who isn't remembered: still no -silent" eval '[[ "$c" != *-silent* ]]'
+sed -i '' 's/"RememberPassword"\([[:space:]]*\)"0"/"RememberPassword"\1"1"/' "$LU"
+check "a remembered login: steam_login=yes" sh -c "'$G' settings | grep -qx steam_login=yes"
+c=$(play_cmd); check "  Play: steam.exe -silent -applaunch 1284210 with the launch options" eval '[[ "$c" == *"steam.exe -silent -applaunch 1284210 -maploadinfo" ]]'
+check "set steambg off" g set steambg off
+c=$(play_cmd); check "  Steam's window again (no -silent)" eval '[[ "$c" == *"steam.exe -applaunch 1284210 -maploadinfo" ]]'
+g set steambg on >/dev/null
 
 section "Busy checks (a sleeper at the engine's paths)"
 # (macOS kills copies of /bin/sleep: an ad-hoc signed program of our own keeps its signature)
@@ -352,6 +377,127 @@ g install steam >/dev/null 2>&1
 check "stop-waiting" sh -c "'$G' stop-waiting | grep -q '@done'"
 check "  stage=none, engine and bottle stay" [ "$(st stage)/$(st installed)" = none/yes ]
 g uninstall >/dev/null 2>&1
+
+section "Use existing game files (other Wine apps' installs)"
+# CrossOver (a Steam install, with our own addon, another addon and the game's settings), Whisky
+# and a Sikarugir wrapper (ArenaNet installs), a broken one (Gw2.dat too small). Gw2.dat is sparse.
+CX="$H/Library/Application Support/CrossOver/Bottles/Steam GW2/drive_c"
+CXG="$CX/Program Files (x86)/Steam/steamapps/common/Guild Wars 2"
+CXS="$CX/users/crossover/AppData/Roaming/Guild Wars 2"
+mkdir -p "$CXG/bin64" "$CXS"
+echo "stand-in game" >"$CXG/Gw2-64.exe" && mkfile -n 2g "$CXG/Gw2.dat" && echo "bin" >"$CXG/bin64/CoherentUI64.dll"
+cp "$COMP/ui-scale/version.dll" "$CXG/version.dll" && echo "scale=1.75" >"$CXG/gw2-ui-scale.ini" && echo "arcdps" >"$CXG/d3d11.dll"
+printf '"AppState"\n{\n\t"appid"\t\t"1284210"\n\t"installdir"\t\t"Guild Wars 2"\n\t"StateFlags"\t\t"4"\n}\n' >"$CX/Program Files (x86)/Steam/steamapps/appmanifest_1284210.acf"
+echo "cx local.dat" >"$CXS/Local.dat" && echo "<GSA_SDK cx/>" >"$CXS/GFXSettings.Gw2-64.exe.xml"
+WB="$H/Library/Containers/com.isaacmarovitz.Whisky/Bottles/5F0C2A9E-0000-4000-8000-00000000AA01"
+WHG="$WB/drive_c/Program Files/Guild Wars 2"
+mkdir -p "$WHG" "$WB/drive_c/users/crossover/AppData/Roaming/Guild Wars 2"
+echo "stand-in game" >"$WHG/Gw2-64.exe" && mkfile -n 1100m "$WHG/Gw2.dat"
+echo "wh local.dat" >"$WB/drive_c/users/crossover/AppData/Roaming/Guild Wars 2/Local.dat"
+plutil -create xml1 "$WB/Metadata.plist" && plutil -insert name -string "GW2 Whisky" "$WB/Metadata.plist"
+WRAP="$H/Applications/Sikarugir/Guild Wars 2.app"
+WRC="$WRAP/Contents/SharedSupport/prefix/drive_c"
+WRS="$WRC/users/crossover/AppData/Roaming/Guild Wars 2"
+mkdir -p "$WRC/Program Files/Guild Wars 2" "$WRS"
+echo "stand-in game" >"$WRC/Program Files/Guild Wars 2/Gw2-64.exe" && mkfile -n 2g "$WRC/Program Files/Guild Wars 2/Gw2.dat"
+echo "wrapper local.dat" >"$WRS/Local.dat"
+BR="$H/Library/Application Support/CrossOver/Bottles/Broken/drive_c/Program Files/Guild Wars 2"
+mkdir -p "$BR" && echo "stand-in game" >"$BR/Gw2-64.exe" && mkfile -n 10m "$BR/Gw2.dat"
+# every file and folder of the sources (size, mtime, mode): they must never change
+snap() { find "$H/Library/Application Support/CrossOver" "$H/Library/Containers" "$H/Applications" -exec stat -f '%N %z %m %p' {} + | sort; }
+snap >"$SANDBOX/sources-before.txt"
+sources_unchanged() { snap | cmp -s - "$SANDBOX/sources-before.txt"; }
+BS="$BOTTLE/drive_c/users/crossover/AppData/Roaming/Guild Wars 2"
+
+out=$(g scan)
+line_of() { echo "$out" | awk -F'\t' -v s="$1" '$2 == s'; }
+fields() { line_of "$1" | cut -f3,5,6 | tr '\t' ' '; }
+check "scan finds CrossOver's, Whisky's and the wrapper's, not the broken one" [ "$(echo "$out" | grep -c '^game')" = 3 ]
+check "  CrossOver's: the Steam route, the same disk, settings" [ "$(fields 'CrossOver · Steam GW2')" = "steam yes yes" ]
+check "  its size: the folder's files (over 2 GB)" [ "$(line_of 'CrossOver · Steam GW2' | cut -f4)" -gt 2147483648 ]
+check "  its path" [ "$(line_of 'CrossOver · Steam GW2' | cut -f7)" = "$CXG" ]
+check "  Whisky's, by its bottle's name: ArenaNet" [ "$(fields 'Whisky · GW2 Whisky')" = "arenanet yes yes" ]
+check "  the wrapper's: ArenaNet" [ "$(fields 'Wrapper · Guild Wars 2')" = "arenanet yes yes" ]
+check "check-game: a folder without the game" sh -c "'$G' check-game '$SANDBOX/standin' | grep -q '^@error This folder has no Guild Wars 2'"
+check "check-game: Gw2.dat under 1 GB is not the game" sh -c "'$G' check-game '$BR' | grep -q '^@error'"
+check "check-game: the wrapper app itself finds the game in it" sh -c "'$G' check-game '$WRAP' | grep -q \"\$(printf 'game\tWrapper · Guild Wars 2\tarenanet')\""
+check "check-game: a bottle's folder finds its Steam install" sh -c "'$G' check-game '$(dirname "$CX")' | grep -q \"\$(printf '\tsteam\t')\""
+
+# a Guild Wars 2 that runs (in another app): its files may change, so nothing is copied
+mkdir -p "$SANDBOX/elsewhere" && cp "$SANDBOX/sleeper" "$SANDBOX/elsewhere/Gw2-64.exe"
+"$SANDBOX/elsewhere/Gw2-64.exe" 60 & ep=$!
+sleep 0.3
+out=$(g install import "$CXG" 2>&1) && rc=0 || rc=$?
+check "install import refused while Guild Wars 2 runs elsewhere, nothing created" eval '[ "$rc" != 0 ] && has <(echo "$out") "@error Guild Wars 2 is running" && [ ! -e "$AD/engine" ]'
+kill $ep 2>/dev/null || true; wait $ep 2>/dev/null || true
+
+out=$(GW2_ON_MAC_DRY_RUN=1 g install import "$CXG" 2>&1) && rc=0 || rc=$?
+check "dry-run install import: exits 0, would clone, creates nothing" eval '[ "$rc" = 0 ] && has <(echo "$out") "\[dry-run\] clone" && [ ! -e "$AD" ]'
+
+: >"$STANDIN_LOG"
+out=$(g install import "$CXG" 2>&1) && rc=0 || rc=$?
+GDI="$STEAM/steamapps/common/Guild Wars 2"
+check "install import (CrossOver's Steam install) exits 0" [ "$rc" = 0 ]
+check "  the phases 1-5 (engine, bottle, Steam, the files, finishing)" [ "$(echo "$out" | grep '^@phase' | tr '\n' ' ')" = "@phase 1 @phase 2 @phase 3 @phase 4 @phase 5 " ]
+check "  cloned: the same disk, no extra space" has <(echo "$out") "Cloning the game's files"
+check "  route=steam origin=import stage=finished game=yes" [ "$(st route) $(st origin) $(st stage) $(st game)" = "steam import finished yes" ]
+check "  the game's files in the bottle's Steam library" eval '[ -f "$GDI/Gw2-64.exe" ] && [ "$(stat -f %z "$GDI/Gw2.dat")" = 2147483648 ] && has "$GDI/bin64/CoherentUI64.dll" bin'
+check "  Steam's record of them, as it was" same "$CX/Program Files (x86)/Steam/steamapps/appmanifest_1284210.acf" "$STEAM/steamapps/appmanifest_1284210.acf"
+check "  Steam installed, not started for an install" eval '[ "$(st steam)" = yes ] && ! grep -q "steam://install" "$STANDIN_LOG"'
+check "  our own addon left out (version.dll, gw2-ui-scale.ini)" eval '[ ! -e "$GDI/version.dll" ] && [ ! -e "$GDI/gw2-ui-scale.ini" ]'
+check "  another addon came along, and the summary names it" eval 'has "$GDI/d3d11.dll" arcdps && has <(echo "$out") "^@done .*Addons that came along: d3d11.dll"'
+check "  the game's settings in the bottle" eval 'same "$CXS/Local.dat" "$BS/Local.dat" && same "$CXS/GFXSettings.Gw2-64.exe.xml" "$BS/GFXSettings.Gw2-64.exe.xml"'
+check "  the summary: cloned, with the settings" has <(echo "$out") "^@done Guild Wars 2 is ready: its files were cloned from CrossOver · Steam GW2 (no extra space), with your game settings"
+check "  the source is unchanged" sources_unchanged
+c=$(play_cmd); check "  Play: Steam (no login in this bottle yet: its window)" eval '[[ "$c" == *"steam.exe -applaunch 1284210"* && "$c" != *-silent* ]]'
+check "  uninstall" sh -c "'$G' uninstall | grep -q '@done'"
+check "  the source is still unchanged" sources_unchanged
+
+# into an earlier run's bottle, whose own settings go to a backup folder
+g install steam >/dev/null 2>&1; g stop-waiting >/dev/null
+mkdir -p "$BS" && echo "the bottle's own" >"$BS/Local.dat"
+backup_kept() { local f; for f in "$BS"/"GW2 on Mac backup "*/Local.dat; do has "$f" "the bottle's own" && return 0; done; return 1; }
+: >"$STANDIN_LOG"
+out=$(g install import "$WRAP" 2>&1) && rc=0 || rc=$?
+check "install import of the wrapper's (ArenaNet) into the earlier bottle exits 0" [ "$rc" = 0 ]
+check "  the phases 1-4 (engine, bottle, the files, finishing)" [ "$(echo "$out" | grep '^@phase' | tr '\n' ' ')" = "@phase 1 @phase 2 @phase 3 @phase 4 " ]
+check "  route=arenanet origin=import game=yes, in Program Files" eval '[ "$(st route) $(st origin) $(st game)" = "arenanet import yes" ] && [ "$(st game_dir)" = "$BOTTLE/drive_c/Program Files/Guild Wars 2" ]'
+check "  its settings in the bottle" same "$WRS/Local.dat" "$BS/Local.dat"
+check "  the bottle's own kept in a backup folder" backup_kept
+g play >/dev/null 2>&1; started
+check "  Play starts the game's own launcher" has "$STANDIN_LOG" 'wine C:\\Program Files\\Guild Wars 2\\Gw2-64.exe'
+g uninstall >/dev/null 2>&1
+
+out=$(g install import "$WHG" --no-settings 2>&1) && rc=0 || rc=$?
+check "install import --no-settings (Whisky's) exits 0" [ "$rc" = 0 ]
+check "  no game settings brought" eval '[ ! -e "$BS/Local.dat" ] && ! has <(echo "$out") "with your game settings"'
+g uninstall >/dev/null 2>&1
+
+# another disk: a real copy, with progress (an attached disk image when possible; the copy is also
+# forced on the same disk, GW2_ON_MAC_IMPORT_COPY)
+VOL="$SANDBOX/othervol"
+if hdiutil create -quiet -size 200m -type SPARSE -fs APFS -volname gw2om-test "$SANDBOX/other" >/dev/null 2>&1 &&
+  mkdir -p "$VOL" && hdiutil attach -quiet -nobrowse -noautoopen -mountpoint "$VOL" "$SANDBOX/other.sparseimage" >/dev/null 2>&1; then
+  trap 'hdiutil detach -quiet -force "$VOL" 2>/dev/null' EXIT
+  OG="$VOL/Bottles/Other/drive_c/Program Files/Guild Wars 2"
+  mkdir -p "$OG" && echo "stand-in game" >"$OG/Gw2-64.exe" && mkfile -n 1100m "$OG/Gw2.dat"
+  check "check-game on another disk: not the same disk" eval '[ "$(g check-game "$OG" | grep "^game" | cut -f5)" = no ]'
+  out=$(g install import "$OG" 2>&1) && rc=0 || rc=$?
+  check "install import from another disk exits 0: copied, with progress" eval '[ "$rc" = 0 ] && has <(echo "$out") "Copying the game" && has <(echo "$out") "^@progress Guild Wars 2 " && has <(echo "$out") "^@done .*copied from"'
+  check "  the copy is complete" eval '[ "$(st game)" = yes ] && [ "$(stat -f %z "$BOTTLE/drive_c/Program Files/Guild Wars 2/Gw2.dat")" = "$(stat -f %z "$OG/Gw2.dat")" ]'
+  g uninstall >/dev/null 2>&1
+  hdiutil detach -quiet -force "$VOL" >/dev/null 2>&1; trap - EXIT
+else
+  echo "  skip the disk image (hdiutil could not attach one); the forced copy below covers the copy"
+fi
+out=$(GW2_ON_MAC_IMPORT_COPY=1 g install import "$WHG" 2>&1) && rc=0 || rc=$?
+check "install import, copy forced: exits 0, copied with progress" eval '[ "$rc" = 0 ] && has <(echo "$out") "Copying the game" && has <(echo "$out") "^@progress Guild Wars 2 "'
+check "  the copy is complete" eval '[ "$(st game)" = yes ] && [ "$(stat -f %z "$BOTTLE/drive_c/Program Files/Guild Wars 2/Gw2.dat")" = 1153433600 ]'
+g uninstall >/dev/null 2>&1
+out=$(GW2_ON_MAC_IMPORT_COPY=1 GW2_ON_MAC_FREE_KB=3020000 g install import "$CXG" 2>&1) && rc=0 || rc=$?
+check "a copy without the free space is refused" eval '[ "$rc" != 0 ] && has <(echo "$out") "@error Not enough free disk space to copy the game"'
+check "  and leaves nothing behind" eval '[ ! -e "$AD/engine" ] && [ ! -e "$AD/bottle" ] && [ ! -e "$AD/state" ] && [ ! -e "$AD/.lock" ]'
+check "the sources never changed" sources_unchanged
 
 echo
 echo "$pass passed, $fail failed"

@@ -92,9 +92,12 @@ final class GameSettings {
   static let frameCaps: [(String, String)] = [
     ("off", "Off"), ("30", "30 fps"), ("40", "40 fps"), ("60", "60 fps"), ("120", "120 fps"),
   ]
-  static let cpuCounts: [(String, String)] = [
-    ("4", "4"), ("6", "6"), ("8", "8"), ("10", "10"), ("12", "12"), ("all", "All"),
-  ]
+  // CPUs the game sees: 2 up to this Mac's logical CPUs (gw2om.sh settings: cpus, sysctl
+  // hw.logicalcpu), or all
+  var cpuCount: Int { Int(values["cpus"] ?? "") ?? ProcessInfo.processInfo.processorCount }
+  var cpuCounts: [(String, String)] {
+    (2...max(2, cpuCount)).map { ("\($0)", "\($0)") } + [("all", "All")]
+  }
   // Larger's interface scale with the addon (gw2-ui-scale.ini's scale; the nearest of the game's
   // own font sizes is used)
   static let interfaceScales: [(String, String)] = [
@@ -294,7 +297,7 @@ struct SettingsView: View {
           InkSwitch(isOn: settings.toggle("fastlocks"))
         }
         SettingRow("CPUs the game sees", "The game starts one job worker per CPU, minus one.") {
-          InkPopup(selection: settings.choice("ncpu", "8"), options: GameSettings.cpuCounts)
+          InkPopup(selection: settings.choice("ncpu", "8"), options: settings.cpuCounts)
         }
       }
 
@@ -328,6 +331,12 @@ struct SettingsView: View {
                    ? "ArenaNet's installer. Play starts the game's own launcher, Gw2-64.exe."
                    : "Steam. Play starts Steam, which starts the game (steam.exe -applaunch 1284210).") {
           Text(settings.values["route"] == "arenanet" ? "ArenaNet" : "Steam").font(.body(13, .semibold)).bodyBox(13).foregroundStyle(Brand.fg2)
+        }
+        SettingRow("Start Steam in the background", settings.values["route"] == "arenanet"
+                   ? "For the Steam route only: this install starts the game's own launcher."
+                   : "Once Steam remembers your login, Play starts it without its window and it starts the game. Until your first sign-in, Steam's window shows.") {
+          InkSwitch(isOn: settings.toggle("steambg"))
+            .disabled(settings.values["route"] == "arenanet")
         }
         SettingRow("Game Mode", "While the game is in full screen, macOS gives it priority on the CPU and GPU and lowers the latency of Bluetooth controllers and headphones.") {
           InkSwitch(isOn: settings.toggle("gamemode"))

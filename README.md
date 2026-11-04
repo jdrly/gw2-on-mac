@@ -1,8 +1,9 @@
 # GW2 on Mac
 
 A small macOS app that sets up [Guild Wars 2](https://www.guildwars2.com) on Apple silicon and
-starts it. It installs the game, through **Steam** or **ArenaNet's own installer**, into a Wine
-engine and bottle of its own (CrossOver 26.3 with Wine 11), with the game's Direct3D 11 going
+starts it. It installs the game, through **Steam** or **ArenaNet's own installer**, or brings in
+the **game files the Mac already has** (another Wine app's install, cloned without a download), into
+a Wine engine and bottle of its own (CrossOver 26.3 with Wine 11), with the game's Direct3D 11 going
 straight to Metal through our build of [DXMT](https://github.com/jdrly/dxmt), macOS Game Mode,
 Retina rendering and a Wine tuned for the game's busy maps. It changes nothing you already have
 installed. Website: [gw2onmac.com](https://gw2onmac.com).
@@ -34,16 +35,21 @@ wiring), restyled to the approved design.
 Unlike SWTOR on Mac it changes no existing install. It creates its own engine and bottle and
 installs the game into them, through **Steam** (Valve's installer; you sign in and install the
 game in Steam) or **ArenaNet's own installer** (`Gw2Setup-64.exe`, which you download from
-ArenaNet's site and drop into the window). Every download of the game or Steam comes from Valve
-or ArenaNet; GW2 on Mac hosts nothing of the game.
+ArenaNet's site and drop into the window), or from **game files you already have**: another Wine
+app's Guild Wars 2 (CrossOver, Whisky, an app wrapper), cloned or copied into the bottle while the
+original stays as it is. Every download of the game or Steam comes from Valve or ArenaNet; GW2 on
+Mac hosts nothing of the game.
 
 Status: version 0.1.0, built and tested in a sandbox. Nobody has run a real install yet (Jan
 does the first one), and nothing is published.
 
 ## The window
 
-- **Main window**, three states: choose the route → the install's steps with progress and
-  Cancel → Ready (Play, Repair, Settings, Uninstall…).
+- **Main window**, three states: choose the route (Steam, ArenaNet installer, or game files I
+  already have) → the install's steps with progress and Cancel → Ready (Play, Repair, Settings,
+  Uninstall…).
+  - The chosen route's card opens; the others keep one line. The painting gives way when the
+    panel needs its room (the list of found installs, a long message).
   - *This Mac* checks Rosetta, the engine, the graphics (DXMT), Game Mode, the game and disk space
     (a warning under 75 GB).
   - Light and dark follow the system, each with its own header stroke.
@@ -94,9 +100,50 @@ failed or cancelled first install leaves nothing behind):
    - the registry settings
    - `stage=finished`, then Ready
 
+### Using game files you already have
+
+`gw2om.sh install import <folder> [--no-settings]`, the window's *Game files I already have*:
+
+- **Where it looks** (`gw2om.sh scan`, read-only): CrossOver's bottles
+  (`~/Library/Application Support/CrossOver/Bottles/*`), Whisky's
+  (`~/Library/Containers/com.isaacmarovitz.Whisky/Bottles/*` and `…/Data/Bottles/*`, named from the
+  bottle's `Metadata.plist`), app wrappers such as Sikarugir, Kegworks, Wineskin or Porting Kit
+  (`~/Applications/**/*.app` and `/Applications/**/*.app`: `Contents/SharedSupport/prefix`,
+  `Contents/drive_c`, `Contents/Resources/drive_c`), Heroic's prefixes (`~/Games/Heroic/Prefixes`) and
+  `~/.wine`. In each `drive_c`: Steam's library (`Program Files (x86)/Steam/steamapps/common/Guild
+  Wars 2`) and ArenaNet's default (`Program Files/Guild Wars 2`, also under `Program Files (x86)`).
+  GameHub doesn't document where it keeps its bottles: its folders in `~/Library/Application
+  Support` and `~/Library/Containers` are looked through a few levels deep, and *Choose folder…*
+  covers the rest. *Choose folder…* (or a folder dropped on the card) takes the game folder, or a
+  bottle or wrapper app with one in it (`gw2om.sh check-game`).
+- **What counts**: `Gw2-64.exe` and a `Gw2.dat` of more than 1 GB. The list shows the source app,
+  the path, the size and the route it implies: Steam if Steam's record
+  (`steamapps/appmanifest_1284210.acf`) is next to it, else ArenaNet.
+- **The files**: on the same disk as the app's folder they are cloned (APFS `clonefile`, `cp -c`):
+  instant, and they take no extra space until either copy changes. From another disk they are
+  copied, after a free-space check (their size and 1 GB to spare), with progress. The source is
+  only read. GW2 on Mac's own addon files (`version.dll` with its mark, `gw2-ui-scale.*`) are left
+  out; any other addon (an arcdps `d3d11.dll`, an `addons` folder…) comes along as it is and the
+  summary names it.
+- **Steam route**: the engine, the bottle and Steam as usual, then the folder goes to the
+  bottle's `steamapps/common/` with Steam's record next to it, before Steam ever starts, and the
+  finishing touches follow. Steam may check the files at the first Play. If its record says the
+  game isn't complete, Steam's install step follows as usual and continues from the files.
+- **ArenaNet route**: the engine and the bottle, the folder to the bottle's `Program
+  Files/Guild Wars 2`, the finishing touches.
+- **Also bring my game settings** (on by default): `GFXSettings.Gw2-64.exe.xml` and `Local.dat`
+  (the options and the remembered login) from the source bottle's newest
+  `users/*/AppData/Roaming/Guild Wars 2`. Any the bottle had already go to `GW2 on Mac backup
+  <date>/` next to them.
+- Refused while a Guild Wars 2 runs anywhere (its files could change during the copy). A failed or
+  cancelled import removes what it cloned or copied.
+
 **Play** (`gw2om.sh play`) starts `steam.exe -applaunch 1284210 <launch options>` (Steam route),
 or the game's own launcher `Gw2-64.exe <launch options>` (ArenaNet route), detached, with the
-settings as its environment. It also:
+settings as its environment. Once Steam remembers a login (its `config/loginusers.vdf` has a
+user with `"RememberPassword" "1"`), it starts Steam with `-silent` too: no Steam window, Steam
+signs in and starts the game (*Start Steam in the background*, Settings › Game). Before the first
+sign-in, Steam's window shows. It also:
 - makes the Game Mode link
 - writes `session.env`
 - rotates the logs (when no session runs)
@@ -123,13 +170,16 @@ items, nothing in `/Applications` besides the app itself):
 | Path | What | Uninstall |
 |---|---|---|
 | `~/Library/Application Support/GW2 on Mac/engine/` | the Wine engine with GW2 on Mac's pieces (about 1 GB) | removed |
-| `…/GW2 on Mac/bottle/` | the game's Wine prefix: Steam, **the game's files** (about 75 GB), the game's own settings | removed, with the game |
+| `…/GW2 on Mac/bottle/` | the game's Wine prefix: Steam, **the game's files** (about 75 GB; an APFS clone of your own when they came from the same disk, which takes no extra space until either changes), the game's own settings (and `GW2 on Mac backup <date>/` next to them after an import that replaced some) | removed, with the game |
 | `…/GW2 on Mac/gamemode/GW2.app` | the Game Mode bundle | removed |
 | `…/GW2 on Mac/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf` | the settings, the route and stage, what was installed, DXMT's options | removed |
 | `~/Library/Caches/GW2 on Mac/downloads/` | the engine archive, `SteamSetup.exe`, a copy of `Gw2Setup-64.exe` | removed |
 | `~/Library/Caches/GW2 on Mac/dxmt/Gw2-64.exe/` | DXMT's shader cache, pipeline archives and recorded pipelines for the game (`DXMT_CACHE_DIR` points DXMT here; another process, such as the launcher's `CefHost.exe`, gets its own folder next to it) | removed; *Reset the shader cache* empties it too |
 | `$(getconf DARWIN_USER_TEMP_DIR)winetemp-…/Gw2-64.exe` | the Game Mode link | removed |
 | `~/Library/Logs/GW2 on Mac/` | `install.log`, `wine.log`, DXMT's `Gw2-64_d3d11.log`, `session.env`, `gamemode.log`, heat logs (Debug logging) | **kept** |
+
+Other Wine apps' bottles and wrappers are only ever read (*Game files I already have*), never
+changed, and Uninstall leaves them alone.
 
 The game folder gets `version.dll` and `gw2-ui-scale.ini` only while *Larger interface* is on.
 Another program's `version.dll` there is never touched. The app's own preferences (the chosen
@@ -151,12 +201,13 @@ use). The defaults are the mix Jan plays with.
 | Performance | Shader warming (`warm`) | on | `DXMT_WARM=all`: pipelines built ahead by recent use, up to 8,192 |
 | | Cooler job workers (`coolworkers`) | 3 | `WINE_HEAT_QOS=1=utility:<n>`: the first n ABOVE_NORMAL job workers on the cooler cores; off |
 | | Faster locks (`fastlocks`) | on | `WINE_HEAT_SPIN=lock=20:game,event=30:game` |
-| | CPUs the game sees (`ncpu`) | 8 | `WINENCPU` (4, 6, 8, 10, 12, all) |
+| | CPUs the game sees (`ncpu`) | 8 | `WINENCPU`: 2 up to the Mac's logical CPUs (`sysctl hw.logicalcpu`) in steps of 1, or all. The game starts one job worker per CPU, minus one |
 | Interface | Larger interface (`uiscale`) | off | the addon in the game folder, and `version=native,builtin` for `Gw2-64.exe`. Turning it on asks first: it changes the game's memory and patches one piece of its code (the cinema text), which ArenaNet doesn't support |
 | | Interface Size "Larger" (`uiscale_size`) | 1.75 | the ini's `scale` (1.5, 1.75, 1.8, 2.0) |
 | | Small text in Cronos (`uiscale_sans`) | on | the ini's `sans=cronos` (else `keep`) |
 | | Cinematic dialogue (`uiscale_cinema`) | on | the ini's `cinema=1` |
 | Game | Game Mode (`gamemode`) | on | the bundle and link above |
+| | Start Steam in the background (`steambg`) | on | Steam route: `-silent` once Steam remembers a login (see Play) |
 | | Launch options (`launchopts`) | none | arguments for `Gw2-64.exe` (letters, digits, `-_.:=,/+` only) |
 | | Quit GW2 on Mac after launching | off | the app's own preference |
 | Updates | Check automatically (`updates`) | on | Sparkle's automatic checks, once there is a feed |
@@ -249,13 +300,19 @@ scripts/stage-components.sh    # copy DXMT, the heat Wine pieces, winemac and th
 Never against a real install, and never with Wine, Steam or the game running on Jan's screen.
 
 - `scripts/test-sandbox.sh` tests the backend of a built app end to end in
-  `work/app-sandbox/test` (148 checks). It uses a stand-in engine archive whose `bin/wine` only
+  `work/app-sandbox/test` (210 checks). It uses a stand-in engine archive whose `bin/wine` only
   pretends, plays Steam's and ArenaNet's downloads itself, and uses a clone of the game's own
   ArenaNet-signed `Gw2-64.exe` as the installer to check (`SIGNED_PE`, by default the one in
   the development workspace's bottle; without one those checks are skipped). It covers:
   - dry runs, both routes, finish, every setting and what it does, the addon
   - play, the busy checks, repair, reset-shaders, reinstall-engine, the lock
   - Collect Logs' redaction, uninstall, a failed install's rollback
+  - Steam's `-silent` with and without a remembered login, the CPU counts
+  - existing game files: stand-in CrossOver, Whisky and wrapper bottles (sparse `Gw2.dat`), the
+    scan, check-game, the clone (Steam and ArenaNet routes), the settings and their backup, a real
+    copy from an attached disk image (`hdiutil`, when it can attach one) and a forced copy
+    (`GW2_ON_MAC_IMPORT_COPY`), the free-space refusal (`GW2_ON_MAC_FREE_KB`), the refusal while the
+    game runs, and that the sources never change
 - `scripts/ui-render.sh` renders every window state, light and dark, headlessly into
   `work/app-renders/`. Nothing is shown on screen and the app never activates. With the approved
   design's exports (`DESIGN_EXPORTS`, by default the development workspace's; the design file is
@@ -331,3 +388,6 @@ prebuilt/, dist/, release/, work/, .cache/   build and test output (ignored)
 - A Steam library added outside the bottle (Steam › Settings › Storage) is not removed by
   Uninstall.
 - Blish HUD and macOS 28's Rosetta changes are not covered.
+- *Game files I already have*: GameHub's bottle location is a guess (its folders, searched a few
+  levels deep); Choose folder… is the sure way. An addon's `d3d11.dll` (arcdps) in the source
+  folder comes along as it is; whether it works with DXMT is untested.

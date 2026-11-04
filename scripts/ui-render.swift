@@ -158,6 +158,34 @@ func installer(_ state: String) -> Installer {
     st["game"] = "no"; st["stage"] = "none"; st["route"] = ""; st["installed"] = "no"; st["engine_installed"] = "no"
     st["graphics"] = "no"; st["gamemode"] = "no"
     i.phase = .failed(.install, "The download of the Wine engine failed (curl status 6). Check your internet connection and try again.")
+  case "existing", "existing-copy", "existing-none", "importing":
+    // Game files I already have: what a scan of other Wine apps found
+    st = st.merging(["installed": "no", "engine_installed": "no", "graphics": "no", "gamemode": "no", "game": "no",
+                     "stage": "none", "steam": "no", "route": "", "installed_version": ""]) { $1 }
+    i.route = .existing
+    i.scanned = true
+    let home = "/Users/you"
+    i.gameFolders = state == "existing-none" ? [] : [
+      .init(source: "CrossOver · Steam", route: .steam, bytes: 71_400_000_000, sameDisk: true, hasSettings: true,
+            path: home + "/Library/Application Support/CrossOver/Bottles/Steam/drive_c/Program Files (x86)/Steam/steamapps/common/Guild Wars 2"),
+      .init(source: "Whisky · Guild Wars 2", route: .arenanet, bytes: 69_800_000_000, sameDisk: true, hasSettings: true,
+            path: home + "/Library/Containers/com.isaacmarovitz.Whisky/Bottles/5F0C2A9E/drive_c/Program Files/Guild Wars 2"),
+      .init(source: "Folder · Games", route: .arenanet, bytes: 70_100_000_000, sameDisk: false, hasSettings: false,
+            path: "/Volumes/Games/Guild Wars 2"),
+    ]
+    i.chosenGame = state == "existing-copy" ? i.gameFolders.last : i.gameFolders.first
+    if state == "importing" {
+      i.operation = .install
+      i.phase = .working(.install)
+      i.stepIndex = 2
+      i.chosenGame = i.gameFolders.last
+      i.progress = .init(label: "Guild Wars 2", done: 31_200_000_000, total: 70_100_000_000)
+    }
+  case "imported":
+    // Ready after an import (the summary under the panel)
+    st["origin"] = "import"
+    i.phase = .succeeded(.install, "Guild Wars 2 is ready: its files were cloned from CrossOver · Steam (no extra space), "
+                         + "with your game settings. Steam may check the files at the first Play. Press Play.")
   case "uninstalling":
     i.operation = .uninstall
     i.phase = .working(.uninstall)
@@ -174,7 +202,8 @@ func settings() -> GameSettings {
   s.preview(["installed": "yes", "running": "no", "retina": "on", "fpscap": "off", "metalfx": "off", "hud": "off",
              "warm": "on", "coolworkers": "3", "fastlocks": "on", "ncpu": "8", "uiscale": "off", "uiscale_state": "off",
              "uiscale_size": "1.75", "uiscale_sans": "on", "uiscale_cinema": "on", "gamemode": "on", "launchopts": "",
-             "route": "steam", "updates": "off", "debug": "off"])
+             "route": "steam", "updates": "off", "debug": "off", "steambg": "on", "cpus": "12",
+             "steam_login": "no"])
   return s
 }
 
@@ -195,6 +224,13 @@ func renderAll(_ dir: URL, exports: URL?) async {
     ("main-waiting-light", "waiting", false, nil),
     ("main-failed-light", "failed", false, nil),
     ("main-uninstalling-light", "uninstalling", false, nil),
+    ("main-existing-light", "existing", false, nil),
+    ("main-existing-dark", "existing", true, nil),
+    ("main-existing-copy-light", "existing-copy", false, nil),
+    ("main-existing-none-light", "existing-none", false, nil),
+    ("main-arenanet-dark", "arenanet", true, nil),
+    ("main-importing-light", "importing", false, nil),
+    ("main-imported-light", "imported", false, nil),
   ]
   for (name, state, dark, design) in mains {
     let rep = await render(MainView(installer: installer(state), settings: settings()), size: size, dark: dark)
@@ -203,7 +239,7 @@ func renderAll(_ dir: URL, exports: URL?) async {
                                          to: dir.appendingPathComponent("compare-" + name + ".png")) }
   }
   for pane in SettingsPane.allCases {
-    for dark in [false, true] where !dark || pane == .performance || pane == .interface {
+    for dark in [false, true] where !dark || pane == .performance || pane == .interface || pane == .game {
       UserDefaults.standard.set(pane.rawValue, forKey: SettingsView.selectedPaneKey)
       let name = "settings-\(pane.rawValue)-\(dark ? "dark" : "light")"
       let rep = await render(SettingsView(settings: settings()), size: SettingsView.designSize, dark: dark)

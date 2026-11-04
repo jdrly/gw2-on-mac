@@ -475,12 +475,23 @@ struct RightColumn: View {
   @Bindable var installer: Installer
   let actions: PanelActions
 
+  // The painting stays while the panel leaves room for it (the window's height): the list of
+  // existing game files, the drop zone or a long message can take its place
   var body: some View {
+    ViewThatFits(in: .vertical) {
+      column(painting: true)
+      column(painting: false)
+    }
+  }
+
+  private func column(painting: Bool) -> some View {
     VStack(alignment: .leading, spacing: 12) {
-      ArtImage(name: "painting.webp")
-        .frame(width: 392, height: 132)
-        .clipped()
-        .accessibilityLabel("A painted landscape: a traveller on a cliff above a river valley and a city")
+      if painting {
+        ArtImage(name: "painting.webp")
+          .frame(width: 392, height: 132)
+          .clipped()
+          .accessibilityLabel("A painted landscape: a traveller on a cliff above a river valley and a city")
+      }
       switch installer.panel {
       case .choose: ChoosePanel(installer: installer, actions: actions)
       case .installing: InstallingPanel(installer: installer, actions: actions)
@@ -507,7 +518,8 @@ struct ResultNote: View {
             .font(.body(12.5, .bold)).bodyBox(12.5)
         }
       }
-    case .succeeded(.uninstall, let message), .succeeded(.repair, let message):
+    // (an install that ends in Ready: existing game files; the downloads go on to waiting)
+    case .succeeded(.uninstall, let message), .succeeded(.repair, let message), .succeeded(.install, let message):
       HStack(alignment: .top, spacing: 7) {
         LucideIcon(name: "circle-check", size: 13).foregroundStyle(Brand.good).padding(.top, 1)
         Text(message).font(.body(12.5)).bodyBox(12.5).foregroundStyle(Brand.fg2).fixedSize(horizontal: false, vertical: true)
@@ -518,23 +530,34 @@ struct ResultNote: View {
   }
 }
 
-// Choose the install route: Steam, or ArenaNet's installer (a dropped Gw2Setup-64.exe)
+// Choose the install route: Steam, ArenaNet's installer (a dropped Gw2Setup-64.exe), or game files
+// this Mac already has (another Wine app's install, cloned or copied). The chosen route's card
+// opens; the others keep a single line.
 struct ChoosePanel: View {
   @Bindable var installer: Installer
   let actions: PanelActions
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    VStack(alignment: .leading, spacing: 10) {
       InkHeading(title: "Install Guild Wars 2 from", size: 17, alignment: .center) { EmptyView() }
-      RouteCard(selected: installer.route == .steam, icon: "store", title: "Steam",
+        .padding(.bottom, 2)
+      RouteCard(selected: installer.route == .steam, icon: "store", title: "Steam", summary: "Valve's installer",
                 detail: "Downloads Valve's Steam installer from Valve. You sign in and install the game in it.") {
         installer.route = .steam
       }
       RouteCard(selected: installer.route == .arenanet, icon: "download", title: "ArenaNet installer",
+                summary: "Gw2Setup-64.exe",
                 detail: "Get Gw2Setup-64.exe from the official site, then drop it below.") {
         installer.route = .arenanet
       } extra: {
         DropZone(installer: installer)
+      }
+      RouteCard(selected: installer.route == .existing, icon: "hard-drive", title: "Game files I already have",
+                summary: "No download",
+                detail: "From CrossOver, Whisky or an app wrapper. No download.") {
+        installer.route = .existing
+      } extra: {
+        ExistingGames(installer: installer)
       }
       Button(action: actions.install) {
         HStack(spacing: 10) {
@@ -544,12 +567,18 @@ struct ChoosePanel: View {
       }
       .buttonStyle(.crimson)
       .disabled(!installer.loaded || installer.isBusy)
+      .padding(.top, 2)
       HStack(alignment: .top, spacing: 7) {
         LucideIcon(name: "info", size: 13).foregroundStyle(Brand.fg3)
-        Text("Every download comes from Valve or ArenaNet. GW2 on Mac hosts nothing of the game.")
+        Text(installer.route == .existing
+             ? "Cloned or copied into GW2 on Mac's bottle. The originals stay as they are."
+             : "Every download comes from Valve or ArenaNet. GW2 on Mac hosts nothing of the game.")
           .font(.body(12)).bodyBox(12, 1.3).foregroundStyle(Brand.fg3)
           .fixedSize(horizontal: false, vertical: true)
       }
+    }
+    .task {
+      if installer.route == .existing && !installer.scanned { installer.scanGames() }
     }
   }
 }
@@ -558,6 +587,8 @@ struct RouteCard<Extra: View>: View {
   let selected: Bool
   let icon: String
   let title: String
+  // what an unselected card says on its single line
+  let summary: String
   let detail: String
   let select: () -> Void
   @ViewBuilder var extra: Extra
@@ -575,10 +606,16 @@ struct RouteCard<Extra: View>: View {
             HStack(spacing: 6) {
               LucideIcon(name: icon, size: 15)
               Text(title).font(.body(14, .bold)).bodyBox(14)
+              if !selected {
+                Spacer(minLength: 8)
+                Text(summary).font(.body(12.5)).bodyBox(12.5).foregroundStyle(Brand.fg3).lineLimit(1)
+              }
             }
             .foregroundStyle(Brand.fg)
-            Text(detail).font(.body(12.5)).bodyBox(12.5, 1.3).foregroundStyle(Brand.fg2)
-              .fixedSize(horizontal: false, vertical: true)
+            if selected {
+              Text(detail).font(.body(12.5)).bodyBox(12.5, 1.3).foregroundStyle(Brand.fg2)
+                .fixedSize(horizontal: false, vertical: true)
+            }
           }
           .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -586,9 +623,10 @@ struct RouteCard<Extra: View>: View {
       }
       .buttonStyle(.plain)
       .accessibilityAddTraits(selected ? [.isSelected] : [])
-      extra
+      .accessibilityHint(selected ? "" : detail)
+      if selected { extra }
     }
-    .padding(.vertical, 11)
+    .padding(.vertical, selected ? 11 : 9)
     .padding(.horizontal, 13)
     .background(selected ? Brand.bgRaised : .clear, in: .rect(cornerRadius: 10))
     .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(selected ? Brand.accent : Brand.border,
@@ -597,8 +635,194 @@ struct RouteCard<Extra: View>: View {
 }
 
 extension RouteCard where Extra == EmptyView {
-  init(selected: Bool, icon: String, title: String, detail: String, select: @escaping () -> Void) {
-    self.init(selected: selected, icon: icon, title: title, detail: detail, select: select) { EmptyView() }
+  init(selected: Bool, icon: String, title: String, summary: String, detail: String, select: @escaping () -> Void) {
+    self.init(selected: selected, icon: icon, title: title, summary: summary, detail: detail, select: select) { EmptyView() }
+  }
+}
+
+// Game files I already have: the Guild Wars 2 installs gw2om.sh scan found in other Wine apps
+// (source, path, size, the route they imply), Choose folder… (or a dropped folder) for anything
+// else, and whether the game's settings come along
+struct ExistingGames: View {
+  @Bindable var installer: Installer
+  @State private var targeted = false
+  static let rowHeight: CGFloat = 42
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      list
+      if let problem = installer.folderProblem {
+        HStack(alignment: .top, spacing: 6) {
+          LucideIcon(name: "triangle-alert", size: 13).foregroundStyle(Brand.accent).padding(.top, 1)
+          Text(problem).font(.body(12)).bodyBox(12, 1.3).foregroundStyle(Brand.accent)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
+      HStack(spacing: 10) {
+        Button(action: chooseFolder) {
+          HStack(spacing: 5) {
+            LucideIcon(name: "folder-open", size: 14)
+            Text("Choose folder…").font(.body(12.5, .bold)).bodyBox(12.5)
+          }
+        }
+        .buttonStyle(QuietButtonStyle(color: Brand.accent))
+        .help("A Guild Wars 2 folder, or a bottle or app with one in it")
+        Spacer(minLength: 4)
+        InkCheckbox(title: "Also bring my game settings",
+                    isOn: Binding(get: { installer.bringSettings && (installer.chosenGame?.hasSettings ?? false) },
+                                  set: { installer.bringSettings = $0 }))
+          .disabled(!(installer.chosenGame?.hasSettings ?? false))
+          .help(installer.chosenGame?.hasSettings == false
+                ? "There are no game settings next to these files"
+                : "Your graphics options and the remembered login (GFXSettings.Gw2-64.exe.xml, Local.dat). The bottle's own are kept in a backup folder.")
+      }
+      if let game = installer.chosenGame {
+        HStack(alignment: .top, spacing: 6) {
+          LucideIcon(name: game.sameDisk ? "zap" : "hard-drive", size: 13).foregroundStyle(Brand.gold).padding(.top, 1)
+          Text(game.sameDisk
+               ? "Same disk: cloned in an instant, without taking extra space."
+               : "Another disk: copied, \(Installer.gigabytes(game.bytes)) on this Mac's disk.")
+            .font(.body(12)).bodyBox(12, 1.3).foregroundStyle(Brand.fg2)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
+    }
+    .dropDestination(for: URL.self) { urls, _ in
+      guard let url = urls.first(where: \.isFileURL) else { return false }
+      installer.choose(gameFolder: url)
+      return true
+    } isTargeted: { targeted = $0 }
+  }
+
+  @ViewBuilder private var list: some View {
+    let games = installer.gameFolders
+    if games.isEmpty {
+      HStack(spacing: 8) {
+        if installer.scanning {
+          ProgressView().controlSize(.small)
+          Text("Looking for Guild Wars 2 on this Mac…")
+        } else {
+          LucideIcon(name: "info", size: 14)
+          Text("None found in CrossOver, Whisky or app wrappers. Choose its folder below.")
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
+      .font(.body(12.5)).bodyBox(12.5, 1.3).foregroundStyle(Brand.fg3)
+      .padding(.vertical, 9).padding(.horizontal, 12)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(targeted ? Brand.accentSoft : Brand.surface, in: .rect(cornerRadius: 8))
+      .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(targeted ? Brand.accent : Brand.borderStrong, lineWidth: 1.2))
+    } else {
+      let rows = VStack(spacing: 0) {
+        ForEach(Array(games.enumerated()), id: \.element.id) { index, game in
+          if index > 0 { Rectangle().fill(Brand.border).frame(height: 1) }
+          row(game)
+        }
+      }
+      Group {
+        // (a fixed height past three: the panel keeps its size)
+        if games.count > 3 {
+          ScrollView { rows }.scrollIndicators(.automatic).frame(height: Self.rowHeight * 3 + 2)
+        } else {
+          rows
+        }
+      }
+      .background(Brand.bg, in: .rect(cornerRadius: 8))
+      .clipShape(.rect(cornerRadius: 8))
+      .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(targeted ? Brand.accent : Brand.borderStrong, lineWidth: 1))
+    }
+  }
+
+  private func row(_ game: Installer.GameFolder) -> some View {
+    let selected = installer.chosenGame?.path == game.path
+    return Button { installer.chosenGame = game; installer.folderProblem = nil } label: {
+      HStack(spacing: 9) {
+        ZStack {
+          Circle().strokeBorder(selected ? Brand.accent : Brand.borderStrong, lineWidth: 1.3)
+          if selected { Circle().fill(Brand.accent).frame(width: 6, height: 6) }
+        }
+        .frame(width: 13, height: 13)
+        VStack(alignment: .leading, spacing: 2) {
+          HStack(spacing: 6) {
+            Text(game.source).font(.body(13, .bold)).bodyBox(13).foregroundStyle(Brand.fg).lineLimit(1)
+            RouteChip(route: game.route)
+            Spacer(minLength: 4)
+            Text(Installer.gigabytes(game.bytes)).font(.body(12, .semibold)).bodyBox(12).foregroundStyle(Brand.fg2)
+          }
+          Text(ExistingGames.shownPath(game.path)).font(.body(11.5)).bodyBox(11.5).foregroundStyle(Brand.fg3)
+            .lineLimit(1).truncationMode(.middle)
+        }
+      }
+      .padding(.horizontal, 10)
+      .frame(height: Self.rowHeight)
+      .background(selected ? Brand.accentSoft : .clear)
+      .contentShape(.rect)
+    }
+    .buttonStyle(.plain)
+    .help(game.path)
+    .accessibilityAddTraits(selected ? [.isSelected] : [])
+    .accessibilityLabel("\(game.source), \(game.route == .steam ? "Steam" : "ArenaNet"), \(Installer.gigabytes(game.bytes))")
+  }
+
+  // In a bottle, the game's Windows path ("C:\Program Files\Guild Wars 2"; the source names the
+  // bottle); elsewhere the folder, with ~ for the home folder
+  static func shownPath(_ path: String) -> String {
+    if let r = path.range(of: "/drive_c/") {
+      return "C:\\" + path[r.upperBound...].replacingOccurrences(of: "/", with: "\\")
+    }
+    let home = NSHomeDirectory()
+    return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
+  }
+
+  private func chooseFolder() {
+    let panel = NSOpenPanel()
+    panel.canChooseDirectories = true
+    panel.canChooseFiles = true
+    panel.allowedContentTypes = [.folder, .application]
+    panel.allowsMultipleSelection = false
+    panel.message = "Choose the Guild Wars 2 folder (the one with Gw2-64.exe), or a bottle or app that has it"
+    panel.prompt = "Use"
+    if panel.runModal() == .OK, let url = panel.url { installer.choose(gameFolder: url) }
+  }
+}
+
+// "Steam" or "ArenaNet": the route a found install implies
+struct RouteChip: View {
+  let route: Installer.Route
+  var body: some View {
+    Text(route == .steam ? "Steam" : "ArenaNet")
+      .font(.body(10.5, .bold)).bodyBox(10.5)
+      .tracking(0.3)
+      .foregroundStyle(Brand.gold)
+      .padding(.vertical, 1.5).padding(.horizontal, 5)
+      .background(Brand.goldSoft, in: .rect(cornerRadius: 4))
+      .fixedSize()
+  }
+}
+
+// A small checkbox in the ink style (the accent when on)
+struct InkCheckbox: View {
+  let title: String
+  @Binding var isOn: Bool
+  @Environment(\.isEnabled) private var isEnabled
+
+  var body: some View {
+    Button { isOn.toggle() } label: {
+      HStack(spacing: 6) {
+        ZStack {
+          RoundedRectangle(cornerRadius: 3.5).fill(isOn ? Brand.accent : Brand.bg)
+          RoundedRectangle(cornerRadius: 3.5).strokeBorder(isOn ? Brand.accent : Brand.borderStrong, lineWidth: 1.3)
+          if isOn { LucideIcon(name: "check", size: 11).foregroundStyle(Brand.onAccent) }
+        }
+        .frame(width: 15, height: 15)
+        Text(title).font(.body(12.5)).bodyBox(12.5).foregroundStyle(Brand.fg2).lineLimit(1)
+      }
+      .opacity(isEnabled ? 1 : 0.5)
+      .contentShape(.rect)
+    }
+    .buttonStyle(.plain)
+    .accessibilityAddTraits(.isToggle)
+    .accessibilityValue(isOn ? "On" : "Off")
   }
 }
 
@@ -661,7 +885,9 @@ struct InstallingPanel: View {
     switch installer.operation {
     case .uninstall: return "Uninstalling"
     case .repair: return "Repairing"
-    default: return (installer.installedRoute ?? installer.route) == .arenanet ? "Installing through ArenaNet" : "Installing through Steam"
+    default:
+      if installer.imported || installer.isOperating && installer.route == .existing { return "Installing from your files" }
+      return (installer.installedRoute ?? installer.route) == .arenanet ? "Installing through ArenaNet" : "Installing through Steam"
     }
   }
 
@@ -684,7 +910,9 @@ struct InstallingPanel: View {
                 detail: detail(index, step), progress: index == installer.stepIndex ? installer.progress : nil)
       }
       if installer.phase == .waitingForGame {
-        Text(installer.installedRoute == .arenanet
+        Text(installer.imported
+             ? "Sign in to Steam: it brings your Guild Wars 2 up to date. This window follows it."
+             : installer.installedRoute == .arenanet
              ? "Pick a folder in ArenaNet's installer and let it download. This window follows it."
              : "Sign in to Steam and install Guild Wars 2 there. This window follows the download.")
           .font(.body(12)).bodyBox(12).foregroundStyle(Brand.fg3).fixedSize(horizontal: false, vertical: true)
@@ -813,7 +1041,7 @@ struct ReadyPanel: View {
       tip(installer.installedRoute == .arenanet ? "download" : "store",
           installer.installedRoute == .arenanet
             ? "Starts ArenaNet's launcher, then the game. Your login stays in it."
-            : "Starts Steam, then the game. Sign-in stays in Steam.")
+            : "Starts Steam, then the game. After your first sign-in, Steam stays in the background.")
       tip("sparkles", "The first visit to a busy map may hitch once while its shaders build. Later sessions build them ahead.")
     }
     .padding(.top, 14)

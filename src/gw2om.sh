@@ -10,6 +10,15 @@
 #                              (status: stage=waiting_game) and runs finish once it is complete
 #   gw2om.sh install arenanet <Gw2Setup-64.exe>
 #                              the same with ArenaNet's installer (checked first, check-setup)
+#   gw2om.sh install import <game folder> [--no-settings]
+#                              uses game files the Mac already has (another Wine app's Guild Wars
+#                              2): engine, bottle (and Steam, if the folder is Steam's), then the
+#                              folder cloned into the bottle (same disk) or copied, the game's
+#                              settings with it, and the finishing touches; the source is only read
+#   gw2om.sh scan              the Guild Wars 2 installs of other Wine apps on this Mac (CrossOver,
+#                              Whisky, app wrappers, Heroic, GameHub, ~/.wine), one "game" line each
+#   gw2om.sh check-game DIR    is DIR (or a game folder in it) a Guild Wars 2 install: its "game"
+#                              line, or "@error <why>"
 #   gw2om.sh finish            phase 5 once the game is there: the shader cache's folder, the
 #                              interface addon (if on), the registry settings, the manifest
 #   gw2om.sh stop-waiting      the window stops following the game's download (the engine and
@@ -19,8 +28,9 @@
 #   gw2om.sh uninstall         removes everything this app created: the bottle (with the game in
 #                              it), the engine, Game Mode, the settings, its caches (DXMT's in
 #                              them); logs stay
-#   gw2om.sh play              starts the game (Steam: steam.exe -applaunch 1284210; ArenaNet:
-#                              Gw2-64.exe) with the settings as its environment
+#   gw2om.sh play              starts the game (Steam: steam.exe -applaunch 1284210, -silent once
+#                              Steam remembers a login; ArenaNet: Gw2-64.exe) with the settings as
+#                              its environment
 #   gw2om.sh settings          KEY=VALUE lines: the settings (Settings window) and their state
 #   gw2om.sh set K V           change one setting (see setting_valid)
 #   gw2om.sh check-setup FILE  is FILE ArenaNet's Gw2Setup-64.exe: a PE x86_64 executable with a
@@ -44,10 +54,13 @@
 #   GW2_ON_MAC_STEAMSETUP_URL  another SteamSetup.exe
 #   GW2_ON_MAC_SIGNER          the signer check-setup accepts (default ArenaNet)
 #   GW2_ON_MAC_ALLOW_WINE=1    let the real engine's Wine run in a sandbox (never in the tests)
+#   GW2_ON_MAC_IMPORT_COPY=1   install import copies even on the same disk (the other-disk path)
+#   GW2_ON_MAC_FREE_KB=<n>     the free space the app's disk reports (KB)
 #
 # Lines for the app start with "@": "@phase <n>" (the timeline: install 1 engine, 2 bottle,
-# 3 Steam or ArenaNet's installer, 4 the game's download, 5 finishing touches; uninstall 1 stop,
-# 2 bottle, 3 the rest), "@step <text>", "@progress <label> <bytes> <total>", "@warn <text>",
+# 3 Steam or ArenaNet's installer, 4 the game's download, 5 finishing touches; install import
+# 1 engine, 2 bottle, then Steam's route 3 Steam, 4 the files, 5 finishing touches, or ArenaNet's
+# 3 the files, 4 finishing touches; uninstall 1 stop, 2 bottle, 3 the rest), "@step <text>", "@progress <label> <bytes> <total>", "@warn <text>",
 # "@notice <text>", "@error <text>", "@done <text>". Everything else is plain log text.
 # Runs under macOS's /bin/bash 3.2.
 set -euo pipefail
@@ -100,11 +113,16 @@ if [ -n "$ROOT" ]; then
   ENGINE_CHECKS="${GW2_ON_MAC_ENGINE_CHECKS:-1}"
   STEAM_SETUP_URL="${GW2_ON_MAC_STEAMSETUP_URL:-$STEAM_SETUP_URL}"
   SIGNER="${GW2_ON_MAC_SIGNER:-ArenaNet}"
+  SYS_APPS="$ROOT/Applications"
+  IMPORT_COPY="${GW2_ON_MAC_IMPORT_COPY:-}"
+  FREE_KB="${GW2_ON_MAC_FREE_KB:-}"
 else
   H="$HOME"
   USER_TMP="$(getconf DARWIN_USER_TEMP_DIR)"
   ENGINE_CHECKS=1
   SIGNER=ArenaNet
+  SYS_APPS=/Applications
+  IMPORT_COPY="" FREE_KB=""
 fi
 APPDIR="$H/Library/Application Support/GW2 on Mac"
 LOGS="$H/Library/Logs/GW2 on Mac"
@@ -113,7 +131,8 @@ ENG="$APPDIR/engine"                  # the unpacked engine with GW2 on Mac's pi
 BOTTLE="$APPDIR/bottle"               # the game's Wine prefix (Steam and the game live in it)
 GAMEMODE_APP="$APPDIR/gamemode/GW2.app"
 SETTINGS="$APPDIR/settings.conf"
-STATE="$APPDIR/state"                 # route, stage (none|waiting_game|finished), game_dir
+STATE="$APPDIR/state"                 # route, stage (none|waiting_game|finished), game_dir,
+                                      # origin (download|import)
 MANIFEST="$APPDIR/install-manifest.json"
 DXMT_CONF="$APPDIR/dxmt.conf"
 # DXMT's caches, in the app's own cache folder (DXMT_CACHE_DIR=$CACHE, jdrly/dxmt #134) instead of
@@ -168,6 +187,7 @@ rosetta_ok() { /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null; }
 # free_kb: free space (KB) on the volume the app's folder is (or will be) on
 free_kb() {
   local d="$APPDIR"
+  if [ -n "$FREE_KB" ]; then echo "$FREE_KB"; return; fi
   while [ ! -d "$d" ] && [ "$d" != / ]; do d=$(dirname "$d"); done
   { df -k "$d" 2>/dev/null || true; } | awk 'NR == 2 { print $4 }'
 }
@@ -176,7 +196,7 @@ free_kb() {
 state() { sed -n "s/^$1=//p" "$STATE" 2>/dev/null | tail -1; }
 set_state() {
   local k
-  { for k in route stage game_dir game_exe; do
+  { for k in route stage game_dir game_exe origin; do
       if [ "$k" = "$1" ]; then echo "$k=$2"; else echo "$k=$(state "$k")"; fi
     done; } | put "$STATE" 644
 }
@@ -501,13 +521,14 @@ apply_registry() {
 #   fastlocks=on     HEAT_SPIN=lock=20:game,event=30:game: short spins before sleeps (round 7)
 # (and, with no setting of their own, DXMT_DEPENDENCY_COMPRESSION=1, the checkpoint chain, #133,
 # and round 7's HEAT_LAZYCLOCK, HEAT_MSYNC_UNREG and HEAT_MSYNC_PORTFIX: see game_env)
-SETTING_KEYS="retina fpscap metalfx hud warm coolworkers fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts updates debug"
+SETTING_KEYS="retina fpscap metalfx hud warm coolworkers fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts updates debug steambg"
 FPS_CAPS="off 30 40 60 120"
-CPU_COUNTS="4 6 8 10 12 all"
+# CPUs the game sees (ncpu): 2 up to this Mac's logical CPUs, or all
+CPU_MAX="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 8)"
 UI_SCALES="1.5 1.75 1.8 2.0"
 setting_default() {
   case "$1" in
-    retina|warm|fastlocks|uiscale_sans|uiscale_cinema|gamemode|updates) echo on ;;
+    retina|warm|fastlocks|uiscale_sans|uiscale_cinema|gamemode|updates|steambg) echo on ;;
     metalfx|hud|uiscale) echo off ;;
     debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
     fpscap) echo off ;;
@@ -519,10 +540,10 @@ setting_default() {
 }
 setting_valid() { # <key> <value>
   case "$1" in
-    retina|metalfx|hud|warm|fastlocks|uiscale|uiscale_sans|uiscale_cinema|gamemode|updates|debug)
+    retina|metalfx|hud|warm|fastlocks|uiscale|uiscale_sans|uiscale_cinema|gamemode|updates|debug|steambg)
       [ "$2" = on ] || [ "$2" = off ] ;;
     fpscap) in_list "$2" "$FPS_CAPS" ;;
-    ncpu) in_list "$2" "$CPU_COUNTS" ;;
+    ncpu) [ "$2" = all ] || { case "$2" in ''|*[!0-9]*) false ;; *) [ "$2" -ge 2 ] && [ "$2" -le "$CPU_MAX" ] ;; esac; } ;;
     uiscale_size) in_list "$2" "$UI_SCALES" ;;
     coolworkers) [ "$2" = off ] || { case "$2" in ''|*[!0-9]*) false ;; *) [ "$2" -ge 1 ] && [ "$2" -le 15 ] ;; esac; } ;;
     # Gw2-64.exe's arguments: words of letters, digits and -_.:=,/+ only (nothing a shell or Wine
@@ -784,6 +805,11 @@ steam_libraries() {
 }
 # acf <file> <key>: a top-level value of a Steam appmanifest
 acf() { sed -n "s/^[[:space:]]*\"$2\"[[:space:]]*\"\(.*\)\"[[:space:]]*$/\1/p" "$1" 2>/dev/null | head -1; }
+# Steam remembers a login: a user in its config/loginusers.vdf with "RememberPassword" "1" (Steam
+# signs in by itself; without one, it asks in its window)
+steam_remembers_login() {
+  awk -F'"' 'tolower($2) == "rememberpassword" && $4 == "1" { f = 1 } END { exit !f }' "$STEAM_DIR/config/loginusers.vdf" 2>/dev/null
+}
 
 # game_state: sets GAME (yes|no), GAME_DIR, GAME_EXE (its Windows path), GAME_BYTES, GAME_TOTAL
 game_state() {
@@ -866,6 +892,265 @@ sync_uiscale() {
     if [ -f "$GAME_DIR/gw2-ui-scale.log" ] && [ -z "$DRY" ]; then
       mkdir -p "$LOGS" && mv -f "$GAME_DIR/gw2-ui-scale.log" "$LOGS/gw2-ui-scale-$(date '+%Y%m%d-%H%M%S').log"
     fi
+  fi
+}
+
+# --- Existing game files (install import): another Wine app's Guild Wars 2, cloned into the bottle
+# (the same disk: APFS clonefile, instant and without extra space) or copied (another disk). The
+# source is only read: its files, its bottle and its app stay as they are.
+
+# Where a bottle keeps the game: Steam's default library, ArenaNet's default folder
+GAME_RELS=("Program Files (x86)/Steam/steamapps/common/Guild Wars 2" "Program Files/Steam/steamapps/common/Guild Wars 2"
+  "Program Files/Guild Wars 2" "Program Files (x86)/Guild Wars 2")
+
+# The drive_c of every bottle other Wine apps keep in their known places: CrossOver's bottles,
+# Whisky's, app wrappers (Sikarugir, Kegworks, Wineskin, Porting Kit: <app>/Contents/...),
+# Heroic's prefixes, ~/.wine; GameHub doesn't document where it keeps its bottles, so its folders
+# are looked through (a few levels). Anything else: Choose folder… (check-game).
+wine_places() {
+  local d a
+  for d in "$H/Library/Application Support/CrossOver/Bottles"/*/drive_c \
+    "$H/Library/Containers/com.isaacmarovitz.Whisky/Bottles"/*/drive_c \
+    "$H/Library/Containers/com.isaacmarovitz.Whisky/Data/Bottles"/*/drive_c \
+    "$H/Games/Heroic/Prefixes"/*/drive_c "$H/Games/Heroic/Prefixes"/*/*/drive_c "$H/.wine/drive_c"; do
+    if [ -d "$d" ]; then echo "$d"; fi
+  done
+  for a in "$H/Applications"/*.app "$H/Applications"/*/*.app "$SYS_APPS"/*.app "$SYS_APPS"/*/*.app; do
+    [ -d "$a/Contents" ] || continue
+    for d in "$a/Contents/SharedSupport/prefix/drive_c" "$a/Contents/drive_c" "$a/Contents/Resources/drive_c"; do
+      if [ -d "$d" ]; then echo "$d"; fi
+    done
+  done
+  for d in "$H/Library/Application Support"/[Gg]ame[Hh]ub* "$H/Library/Containers"/*[Gg]ame[Hh]ub*; do
+    if [ -d "$d" ]; then find "$d" -maxdepth 6 -type d -name drive_c -prune 2>/dev/null || true; fi
+  done
+}
+
+# source_label <game dir>: the app it belongs to, as the window shows it ("CrossOver · Steam")
+source_label() {
+  local p=$1 r n
+  case "$p" in
+    "$H/Library/Application Support/CrossOver/Bottles/"*)
+      r=${p#"$H/Library/Application Support/CrossOver/Bottles/"}; echo "CrossOver · ${r%%/*}" ;;
+    "$H/Library/Containers/com.isaacmarovitz.Whisky/"*)
+      r=${p#*/Bottles/}; r=${r%%/*}
+      n=$(plutil -extract name raw -o - "${p%%/Bottles/*}/Bottles/$r/Metadata.plist" 2>/dev/null || true)
+      echo "Whisky · ${n:-$r}" ;;
+    "$H/Games/Heroic/"*) echo "Heroic · $(basename "${p%%/drive_c/*}")" ;;
+    "$H/.wine/"*) echo "Wine · ~/.wine" ;;
+    *[Gg]ame[Hh]ub*) echo "GameHub · $(basename "${p%%/drive_c/*}")" ;;
+    *.app/Contents/*) r=${p%%.app/Contents/*}; echo "Wrapper · $(basename "$r")" ;;
+    *) echo "Folder · $(basename "$(dirname "$p")")" ;;
+  esac
+}
+
+# game_ok <dir>: a complete Guild Wars 2 (its launcher, and a Gw2.dat with more than 1 GB)
+game_ok() { [ -f "$1/Gw2-64.exe" ] && [ "$(stat -f %z "$1/Gw2.dat" 2>/dev/null || echo 0)" -gt 1000000000 ]; }
+# game_route_of <game dir>: steam if Steam's record of it is there (steamapps/appmanifest_1284210.acf),
+# else arenanet
+game_route_of() { if [ -f "$1/../../appmanifest_$GW2_APPID.acf" ]; then echo steam; else echo arenanet; fi; }
+folder_bytes() { find "$1" -type f -exec stat -f %z {} + 2>/dev/null | awk '{ s += $1 } END { printf "%.0f\n", s }'; }
+volume_of() { local d=$1; while [ ! -d "$d" ] && [ "$d" != / ]; do d=$(dirname "$d"); done; stat -f %d "$d"; }
+# the game folder is on the disk of the app's folder (it can be cloned)
+same_volume() { [ -z "$IMPORT_COPY" ] && [ "$(volume_of "$1")" = "$(volume_of "$APPDIR")" ]; }
+# settings_source <game dir>: the newest users/*/AppData/Roaming/Guild Wars 2 of its bottle that has
+# the game's settings (Local.dat, GFXSettings.Gw2-64.exe.xml)
+settings_source() {
+  local c d f t best="" bt=0
+  case "$1" in */drive_c/*) c="${1%%/drive_c/*}/drive_c" ;; *) return 1 ;; esac
+  for d in "$c/users"/*/"AppData/Roaming/Guild Wars 2"; do
+    for f in Local.dat GFXSettings.Gw2-64.exe.xml; do
+      [ -f "$d/$f" ] || continue
+      t=$(stat -f %m "$d/$f")
+      if [ "$t" -gt "$bt" ]; then bt=$t; best=$d; fi
+    done
+  done
+  [ -n "$best" ] || return 1
+  echo "$best"
+}
+# game_dir_of <path>: the Guild Wars 2 folder at <path>, or in the bottle (or wrapper) at <path>
+game_dir_of() {
+  local p=${1:-} b rel
+  [ -n "$p" ] && [ -d "$p" ] || return 1
+  for b in "$p" "$p/Guild Wars 2" "$p/common/Guild Wars 2" "$p/steamapps/common/Guild Wars 2"; do
+    if game_ok "$b"; then (cd "$b" && pwd -P); return 0; fi
+  done
+  for b in "$p" "$p/drive_c" "$p/Contents/SharedSupport/prefix/drive_c" "$p/Contents/drive_c"; do
+    for rel in "${GAME_RELS[@]}"; do
+      if game_ok "$b/$rel"; then (cd "$b/$rel" && pwd -P); return 0; fi
+    done
+  done
+  return 1
+}
+# game_line <game dir>: what the window lists, tab-separated:
+#   game <source> <route> <bytes> <same disk yes|no> <settings yes|no> <path>
+game_line() {
+  local d=$1
+  case "$d/" in "$BOTTLE/"*) return 0 ;; esac
+  printf 'game\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(source_label "$d")" "$(game_route_of "$d")" "$(folder_bytes "$d")" \
+    "$(same_volume "$d" && echo yes || echo no)" "$(settings_source "$d" >/dev/null && echo yes || echo no)" "$d"
+}
+
+cmd_scan() {
+  local c rel
+  wine_places | while IFS= read -r c; do
+    for rel in "${GAME_RELS[@]}"; do
+      if game_ok "$c/$rel"; then game_line "$(cd "$c/$rel" && pwd -P)"; fi
+    done
+  done | awk -F'\t' '!seen[$NF]++'
+  echo "@done scanned"
+}
+
+cmd_check_game() {
+  local d
+  d=$(game_dir_of "${1:-}") || { echo "@error This folder has no Guild Wars 2 in it: it needs Gw2-64.exe and a Gw2.dat of more than 1 GB."; exit 1; }
+  case "$d/" in "$BOTTLE/"*) echo "@error That is GW2 on Mac's own copy of the game."; exit 1 ;; esac
+  game_line "$d"
+  echo "@done $d"
+}
+
+# A Guild Wars 2 runs, in any Wine (its files may change while they are copied). In a sandbox only
+# the sandbox's own count.
+game_runs_anywhere() {
+  local l
+  l=$(ps -axww -o args= 2>/dev/null || true)
+  printf '%s\n' "$l" | awk -v r="${ROOT:+$ROOT/}" 'tolower($0) ~ /gw2-64\.exe/ && (r == "" || index($0, r)) { f = 1 } END { exit !f }'
+}
+
+# import_game <source dir> <bottle's game dir>: the folder cloned (same disk) or copied (with a
+# free-space check and progress); our own addon's files (version.dll with its mark,
+# gw2-ui-scale.*) are left out; any other addon comes along as it is (ADDONS names them)
+import_game() {
+  local src=$1 dst=$2 total pid
+  total=$(folder_bytes "$src")
+  if [ -e "$dst" ]; then
+    [ -z "$(ls -A "$dst" 2>/dev/null)" ] ||
+      die "The game's bottle already has a Guild Wars 2 folder ($dst). Uninstall GW2 on Mac first to use your own game files."
+    run rmdir "$dst"
+  fi
+  if [ -n "$DRY" ]; then
+    echo "[dry-run] $(same_volume "$src" && echo clone || echo copy) $src ($total bytes) to $dst"
+    IMPORT_HOW=cloned ADDONS=""
+    return
+  fi
+  run mkdir -p "$(dirname "$dst")"
+  IMPORT_DST=$dst IMPORT_HOW=""
+  if same_volume "$src"; then
+    say "Cloning the game's files from $src: the same disk, so it takes no extra space"
+    if run cp -Rpc "$src" "$dst" 2>>"$LOGFILE"; then
+      IMPORT_HOW=cloned
+    else
+      log "cloning failed; copying instead"
+      rm -rf "$dst"
+    fi
+  fi
+  if [ -z "$IMPORT_HOW" ]; then
+    local free
+    free=$(free_kb)
+    [ "$(( ${free:-0} * 1024 ))" -ge "$((total + 1000000000))" ] ||
+      die "Not enough free disk space to copy the game's files: they need $(( (total + 999999999) / 1000000000 )) GB (and 1 GB to spare), $(( ${free:-0} / 1000000 )) GB are free."
+    say "Copying the game's files from $src ($(( (total + 500000000) / 1000000000 )) GB, from another disk)"
+    { printf '+ cp -Rp %q %q\n' "$src" "$dst"; } >>"$LOGFILE"
+    cp -Rp "$src" "$dst" 2>>"$LOGFILE" &
+    pid=$!
+    FETCH_PID=$pid
+    while kill -0 "$pid" 2>/dev/null; do
+      echo "@progress Guild Wars 2 $(folder_bytes "$dst") $total"
+      sleep 1
+    done
+    wait "$pid" || { FETCH_PID=; die "Copying the game's files failed (details in $LOGS/install.log)."; }
+    FETCH_PID=
+    IMPORT_HOW=copied
+  fi
+  echo "@progress Guild Wars 2 $total $total"
+  if [ -f "$dst/version.dll" ] && grep -aq "$UI_MARK" "$dst/version.dll"; then run rm -f "$dst/version.dll"; fi
+  run rm -f "$dst/gw2-ui-scale.ini" "$dst/gw2-ui-scale.log"
+  chmod -R u+w "$dst"
+  ADDONS=$( (cd "$dst" && ls -d ./*.dll addons bin64/d3d9.dll 2>/dev/null || true) | sed 's|^\./||' | tr '\n' ',' | sed 's/,$//; s/,/, /g')
+  [ -z "$ADDONS" ] || say "Addons that came along with the game's files: $ADDONS (GW2 on Mac leaves them as they are)"
+  log "game files $IMPORT_HOW: $src -> $dst ($total bytes)"
+}
+
+# The bottle's Windows user (CrossOver's engine: crossover)
+bottle_user() {
+  local u
+  for u in "$BOTTLE/drive_c/users"/*; do
+    [ -d "$u" ] || continue
+    case "$(basename "$u")" in Public|public) continue ;; esac
+    basename "$u"; return
+  done
+  echo crossover
+}
+
+# import_settings <source game dir>: the game's settings (Local.dat: options and the remembered
+# login; GFXSettings.Gw2-64.exe.xml: graphics) from the source bottle's AppData into ours; any the
+# bottle had already go to a backup folder next to them
+import_settings() {
+  local from to backup f
+  SETTINGS_IMPORTED=no
+  from=$(settings_source "$1") || { say "No game settings next to these files: the game starts with its defaults"; return 0; }
+  to="$BOTTLE/drive_c/users/$(bottle_user)/AppData/Roaming/Guild Wars 2"
+  say "Your game settings from $from"
+  if [ -n "$DRY" ]; then echo "[dry-run] copy Local.dat and GFXSettings.Gw2-64.exe.xml to $to"; return 0; fi
+  backup="$to/GW2 on Mac backup $(date '+%Y-%m-%d %H%M%S')"
+  run mkdir -p "$to"
+  for f in GFXSettings.Gw2-64.exe.xml Local.dat; do
+    [ -f "$from/$f" ] || continue
+    if [ -f "$to/$f" ]; then run mkdir -p "$backup"; run mv -f "$to/$f" "$backup/$f"; fi
+    run cp -p "$from/$f" "$to/$f"
+    SETTINGS_IMPORTED=yes
+  done
+  if [ -d "$backup" ]; then say "The bottle's own game settings are kept in $backup"; fi
+}
+
+# install import, after the engine and the bottle: Steam (for Steam's files), the game's files and
+# settings, then the finishing touches. Steam's record comes along with its files: Steam may check
+# them at the first Play. If its record says the game isn't complete, Steam's install step follows
+# as usual (it continues from the files).
+install_imported() {
+  local route=$1 src=$2 with_settings=$3 dst m="" how label
+  label=$(source_label "$src")
+  phase 3
+  if [ "$route" = steam ]; then
+    install_steam
+    phase 4
+    m="$src/../../appmanifest_$GW2_APPID.acf"
+    dst="$STEAM_DIR/steamapps/common/$(acf "$m" installdir)"
+    [ "$dst" != "$STEAM_DIR/steamapps/common/" ] || dst="$STEAM_DIR/steamapps/common/Guild Wars 2"
+  else
+    dst="$BOTTLE/drive_c/Program Files/Guild Wars 2"
+  fi
+  step "Your game files, from $label"
+  import_game "$src" "$dst"
+  if [ -n "$m" ]; then
+    run cp -p "$m" "$STEAM_DIR/steamapps/appmanifest_$GW2_APPID.acf"
+    IMPORT_ACF="$STEAM_DIR/steamapps/appmanifest_$GW2_APPID.acf"
+  fi
+  SETTINGS_IMPORTED=no
+  if [ "$with_settings" = yes ]; then import_settings "$src"; fi
+  if [ -z "$DRY" ]; then
+    set_state route "$route"
+    set_state origin import
+    [ "$route" = steam ] || set_state game_dir "$dst"
+  fi
+  write_manifest
+  game_state
+  how="cloned from $label (no extra space)"
+  [ "$IMPORT_HOW" != copied ] || how="copied from $label"
+  if [ "$GAME" = yes ] || [ -n "$DRY" ]; then
+    if [ "$route" = steam ]; then phase 5; else phase 4; fi
+    step "Finishing touches"
+    finish_touches
+    IMPORT_DST="" IMPORT_ACF=""
+    log "install import complete"
+    echo "@done Guild Wars 2 is ready: its files were $how$([ "$SETTINGS_IMPORTED" = yes ] && echo ", with your game settings").$([ -z "$ADDONS" ] || echo " Addons that came along: $ADDONS; GW2 on Mac leaves them as they are.")$([ "$route" = steam ] && echo " Steam may check the files at the first Play.") Press Play."
+  else
+    step "Steam opens: sign in, and it brings Guild Wars 2 up to date"
+    launch "$STEAM_EXE" "steam://install/$GW2_APPID"
+    set_state stage waiting_game
+    IMPORT_DST="" IMPORT_ACF=""
+    log "install import: Steam's record of the game is not complete; waiting for Steam"
+    echo "@done Your game files were $how. Steam is starting: sign in, and it brings the game up to date; this window follows it."
   fi
 }
 
@@ -970,6 +1255,7 @@ status() {
   if [ "$(setting gamemode)" != on ]; then echo "gamemode=off"
   elif gamemode_current; then echo "gamemode=yes"; else echo "gamemode=no"; fi
   echo "route=$(state route)"
+  echo "origin=$(state origin)"
   echo "steam=$([ -f "$STEAM_DIR/steam.exe" ] && echo yes || echo no)"
   game_state
   echo "game=$GAME"
@@ -994,6 +1280,8 @@ settings() {
   echo "route=$(state route)"
   for k in $SETTING_KEYS; do echo "$k=$(setting "$k")"; done
   echo "uiscale_state=$(uiscale_state)"
+  echo "cpus=$CPU_MAX"
+  echo "steam_login=$(steam_remembers_login && echo yes || echo no)"
 }
 
 cmd_set() {
@@ -1056,12 +1344,17 @@ on_install_exit() {
     for c in $CREATED; do
       if [ -e "$APPDIR/$c" ]; then rm -rf "${APPDIR:?}/$c"; log "removed $c (install failed)"; fi
     done
+    # the game's files this run cloned or copied (and Steam's record of them), if the bottle stays
+    if [ -n "${FETCH_PID:-}" ]; then wait "$FETCH_PID" 2>/dev/null || true; fi
+    if [ -n "${IMPORT_DST:-}" ] && [ -e "$IMPORT_DST" ]; then rm -rf "$IMPORT_DST"; log "removed $IMPORT_DST (install failed)"; fi
+    if [ -n "${IMPORT_ACF:-}" ] && [ -e "$IMPORT_ACF" ]; then rm -f "$IMPORT_ACF"; fi
     rm -rf "$APPDIR"/*.new "$APPDIR/gamemode"/.GW2.app.new.* 2>/dev/null || true
     log "install failed (status $st)"
   fi
   rmdir "$APPDIR/.lock" 2>/dev/null || true
 }
 
+# preflight [import]: (an import checks the space its copy needs itself)
 preflight() {
   [ "$(uname -m)" = arm64 ] || die "GW2 on Mac needs a Mac with Apple silicon."
   rosetta_ok || die "Rosetta is not installed. Install it (softwareupdate --install-rosetta in Terminal), then try again."
@@ -1069,7 +1362,7 @@ preflight() {
   local avail
   avail=$(free_kb)
   [ "${avail:-0}" -gt 3000000 ] || die "Not enough free disk space (the engine and Steam need about 3 GB, the game about 75 GB)."
-  [ "$((${avail:-0} * 1024))" -ge "$DISK_NEEDED" ] || warn "Only $(( ${avail:-0} / 1000000 )) GB free: Guild Wars 2 needs about 75 GB."
+  [ "${1:-}" = import ] || [ "$((${avail:-0} * 1024))" -ge "$DISK_NEEDED" ] || warn "Only $(( ${avail:-0} / 1000000 )) GB free: Guild Wars 2 needs about 75 GB."
 }
 
 # The bottle: created once (wineboot), then its settings (registry, dxmt.conf) and Game Mode
@@ -1146,22 +1439,29 @@ launch() {
 }
 
 cmd_install() {
-  local route=${1:-} setup=${2:-} want
-  CREATED="" FETCH_PID=""
+  local route=${1:-} setup=${2:-} want src="" with_settings=yes
+  CREATED="" FETCH_PID="" IMPORT_DST="" IMPORT_ACF=""
   # a first install's state and manifest go too if it fails
   [ -f "$MANIFEST" ] || CREATED="state install-manifest.json"
-  case "$route" in steam|arenanet) ;; *) echo "@error Usage: gw2om.sh install steam | install arenanet <Gw2Setup-64.exe>"; exit 2 ;; esac
-  if [ "$route" = arenanet ]; then
+  case "$route" in steam|arenanet|import) ;; *) echo "@error Usage: gw2om.sh install steam | install arenanet <Gw2Setup-64.exe> | install import <game folder> [--no-settings]"; exit 2 ;; esac
+  if [ "$route" = import ]; then
+    [ "${3:-}" != --no-settings ] || with_settings=no
+    src=$(game_dir_of "$setup") || { echo "@error There is no Guild Wars 2 in ${setup:-that folder} (Gw2-64.exe and a Gw2.dat of more than 1 GB)."; exit 2; }
+    case "$src/" in "$BOTTLE/"*) echo "@error That is GW2 on Mac's own copy of the game."; exit 2 ;; esac
+    route=$(game_route_of "$src")
+    if game_runs_anywhere; then echo "@error Guild Wars 2 is running. Quit it first (in every app), so its files don't change while they are copied."; exit 1; fi
+  fi
+  if [ "$route" = arenanet ] && [ -z "$src" ]; then
     [ -n "$setup" ] || { echo "@error Drop Gw2Setup-64.exe from ArenaNet's site first."; exit 2; }
     want=$(cmd_check_setup "$setup") || true
     want=$(echo "$want" | tail -1)
     case "$want" in "@done "*) ;; *) echo "$want"; exit 1 ;; esac
   fi
   open_log
-  log "---- install $route $VERSION (dxmt $DXMT_VERSION, engine $ENGINE_NAME) root=${ROOT:-/} dry=${DRY:-0}"
+  log "---- install $route${src:+ import $src} $VERSION (dxmt $DXMT_VERSION, engine $ENGINE_NAME) root=${ROOT:-/} dry=${DRY:-0}"
   phase 1
   step "Checking your Mac"
-  preflight
+  preflight ${src:+import}
   lock
   trap on_install_exit EXIT
   trap 'exit 143' TERM INT HUP   # Cancel in the app: roll back through the EXIT trap
@@ -1171,6 +1471,10 @@ cmd_install() {
   phase 2
   step "The game's own bottle"
   install_bottle
+  if [ -n "$src" ]; then
+    install_imported "$route" "$src" "$with_settings"
+    return
+  fi
   phase 3
   if [ "$route" = steam ]; then
     install_steam
@@ -1180,7 +1484,7 @@ cmd_install() {
     run mkdir -p "$CACHE/downloads"
     run cp "$setup" "$CACHE/downloads/Gw2Setup-64.exe"
   fi
-  [ -n "$DRY" ] || set_state route "$route"
+  [ -n "$DRY" ] || { set_state route "$route"; set_state origin download; }
   write_manifest
   phase 4
   if [ "$route" = steam ]; then
@@ -1198,6 +1502,18 @@ cmd_install() {
   fi
 }
 
+# The finishing touches, once the game is there (game_state): the shader cache's folder, the
+# interface addon, the registry settings, Game Mode, stage=finished
+finish_touches() {
+  say "The shader cache: $DXMT_CACHE (DXMT fills it while you play; warming builds ahead)"
+  run mkdir -p "$DXMT_CACHE"
+  sync_uiscale
+  apply_registry
+  gamemode_current || [ "$(setting gamemode)" != on ] || install_gamemode
+  [ -n "$DRY" ] || { set_state stage finished; set_state game_dir "$GAME_DIR"; }
+  write_manifest
+}
+
 # Phase 5, once the game is there
 cmd_finish() {
   open_log
@@ -1209,13 +1525,7 @@ cmd_finish() {
   [ "$GAME" = yes ] || [ -n "$DRY" ] || die "Guild Wars 2 is not installed yet."
   lock
   trap 'rmdir "$APPDIR/.lock" 2>/dev/null || true' EXIT
-  say "The shader cache: $DXMT_CACHE (DXMT fills it while you play; warming builds ahead)"
-  run mkdir -p "$DXMT_CACHE"
-  sync_uiscale
-  apply_registry
-  gamemode_current || [ "$(setting gamemode)" != on ] || install_gamemode
-  [ -n "$DRY" ] || { set_state stage finished; set_state game_dir "$GAME_DIR"; }
-  write_manifest
+  finish_touches
   log "finish complete"
   echo "@done Guild Wars 2 is ready. Press Play."
 }
@@ -1315,8 +1625,12 @@ cmd_play() {
     # shellcheck disable=SC2086
     launch "$GAME_EXE" $(setting launchopts)
   else
+    # Once Steam remembers a login, it starts without its window (-silent): it signs in by itself
+    # and starts the game. Before the first sign-in its window shows, as at the install.
+    local silent=""
+    if [ "$(setting steambg)" = on ] && steam_remembers_login; then silent=-silent; fi
     # shellcheck disable=SC2086
-    launch "$STEAM_EXE" -applaunch "$GW2_APPID" $(setting launchopts)
+    launch "$STEAM_EXE" ${silent:+"$silent"} -applaunch "$GW2_APPID" $(setting launchopts)
   fi
   echo "@done Starting Guild Wars 2."
 }
@@ -1384,6 +1698,8 @@ case "${1:-}" in
   settings) settings ;;
   set) shift; cmd_set "$@" ;;
   check-setup) shift; cmd_check_setup "$@" ;;
+  scan) cmd_scan ;;
+  check-game) shift; cmd_check_game "$@" ;;
   reset-shaders) cmd_reset_shaders ;;
   reinstall-engine) cmd_reinstall_engine ;;
   end-leftovers) cmd_end_leftovers ;;

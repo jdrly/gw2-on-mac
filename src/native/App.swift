@@ -19,7 +19,31 @@ import SwiftUI
 
 @MainActor @Observable
 final class Installer {
-  enum Route: String, CaseIterable { case steam, arenanet }
+  // existing: game files the Mac already has (another Wine app's install), brought into the bottle;
+  // its own route (Steam or ArenaNet) comes from those files
+  enum Route: String, CaseIterable { case steam, arenanet, existing }
+  // A Guild Wars 2 install found by gw2om.sh scan (or chosen with Choose folder…, check-game)
+  struct GameFolder: Identifiable, Equatable {
+    var id: String { path }
+    let source: String        // "CrossOver · Steam"
+    let route: Route          // steam if Steam's record is there, else arenanet
+    let bytes: Int64
+    let sameDisk: Bool        // cloned (instant, no extra space), else copied
+    let hasSettings: Bool     // its bottle has the game's settings (Local.dat, GFXSettings)
+    let path: String
+
+    // "game\t<source>\t<route>\t<bytes>\t<yes|no>\t<yes|no>\t<path>"
+    init?(line: Substring) {
+      let f = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+      guard f.count >= 7, f[0] == "game", let route = Route(rawValue: f[2]) else { return nil }
+      self.init(source: f[1], route: route, bytes: Int64(f[3]) ?? 0, sameDisk: f[4] == "yes",
+                hasSettings: f[5] == "yes", path: f[6...].joined(separator: "\t"))
+    }
+    init(source: String, route: Route, bytes: Int64, sameDisk: Bool, hasSettings: Bool, path: String) {
+      self.source = source; self.route = route; self.bytes = bytes
+      self.sameDisk = sameDisk; self.hasSettings = hasSettings; self.path = path
+    }
+  }
   enum Operation: String { case install, finish, repair, uninstall }
   enum Phase: Equatable {
     case idle
@@ -37,15 +61,29 @@ final class Installer {
   }
   struct Progress: Equatable { var label: String; var done: Int64; var total: Int64 }
 
-  static func installSteps(_ route: Route, interface: Bool) -> [Step] {
-    let finishing = Step(id: 5, title: "Finishing touches",
-                         detail: interface ? "The sharper interface and the shader cache" : "Game Mode and the shader cache")
+  // imported: the game's files come from the Mac (a clone or a copy) instead of a download
+  static func installSteps(_ route: Route, interface: Bool, imported: Bool = false) -> [Step] {
+    let finishingDetail = interface ? "The sharper interface and the shader cache" : "Game Mode and the shader cache"
+    let finishing = Step(id: 5, title: "Finishing touches", detail: finishingDetail)
     let common = [
       Step(id: 1, title: "The Wine engine", detail: "CrossOver 26.3 · from athei/wine-build"),
       Step(id: 2, title: "The game's own bottle", detail: "Retina, Game Mode and our graphics"),
     ]
+    let files = "Cloned or copied; the originals stay as they are"
+    if imported {
+      return route == .steam
+        ? common + [
+          Step(id: 3, title: "Steam, from Valve", detail: "SteamSetup.exe, Valve's installer"),
+          Step(id: 4, title: "Your game files", detail: files),
+          finishing,
+        ]
+        : common + [
+          Step(id: 3, title: "Your game files", detail: files),
+          Step(id: 4, title: "Finishing touches", detail: finishingDetail),
+        ]
+    }
     switch route {
-    case .steam:
+    case .steam, .existing:
       return common + [
         Step(id: 3, title: "Steam, from Valve", detail: "SteamSetup.exe, Valve's installer"),
         Step(id: 4, title: "Sign in, then install Guild Wars 2", detail: "Steam opens. Your login stays in Steam."),
@@ -77,11 +115,22 @@ final class Installer {
   // The route chosen in the window (kept across launches), and the ArenaNet installer the user
   // dropped (checked by gw2om.sh check-setup)
   var route: Route = Route(rawValue: UserDefaults.standard.string(forKey: "route") ?? "") ?? .steam {
-    didSet { UserDefaults.standard.set(route.rawValue, forKey: "route") }
+    didSet {
+      UserDefaults.standard.set(route.rawValue, forKey: "route")
+      if route == .existing && oldValue != .existing { scanGames() }
+    }
   }
   var setupFile: URL?
   var setupCheck: SetupCheck?
   enum SetupCheck: Equatable { case checking, ok(String), bad(String) }
+  // Existing game files: what gw2om.sh scan found (and folders chosen), the one chosen, and
+  // whether the game's settings come along (on by default)
+  var gameFolders: [GameFolder] = []
+  var scanning = false
+  var scanned = false
+  var chosenGame: GameFolder?
+  var folderProblem: String?
+  var bringSettings = true
   // a sheet or alert is open on the main window (it keeps the app from quitting), and a request
   // to close them
   var sheetOpen = false
@@ -125,9 +174,19 @@ final class Installer {
 
   // The steps shown: the install's (of the route being installed), or the uninstall's
   var steps: [Step] {
-    operation == .uninstall ? Installer.uninstallSteps
-      : Installer.installSteps(installedRoute ?? route, interface: status["uiscale"] == "on")
+    if operation == .uninstall { return Installer.uninstallSteps }
+    let interface = status["uiscale"] == "on"
+    // an install that runs now follows the route chosen in the window (the status is from before)
+    if case .working(.install) = phase {
+      return route == .existing
+        ? Installer.installSteps(chosenGame?.route ?? .steam, interface: interface, imported: true)
+        : Installer.installSteps(route, interface: interface)
+    }
+    return Installer.installSteps(installedRoute ?? (route == .existing ? chosenGame?.route ?? .steam : route),
+                                  interface: interface, imported: imported)
   }
+  // the game's files came from the Mac (gw2om.sh install import)
+  var imported: Bool { status["origin"] == "import" }
 
   // The panel the right column shows
   enum Panel { case choose, installing, ready }
@@ -151,6 +210,10 @@ final class Installer {
       case .bad(let why): return why
       case nil: return "Drop Gw2Setup-64.exe from ArenaNet's site first."
       }
+    }
+    if route == .existing && chosenGame == nil {
+      return scanning ? "Still looking for Guild Wars 2 on this Mac…"
+        : "Choose the Guild Wars 2 folder to use (Choose folder… finds it in a bottle or app too)."
     }
     return nil
   }
@@ -232,6 +295,40 @@ final class Installer {
     }
   }
 
+  // Looks for Guild Wars 2 in other Wine apps' bottles (gw2om.sh scan; it only reads); the folders
+  // chosen by hand stay in the list
+  func scanGames() {
+    // (the headless renders show made-up installs)
+    guard !scanning, ProcessInfo.processInfo.environment["GW2OM_RENDER"] == nil else { return }
+    scanning = true
+    Task {
+      let output = await Installer.capture(script: script, arguments: ["scan"])
+      let found = output.split(separator: "\n").compactMap(GameFolder.init(line:))
+      let chosenByHand = gameFolders.filter { g in !found.contains { $0.path == g.path } && g.source.hasPrefix("Folder") }
+      gameFolders = found + chosenByHand
+      scanning = false
+      scanned = true
+      if let chosen = chosenGame, !gameFolders.contains(where: { $0.path == chosen.path }) { chosenGame = nil }
+      if chosenGame == nil { chosenGame = gameFolders.first }
+    }
+  }
+
+  // Choose folder…: a Guild Wars 2 folder, or a bottle or app with one in it (gw2om.sh check-game)
+  func choose(gameFolder url: URL) {
+    route = .existing
+    folderProblem = nil
+    Task {
+      let output = await Installer.capture(script: script, arguments: ["check-game", url.path])
+      if let game = output.split(separator: "\n").compactMap(GameFolder.init(line:)).first {
+        if let i = gameFolders.firstIndex(where: { $0.path == game.path }) { gameFolders[i] = game } else { gameFolders.append(game) }
+        chosenGame = game
+      } else {
+        folderProblem = output.split(separator: "\n").first { $0.hasPrefix("@error ") }.map { String($0.dropFirst(7)) }
+          ?? "There is no Guild Wars 2 in that folder."
+      }
+    }
+  }
+
   func start(_ operation: Operation) {
     guard !isOperating else { return }
     phase = .working(operation)
@@ -245,8 +342,13 @@ final class Installer {
 
     var arguments = [script.path, operation.rawValue]
     if operation == .install {
-      arguments.append(route.rawValue)
-      if route == .arenanet, let setupFile { arguments.append(setupFile.path) }
+      if route == .existing, let chosenGame {
+        arguments += ["import", chosenGame.path]
+        if !bringSettings || !chosenGame.hasSettings { arguments.append("--no-settings") }
+      } else {
+        arguments.append(route == .existing ? Route.steam.rawValue : route.rawValue)
+        if route == .arenanet, let setupFile { arguments.append(setupFile.path) }
+      }
     }
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/bin/bash")
