@@ -1,2 +1,163 @@
 #!/bin/bash
-echo "not yet" >&2; exit 1
+# Summary of one game session from DXMT's log (the jdrly/dxmt fork writes it for Gw2-64.exe into
+# ~/Library/Logs/GW2 on Mac/Gw2-64_d3d11.log; gw2om.sh keeps the 4 before as .1-.4): frame rate,
+# hitches (and DXMT's share of them), shader and pipeline compile waits, shader warming,
+# presentation, Metal 4. As SWTOR on Mac's session report, for DXMT's lines.
+#
+#   session-report.sh [--keep] [Gw2-64_d3d11.log]   one session (default: the current log; the
+#                                                   last session in it)
+#   session-report.sh --compare A.log B.log          two sessions side by side (before/after)
+#
+#   --keep  also save the log as ~/Library/Logs/GW2 on Mac/sessions/Gw2-64_d3d11-<date>.log: the
+#           log is rotated at every game start, so keep the sessions to compare
+#
+# Sources, all from the fork's own lines (DXMT_STATS is on by default):
+#   "GW2 fork <version>: …"  the start of a session: DXMT's version, its switches, cpus, refresh
+#   STATS    the frame rate and frame times (avg/max ms) of each interval, the command buffers
+#            and render passes per frame, the encode thread's time
+#   HITCH    each frame over DXMT_HITCH_MS (50): its time and DXMT's calls in it (ms/calls)
+#   COMPILE  shader variants and pipelines built, the render thread's waits for them
+#   WARM     shader warming: pipelines planned and built ahead (DXMT_WARM)
+#   PRESENT  presentation: presented-to-display latency, missed and dropped frames
+#   METAL4   Metal 4 commits and errors
+# Also in Collect Logs (session-report.txt). Runs under macOS's /bin/bash 3.2 and awk.
+set -euo pipefail
+
+usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+
+KEEP="" COMPARE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --keep) KEEP=1; shift ;;
+    --compare) COMPARE=1; shift ;;
+    -h|--help) usage ;;
+    -*) usage ;;
+    *) break ;;
+  esac
+done
+ROOT="${GW2_ON_MAC_ROOT:-}"
+H="${ROOT:+$ROOT/home}"
+H="${H:-$HOME}"
+LOGS="$H/Library/Logs/GW2 on Mac"
+
+# summary <log>: KEY=VALUE lines of its last session
+summary() {
+  LC_ALL=C awk '
+    /GW2 fork .*: DXMT_STATS=/ {
+      # a new session: forget the one before
+      n = 0; delete fps; summs = 0; maxms = 0; hitches = 0; worst = 0; delete dx; variants = 0; builtp = 0
+      failed = 0; waits = 0; waitms = 0; warm = ""; warmp = 0; present = ""; m4commits = 0; m4errors = 0; cb = 0; rp = 0
+      enc = 0; missed = 0; dropped = 0; slowc = 0
+      v = $0; sub(/.*GW2 fork /, "", v); sub(/:.*/, "", v); version = v
+      c = $0; cpus = (match(c, /cpus=[0-9]+/) ? substr(c, RSTART + 5, RLENGTH - 5) : "?")
+      r = $0; refresh = (match(r, /refresh=[0-9.]+/) ? substr(r, RSTART + 8, RLENGTH - 8) : "?")
+      sw = $0; sub(/.*: DXMT_STATS=/, "DXMT_STATS=", sw); switches = sw
+      sessions++
+      next
+    }
+    function val(line, key,    s) {
+      if (!match(line, key "=[^ ]+")) return ""
+      s = substr(line, RSTART + length(key) + 1, RLENGTH - length(key) - 1)
+      return s
+    }
+    /info: +STATS fps=/ {
+      f = val($0, "fps") + 0; fps[++n] = f
+      ms = val($0, "ms"); split(ms, a, "/"); summs += a[1]; if (a[2] + 0 > maxms) maxms = a[2] + 0
+      cb += val($0, "cb") + 0; rp += val($0, "rp") + 0
+      e = val($0, "encode"); split(e, b, "/"); split(b[1], c2, "+"); enc += c2[1] + c2[2]
+      next
+    }
+    /info: +HITCH frame=/ {
+      hitches++; ms = val($0, "ms") + 0; if (ms > worst) worst = ms
+      s = $0; sub(/.*dxmt\(ms\/calls\): */, "", s)
+      k = split(s, parts, " ")
+      for (i = 1; i <= k; i++) { split(parts[i], kv, "="); split(kv[2], mc, "/"); dx[kv[1]] += mc[1] }
+      next
+    }
+    /info: +COMPILE variants=/ {
+      variants += val($0, "variants") + 0; builtp += val($0, "built") + 0; failed += val($0, "failed") + 0
+      w = $0; if (match(w, /wait=[0-9]+x [0-9.]+\/[0-9.]+/)) { split(substr(w, RSTART + 5, RLENGTH - 5), wx, "x "); waits += wx[1]; split(wx[2], wt, "/"); waitms += wx[1] * wt[1] }
+      slowc += val($0, "slow") + 0
+      next
+    }
+    # (the line with the most pipelines built: warming reports as it goes)
+    /info: +WARM functions=/ { p = val($0, "pipelines") + 0; if (warm == "" || p >= warmp) { warmp = p; warm = $0; sub(/.*WARM /, "", warm) } next }
+    /info: +PRESENT presented=/ {
+      present = val($0, "presented"); missed += val($0, "missed") + 0; dropped += val($0, "dropped") + 0; next
+    }
+    /info: +METAL4 commits=/ { m4commits += val($0, "commits") + 0; m4errors += val($0, "errors") + 0; next }
+    END {
+      if (!sessions) { print "sessions=0"; exit }
+      print "sessions=" sessions; print "version=" version; print "cpus=" cpus; print "refresh=" refresh
+      print "switches=" switches
+      print "samples=" n
+      if (n) {
+        # fps: median, the low (10th percentile), min
+        for (i = 1; i <= n; i++) s2[i] = fps[i]
+        for (i = 2; i <= n; i++) { x = s2[i]; j = i - 1; while (j > 0 && s2[j] > x) { s2[j + 1] = s2[j]; j-- } s2[j + 1] = x }
+        printf "fps_median=%.1f\nfps_low=%.1f\nfps_min=%.1f\n", s2[int((n + 1) / 2)], s2[int(n / 10) + 1], s2[1]
+        printf "ms_avg=%.1f\nms_max=%.1f\ncb=%.1f\nrp=%.1f\nencode=%.2f\n", summs / n, maxms, cb / n, rp / n, enc / n
+      }
+      print "hitches=" hitches; printf "hitch_worst=%.0f\n", worst
+      top = ""
+      for (k2 in dx) if (dx[k2] >= 1) top = top sprintf("%s %.0f ms, ", k2, dx[k2])
+      sub(/, $/, "", top); print "hitch_dxmt=" top
+      print "variants=" variants; print "pipelines_built=" builtp; print "compile_failed=" failed
+      printf "compile_waits=%d\ncompile_wait_ms=%.0f\n", waits, waitms
+      print "warm=" warm; print "present=" present; print "missed=" missed; print "dropped=" dropped
+      print "metal4_commits=" m4commits; print "metal4_errors=" m4errors
+    }' "$1"
+}
+
+get() { printf '%s\n' "$1" | sed -n "s/^$2=//p"; }
+
+report() {  # <log>
+  local s
+  s=$(summary "$1")
+  echo "Session: $1 (the last of $(get "$s" sessions) in it)"
+  [ "$(get "$s" sessions)" != 0 ] || { echo "No DXMT session in this log."; return; }
+  echo "DXMT $(get "$s" version), $(get "$s" cpus) CPUs seen, display at $(get "$s" refresh) Hz"
+  if [ -f "$LOGS/session.env" ] && [ "$(dirname "$1")" = "$LOGS" ]; then
+    echo "Settings at the start: $(sed -n 's/^SETTING_//p' "$LOGS/session.env" | tr '\n' ' ')"
+  fi
+  echo
+  if [ "$(get "$s" samples)" -gt 0 ]; then
+    echo "Frame rate: median $(get "$s" fps_median), low (10th percentile) $(get "$s" fps_low), min $(get "$s" fps_min) fps ($(get "$s" samples) intervals)"
+    echo "Frame time: average $(get "$s" ms_avg) ms, the longest $(get "$s" ms_max) ms"
+    echo "Per frame: $(get "$s" cb) command buffers, $(get "$s" rp) render passes; encode thread $(get "$s" encode) ms"
+  else
+    echo "No STATS lines (DXMT_STATS=0?)"
+  fi
+  echo "Hitches (frames over 50 ms): $(get "$s" hitches), the worst $(get "$s" hitch_worst) ms"
+  [ -z "$(get "$s" hitch_dxmt)" ] || echo "  DXMT's time in them: $(get "$s" hitch_dxmt)"
+  echo "Compiles: $(get "$s" variants) shader variants, $(get "$s" pipelines_built) pipelines built, $(get "$s" compile_failed) failed;" \
+    "the render thread waited $(get "$s" compile_waits) times, about $(get "$s" compile_wait_ms) ms in all"
+  [ -z "$(get "$s" warm)" ] || echo "Shader warming: $(get "$s" warm | cut -c1-160)"
+  [ -z "$(get "$s" present)" ] || echo "Presentation: presented-to-display $(get "$s" present) ms (min/avg/max), $(get "$s" missed) missed, $(get "$s" dropped) dropped"
+  echo "Metal 4: $(get "$s" metal4_commits) commits, $(get "$s" metal4_errors) errors"
+}
+
+compare() {  # <A> <B>
+  local a b k
+  a=$(summary "$1"); b=$(summary "$2")
+  printf '%-34s %18s %18s\n' "" "A" "B"
+  printf '%-34s %18s %18s\n' "log" "$(basename "$1")" "$(basename "$2")"
+  for k in version fps_median fps_low fps_min ms_avg ms_max cb rp encode hitches hitch_worst variants pipelines_built \
+    compile_waits compile_wait_ms missed dropped metal4_errors; do
+    printf '%-34s %18s %18s\n' "$k" "$(get "$a" "$k" | cut -c1-18)" "$(get "$b" "$k" | cut -c1-18)"
+  done
+}
+
+if [ -n "$COMPARE" ]; then
+  [ $# -eq 2 ] || usage
+  compare "$1" "$2"
+  exit 0
+fi
+LOG="${1:-$LOGS/Gw2-64_d3d11.log}"
+[ -f "$LOG" ] || { echo "No DXMT log at $LOG (play a session first)" >&2; exit 1; }
+report "$LOG"
+if [ -n "$KEEP" ]; then
+  mkdir -p "$LOGS/sessions"
+  cp "$LOG" "$LOGS/sessions/Gw2-64_d3d11-$(date -r "$LOG" +%Y%m%d-%H%M).log"
+  echo "Kept as $LOGS/sessions/Gw2-64_d3d11-$(date -r "$LOG" +%Y%m%d-%H%M).log"
+fi

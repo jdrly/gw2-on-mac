@@ -65,10 +65,11 @@ struct MainView: View {
       Button("Uninstall", role: .destructive) { installer.start(.uninstall) }
       Button("Cancel", role: .cancel) {}
     } message: {
-      Text("This removes everything GW2 on Mac created: the Wine engine, the game's bottle and DXMT's "
-           + "caches. The game's files are in the bottle, so they go with it: Guild Wars 2 has to "
-           + "download again if you install it later. Your account, characters and Steam library are "
-           + "not affected. The logs are kept.")
+      Text("This removes everything GW2 on Mac created: the Wine engine and the game's bottle. The "
+           + "game's files are in the bottle, so they go with it: Guild Wars 2 has to download again if "
+           + "you install it later. It also clears DXMT's shader cache for Gw2-64.exe (in your user cache "
+           + "folder, dxmt/Gw2-64.exe), which any other DXMT setup of the game on this Mac shares. Your "
+           + "account, characters and Steam library are not affected. The logs are kept.")
     }
     .alert(blocked?.title ?? "", isPresented: Binding(get: { blocked != nil }, set: { if !$0 { blocked = nil } }),
            presenting: blocked) { _ in

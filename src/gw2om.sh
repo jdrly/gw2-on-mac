@@ -1101,6 +1101,17 @@ install_steam() {
   [ -n "$DRY" ] || [ -f "$STEAM_DIR/steam.exe" ] || die "Steam's installer ended without installing Steam (details in $LOGS/install.log)."
 }
 
+# A new session's logs start afresh; the 4 before stay as <log>.1-.4 (Collect Logs, the session
+# report's --compare)
+rotate_logs() {
+  local f i
+  for f in wine.log Gw2-64_d3d11.log; do
+    [ -s "$LOGS/$f" ] || continue
+    for i in 3 2 1; do [ ! -f "$LOGS/$f.$i" ] || mv -f "$LOGS/$f.$i" "$LOGS/$f.$((i + 1))"; done
+    mv -f "$LOGS/$f" "$LOGS/$f.1"
+  done
+}
+
 # launch <program> <args...>: a program in the bottle with the game's environment, detached; the
 # session's environment goes to logs/session.env (Collect Logs, the session report)
 launch() {
@@ -1115,6 +1126,7 @@ launch() {
   wine_allowed
   mkdir -p "$LOGS"
   if ! session_running; then
+    rotate_logs
     { echo "STARTED=$(date '+%F %T')"; echo "APP=$VERSION"; echo "ROUTE=$(state route)"; echo "DXMT=$DXMT_VERSION"
       for k in $SETTING_KEYS; do echo "SETTING_$k=$(setting "$k")"; done
       printf '%s\n' "${E[@]}" | grep -v '^WINE_COMPATDB='; } >"$LOGS/session.env"

@@ -25,8 +25,9 @@
 #
 #   app/build.sh                 build into app/dist/, ad-hoc signed
 #
-# Signing for distribution (Developer ID, hardened runtime, notarization) is scripts/release.sh,
-# which re-signs a copy of dist/ inside out.
+# Signing for distribution (Developer ID, hardened runtime, notarization) is app/scripts/release.sh,
+# which re-signs a copy of dist/ inside out. GW2_ON_MAC_VERSION=X.Y.Z[-dev.N] sets the version;
+# GW2_ON_MAC_FEED_URL and GW2_ON_MAC_ED_PUBLIC_KEY turn updates on (no feed yet: off).
 set -euo pipefail
 cd "$(dirname "$0")"
 ROOT="$PWD"
@@ -132,6 +133,14 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 R="$APP/Contents/Resources"
 sed -e "s/@VERSION@/$APP_VERSION/g" -e "s/@BUILD@/$BUNDLE_VERSION/g" -e "s/@CHANNEL@/$CHANNEL/g" \
   src/Info.plist >"$APP/Contents/Info.plist"
+# Updates: off until there is a feed. GW2_ON_MAC_FEED_URL and GW2_ON_MAC_ED_PUBLIC_KEY (Sparkle's
+# EdDSA public key, generate_keys) turn them on for a release build (scripts/release.sh).
+if [ -n "${GW2_ON_MAC_FEED_URL:-}" ]; then
+  [ -n "${GW2_ON_MAC_ED_PUBLIC_KEY:-}" ] || { echo "GW2_ON_MAC_FEED_URL needs GW2_ON_MAC_ED_PUBLIC_KEY" >&2; exit 1; }
+  plutil -replace SUFeedURL -string "$GW2_ON_MAC_FEED_URL" "$APP/Contents/Info.plist"
+  plutil -replace SUPublicEDKey -string "$GW2_ON_MAC_ED_PUBLIC_KEY" "$APP/Contents/Info.plist"
+  [ "$CHANNEL" != release ] || plutil -replace SUEnableAutomaticChecks -bool YES "$APP/Contents/Info.plist"
+fi
 plutil -lint -s "$APP/Contents/Info.plist"
 printf 'APPL????' >"$APP/Contents/PkgInfo"
 
@@ -213,7 +222,7 @@ EOF
 
 # channel: release, or dev (development build; gw2om.sh and the app read it)
 printf 'version=%s\nbuild=%s\nchannel=%s\nauthor=%s\ngithub=%s\nrepo=%s\nfeed=%s\n' "$APP_VERSION" "$BUNDLE_VERSION" \
-  "$CHANNEL" "$APP_AUTHOR" "$GITHUB_URL" "$REPO_URL" "$(plutil -extract SUFeedURL raw src/Info.plist 2>/dev/null || true)" >"$R/app.properties"
+  "$CHANNEL" "$APP_AUTHOR" "$GITHUB_URL" "$REPO_URL" "$(plutil -extract SUFeedURL raw "$APP/Contents/Info.plist" 2>/dev/null || true)" >"$R/app.properties"
 printf 'app %s\ndxmt %s %s\nengine %s\nheat %s wineserver %s\nwinemac %s win32u %s\nui-scale %s\nsparkle %s\nsdk %s\n' \
   "$APP_VERSION" "$DXMT_COMMIT" "$DXMT_VERSION" "$(sed -n 's/^ENGINE_NAME=//p' src/gw2om.sh)" \
   "$(sha "$P/heat/ntdll.so" | cut -c1-12)" "$(sha "$P/heat/wineserver" | cut -c1-12)" \

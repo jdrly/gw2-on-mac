@@ -189,8 +189,9 @@ struct SettingsView: View {
       Button("Cancel", role: .cancel) { confirmAction = nil }
     } message: {
       Text(confirmAction == "reset-shaders"
-           ? "DXMT's compiled shaders, pipeline archives and recorded pipelines for Guild Wars 2 are deleted. "
-             + "The next sessions build them again, with more hitches at first."
+           ? "This clears DXMT's shader cache for Gw2-64.exe (in your user cache folder, dxmt/Gw2-64.exe): "
+             + "its compiled shaders, pipeline archives and recorded pipelines, also for any other DXMT "
+             + "setup of the game on this Mac. The next sessions build them again, with more hitches at first."
            : "The Wine engine is unpacked again from the verified download and GW2 on Mac's graphics and "
              + "Wine pieces go back in. The bottle, the game and your settings stay.")
     }

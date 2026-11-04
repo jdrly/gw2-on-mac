@@ -209,6 +209,32 @@ check "play exits 0" [ "$rc" = 0 ]
 check "Steam -applaunch 1284210 with the launch options" has "$STANDIN_LOG" 'steam.exe -applaunch 1284210 -maploadinfo'
 check "  with DXMT's config file" has "$STANDIN_LOG" "DXMT_CONFIG_FILE=$AD/dxmt.conf"
 
+section "Collect Logs (redaction and the leak check)"
+mkdir -p "$STEAM/config" "$STEAM/logs" "$BOTTLE/drive_c/users/crossover/AppData/Roaming/Guild Wars 2"
+printf '"users"\n{\n\t"76561198000000042"\n\t{\n\t\t"AccountName"\t\t"zz_acct_name"\n\t\t"PersonaName"\t\t"Zz Persona Q"\n\t}\n}\n' >"$STEAM/config/loginusers.vdf"
+printf '[2026-11-04] AppID 1284210 update started : download 0/58900000000\nUser zz_acct_name (76561198000000042) [U:1:39734314] logged in, path %s\n' "$HOME/Library" >"$STEAM/logs/content_log.txt"
+printf 'Crash\nName: ZZ-MACHINE\nIpAddr: 192.168.77.5\nLogin: zz.person@example.com\nException: c0000005\n' >"$BOTTLE/drive_c/users/crossover/AppData/Roaming/Guild Wars 2/ArenaNet.log"
+printf 'started by %s from %s/Library, mail zz.person@example.com, token=abcDEF123secret\n' "$(id -un)" "$HOME" >>"$LOGS/wine.log"
+printf 'info:  GW2 fork v0.80-439-g684f428: DXMT_STATS=1 cpus=8 refresh=60\ninfo:  STATS fps=60.0 ms=16.7/24.8 cb=1.1 rp=31.7(+0.0 merged) encode=0.23+1.03/10.3\ninfo:  HITCH frame=52 ms=120.0 dxmt(ms/calls): create=4.0/37 flush=3.5/1\n' >"$LOGS/Gw2-64_d3d11.log"
+mkdir -p "$SANDBOX/zip"
+zip=$("$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip" 2>"$SANDBOX/collect.err" | tail -1)
+check "collect-logs makes a zip" [ -f "$zip" ]
+rm -rf "$SANDBOX/unzipped" && mkdir -p "$SANDBOX/unzipped" && (cd "$SANDBOX/unzipped" && unzip -q "$zip")
+Z="$SANDBOX/unzipped/$(basename "$zip" .zip)"
+for f in logs/install.log logs/wine.log logs/Gw2-64_d3d11.log settings.conf install-manifest.json session-report.txt system-info.txt gpu-errors.txt game-logs/ArenaNet.log game-logs/steam/content_log.txt; do
+  check "  has $f" [ -f "$Z/$f" ]
+done
+check "  the session report read DXMT's log" has "$Z/session-report.txt" "Frame rate: median 60.0"
+check "  the Steam account name is gone" sh -c "! grep -rq zz_acct_name '$Z'"
+check "  the persona name is gone" sh -c "! grep -rqi 'Zz Persona Q' '$Z'"
+check "  the Steam ID is gone" sh -c "! grep -rqE '7656119[0-9]{10}|U:1:39734314' '$Z'"
+check "  the e-mail address is gone" sh -c "! grep -rq zz.person@example.com '$Z'"
+check "  the crash log's machine and address are gone" sh -c "! grep -rqE 'ZZ-MACHINE|192\.168\.77\.5' '$Z'"
+check "  the token value is gone" sh -c "! grep -rq abcDEF123secret '$Z'"
+check "  the home folder is gone" sh -c "! grep -rqF '$HOME/' '$Z'"
+check "  never Local.dat or Steam's config" sh -c "! find '$Z' -name Local.dat -o -name loginusers.vdf | grep -q ."
+check "  the crash log kept its exception" has "$Z/game-logs/ArenaNet.log" "Exception: c0000005"
+
 section "Busy checks (a sleeper at the engine's paths)"
 # (macOS kills copies of /bin/sleep: an ad-hoc signed program of our own keeps its signature)
 printf '#include <unistd.h>\n#include <stdlib.h>\nint main(int c, char **v) { sleep(c > 1 ? atoi(v[1]) : 60); return 0; }\n' >"$SANDBOX/sleeper.c"
