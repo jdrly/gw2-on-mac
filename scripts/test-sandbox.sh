@@ -35,10 +35,19 @@ CACHE="$H/Library/Caches/GW2 on Mac"
 ENG="$AD/engine"
 BOTTLE="$AD/bottle"
 STEAM="$BOTTLE/drive_c/Program Files (x86)/Steam"
-DXMT_CACHE="$SANDBOX/usercache/dxmt/Gw2-64.exe"
+DXMT_CACHE="$CACHE/dxmt/Gw2-64.exe"
 STANDIN_LOG="$SANDBOX/standin.log"
 COMP="$APP/Contents/Resources/components"
-mkdir -p "$H" "$SANDBOX/usertmp" "$SANDBOX/usercache"
+mkdir -p "$H" "$SANDBOX/usertmp"
+# Another DXMT setup's caches in the per-user cache folder, which the app must never touch: a
+# stand-in getconf on PATH points DARWIN_USER_CACHE_DIR at the sandbox's usercache/
+USERCACHE="$SANDBOX/usercache/"
+OTHER_DXMT="${USERCACHE}dxmt/Gw2-64.exe"
+mkdir -p "$OTHER_DXMT" "$SANDBOX/bin" && echo "another setup's shaders" >"$OTHER_DXMT/shaders_320.db"
+printf '#!/bin/bash\n[ "$1" = DARWIN_USER_CACHE_DIR ] && { echo "%s"; exit 0; }\nexec /usr/bin/getconf "$@"\n' "$USERCACHE" >"$SANDBOX/bin/getconf"
+chmod 755 "$SANDBOX/bin/getconf"
+export PATH="$SANDBOX/bin:$PATH"
+other_dxmt_kept() { has "$OTHER_DXMT/shaders_320.db" "another setup's"; }
 
 pass=0 fail=0
 ok() { pass=$((pass + 1)); echo "  ok   $*"; }
@@ -49,6 +58,8 @@ g() { "$G" "$@"; }
 st() { g status | sed -n "s/^$1=//p"; }
 sett() { g settings | sed -n "s/^$1=//p"; }
 has() { grep -q -- "$2" "$1" 2>/dev/null; }
+# play starts Wine detached: wait (up to 5 s) for the stand-in's log of that start
+started() { local i=0; while ! grep -q '^wine ' "$STANDIN_LOG" 2>/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done; }
 reg() { grep -A3 "^\[$1\]" "$BOTTLE/user.reg" 2>/dev/null | grep -q "^\"$2\"=\"$3\""; }
 same() { cmp -s "$1" "$2"; }
 
@@ -208,9 +219,12 @@ rm -f "$GD/version.dll"
 section "Play"
 : >"$STANDIN_LOG"
 out=$(g play 2>&1) && rc=0 || rc=$?
+started
 check "play exits 0" [ "$rc" = 0 ]
 check "Steam -applaunch 1284210 with the launch options" has "$STANDIN_LOG" 'steam.exe -applaunch 1284210 -maploadinfo'
 check "  with DXMT's config file" has "$STANDIN_LOG" "DXMT_CONFIG_FILE=$AD/dxmt.conf"
+check "  with DXMT's caches in the app's cache folder (DXMT_CACHE_DIR)" grep -qxF "  DXMT_CACHE_DIR=$CACHE" "$STANDIN_LOG"
+check "  env has DXMT_CACHE_DIR too" sh -c "'$G' env | grep -qxF 'DXMT_CACHE_DIR=$CACHE'"
 
 section "Collect Logs (redaction and the leak check)"
 mkdir -p "$STEAM/config" "$STEAM/logs" "$BOTTLE/drive_c/users/crossover/AppData/Roaming/Guild Wars 2"
@@ -218,7 +232,7 @@ printf '"users"\n{\n\t"76561198000000042"\n\t{\n\t\t"AccountName"\t\t"zz_acct_na
 printf '[2026-11-04] AppID 1284210 update started : download 0/58900000000\nUser zz_acct_name (76561198000000042) [U:1:39734314] logged in, path %s\n' "$HOME/Library" >"$STEAM/logs/content_log.txt"
 printf 'Crash\nName: ZZ-MACHINE\nIpAddr: 192.168.77.5\nLogin: zz.person@example.com\nException: c0000005\n' >"$BOTTLE/drive_c/users/crossover/AppData/Roaming/Guild Wars 2/ArenaNet.log"
 printf 'started by %s from %s/Library, mail zz.person@example.com, token=abcDEF123secret\n' "$(id -un)" "$HOME" >>"$LOGS/wine.log"
-printf 'info:  GW2 fork v0.80-439-g684f428: DXMT_STATS=1 cpus=8 refresh=60\ninfo:  STATS fps=60.0 ms=16.7/24.8 cb=1.1 rp=31.7(+0.0 merged) encode=0.23+1.03/10.3\ninfo:  HITCH frame=52 ms=120.0 dxmt(ms/calls): create=4.0/37 flush=3.5/1\n' >"$LOGS/Gw2-64_d3d11.log"
+printf 'info:  GW2 fork v0.80-440-g9eb7668: DXMT_STATS=1 cpus=8 refresh=60\ninfo:  STATS fps=60.0 ms=16.7/24.8 cb=1.1 rp=31.7(+0.0 merged) encode=0.23+1.03/10.3\ninfo:  HITCH frame=52 ms=120.0 dxmt(ms/calls): create=4.0/37 flush=3.5/1\n' >"$LOGS/Gw2-64_d3d11.log"
 mkdir -p "$SANDBOX/zip"
 zip=$("$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip" 2>"$SANDBOX/collect.err" | tail -1)
 check "collect-logs makes a zip" [ -f "$zip" ]
@@ -277,6 +291,7 @@ check "graphics=yes after repair" [ "$(st graphics)" = yes ]
 check "the game and the settings stay" [ "$(st game)/$(sett launchopts)" = yes/-maploadinfo ]
 echo "shader" >"$DXMT_CACHE/shaders_320.db"
 check "reset-shaders empties DXMT's cache" sh -c "'$G' reset-shaders | grep -q '@done' && [ -d '$DXMT_CACHE' ] && [ ! -e '$DXMT_CACHE/shaders_320.db' ]"
+check "  and leaves the per-user cache folder's dxmt/ alone" other_dxmt_kept
 check "reinstall-engine" sh -c "'$G' reinstall-engine | grep -q '@done'"
 check "  graphics=yes after it" [ "$(st graphics)" = yes ]
 mkdir "$AD/.lock"
@@ -292,6 +307,7 @@ check "uninstall exits 0" [ "$rc" = 0 ]
 check "the phases 1-3" [ "$(echo "$out" | grep '^@phase' | tr '\n' ' ')" = "@phase 1 @phase 2 @phase 3 " ]
 check "the app's folder is gone (engine, bottle with the game, Game Mode, settings)" [ ! -e "$AD" ]
 check "its caches are gone" eval '[ ! -e "$CACHE" ] && [ ! -e "$DXMT_CACHE" ]'
+check "the per-user cache folder's dxmt/ stays (another setup's)" other_dxmt_kept
 check "the Game Mode link is gone" sh -c "! ls '$SANDBOX/usertmp/'winetemp-*/Gw2-64.exe >/dev/null 2>&1"
 check "the logs stay" [ -f "$LOGS/install.log" ]
 check "status: not installed" [ "$(st installed)/$(st engine_installed)" = no/no ]
@@ -317,6 +333,7 @@ if [ -f "$SIGNED_PE" ]; then
   : >"$STANDIN_LOG"
   g set launchopts -maploadinfo >/dev/null
   g play >/dev/null 2>&1
+  started
   check "play starts the game's own launcher with the launch options" has "$STANDIN_LOG" 'wine C:\\Program Files\\Guild Wars 2\\Gw2-64.exe -maploadinfo'
   check "uninstall" sh -c "'$G' uninstall | grep -q '@done'"
 else

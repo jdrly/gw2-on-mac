@@ -62,7 +62,7 @@ failed or cancelled first install leaves nothing behind):
 1. **The Wine engine**: athei's `cx-26.3.0-8` (CrossOver 26.3, Wine 11), the same pinned
    archive as SWTOR on Mac's (size and sha256, resumed and retried, a second GitHub address),
    unpacked and checked. GW2 on Mac's pieces then go into it:
-   - DXMT `684f428` over the engine's `dxgi/dxmt` tree
+   - DXMT `9eb7668` over the engine's `dxgi/dxmt` tree
    - the heat `ntdll.so` and `wineserver`
    - `winemac.so` (the launcher fix) and `win32u.so` (its drawing at -O2)
 
@@ -89,7 +89,7 @@ failed or cancelled first install leaves nothing behind):
 
    This picks up again after the app restarts. *Stop waiting* keeps the engine and the bottle.
 5. **Finishing touches** (`gw2om.sh finish`, which the window starts by itself):
-   - DXMT's cache folder
+   - DXMT's cache folder, `~/Library/Caches/GW2 on Mac/dxmt/Gw2-64.exe/`
    - the interface addon, if it's on
    - the registry settings
    - `stage=finished`, then Ready
@@ -127,7 +127,7 @@ items, nothing in `/Applications` besides the app itself):
 | `…/GW2 on Mac/gamemode/GW2.app` | the Game Mode bundle | removed |
 | `…/GW2 on Mac/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf` | the settings, the route and stage, what was installed, DXMT's options | removed |
 | `~/Library/Caches/GW2 on Mac/downloads/` | the engine archive, `SteamSetup.exe`, a copy of `Gw2Setup-64.exe` | removed |
-| `$(getconf DARWIN_USER_CACHE_DIR)dxmt/Gw2-64.exe/` | DXMT's shader cache, pipeline archives and recorded pipelines for the game | removed (shared by any other DXMT setup of the game on this Mac: the confirmation says so) |
+| `~/Library/Caches/GW2 on Mac/dxmt/Gw2-64.exe/` | DXMT's shader cache, pipeline archives and recorded pipelines for the game (`DXMT_CACHE_DIR` points DXMT here; another process, such as the launcher's `CefHost.exe`, gets its own folder next to it) | removed; *Reset the shader cache* empties it too |
 | `$(getconf DARWIN_USER_TEMP_DIR)winetemp-…/Gw2-64.exe` | the Game Mode link | removed |
 | `~/Library/Logs/GW2 on Mac/` | `install.log`, `wine.log`, DXMT's `Gw2-64_d3d11.log`, `session.env`, `gamemode.log`, heat logs (Debug logging) | **kept** |
 
@@ -164,7 +164,7 @@ use). The defaults are the mix Jan plays with.
 
 Always set: `WINEMSYNC=1`, `ROSETTA_X87_PATH=` (x87sidecar off), `WINEDLLOVERRIDES=winemenubuilder.exe=d`,
 the compatdb rule that gives every process DXMT (`dxgi=dxmt`, the game launcher's `CefHost.exe`
-too), `DXMT_CONFIG_FILE`, `DXMT_LOG_PATH`, `DXMT_DEPENDENCY_COMPRESSION=1`, and the heat ntdll's
+too), `DXMT_CONFIG_FILE`, `DXMT_LOG_PATH`, `DXMT_CACHE_DIR` (the app's cache folder), `DXMT_DEPENDENCY_COMPRESSION=1`, and the heat ntdll's
 `WINE_HEAT_EVPOOL=1`, `WINE_HEAT_WAKE=one,skip`, `WINE_HEAT_LAZYCLOCK=1`,
 `WINE_HEAT_MSYNC_UNREG=1`, `WINE_HEAT_MSYNC_PORTFIX=1`.
 
@@ -211,13 +211,13 @@ scripts/stage-components.sh    # copy DXMT, the heat Wine pieces, winemac and th
   `wineserver`, `winemac.so`, `win32u.so`) are built today only in Jan's private development
   workspace, whose build scripts are not in this repository. `stage-components.sh` copies them
   from that workspace: `GW2_ON_MAC_WORKSPACE` (default `../gw2-on-mac`, next to this
-  repository), and in it what the live engine runs (`work/dxmt-rollback/684f428-install`,
+  repository), and in it the builds the app ships (`work/dxmt-rollback/9eb7668-install`,
   `work/heat/install-r7b`, `work/winemac/install`, `work/ui-scale/build`; override with
   `DXMT_INSTALL`, `HEAT_INSTALL`, `WINEMAC_INSTALL`, `UISCALE_BUILD`). It changes nothing in the
   workspace and checks each file against its build record and this repository's
   [`patches/`](patches). `prebuilt/` is ignored by git.
 - **Their complete corresponding source** (LGPL-2.1-or-later) is public: the pinned upstreams
-  plus this repository's patches. DXMT is [jdrly/dxmt at `684f428`](https://github.com/jdrly/dxmt/tree/684f428);
+  plus this repository's patches. DXMT is [jdrly/dxmt at `9eb7668`](https://github.com/jdrly/dxmt/tree/9eb7668);
   the Wine pieces are [athei/wine `d23b397`](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0)
   (CodeWeavers' CrossOver 26.3 sources with athei's patches, the engine's own sources) with
   [`patches/ntdll-msync-alert-fd.patch`](patches/ntdll-msync-alert-fd.patch) (from SWTOR on Mac),
@@ -279,8 +279,7 @@ then removes everything in the table above except the logs. Steam and the game h
 closed. Removing it by hand:
 
 ```sh
-rm -rf ~/Library/"Application Support/GW2 on Mac" ~/Library/Caches/"GW2 on Mac" \
-  "$(getconf DARWIN_USER_CACHE_DIR)dxmt/Gw2-64.exe"
+rm -rf ~/Library/"Application Support/GW2 on Mac" ~/Library/Caches/"GW2 on Mac"
 rm -rf ~/Library/Logs/"GW2 on Mac"      # the logs, if you want them gone too
 ```
 
@@ -325,8 +324,10 @@ prebuilt/, dist/, release/, work/, .cache/   build and test output (ignored)
 - The first real install hasn't run yet: Jan does it, after which the Steam route's `StateFlags`
   and the ArenaNet route's completion heuristic should be checked against what really happens.
 - No Keyboard or Mouse pane until SWTOR on Mac's winemac patches are ported to our build.
-- DXMT's cache for `Gw2-64.exe` is per user, shared with any other DXMT setup of the game (Jan's
-  development bottle on his Mac); a fork-side cache folder override would separate them.
+- DXMT's caches live in the app's own cache folder (`DXMT_CACHE_DIR`, jdrly/dxmt #134), so they
+  are no longer shared with another DXMT setup of the game on the same Mac. Caches an older
+  build left in `$(getconf DARWIN_USER_CACHE_DIR)dxmt/Gw2-64.exe/` are not moved or removed
+  (another setup may use them); the first sessions build the app's own cache from scratch.
 - A Steam library added outside the bottle (Steam › Settings › Storage) is not removed by
   Uninstall.
 - Blish HUD and macOS 28's Rosetta changes are not covered.

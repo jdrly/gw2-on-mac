@@ -67,9 +67,8 @@ struct MainView: View {
     } message: {
       Text("This removes everything GW2 on Mac created: the Wine engine and the game's bottle. The "
            + "game's files are in the bottle, so they go with it: Guild Wars 2 has to download again if "
-           + "you install it later. It also clears DXMT's shader cache for Gw2-64.exe (in your user cache "
-           + "folder, dxmt/Gw2-64.exe), which any other DXMT setup of the game on this Mac shares. Your "
-           + "account, characters and Steam library are not affected. The logs are kept.")
+           + "you install it later. Its caches go too, DXMT's shader cache with them. Your account, "
+           + "characters and Steam library are not affected. The logs are kept.")
     }
     .alert(blocked?.title ?? "", isPresented: Binding(get: { blocked != nil }, set: { if !$0 { blocked = nil } }),
            presenting: blocked) { _ in

@@ -17,14 +17,16 @@
 #   gw2om.sh repair            engine, graphics, Wine pieces, bottle settings and Game Mode again;
 #                              keeps the game and the settings
 #   gw2om.sh uninstall         removes everything this app created: the bottle (with the game in
-#                              it), the engine, Game Mode, the settings, DXMT's caches; logs stay
+#                              it), the engine, Game Mode, the settings, its caches (DXMT's in
+#                              them); logs stay
 #   gw2om.sh play              starts the game (Steam: steam.exe -applaunch 1284210; ArenaNet:
 #                              Gw2-64.exe) with the settings as its environment
 #   gw2om.sh settings          KEY=VALUE lines: the settings (Settings window) and their state
 #   gw2om.sh set K V           change one setting (see setting_valid)
 #   gw2om.sh check-setup FILE  is FILE ArenaNet's Gw2Setup-64.exe: a PE x86_64 executable with a
 #                              valid Authenticode signature by ArenaNet ("@done <what>")
-#   gw2om.sh reset-shaders     deletes DXMT's caches for the game (shaders, pipelines, recipes)
+#   gw2om.sh reset-shaders     deletes DXMT's caches (shaders, pipelines, recipes) in the app's
+#                              own cache folder; never DXMT's in the per-user cache folder
 #   gw2om.sh reinstall-engine  unpacks the engine again and puts GW2 on Mac's pieces back
 #   gw2om.sh end-leftovers     ends leftover Wine processes of the engine (no session running)
 #   gw2om.sh fetch-engine      downloads and verifies the engine into the cache
@@ -32,8 +34,7 @@
 #
 # Environment:
 #   GW2_ON_MAC_ROOT=/abs/dir   sandbox for tests: the app's files, logs, caches and the per-user
-#                              temp and cache folders all live under it ($ROOT/home/Library/...,
-#                              $ROOT/usertmp/, $ROOT/usercache/)
+#                              temp folder all live under it ($ROOT/home/Library/..., $ROOT/usertmp/)
 #   GW2_ON_MAC_DRY_RUN=1       print what would change and change nothing (no downloads, no Wine,
 #                              no log file)
 #   In a sandbox only, for scripts/test-sandbox.sh's stand-ins (never the real Wine there):
@@ -92,7 +93,6 @@ if [ -n "$ROOT" ]; then
   if [ -d "$ROOT" ]; then ROOT="$(cd "$ROOT" && pwd -P)"; fi
   H="$ROOT/home"
   USER_TMP="$ROOT/usertmp/"
-  USER_CACHE="$ROOT/usercache/"
   ENGINE_URL="${GW2_ON_MAC_ENGINE_URL:-$ENGINE_URL}"
   [ -z "${GW2_ON_MAC_ENGINE_URL:-}" ] || ENGINE_API_URL=""
   ENGINE_SHA256="${GW2_ON_MAC_ENGINE_SHA256:-$ENGINE_SHA256}"
@@ -103,9 +103,6 @@ if [ -n "$ROOT" ]; then
 else
   H="$HOME"
   USER_TMP="$(getconf DARWIN_USER_TEMP_DIR)"
-  # the per-user cache folder (/var/folders/.../C/), where DXMT keeps its caches for the game in
-  # dxmt/Gw2-64.exe/ (shaders, pipeline archives, recorded pipelines)
-  USER_CACHE="$(getconf DARWIN_USER_CACHE_DIR)"
   ENGINE_CHECKS=1
   SIGNER=ArenaNet
 fi
@@ -119,7 +116,12 @@ SETTINGS="$APPDIR/settings.conf"
 STATE="$APPDIR/state"                 # route, stage (none|waiting_game|finished), game_dir
 MANIFEST="$APPDIR/install-manifest.json"
 DXMT_CONF="$APPDIR/dxmt.conf"
-DXMT_CACHE="${USER_CACHE}dxmt/Gw2-64.exe"
+# DXMT's caches, in the app's own cache folder (DXMT_CACHE_DIR=$CACHE, jdrly/dxmt #134) instead of
+# the per-user one ($(getconf DARWIN_USER_CACHE_DIR)dxmt/, which another DXMT setup of the game on
+# this Mac may use and this app never touches): per process <exe>/ (the game's Gw2-64.exe/:
+# shaders, pipeline archives, recorded pipelines)
+DXMT_CACHE_ROOT="$CACHE/dxmt"
+DXMT_CACHE="$DXMT_CACHE_ROOT/Gw2-64.exe"
 STEAM_DIR="$BOTTLE/drive_c/Program Files (x86)/Steam"
 STEAM_EXE='C:\Program Files (x86)\Steam\steam.exe'
 # What uninstall removes in APPDIR (the folder itself goes too once empty)
@@ -584,6 +586,8 @@ game_env() {
     "WINE_HEAT_MSYNC_PORTFIX=1"
     "DXMT_CONFIG_FILE=$DXMT_CONF"
     "DXMT_LOG_PATH=$LOGS"
+    # the caches under the app's own cache folder: $CACHE/dxmt/<exe>/ (jdrly/dxmt #134)
+    "DXMT_CACHE_DIR=$CACHE"
     # the checkpoint-chain fence compression on Metal 4 (jdrly/dxmt #133; in the mix)
     "DXMT_DEPENDENCY_COMPRESSION=1"
   )
@@ -1033,7 +1037,7 @@ write_manifest() {
   "win32u_sha256": "$(sha256 "$COMP/winemac/win32u.so")",
   "app_files": ["$(echo $APP_FILES | sed 's/ /", "/g')"],
   "logs": "$LOGS",
-  "caches": ["$CACHE", "$DXMT_CACHE"]
+  "caches": ["$CACHE"]
 }
 EOF
 }
@@ -1272,8 +1276,8 @@ cmd_reset_shaders() {
   open_log
   log "---- reset-shaders"
   case "$(busy_of "$(proc_list)")" in game) die "Quit Guild Wars 2 first." ;; esac
-  if [ -d "$DXMT_CACHE" ]; then
-    run rm -rf "$DXMT_CACHE"
+  if [ -d "$DXMT_CACHE_ROOT" ]; then
+    run rm -rf "$DXMT_CACHE_ROOT"
     run mkdir -p "$DXMT_CACHE"
   fi
   echo "@done DXMT's caches for the game are empty. The next sessions build them again."
@@ -1340,9 +1344,8 @@ cmd_uninstall() {
   for c in $APP_FILES; do
     if [ -e "$APPDIR/$c" ]; then run rm -rf "${APPDIR:?}/$c"; fi
   done
-  if [ -d "$CACHE" ]; then run rm -rf "$CACHE"; fi
-  if [ -d "$DXMT_CACHE" ]; then run rm -rf "$DXMT_CACHE"; say "Removed DXMT's caches for the game ($DXMT_CACHE)"; fi
-  rmdir "${USER_CACHE}dxmt" 2>/dev/null || true
+  # (DXMT's caches are in it: $CACHE/dxmt)
+  if [ -d "$CACHE" ]; then run rm -rf "$CACHE"; say "Removed the caches, DXMT's with them ($CACHE)"; fi
   log "uninstall complete"
   echo "@done GW2 on Mac is removed, with the bottle and the game in it. Logs stay in $LOGS."
 }

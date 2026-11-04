@@ -43,8 +43,8 @@ DIAG="$H/Library/Logs/DiagnosticReports"
 BOTTLE="$APPDIR/bottle"
 STEAM="$BOTTLE/drive_c/Program Files (x86)/Steam"
 GW2_APPDATA="$BOTTLE/drive_c/users/crossover/AppData/Roaming/Guild Wars 2"
-if [ -n "$ROOT" ]; then USER_CACHE="$ROOT/usercache/"; else USER_CACHE="$(getconf DARWIN_USER_CACHE_DIR)"; fi
-DXMT_CACHE="${USER_CACHE}dxmt/Gw2-64.exe"
+# DXMT's caches for the game, in the app's own cache folder (gw2om.sh sets DXMT_CACHE_DIR to it)
+DXMT_CACHE="$H/Library/Caches/GW2 on Mac/dxmt/Gw2-64.exe"
 
 name="GW2-on-Mac-logs-$(date +%Y-%m-%d-%H%M)"
 dest="${1:-$H/Desktop}"
