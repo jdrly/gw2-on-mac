@@ -392,7 +392,7 @@ check "Steam never comes (closed before the game): result=steam_gone" eval 'watc
 splay; steam_up
 wp=$(sess watcher_pid)
 splay
-check "a second Play keeps the session and its watcher" [ "$(sess watcher_pid)/$(sess started_steam)/$(sess quit_steam)" = "$wp/yes/yes" ]
+check "a second Play joins the session and keeps its watcher" [ "$(sess watcher_pid)/$(sess started_steam)/$(sess quit_steam)/$(sess replay)" = "$wp/yes/yes/1" ]
 # (the watcher's own subshells carry its command line: only those whose parent isn't one count)
 watchers() {
   ps -axo pid=,ppid=,command= | awk -v c="/bin/bash $G watch-session" '
@@ -406,22 +406,32 @@ game_session
 check "  Steam quits once" eval 'watch_done && [ "$(sess result)" = quit ] && [ "$(grep -c "steam.exe -shutdown" "$STANDIN_LOG")" = 1 ]'
 check "watch-session by hand with no session: nothing to follow" sh -c "'$G' watch-session | grep -q '@done No session to follow'"
 
-# the user quits the Steam Play started and opens another: that one is the user's
+# Steam restarts itself while it starts (an update): a new steam.exe without a request stays the
+# session's (the bottle's Steam starts only through Play)
 splay; steam_up
-game_up; wait_stage playing
 steam_down; steam_up
-game_down
-check "Steam quit and opened again while the game runs: the new Steam is left alone" eval 'watch_done && [ "$(sess result)" = left_running ] && [ "$(sess quit_steam)" = no ] && steam_runs && ! has "$STANDIN_LOG" "steam.exe -shutdown"'
-check "  and the log says why" has "$LOGS/install.log" "Steam quit during the session"
-steam_down
-splay; steam_up
 game_session
-steam_down; steam_up
-check "the same in the grace" eval 'watch_done && [ "$(sess result)" = left_running ] && steam_runs && ! has "$STANDIN_LOG" "steam.exe -shutdown"'
+check "Steam restarting itself before the game (a new pid, no request) stays the session's: it quits" eval 'watch_done && [ "$(sess result)" = quit ] && ! steam_runs'
+
+# Show Steam (lane B) asks the watcher: Steam's window shown, so Steam stays open
+splay; steam_up
+echo shown >>"$AD/session.req"
+check "a shown request: applied by the watcher (requests=1, steam_window=shown, quit_steam=no)" eval 'i=0; while [ "$(sess requests)" != 1 ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done; [ "$(sess steam_window)/$(sess quit_steam)" = shown/no ]'
+game_session
+check "  Steam left open after the game" eval 'watch_done && [ "$(sess result)" = left_running ] && steam_runs && ! has "$STANDIN_LOG" "steam.exe -shutdown"'
 steam_down
 
-# Play in the grace, near its end (a 4 s grace here): the watcher waits for that Play's game
-# instead of quitting
+# Steam quits during the game; Play in the grace starts it again: that Play's Steam (a 4 s grace)
+: >"$STANDIN_LOG"; GW2_ON_MAC_WATCH_GRACE=4 "$G" play >/dev/null 2>&1; started; steam_up
+game_up; wait_stage playing
+steam_down; game_down; wait_stage grace
+splay; steam_up
+check "Play in the grace after Steam quit: joins (replay=1), its own Steam (started_steam=yes quit_steam=yes)" eval '[ "$(sess replay)/$(sess started_steam)/$(sess quit_steam)" = 1/yes/yes ] && wait_stage waiting_game'
+game_session
+check "  its game quits: that Steam quits" eval 'watch_done && [ "$(sess result)" = quit ] && ! steam_runs'
+
+# Play near the end of the grace (a 4 s grace): the watcher waits for that Play's game instead of
+# quitting
 : >"$STANDIN_LOG"; GW2_ON_MAC_WATCH_GRACE=4 "$G" play >/dev/null 2>&1; started; steam_up
 game_session
 sleep 2.5; splay; sleep 3
@@ -429,20 +439,33 @@ check "Play in the grace: the watcher waits for the game again, past the grace, 
 game_session
 check "  then that game quits: Steam quits" eval 'watch_done && [ "$(sess result)" = quit ] && ! steam_runs'
 
+# Play in the grace, and its game starts within the grace: once it quits, Steam quits
+: >"$STANDIN_LOG"; GW2_ON_MAC_WATCH_GRACE=4 "$G" play >/dev/null 2>&1; started; steam_up
+game_session; splay
+game_session
+check "Play and its game within the grace: after that game, Steam quits" eval 'watch_done && [ "$(sess result)" = quit ] && [ "$(sess replay)" = 1 ] && ! steam_runs'
+
 # a stale lock (a watcher that died) and two Plays at once: one watcher
-mkdir -p "$AD/.session.lock" && ( exit 0 ) & dp=$!; wait $dp; echo $dp >"$AD/.session.lock/pid"
+owner() { cut -d' ' -f1 "$AD/.session.lock/owner" 2>/dev/null; }
+mkdir -p "$AD/.session.lock" && ( exit 0 ) & dp=$!; wait $dp; echo "$dp Thu Jan 1 00:00:00 1970" >"$AD/.session.lock/owner"
 : >"$STANDIN_LOG"
 "$G" play >/dev/null 2>&1 & p1=$!
 "$G" play >/dev/null 2>&1 & p2=$!
 wait $p1 $p2; started; steam_up
-check "two Plays at once over a stale lock: one watcher, which holds the lock" eval '[ "$(watchers)" = 1 ] && [ "$(cat "$AD/.session.lock/pid")" = "$(sess watcher_pid)" ]'
+check "two Plays at once over a stale lock: one watcher, which holds the lock; the other joined" eval '[ "$(watchers)" = 1 ] && [ "$(owner)" = "$(sess watcher_pid)" ] && [ "$(sess replay)" = 1 ]'
 game_session
 check "  Steam quits once" eval 'watch_done && [ "$(sess result)" = quit ] && [ "$(grep -c "steam.exe -shutdown" "$STANDIN_LOG")" = 1 ]'
+
+# a lock whose pid now belongs to another process (pid reuse: another start time) is stale
+mkdir -p "$AD/.session.lock" && echo "$$ Mon Jan 1 00:00:00 2001" >"$AD/.session.lock/owner"
+splay
+check "a lock held by a reused pid is taken over" eval '[ "$(owner)" = "$(sess watcher_pid)" ] && [ "$(sess watcher_pid)" != $$ ] && [ "$(sess replay)" = 0 ]'
+watch_done
 
 # a watcher whose lock another took stops, without touching the session or Steam
 splay; steam_up
 wp=$(sess watcher_pid)
-echo 999999 >"$AD/.session.lock/pid"
+echo "999999 Mon Jan 1 00:00:00 2001" >"$AD/.session.lock/owner"
 sleep 1
 check "a watcher that lost its lock stops, leaving the session and Steam alone" eval '! kill -0 "$wp" 2>/dev/null && [ "$(sess stage)" = waiting_game ] && steam_runs && ! has "$STANDIN_LOG" "steam.exe -shutdown"'
 rm -rf "$AD/.session.lock"; steam_down

@@ -153,7 +153,10 @@ other settings, Play says Steam must quit first, because the game gets Steam's e
 
 **Steam quits after the game** (*Quit Steam when the game quits*, Settings › Game, on by default).
 Play records the session in `session` (next to `state`) and starts `gw2om.sh watch-session`
-detached, one per session (a lock, `.session.lock`), so it doesn't need the window:
+detached, one per session (a lock, `.session.lock`, holding the watcher's pid and start time), so
+it doesn't need the window. After Play's first version of `session`, the watcher is its only
+writer: others append a request to `session.req` (`join` from a Play, `shown` from Show Steam),
+which it applies in order.
 - It follows the session through the engine's own processes: it waits up to 15 minutes for
   `Gw2-64.exe` (Steam may update itself and sign in first), then for it to quit, plus a
   30-second grace, since the game's patcher or a restart starts it again.
@@ -162,13 +165,14 @@ detached, one per session (a lock, `.session.lock`), so it doesn't need the wind
   still running 20 seconds later, it ends the bottle's Wine (`wineserver -k`, this bottle only).
 - It leaves Steam alone if Steam was already running before Play, if Steam's window showed
   (before the first sign-in, or with *Start Steam in the background* off), if the setting is
-  off, and if the game never started (the timeout, or Steam closed first). Steam stays the
-  session's only while a `steam.exe` that ran as the game started still runs: a Steam the user
-  quit and opened again is theirs.
+  off, if Steam's window was brought up during the session, and if the game never started
+  (the timeout, or Steam closed first). Whether Steam is the session's is decided by Play, from
+  the bottle's processes before it starts Steam: the bottle's Steam starts only through Play, so
+  a `steam.exe` replaced without a request is Steam restarting itself (after an update).
 - A second Play while a session runs (while Steam starts the game, or in the grace after it quit)
-  joins that session: the watcher waits for the game again. Play and the watcher's last decision
-  share a short lock (`.session.mutex`), and while Steam is quitting, Play asks to try again in a
-  few seconds.
+  joins that session and waits until the watcher has it: the watcher waits for the game again,
+  and if no Steam ran before that Play, Steam is that Play's. Once the watcher has decided to
+  quit Steam, Play asks to try again in a few seconds.
 - It logs to `install.log` under `---- session`. Uninstall stops it. The `session` file's
   `stage` (`waiting_game`, `playing`, `grace`, `closing_steam`, `done`) and `result` say where
   the session is.
@@ -323,7 +327,7 @@ scripts/stage-components.sh    # copy DXMT, the heat Wine pieces, winemac and th
 Never against a real install, and never with Wine, Steam or the game running on Jan's screen.
 
 - `scripts/test-sandbox.sh` tests the backend of a built app end to end in
-  `work/app-sandbox/test` (252 checks). It uses a stand-in engine archive whose `bin/wine` only
+  `work/app-sandbox/test` (256 checks). It uses a stand-in engine archive whose `bin/wine` only
   pretends, plays Steam's and ArenaNet's downloads itself, and uses a clone of the game's own
   ArenaNet-signed `Gw2-64.exe` as the installer to check (`SIGNED_PE`, by default the one in
   the development workspace's bottle; without one those checks are skipped). It covers:
@@ -335,10 +339,10 @@ Never against a real install, and never with Wine, Steam or the game running on 
     sleepers) and shortened times (`GW2_ON_MAC_WATCH_TIMEOUT`, `…_GRACE`, `…_QUITWAIT`,
     `…_POLL`): Steam quits after the game (`-shutdown` in the stand-in's log), a restart within
     the grace, an already-running Steam, the setting off, Steam's window shown, the timeout,
-    Steam closed before the game, Steam quit and opened again (during the game and in the
-    grace), Play in the grace, Play while Steam quits, one watcher per session (also two Plays
-    at once over a stale lock, and a watcher that lost its lock), the `wineserver -k` fallback,
-    and uninstall stopping it
+    Steam closed before the game, Steam restarting itself, a `shown` request, Play in the grace
+    (also after Steam quit, and with its game within the grace), Play while Steam quits, one
+    watcher per session (also two Plays at once over a stale lock, a reused pid, and a watcher
+    that lost its lock), the `wineserver -k` fallback, and uninstall stopping it
   - existing game files: stand-in CrossOver, Whisky and wrapper bottles (sparse `Gw2.dat`), the
     scan, check-game, the clone (Steam and ArenaNet routes), the settings and their backup, a real
     copy from an attached disk image (`hdiutil`, when it can attach one) and a forced copy
