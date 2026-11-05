@@ -163,9 +163,13 @@ final class Installer {
   var appleSilicon: Bool { status["arch"].map { $0 == "arm64" } ?? true }
   // the setup (engine, bottle and graphics) is in place
   var installed: Bool { status["installed"] == "yes" }
-  // (ArenaNet's route counts its game as there only while neither its installer nor the game runs:
-  // a finished install whose game runs has it too)
-  var gameInstalled: Bool { status["game"] == "yes" || status["stage"] == "finished" && status["busy"] == "game" }
+  // (a finished install has its game during a session too, though status says game=no then:
+  // ArenaNet's route counts it only while neither its installer nor the game runs, and Steam's
+  // appmanifest isn't "fully installed" while Steam updates or verifies the game; Play itself
+  // still checks for the game before it starts)
+  var gameInstalled: Bool {
+    status["game"] == "yes" || status["stage"] == "finished" && (status["busy"] == "game" || status["session"] == "live")
+  }
   // everything is done: Play
   var ready: Bool { installed && gameInstalled && status["stage"] == "finished" }
   var installedRoute: Route? { Route(rawValue: status["route"] ?? "") }

@@ -566,10 +566,12 @@ check "  an older check doesn't count" [ "$(ss stage)" = starting_game ]
 check "Steam validates the game: checking_files, 'Steam verifies Guild Wars 2'" eval '[ "$(ss stage)" = checking_files ] && [ "$(ss detail)" = "Steam verifies Guild Wars 2" ] && [ -z "$(ss progress)" ]'
 M="$STEAM/steamapps/appmanifest_1284210.acf"
 cp "$M" "$SANDBOX/acf.keep"
-{ grep -v -e BytesToDownload -e BytesDownloaded "$SANDBOX/acf.keep" | sed '$d'
+# (while Steam updates the game its appmanifest isn't "fully installed": StateFlags 1026)
+{ grep -v -e BytesToDownload -e BytesDownloaded "$SANDBOX/acf.keep" | sed '$d; s/"StateFlags"\([[:space:]]*\)"4"/"StateFlags"\1"1026"/'
   printf '\t"BytesToDownload"\t\t"4000"\n\t"BytesDownloaded"\t\t"1000"\n}\n'; } >"$M"
 echo "$NEW AppID 1284210 update changed : Running Update,Downloading," >>"$SL/content_log.txt"
 check "Steam updates the game: checking_files with the appmanifest's progress (25%)" eval '[ "$(ss stage)/$(ss progress)" = checking_files/25 ] && [ "$(ss detail)" = "Steam updates Guild Wars 2 · 25%" ]'
+check "  status meanwhile: game=no (not fully installed), stage=finished, busy=steam, session=live (the window's model keeps the session)" eval '[ "$(st game)/$(st stage)/$(st busy)/$(st session)" = no/finished/steam/live ]'
 cp "$SANDBOX/acf.keep" "$M"
 echo "$NEW AppID 1284210 finished update (BytesDownloaded=1000, BytesStaged=0)" >>"$SL/content_log.txt"
 check "  update finished: starting_game" [ "$(ss stage)" = starting_game ]

@@ -193,8 +193,10 @@ func installer(_ state: String) -> Installer {
   case let s where s.hasPrefix("session-"):
     // after Play: the start's stages, Playing, Steam closing after the game (Session.swift)
     st["busy"] = "steam"
-    // (ArenaNet's status while its game runs: game=no, busy=game; the panel must still follow it)
+    // (ArenaNet's status while its game runs: game=no, busy=game; Steam's while it updates or
+    // verifies the game: game=no, busy=steam, session=live; the panel must still follow them)
     if s == "session-arenanet" { st["route"] = "arenanet"; st["game"] = "no"; st["busy"] = "game" }
+    if s == "session-steam-update" { st["game"] = "no"; st["busy"] = "steam"; st["session"] = "live" }
     i.session = session(String(s.dropFirst(8)))
   default: break
   }
@@ -210,7 +212,7 @@ func session(_ state: String) -> Installer.LaunchSession {
            "limiter_hint": "no", "limiter_value": "", "detail": "", "progress": "", "game_elapsed": ""]
   var stage: Installer.Stage? = .checkingFiles
   switch state {
-  case "starting":
+  case "starting", "steam-update":
     // as the design: Steam signed in, then checks the game's files
     v["detail"] = "Steam verifies Guild Wars 2 · 64%"; v["progress"] = "64"
   case "updating":
@@ -233,7 +235,7 @@ func session(_ state: String) -> Installer.LaunchSession {
   }
   s.values = v
   s.stage = stage
-  if state == "starting" { s.seen = [.startingSteam, .signingIn, .checkingFiles] }
+  if state == "starting" || state == "steam-update" { s.seen = [.startingSteam, .signingIn, .checkingFiles] }
   if let stage { s.seen.insert(stage) }
   return s
 }
@@ -284,11 +286,13 @@ func renderAll(_ dir: URL, exports: URL?) async {
     ("main-starting-loading-dark", "session-loading", true, nil),
     ("main-starting-arenanet-light", "session-arenanet", false, nil),
     ("main-playing-nohint-light", "session-playing-nohint", false, nil),
+    ("main-starting-steam-update-light", "session-steam-update", false, nil),
   ]
   // the panel each session state must show (a model check: a wrong one fails the run)
   let panels: [String: Installer.Panel] = ["session-starting": .starting, "session-updating": .starting,
     "session-signing-in": .starting, "session-loading": .starting, "session-arenanet": .starting,
-    "session-playing": .playing, "session-playing-nohint": .playing, "session-closing": .ready]
+    "session-playing": .playing, "session-playing-nohint": .playing, "session-closing": .ready,
+    "session-steam-update": .starting]
   for (state, want) in panels where installer(state).panel != want {
     print("FAIL \(state): the panel is \(installer(state).panel), not \(want)")
     exit(1)
@@ -331,6 +335,20 @@ func renderAll(_ dir: URL, exports: URL?) async {
       print("FAIL a second Play during the grace: the poller \(old.isCancelled ? "replaced" : "kept"), "
             + "\(i.sessionStatusArguments), the panel \(i.panel)")
       exit(1)
+    }
+  }
+  // the window opened while Steam updates the game (status: finished, game=no, busy=steam,
+  // session=live, no session followed yet): still ready, so it picks the session up; Steam on its
+  // own (session=none) and a missing game outside a session are not
+  do {
+    let base = ["installed": "yes", "stage": "finished", "route": "steam", "game": "no", "busy": "steam"]
+    for (extra, want) in [(["session": "live"], true), (["session": "none"], false), ([:], false)] {
+      let i = Installer()
+      i.status = base.merging(extra) { $1 }
+      guard i.ready == want, i.gameInstalled == want else {
+        print("FAIL Steam updating the game, \(extra): ready \(i.ready), not \(want)")
+        exit(1)
+      }
     }
   }
   for (name, state, dark, design) in mains {
