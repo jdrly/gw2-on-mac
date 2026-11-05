@@ -149,7 +149,7 @@ STATE="$APPDIR/state"                 # route, stage (none|waiting_game|finished
 MANIFEST="$APPDIR/install-manifest.json"
 DXMT_CONF="$APPDIR/dxmt.conf"
 # The last Play's session (watch-session keeps it; key=value lines, SESSION_KEYS), the requests to
-# its watcher, and the lock that keeps one watcher per session (a folder with its owner in it)
+# its watcher, and the lock that keeps one watcher per session (a file the watcher holds a flock on)
 SESSION="$APPDIR/session"
 WATCH_LOCK="$APPDIR/.session.lock"
 SESSION_REQ="$APPDIR/session.req"
@@ -1452,7 +1452,7 @@ launch() {
   fi
   echo "=== $(date '+%F %T') $*" >>"$LOGS/wine.log"
   ( cd "$BOTTLE" && env -u WINELOADER -u WINESERVER -u DYLD_FALLBACK_LIBRARY_PATH "${E[@]}" \
-      nohup "$ENG/bin/wine" "$@" </dev/null >>"$LOGS/wine.log" 2>&1 & )
+      nohup "$ENG/bin/wine" "$@" </dev/null >>"$LOGS/wine.log" 2>&1 9>&- & )
   log "started: $*"
 }
 
@@ -1493,7 +1493,7 @@ launch() {
 #                  timeout, steam_gone (Steam quit before the game appeared), no_game (ArenaNet:
 #                  nothing started), uninstalled, ended (stopped otherwise)
 SESSION_KEYS="route started_steam steam_window quit_steam watcher_pid stage started game_started game_ended replay requests updated result"
-session_get() { sed -n "s/^$1=//p" "$SESSION" 2>/dev/null | tail -1; }
+session_get() { sed -n "s/^$1=//p" "$SESSION" 2>/dev/null | tail -1 || true; }   # (no session yet: empty)
 # session_set <key> <value> [<key> <value>...]: changes those keys (and updated), atomically (only
 # the lock's holder calls it)
 session_set() {
@@ -1524,48 +1524,31 @@ steam_decision() {
   [ "$1" = steam ] && [ "$2" = yes ] && [ "$3" = hidden ] && [ "$(setting quitsteam)" = on ] && echo yes || echo no
 }
 
-# The session's lock: a folder (mkdir, atomic) with its holder in `owner`, "<pid> <start time>"
-# (ps lstart: a pid used again by another process is not the holder)
-proc_start() { ps -p "$1" -o lstart= 2>/dev/null | sed 's/^ *//; s/ *$//; s/  */ /g' || true; }
-owner_of() { echo "$1 $(proc_start "$1")"; }
-lock_owner() { cat "$WATCH_LOCK/owner" 2>/dev/null || true; }
-owner_alive() { [ -n "${1#* }" ] && [ "${1#* }" != "$1" ] && [ "$(proc_start "${1%% *}")" = "${1#* }" ]; }
-# (a lock without its owner yet: being taken, or its taker died; stale after 10 seconds)
-lock_young() { [ $(( $(date +%s) - $(stat -f %m "$WATCH_LOCK" 2>/dev/null || echo 0) )) -lt 10 ]; }
-# watcher_alive: the lock is held by a live watcher (or by a Play handing the session over to one)
-watcher_alive() {
-  local o
-  [ -d "$WATCH_LOCK" ] || return 1
-  o=$(lock_owner)
-  if [ -z "$o" ]; then lock_young; return; fi
-  owner_alive "$o"
+# The session's lock: a kernel lock (flock) on the file $WATCH_LOCK, taken on file descriptor 9
+# through macOS's perl (bash has no flock). The lock belongs to the open file, so the shell keeps
+# it after perl exits, the watcher inherits it from Play (the handoff), and the kernel releases it
+# when the last holder exits: no stale lock to recover. Wine never gets fd 9 (launch: 9>&-).
+PERL=/usr/bin/perl
+# lock9: takes the lock on fd 9 (open on $WATCH_LOCK), without waiting
+lock9() { "$PERL" -MFcntl=:flock -e 'open(my $f, ">&=", 9) or exit 2; flock($f, LOCK_EX | LOCK_NB) or exit 1; exit 0' 2>/dev/null; }
+# open_lock: fd 9 on the lock file (one left as a folder by an earlier build goes)
+open_lock() { [ ! -d "$WATCH_LOCK" ] || rm -rf "$WATCH_LOCK"; exec 9>>"$WATCH_LOCK"; }
+# lock_held: another process holds the lock
+lock_held() {
+  [ -f "$WATCH_LOCK" ] || return 1
+  "$PERL" -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or exit 1; flock($f, LOCK_EX | LOCK_NB) and exit 1; exit 0' "$WATCH_LOCK" 2>/dev/null
 }
-# take_watch_lock: the session's lock for this process, unless a live holder has it. A stale one is
-# renamed aside first (atomic: one taker wins); if what was renamed isn't what was judged stale (a
-# new holder took it over meanwhile), it goes back, and else that holder stops by itself (lost)
-take_watch_lock() {
-  local o t="$WATCH_LOCK.stale.$$"
-  if mkdir "$WATCH_LOCK" 2>/dev/null; then owner_of $$ >"$WATCH_LOCK/owner"; return 0; fi
-  o=$(lock_owner)
-  if [ -z "$o" ]; then lock_young && return 1; elif owner_alive "$o"; then return 1; fi
-  mv "$WATCH_LOCK" "$t" 2>/dev/null || return 1
-  if [ "$(cat "$t/owner" 2>/dev/null || true)" != "$o" ]; then
-    [ -e "$WATCH_LOCK" ] || mv "$t" "$WATCH_LOCK" 2>/dev/null || true
-    rm -rf "$t"
-    return 1
-  fi
-  rm -rf "$t"
-  mkdir "$WATCH_LOCK" 2>/dev/null || return 1
-  owner_of $$ >"$WATCH_LOCK/owner"
-}
-owns_watch_lock() { [ "$(lock_owner)" = "$MY_OWNER" ]; }
-drop_watch_lock() { if owns_watch_lock; then rm -rf "$WATCH_LOCK"; fi; return 0; }
+# watcher_proc <pid>: a running watch-session
+watcher_proc() { [ -n "$1" ] && ps -p "$1" -o command= 2>/dev/null | grep -q 'gw2om\.sh watch-session'; }
+# watcher_alive: the session's watcher runs (the lock is held and the session names it)
+watcher_alive() { lock_held && watcher_proc "$(session_get watcher_pid)"; }
 # stop_watcher: ends the session's watcher (uninstall) and waits for it
 stop_watcher() {
-  local o p i
-  watcher_alive || return 0
-  o=$(lock_owner); p=${o%% *}
-  [ -n "$p" ] && [ "$p" != $$ ] || return 0
+  local p i=0
+  # (a watcher that has just started writes its pid first)
+  while lock_held && ! watcher_proc "$(session_get watcher_pid)" && [ $i -lt 20 ]; do sleep 0.1; i=$((i + 1)); done
+  p=$(session_get watcher_pid)
+  watcher_proc "$p" || return 0
   if [ -n "$DRY" ]; then echo "[dry-run] stop the session's watcher (pid $p)"; return 0; fi
   kill "$p" 2>/dev/null || true
   for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$p" 2>/dev/null || break; sleep 0.2; done
@@ -1573,20 +1556,18 @@ stop_watcher() {
 }
 
 # join_session <steam_before> <steam_window> <quit_steam>: Play joins the running session and waits
-# for the watcher to apply it: 0 joined, 1 refused (Steam is quitting), 2 the watcher has ended
-# (Play takes the session itself)
+# for the watcher to apply its join: 0 joined, 1 refused (Steam is quitting), 2 the lock is free
+# (Play takes the session itself), 3 no answer (Play doesn't start: fail closed)
 join_session() {
-  local n h i=0 lim o
+  local n h i=0 lim
   # (the watcher looks every WATCH_POLL seconds)
   lim=$(awk -v p="$WATCH_POLL" 'BEGIN { print int((p * 3 + 3) * 10) }')
-  # the session's watcher must hold the lock (a Play that has just taken it is still writing the
-  # session and emptying the requests)
-  while :; do
-    watcher_alive || return 2
-    o=$(lock_owner)
-    [ -z "$o" ] || [ "${o%% *}" != "$(session_get watcher_pid)" ] || break
+  # the session's watcher must run (a Play that has just taken the lock is still writing the
+  # session and emptying the requests; a watcher that is done is about to release it)
+  until watcher_proc "$(session_get watcher_pid)" && [ "$(session_get stage)" != done ]; do
+    lock_held || return 2
     i=$((i + 1))
-    [ $i -lt "$lim" ] || return 2
+    [ $i -lt "$lim" ] || return 3
     sleep 0.1
   done
   n=$(session_request join "$@")
@@ -1594,16 +1575,11 @@ join_session() {
   while :; do
     h=$(session_get requests)
     if [ "${h:-0}" -ge "$n" ]; then
-      case "$(session_get stage)" in closing_steam) return 1 ;; done) return 2 ;; *) return 0 ;; esac
+      case "$(session_get stage)" in closing_steam|done) return 1 ;; *) return 0 ;; esac
     fi
-    watcher_alive || return 2
+    lock_held || return 2
     i=$((i + 1))
-    if [ $i -ge "$lim" ]; then
-      # (a watcher busy ending Steam's Wine doesn't look for a while)
-      [ "$(session_get stage)" != closing_steam ] || return 1
-      log "session: the watcher did not answer Play's join; starting anyway"
-      return 0
-    fi
+    [ $i -lt "$lim" ] || return 3
     sleep 0.1
   done
 }
@@ -1644,42 +1620,35 @@ apply_requests() {
   session_set requests "$h" replay "$JOINS"
 }
 
-# watch_exit: the watcher's end, however it ends; only while it still holds the lock (a watcher
-# that lost it leaves the session alone)
+# watch_exit: the watcher's end, however it ends (it holds the lock until it has exited)
 watch_exit() {
-  if ! owns_watch_lock; then log "session: the watcher (pid $$) stopped: it no longer holds the session"; return 0; fi
-  [ "$STAGE" = done ] || watch_stage done result "${WATCH_RESULT:-ended}"
+  # (after an uninstall it writes nothing: the app's folder is going)
+  [ "$STAGE" = done ] || [ "${WATCH_RESULT:-}" = uninstalled ] || watch_stage done result "${WATCH_RESULT:-ended}"
   log "session: done (${WATCH_RESULT:-ended})"
-  drop_watch_lock
 }
 
 # watch_poll: proc_list into WL after a pause, and the requests; false once the app's install is
-# gone or the lock isn't this watcher's any more
+# gone
 watch_poll() {
   sleep "$WATCH_POLL"
-  owns_watch_lock || return 1
   [ -f "$MANIFEST" ] || { WATCH_RESULT=uninstalled; log "session: GW2 on Mac was uninstalled; stopping"; return 1; }
   WL=$(proc_list)
   apply_requests
 }
 
-# watch-session [--handoff]: Play starts it with --handoff (the lock is handed over: its owner
-# becomes this process); by hand, it takes the lock or says another watcher follows the session
+# watch-session [--handoff]: Play starts it with --handoff (it inherits Play's lock on fd 9); by
+# hand, it takes the lock or says another watcher follows the session
 cmd_watch_session() {
   local i start now last ended back route quit why at_start
   open_log
   if [ -n "$DRY" ]; then echo "[dry-run] watch-session"; return 0; fi
-  MY_OWNER=$(owner_of $$)
   if [ "${1:-}" = --handoff ]; then
-    i=0
-    while ! owns_watch_lock; do
-      [ $i -lt 50 ] || { log "session: the watcher (pid $$) was not handed the session"; return 0; }
-      sleep 0.1; i=$((i + 1))
-    done
+    lock9 || { log "session: the watcher (pid $$) was not handed the session's lock"; return 0; }
   else
-    [ -f "$SESSION" ] || { echo "@done No session to follow."; return 0; }
-    take_watch_lock || { echo "@done Another watcher follows this session ($(lock_owner))."; return 0; }
-    case "$(session_get stage)" in ''|done) drop_watch_lock; echo "@done No session to follow."; return 0 ;; esac
+    [ -f "$SESSION" ] && [ -x "$PERL" ] || { echo "@done No session to follow."; return 0; }
+    open_lock
+    lock9 || { echo "@done Another watcher follows this session (pid $(session_get watcher_pid))."; return 0; }
+    case "$(session_get stage)" in ''|done) echo "@done No session to follow."; return 0 ;; esac
   fi
   WATCH_RESULT="" STAGE=$(session_get stage) JOINS=$(session_get replay) REQS=$(session_get requests) JOINED=0
   JOINS=${JOINS:-0} REQS=${REQS:-0}
@@ -1774,7 +1743,7 @@ cmd_watch_session() {
   log "session: asking Steam to quit (steam.exe -shutdown)"
   echo "=== $(date '+%F %T') $STEAM_EXE -shutdown (the game quit)" >>"$LOGS/wine.log"
   ( cd "$BOTTLE" && env -u WINELOADER -u WINESERVER -u DYLD_FALLBACK_LIBRARY_PATH "${E[@]}" \
-      nohup "$ENG/bin/wine" "$STEAM_EXE" -shutdown </dev/null >>"$LOGS/wine.log" 2>&1 & )
+      nohup "$ENG/bin/wine" "$STEAM_EXE" -shutdown </dev/null >>"$LOGS/wine.log" 2>&1 9>&- & )
   now=$(date +%s)
   while :; do
     watch_poll || return 0
@@ -1784,7 +1753,6 @@ cmd_watch_session() {
     has_kind steam "$WL" || { WATCH_RESULT=quit; log "session: Steam quit ($(( $(date +%s) - now )) s after -shutdown)"; return 0; }
     [ $(( $(date +%s) - now )) -lt "$WATCH_QUITWAIT" ] || break
   done
-  owns_watch_lock || return 0
   log "session: Steam did not quit within $WATCH_QUITWAIT s; ending the bottle's Wine (wineserver -k)"
   WINEPREFIX="$BOTTLE" "$ENG/bin/wineserver" -k >>"$LOGFILE" 2>&1 || true
   for i in 1 2 3 4 5 6 7 8 9 10; do
@@ -1983,27 +1951,31 @@ cmd_play() {
   # still follows the last one. Then this Play joins it (while Steam starts the game, or in the
   # grace after the game quit) and waits until the watcher has it; refused while Steam quits.
   # Whether this Play starts Steam itself is decided here, from the processes before the launch.
-  local fresh=no steam_before=no route silent="" window="" quit=no try rc
+  local fresh=no joined=no steam_before=no route silent="" window="" quit=no try rc
   route=$(state route)
   [ "$route" = arenanet ] || route=steam
   if [ "$route" = steam ]; then
     if [ "$(setting steambg)" = on ] && steam_remembers_login; then silent=-silent window=hidden; else window=shown; fi
   fi
-  if [ -z "$DRY" ]; then
-    MY_OWNER=$(owner_of $$)
+  if [ -z "$DRY" ] && [ ! -x "$PERL" ]; then
+    log "session: no $PERL for the session's lock; no watcher (Steam stays open after the game)"
+  elif [ -z "$DRY" ]; then
+    open_lock
     for try in 1 2 3; do
       steam_before=no
       has_kind steam "$(proc_list)" && steam_before=yes
-      if take_watch_lock; then fresh=yes; trap drop_watch_lock EXIT; break; fi
+      if lock9; then fresh=yes; break; fi
       [ "$(session_get stage)" != closing_steam ] || die "Steam is quitting after your last session. Try again in a few seconds."
       rc=0
       join_session "$steam_before" "$window" "$(steam_decision "$route" yes "$window")" || rc=$?
       case "$rc" in
-        0) break ;;
+        0) joined=yes; break ;;
         1) die "Steam is quitting after your last session. Try again in a few seconds." ;;
+        3) die "GW2 on Mac's last session did not answer. Try again in a few seconds." ;;
       esac
-      # (2: that watcher has ended; this Play takes the session)
+      # (2: the lock is free again: the last watcher has ended, this Play takes the session)
     done
+    [ "$fresh" = yes ] || [ "$joined" = yes ] || die "GW2 on Mac is still busy with the last session. Try again in a few seconds."
   fi
   if [ "$route" = arenanet ]; then
     # shellcheck disable=SC2086
@@ -2026,15 +1998,12 @@ cmd_play() {
       echo "updated=$(date +%s)"; echo "result="; } >"$SESSION.new.$$"
     mv -f "$SESSION.new.$$" "$SESSION"
     : >"$SESSION_REQ"
-    # the watcher, and the lock handed over to it (its owner becomes the watcher)
+    # the watcher, which inherits the lock (fd 9) and writes its pid into the session
     nohup /bin/bash "$RES/gw2om.sh" watch-session --handoff </dev/null >/dev/null 2>&1 &
-    local wpid=$!
-    session_set watcher_pid "$wpid"
-    owner_of "$wpid" >"$WATCH_LOCK/owner.new" && mv -f "$WATCH_LOCK/owner.new" "$WATCH_LOCK/owner"
-    trap - EXIT
-    log "session: watcher started (pid $wpid), quit_steam=$quit"
-  else
-    log "session: this Play joined the running session (watcher $(lock_owner))"
+    exec 9>&-
+    log "session: watcher started (pid $!), quit_steam=$quit"
+  elif [ "$joined" = yes ]; then
+    log "session: this Play joined the running session (watcher pid $(session_get watcher_pid))"
   fi
   echo "@done Starting Guild Wars 2."
 }

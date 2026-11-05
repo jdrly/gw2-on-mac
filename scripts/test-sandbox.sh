@@ -69,7 +69,8 @@ same() { cmp -s "$1" "$2"; }
 # the session's file, and waits (up to 10 s) for its watcher to reach a stage or end
 sess() { sed -n "s/^$1=//p" "$AD/session" 2>/dev/null; }
 wait_stage() { local i=0; while [ "$(sess stage)" != "$1" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; [ "$(sess stage)" = "$1" ]; }
-watch_done() { local i=0; while { [ -d "$AD/.session.lock" ] || [ "$(sess stage)" != done ]; } && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; [ ! -d "$AD/.session.lock" ] && [ "$(sess stage)" = done ]; }
+watcher_runs() { local p; p=$(sess watcher_pid); [ -n "$p" ] && kill -0 "$p" 2>/dev/null; }
+watch_done() { local i=0; while { watcher_runs || [ "$(sess stage)" != done ]; } && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; ! watcher_runs && [ "$(sess stage)" = done ]; }
 
 # --- The stand-in engine: the real engine's layout, files that only pretend
 section "Stand-in engine and downloads"
@@ -337,7 +338,9 @@ game_up() { ( "$ENG/bin/Gw2-64.exe" 120 & echo $! >"$SANDBOX/game.pid" ); }
 game_down() { kill "$(cat "$SANDBOX/game.pid")" 2>/dev/null; }
 # a session: the game starts, runs, quits
 game_session() { game_up; wait_stage playing && game_down && wait_stage grace; }
-splay() { : >"$STANDIN_LOG"; g play >/dev/null 2>&1; started; }
+# Play, then (up to 2 s) its watcher has written its pid
+watcher_up() { local i=0; until watcher_runs || [ $i -ge 20 ]; do sleep 0.1; i=$((i + 1)); done; }
+splay() { : >"$STANDIN_LOG"; g play >/dev/null 2>&1; started; watcher_up; }
 watch_done
 check "the Steam in the background is on, with a remembered login" [ "$(sett steambg)/$(sett steam_login)/$(sett quitsteam)" = on/yes/on ]
 
@@ -422,7 +425,7 @@ check "  Steam left open after the game" eval 'watch_done && [ "$(sess result)" 
 steam_down
 
 # Steam quits during the game; Play in the grace starts it again: that Play's Steam (a 4 s grace)
-: >"$STANDIN_LOG"; GW2_ON_MAC_WATCH_GRACE=4 "$G" play >/dev/null 2>&1; started; steam_up
+: >"$STANDIN_LOG"; GW2_ON_MAC_WATCH_GRACE=4 "$G" play >/dev/null 2>&1; started; watcher_up; steam_up
 game_up; wait_stage playing
 steam_down; game_down; wait_stage grace
 splay; steam_up
@@ -432,7 +435,7 @@ check "  its game quits: that Steam quits" eval 'watch_done && [ "$(sess result)
 
 # Play near the end of the grace (a 4 s grace): the watcher waits for that Play's game instead of
 # quitting
-: >"$STANDIN_LOG"; GW2_ON_MAC_WATCH_GRACE=4 "$G" play >/dev/null 2>&1; started; steam_up
+: >"$STANDIN_LOG"; GW2_ON_MAC_WATCH_GRACE=4 "$G" play >/dev/null 2>&1; started; watcher_up; steam_up
 game_session
 sleep 2.5; splay; sleep 3
 check "Play in the grace: the watcher waits for the game again, past the grace, no -shutdown" eval '[ "$(sess stage)" = waiting_game ] && [ "$(sess replay)" = 1 ] && steam_runs && ! has "$STANDIN_LOG" "steam.exe -shutdown"'
@@ -440,35 +443,33 @@ game_session
 check "  then that game quits: Steam quits" eval 'watch_done && [ "$(sess result)" = quit ] && ! steam_runs'
 
 # Play in the grace, and its game starts within the grace: once it quits, Steam quits
-: >"$STANDIN_LOG"; GW2_ON_MAC_WATCH_GRACE=4 "$G" play >/dev/null 2>&1; started; steam_up
+: >"$STANDIN_LOG"; GW2_ON_MAC_WATCH_GRACE=4 "$G" play >/dev/null 2>&1; started; watcher_up; steam_up
 game_session; splay
 game_session
 check "Play and its game within the grace: after that game, Steam quits" eval 'watch_done && [ "$(sess result)" = quit ] && [ "$(sess replay)" = 1 ] && ! steam_runs'
 
-# a stale lock (a watcher that died) and two Plays at once: one watcher
-owner() { cut -d' ' -f1 "$AD/.session.lock/owner" 2>/dev/null; }
-mkdir -p "$AD/.session.lock" && ( exit 0 ) & dp=$!; wait $dp; echo "$dp Thu Jan 1 00:00:00 1970" >"$AD/.session.lock/owner"
+# two Plays at once: one watcher, the other joins
 : >"$STANDIN_LOG"
 "$G" play >/dev/null 2>&1 & p1=$!
 "$G" play >/dev/null 2>&1 & p2=$!
-wait $p1 $p2; started; steam_up
-check "two Plays at once over a stale lock: one watcher, which holds the lock; the other joined" eval '[ "$(watchers)" = 1 ] && [ "$(owner)" = "$(sess watcher_pid)" ] && [ "$(sess replay)" = 1 ]'
+wait $p1 $p2; started; watcher_up; steam_up
+check "two Plays at once: one watcher, the other joined" eval '[ "$(watchers)" = 1 ] && watcher_runs && [ "$(sess replay)" = 1 ]'
 game_session
 check "  Steam quits once" eval 'watch_done && [ "$(sess result)" = quit ] && [ "$(grep -c "steam.exe -shutdown" "$STANDIN_LOG")" = 1 ]'
 
-# a lock whose pid now belongs to another process (pid reuse: another start time) is stale
-mkdir -p "$AD/.session.lock" && echo "$$ Mon Jan 1 00:00:00 2001" >"$AD/.session.lock/owner"
+# the lock is the kernel's (flock): a lock file a dead watcher left holds nothing
+echo "left behind" >"$AD/.session.lock"
 splay
-check "a lock held by a reused pid is taken over" eval '[ "$(owner)" = "$(sess watcher_pid)" ] && [ "$(sess watcher_pid)" != $$ ] && [ "$(sess replay)" = 0 ]'
+check "a lock file left behind doesn't block: a new session (replay=0)" eval 'watcher_runs && [ "$(sess replay)" = 0 ]'
 watch_done
 
-# a watcher whose lock another took stops, without touching the session or Steam
-splay; steam_up
-wp=$(sess watcher_pid)
-echo "999999 Mon Jan 1 00:00:00 2001" >"$AD/.session.lock/owner"
-sleep 1
-check "a watcher that lost its lock stops, leaving the session and Steam alone" eval '! kill -0 "$wp" 2>/dev/null && [ "$(sess stage)" = waiting_game ] && steam_runs && ! has "$STANDIN_LOG" "steam.exe -shutdown"'
-rm -rf "$AD/.session.lock"; steam_down
+# the lock held, but no watcher answers (a stuck holder): Play doesn't start the game (fails closed)
+/usr/bin/perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or exit 1; flock($f, LOCK_EX) or exit 1; sleep 30' "$AD/.session.lock" & hp=$!
+sleep 0.3
+: >"$STANDIN_LOG"
+"$G" play >"$SANDBOX/stuck.txt" 2>&1 && rc=0 || rc=$?
+check "the session's lock held without an answer: Play refuses and starts nothing" eval '[ "$rc" != 0 ] && has "$SANDBOX/stuck.txt" "@error GW2 on Mac.s last session did not answer" && ! has "$STANDIN_LOG" "^wine "'
+kill $hp 2>/dev/null; wait $hp 2>/dev/null
 
 # a Steam that ignores -shutdown: wineserver -k (a stand-in wineserver that ends it)
 touch "$SANDBOX/steam.stubborn"
@@ -502,7 +503,7 @@ GW2_ON_MAC_ENGINE_CHECKS=1 "$G" play >"$SANDBOX/realwine.txt" 2>&1 || true
 check "the real engine's Wine never runs in a sandbox" has "$SANDBOX/realwine.txt" "Refusing to run the real Wine"
 
 section "Uninstall"
-GW2_ON_MAC_WATCH_GRACE=60 "$G" play >/dev/null 2>&1; started
+GW2_ON_MAC_WATCH_GRACE=60 "$G" play >/dev/null 2>&1; started; watcher_up
 wp=$(sess watcher_pid)
 check "a session's watcher waits for the game" kill -0 "$wp"
 mkdir -p "$CACHE/downloads" && echo x >"$CACHE/downloads/x"

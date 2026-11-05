@@ -153,8 +153,10 @@ other settings, Play says Steam must quit first, because the game gets Steam's e
 
 **Steam quits after the game** (*Quit Steam when the game quits*, Settings › Game, on by default).
 Play records the session in `session` (next to `state`) and starts `gw2om.sh watch-session`
-detached, one per session (a lock, `.session.lock`, holding the watcher's pid and start time), so
-it doesn't need the window. After Play's first version of `session`, the watcher is its only
+detached, one per session, so it doesn't need the window. One per session: a kernel lock
+(`flock`, through macOS's `/usr/bin/perl`) on `.session.lock`, which Play takes and the watcher
+inherits, and which ends with the watcher (nothing stale to clean up; without perl, Play starts no
+watcher and Steam stays open). After Play's first version of `session`, the watcher is its only
 writer: others append a request to `session.req` (`join` from a Play, `shown` from Show Steam),
 which it applies in order.
 - It follows the session through the engine's own processes: it waits up to 15 minutes for
@@ -172,7 +174,8 @@ which it applies in order.
 - A second Play while a session runs (while Steam starts the game, or in the grace after it quit)
   joins that session and waits until the watcher has it: the watcher waits for the game again,
   and if no Steam ran before that Play, Steam is that Play's. Once the watcher has decided to
-  quit Steam, Play asks to try again in a few seconds.
+  quit Steam, or if it doesn't answer, Play starts nothing and asks to try again in a few
+  seconds.
 - It logs to `install.log` under `---- session`. Uninstall stops it. The `session` file's
   `stage` (`waiting_game`, `playing`, `grace`, `closing_steam`, `done`) and `result` say where
   the session is.
@@ -341,8 +344,8 @@ Never against a real install, and never with Wine, Steam or the game running on 
     the grace, an already-running Steam, the setting off, Steam's window shown, the timeout,
     Steam closed before the game, Steam restarting itself, a `shown` request, Play in the grace
     (also after Steam quit, and with its game within the grace), Play while Steam quits, one
-    watcher per session (also two Plays at once over a stale lock, a reused pid, and a watcher
-    that lost its lock), the `wineserver -k` fallback, and uninstall stopping it
+    watcher per session (also two Plays at once, a lock file left behind, and a held lock that
+    doesn't answer), the `wineserver -k` fallback, and uninstall stopping it
   - existing game files: stand-in CrossOver, Whisky and wrapper bottles (sparse `Gw2.dat`), the
     scan, check-game, the clone (Steam and ArenaNet routes), the settings and their backup, a real
     copy from an attached disk image (`hdiutil`, when it can attach one) and a forced copy
