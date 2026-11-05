@@ -338,6 +338,11 @@ struct SettingsView: View {
           InkSwitch(isOn: settings.toggle("steambg"))
             .disabled(settings.values["route"] == "arenanet")
         }
+        if settings.values["route"] != "arenanet", settings.values["steambg"] == "on" {
+          SettingRow("Quit Steam when the game quits", "When Play started Steam in the background, Steam quits by itself once Guild Wars 2 has quit. A Steam that was already running, or whose window showed, stays open.") {
+            InkSwitch(isOn: settings.toggle("quitsteam"))
+          }
+        }
         SettingRow("Game Mode", "While the game is in full screen, macOS gives it priority on the CPU and GPU and lowers the latency of Bluetooth controllers and headphones.") {
           InkSwitch(isOn: settings.toggle("gamemode"))
         }

@@ -151,6 +151,24 @@ sign-in, Steam's window shows. It also:
 If the game runs, Play brings it to the front instead. If Steam still runs from before with
 other settings, Play says Steam must quit first, because the game gets Steam's environment.
 
+**Steam quits after the game** (*Quit Steam when the game quits*, Settings › Game, on by default).
+Play records the session in `session` (next to `state`) and starts `gw2om.sh watch-session`
+detached, one per session (a lock, `.session.lock`), so it doesn't need the window:
+- It follows the session through the engine's own processes: it waits up to 15 minutes for
+  `Gw2-64.exe` (Steam may update itself and sign in first), then for it to quit, plus a
+  30-second grace, since the game's patcher or a restart starts it again.
+- Then, if this Play started Steam itself in the background (`-silent`), it asks Steam to quit
+  (`steam.exe -shutdown`, through the engine's Wine with the game's environment). If Steam is
+  still running 20 seconds later, it ends the bottle's Wine (`wineserver -k`, this bottle only).
+- It leaves Steam alone if Steam was already running before Play, if Steam's window showed
+  (before the first sign-in, or with *Start Steam in the background* off), if the setting is
+  off, and if the game never started (the timeout, or Steam closed first).
+- A second Play while a session runs keeps that session and its watcher. While Steam is
+  quitting, Play asks to try again in a few seconds.
+- It logs to `install.log` under `---- session`. Uninstall stops it. The `session` file's
+  `stage` (`waiting_game`, `playing`, `grace`, `closing_steam`, `done`) and `result` say where
+  the session is.
+
 **Repair** sets up the engine (unpacked again if its loader changed), GW2 on Mac's pieces, the
 bottle's settings, Game Mode and Steam (if gone) again. It keeps the game and the settings.
 
@@ -172,7 +190,7 @@ items, nothing in `/Applications` besides the app itself):
 | `~/Library/Application Support/GW2 on Mac/engine/` | the Wine engine with GW2 on Mac's pieces (about 1 GB) | removed |
 | `…/GW2 on Mac/bottle/` | the game's Wine prefix: Steam, **the game's files** (about 75 GB; an APFS clone of your own when they came from the same disk, which takes no extra space until either changes), the game's own settings (and `GW2 on Mac backup <date>/` next to them after an import that replaced some) | removed, with the game |
 | `…/GW2 on Mac/gamemode/GW2.app` | the Game Mode bundle | removed |
-| `…/GW2 on Mac/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf` | the settings, the route and stage, what was installed, DXMT's options | removed |
+| `…/GW2 on Mac/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `session` | the settings, the route and stage, what was installed, DXMT's options, the last Play's session (its watcher's stage) | removed |
 | `~/Library/Caches/GW2 on Mac/downloads/` | the engine archive, `SteamSetup.exe`, a copy of `Gw2Setup-64.exe` | removed |
 | `~/Library/Caches/GW2 on Mac/dxmt/Gw2-64.exe/` | DXMT's shader cache, pipeline archives and recorded pipelines for the game (`DXMT_CACHE_DIR` points DXMT here; another process, such as the launcher's `CefHost.exe`, gets its own folder next to it) | removed; *Reset the shader cache* empties it too |
 | `$(getconf DARWIN_USER_TEMP_DIR)winetemp-…/Gw2-64.exe` | the Game Mode link | removed |
@@ -208,6 +226,7 @@ use). The defaults are the mix Jan plays with.
 | | Cinematic dialogue (`uiscale_cinema`) | on | the ini's `cinema=1` |
 | Game | Game Mode (`gamemode`) | on | the bundle and link above |
 | | Start Steam in the background (`steambg`) | on | Steam route: `-silent` once Steam remembers a login (see Play) |
+| | Quit Steam when the game quits (`quitsteam`) | on | the Steam Play started in the background quits once the game has quit (see Play). Shown only while *Start Steam in the background* is on |
 | | Launch options (`launchopts`) | none | arguments for `Gw2-64.exe` (letters, digits, `-_.:=,/+` only) |
 | | Quit GW2 on Mac after launching | off | the app's own preference |
 | Updates | Check automatically (`updates`) | on | Sparkle's automatic checks, once there is a feed |
@@ -300,7 +319,7 @@ scripts/stage-components.sh    # copy DXMT, the heat Wine pieces, winemac and th
 Never against a real install, and never with Wine, Steam or the game running on Jan's screen.
 
 - `scripts/test-sandbox.sh` tests the backend of a built app end to end in
-  `work/app-sandbox/test` (210 checks). It uses a stand-in engine archive whose `bin/wine` only
+  `work/app-sandbox/test` (243 checks). It uses a stand-in engine archive whose `bin/wine` only
   pretends, plays Steam's and ArenaNet's downloads itself, and uses a clone of the game's own
   ArenaNet-signed `Gw2-64.exe` as the installer to check (`SIGNED_PE`, by default the one in
   the development workspace's bottle; without one those checks are skipped). It covers:
@@ -308,6 +327,12 @@ Never against a real install, and never with Wine, Steam or the game running on 
   - play, the busy checks, repair, reset-shaders, reinstall-engine, the lock
   - Collect Logs' redaction, uninstall, a failed install's rollback
   - Steam's `-silent` with and without a remembered login, the CPU counts
+  - the session's watcher, with stand-in Steam and game processes (the busy checks' signed
+    sleepers) and shortened times (`GW2_ON_MAC_WATCH_TIMEOUT`, `…_GRACE`, `…_QUITWAIT`,
+    `…_POLL`): Steam quits after the game (`-shutdown` in the stand-in's log), a restart within
+    the grace, an already-running Steam, the setting off, Steam's window shown, the timeout,
+    Steam closed before the game, one watcher per session, the `wineserver -k` fallback, and
+    uninstall stopping it
   - existing game files: stand-in CrossOver, Whisky and wrapper bottles (sparse `Gw2.dat`), the
     scan, check-game, the clone (Steam and ArenaNet routes), the settings and their backup, a real
     copy from an attached disk image (`hdiutil`, when it can attach one) and a forced copy

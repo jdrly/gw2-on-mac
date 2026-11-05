@@ -62,6 +62,10 @@ has() { grep -q -- "$2" "$1" 2>/dev/null; }
 started() { local i=0; while ! grep -q '^wine ' "$STANDIN_LOG" 2>/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done; }
 reg() { grep -A3 "^\[$1\]" "$BOTTLE/user.reg" 2>/dev/null | grep -q "^\"$2\"=\"$3\""; }
 same() { cmp -s "$1" "$2"; }
+# the session's file, and waits (up to 10 s) for its watcher to reach a stage or end
+sess() { sed -n "s/^$1=//p" "$AD/session" 2>/dev/null; }
+wait_stage() { local i=0; while [ "$(sess stage)" != "$1" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; [ "$(sess stage)" = "$1" ]; }
+watch_done() { local i=0; while { [ -d "$AD/.session.lock" ] || [ "$(sess stage)" != done ]; } && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; [ ! -d "$AD/.session.lock" ] && [ "$(sess stage)" = done ]; }
 
 # --- The stand-in engine: the real engine's layout, files that only pretend
 section "Stand-in engine and downloads"
@@ -92,6 +96,10 @@ case "${1:-}" in
   *SteamSetup.exe)
     mkdir -p "$WINEPREFIX/drive_c/Program Files (x86)/Steam/steamapps"
     echo "stand-in steam" >"$WINEPREFIX/drive_c/Program Files (x86)/Steam/steam.exe" ;;
+  *steam.exe)
+    # -shutdown ends the stand-in Steam (a sleeper whose pid is in steam.pid), unless steam.stubborn
+    d=$(dirname "$STANDIN_LOG")
+    if [ "${2:-}" = -shutdown ] && [ ! -e "$d/steam.stubborn" ] && [ -f "$d/steam.pid" ]; then kill "$(cat "$d/steam.pid")" 2>/dev/null || true; fi ;;
 esac
 EOF
 chmod 755 "$S/bin/wine" "$S/bin/wineserver"
@@ -105,6 +113,9 @@ export GW2_ON_MAC_ENGINE_SIZE="$(stat -f %z "$SANDBOX/engine.tar.xz")"
 export GW2_ON_MAC_ENGINE_CHECKS=0
 export GW2_ON_MAC_STEAMSETUP_URL="file://$SANDBOX/SteamSetup.exe"
 unset GW2_ON_MAC_DRY_RUN GW2_ON_MAC_ALLOW_WINE GW2_ON_MAC_SIGNER
+# the session's watcher (play starts it), with its times shortened: a 2 s grace, 2 s for Steam to
+# quit, a look every 0.2 s (the 15 minutes for the game to appear only in the timeout check)
+export GW2_ON_MAC_WATCH_GRACE=2 GW2_ON_MAC_WATCH_QUITWAIT=2 GW2_ON_MAC_WATCH_POLL=0.2 GW2_ON_MAC_WATCH_TIMEOUT=60
 ok "stand-in engine ($GW2_ON_MAC_ENGINE_SIZE bytes) and SteamSetup.exe"
 
 # --- Dry runs change nothing
@@ -175,6 +186,7 @@ section "Settings"
 check "defaults: warm on, coolworkers 3, fastlocks on, ncpu 8, uiscale off" \
   [ "$(sett warm)$(sett coolworkers)$(sett fastlocks)$(sett ncpu)$(sett uiscale)" = on3on8off ]
 check "default: Steam in the background on" [ "$(sett steambg)" = on ]
+check "default: Quit Steam when the game quits on" [ "$(sett quitsteam)" = on ]
 check "set coolworkers 5" g set coolworkers 5
 check "  WINE_HEAT_QOS=1=utility:5 in the environment" has <(g env) "WINE_HEAT_QOS=1=utility:5"
 check "set coolworkers off: no WINE_HEAT_QOS" sh -c "'$G' set coolworkers off >/dev/null && ! '$G' env | grep -q WINE_HEAT_QOS"
@@ -204,7 +216,7 @@ check "set launchopts -maploadinfo" g set launchopts "-maploadinfo"
 check "launchopts with a ; refused" sh -c "! '$G' set launchopts '-x; rm -rf /' >/dev/null"
 check "unknown value refused (exit 2)" sh -c "'$G' set fpscap 45 >/dev/null; [ \$? = 2 ]"
 check "unknown key refused" sh -c "! '$G' set colour red >/dev/null"
-check "settings.conf has every key" [ "$(grep -c '=' "$AD/settings.conf")" = 17 ]
+check "settings.conf has every key" [ "$(grep -c '=' "$AD/settings.conf")" = 18 ]
 
 section "The larger interface (addon)"
 GD="$STEAM/steamapps/common/Guild Wars 2"
@@ -279,6 +291,7 @@ c=$(play_cmd); check "  Steam's window again (no -silent)" eval '[[ "$c" == *"st
 g set steambg on >/dev/null
 
 section "Busy checks (a sleeper at the engine's paths)"
+watch_done   # the watchers of the Plays above have given up (no Steam came)
 # (macOS kills copies of /bin/sleep: an ad-hoc signed program of our own keeps its signature)
 printf '#include <unistd.h>\n#include <stdlib.h>\nint main(int c, char **v) { sleep(c > 1 ? atoi(v[1]) : 60); return 0; }\n' >"$SANDBOX/sleeper.c"
 clang -O2 -o "$SANDBOX/sleeper" "$SANDBOX/sleeper.c"
@@ -308,6 +321,98 @@ kill $gp 2>/dev/null || true; wait $gp 2>/dev/null || true
 mv -f "$SANDBOX/gw2-loader-copy" "$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe"
 check "busy=none again" [ "$(st busy)" = none ]
 
+section "Steam quits after the game (watch-session)"
+# stand-in Steam and game: sleepers at the engine's paths (proc_list: steam, game), started apart
+# from this shell (launchd reaps them), the Steam's pid in steam.pid for the stand-in wine
+SP="$SANDBOX/steam.pid"
+cp "$SANDBOX/sleeper" "$ENG/bin/steam.exe" && cp "$SANDBOX/sleeper" "$ENG/bin/Gw2-64.exe"
+steam_up() { ( "$ENG/bin/steam.exe" 300 & echo $! >"$SP" ); sleep 0.2; }
+steam_runs() { kill -0 "$(cat "$SP")" 2>/dev/null; }
+steam_down() { kill "$(cat "$SP")" 2>/dev/null; rm -f "$SP"; sleep 0.2; }
+game_up() { ( "$ENG/bin/Gw2-64.exe" 300 & echo $! >"$SANDBOX/game.pid" ); }
+game_down() { kill "$(cat "$SANDBOX/game.pid")" 2>/dev/null; }
+# a session: the game starts, runs, quits
+game_session() { game_up; wait_stage playing && game_down && wait_stage grace; }
+splay() { : >"$STANDIN_LOG"; g play >/dev/null 2>&1; started; }
+watch_done
+check "the Steam in the background is on, with a remembered login" [ "$(sett steambg)/$(sett steam_login)/$(sett quitsteam)" = on/yes/on ]
+
+splay; steam_up
+check "Play starts Steam in the background: session started_steam=yes steam_window=hidden quit_steam=yes" [ "$(sess route)/$(sess started_steam)/$(sess steam_window)/$(sess quit_steam)" = steam/yes/hidden/yes ]
+check "  stage=waiting_game, the watcher's pid" eval '[ "$(sess stage)" = waiting_game ] && kill -0 "$(sess watcher_pid)"'
+check "  stage=playing once Gw2-64.exe runs, grace once it quits" game_session
+check "  the watcher ends with result=quit" eval 'watch_done && [ "$(sess result)" = quit ]'
+check "  steam.exe -shutdown through the engine's Wine, in the bottle" eval 'has "$STANDIN_LOG" "^wine C:.*steam.exe -shutdown" && has "$STANDIN_LOG" "WINEPREFIX=$BOTTLE"'
+check "  Steam is gone, with no wineserver -k" eval '! steam_runs && ! has "$STANDIN_LOG" "wineserver -k"'
+check "  the timestamps" eval '[ -n "$(sess started)" ] && [ -n "$(sess game_started)" ] && [ -n "$(sess game_ended)" ] && [ -n "$(sess updated)" ]'
+check "  install.log: the session under ---- session" eval 'has "$LOGS/install.log" " ---- session " && has "$LOGS/install.log" "session: Steam quit"'
+
+splay; steam_up
+game_session
+game_up
+check "a new Gw2-64.exe within the grace: playing again" wait_stage playing
+check "  Steam still runs, no -shutdown yet" eval 'steam_runs && ! has "$STANDIN_LOG" "steam.exe -shutdown"'
+game_down
+check "  then it quits for good: Steam quits" eval 'watch_done && [ "$(sess result)" = quit ] && ! steam_runs'
+
+steam_up; splay
+check "Steam already running before Play: started_steam=no quit_steam=no" [ "$(sess started_steam)/$(sess quit_steam)" = no/no ]
+game_session
+check "  after the game: Steam left running, no -shutdown" eval 'watch_done && [ "$(sess result)" = left_running ] && steam_runs && ! has "$STANDIN_LOG" "steam.exe -shutdown"'
+check "  and the log says why" has "$LOGS/install.log" "Steam stays open: Steam already ran before Play"
+steam_down
+
+g set quitsteam off >/dev/null
+splay; steam_up
+check "Quit Steam when the game quits off: quit_steam=no" [ "$(sess started_steam)/$(sess quit_steam)" = yes/no ]
+game_session
+check "  Steam left running" eval 'watch_done && [ "$(sess result)" = left_running ] && steam_runs && ! has "$STANDIN_LOG" "steam.exe -shutdown"'
+steam_down
+g set quitsteam on >/dev/null
+
+g set steambg off >/dev/null
+splay; steam_up
+check "Steam's window shown (background off): steam_window=shown quit_steam=no" [ "$(sess steam_window)/$(sess quit_steam)" = shown/no ]
+game_session
+check "  Steam left running" eval 'watch_done && [ "$(sess result)" = left_running ] && steam_runs && ! has "$STANDIN_LOG" "steam.exe -shutdown"'
+steam_down
+g set steambg on >/dev/null
+
+: >"$STANDIN_LOG"; GW2_ON_MAC_WATCH_TIMEOUT=2 "$G" play >/dev/null 2>&1; started; steam_up
+check "Guild Wars 2 never appears (timeout): Steam left running" eval 'watch_done && [ "$(sess result)" = timeout ] && steam_runs && ! has "$STANDIN_LOG" "steam.exe -shutdown"'
+check "  and the log says so" has "$LOGS/install.log" "Guild Wars 2 did not start within"
+steam_down
+splay
+check "Steam never comes (closed before the game): result=steam_gone" eval 'watch_done && [ "$(sess result)" = steam_gone ]'
+
+splay; steam_up
+wp=$(sess watcher_pid)
+splay
+check "a second Play keeps the session and its watcher" [ "$(sess watcher_pid)/$(sess started_steam)/$(sess quit_steam)" = "$wp/yes/yes" ]
+# (the watcher's own subshells carry its command line: only those whose parent isn't one count)
+watchers() {
+  ps -axo pid=,ppid=,command= | awk -v c="/bin/bash $G watch-session" '
+    { x = $0; sub(/^ *[0-9]+ +[0-9]+ /, "", x) }
+    index(x, c) == 1 { w[$1] = $2 }
+    END { for (p in w) if (!(w[p] in w)) n++; print n + 0 }'
+}
+check "  one watcher runs" [ "$(watchers)" = 1 ]
+check "  watch-session by hand: another watcher follows the session" sh -c "'$G' watch-session | grep -q '@done Another watcher follows this session'"
+game_session
+check "  Steam quits once" eval 'watch_done && [ "$(sess result)" = quit ] && [ "$(grep -c "steam.exe -shutdown" "$STANDIN_LOG")" = 1 ]'
+check "watch-session by hand with no session: nothing to follow" sh -c "'$G' watch-session | grep -q '@done No session to follow'"
+
+# a Steam that ignores -shutdown: wineserver -k (a stand-in wineserver that ends it)
+touch "$SANDBOX/steam.stubborn"
+mv "$ENG/bin/wineserver" "$SANDBOX/wineserver.heat"
+printf '#!/bin/bash\necho "wineserver $*" >>"$STANDIN_LOG"\n[ "$1" != -k ] || kill "$(cat "%s")" 2>/dev/null\nexit 0\n' "$SP" >"$ENG/bin/wineserver" && chmod 755 "$ENG/bin/wineserver"
+splay; steam_up
+game_session
+check "Steam ignores -shutdown: wineserver -k for the bottle after the wait" eval 'watch_done && [ "$(sess result)" = killed ] && has "$STANDIN_LOG" "steam.exe -shutdown" && has "$STANDIN_LOG" "^wineserver -k" && ! steam_runs'
+mv -f "$SANDBOX/wineserver.heat" "$ENG/bin/wineserver"
+rm -f "$SANDBOX/steam.stubborn" "$ENG/bin/steam.exe" "$ENG/bin/Gw2-64.exe"
+check "busy=none after the sessions" [ "$(st busy)" = none ]
+
 section "Repair and Troubleshooting"
 echo "something else" >"$ENG/lib/wine/dxgi/dxmt/x86_64-windows/d3d11.dll"
 check "graphics=other after a change in the engine" [ "$(st graphics)" = other ]
@@ -327,11 +432,15 @@ GW2_ON_MAC_ENGINE_CHECKS=1 "$G" play >"$SANDBOX/realwine.txt" 2>&1 || true
 check "the real engine's Wine never runs in a sandbox" has "$SANDBOX/realwine.txt" "Refusing to run the real Wine"
 
 section "Uninstall"
+GW2_ON_MAC_WATCH_GRACE=60 "$G" play >/dev/null 2>&1; started
+wp=$(sess watcher_pid)
+check "a session's watcher waits for the game" kill -0 "$wp"
 mkdir -p "$CACHE/downloads" && echo x >"$CACHE/downloads/x"
 out=$(g uninstall 2>&1) && rc=0 || rc=$?
 check "uninstall exits 0" [ "$rc" = 0 ]
 check "the phases 1-3" [ "$(echo "$out" | grep '^@phase' | tr '\n' ' ')" = "@phase 1 @phase 2 @phase 3 " ]
-check "the app's folder is gone (engine, bottle with the game, Game Mode, settings)" [ ! -e "$AD" ]
+check "the app's folder is gone (engine, bottle with the game, Game Mode, settings, the session)" [ ! -e "$AD" ]
+check "  the session's watcher stopped" sh -c "! kill -0 $wp 2>/dev/null"
 check "its caches are gone" eval '[ ! -e "$CACHE" ] && [ ! -e "$DXMT_CACHE" ]'
 check "the per-user cache folder's dxmt/ stays (another setup's)" other_dxmt_kept
 check "the Game Mode link is gone" sh -c "! ls '$SANDBOX/usertmp/'winetemp-*/Gw2-64.exe >/dev/null 2>&1"

@@ -30,7 +30,11 @@
 #                              them); logs stay
 #   gw2om.sh play              starts the game (Steam: steam.exe -applaunch 1284210, -silent once
 #                              Steam remembers a login; ArenaNet: Gw2-64.exe) with the settings as
-#                              its environment
+#                              its environment, and the session's watcher (watch-session)
+#   gw2om.sh watch-session     follows the session Play started (the file `session`): waits for
+#                              Gw2-64.exe, then for its exit, and quits the Steam that Play started
+#                              in the background (Quit Steam when the game quits); play starts it
+#                              detached, one per session
 #   gw2om.sh settings          KEY=VALUE lines: the settings (Settings window) and their state
 #   gw2om.sh set K V           change one setting (see setting_valid)
 #   gw2om.sh check-setup FILE  is FILE ArenaNet's Gw2Setup-64.exe: a PE x86_64 executable with a
@@ -56,6 +60,8 @@
 #   GW2_ON_MAC_ALLOW_WINE=1    let the real engine's Wine run in a sandbox (never in the tests)
 #   GW2_ON_MAC_IMPORT_COPY=1   install import copies even on the same disk (the other-disk path)
 #   GW2_ON_MAC_FREE_KB=<n>     the free space the app's disk reports (KB)
+#   GW2_ON_MAC_WATCH_TIMEOUT, GW2_ON_MAC_WATCH_GRACE, GW2_ON_MAC_WATCH_QUITWAIT,
+#   GW2_ON_MAC_WATCH_POLL      watch-session's times in seconds (900, 30, 20, 2)
 #
 # Lines for the app start with "@": "@phase <n>" (the timeline: install 1 engine, 2 bottle,
 # 3 Steam or ArenaNet's installer, 4 the game's download, 5 finishing touches; install import
@@ -97,6 +103,11 @@ GW2_APPID=1284210
 DISK_NEEDED=75000000000
 FETCH_TRIES=3
 FETCH_SECOND_TRIES=2
+# watch-session: how long Guild Wars 2 may take to appear (Steam updating itself and signing in);
+# the grace after it quits (its patcher or a restart starts it again) and after Steam vanishes
+# before the game (Steam restarting itself after an update); how long Steam gets to quit after
+# -shutdown before wineserver -k; how often it looks
+WATCH_TIMEOUT=900 WATCH_GRACE=30 WATCH_QUITWAIT=20 WATCH_POLL=2
 
 # --- Paths
 ROOT="${GW2_ON_MAC_ROOT:-}"
@@ -116,6 +127,8 @@ if [ -n "$ROOT" ]; then
   SYS_APPS="$ROOT/Applications"
   IMPORT_COPY="${GW2_ON_MAC_IMPORT_COPY:-}"
   FREE_KB="${GW2_ON_MAC_FREE_KB:-}"
+  WATCH_TIMEOUT="${GW2_ON_MAC_WATCH_TIMEOUT:-$WATCH_TIMEOUT}" WATCH_GRACE="${GW2_ON_MAC_WATCH_GRACE:-$WATCH_GRACE}"
+  WATCH_QUITWAIT="${GW2_ON_MAC_WATCH_QUITWAIT:-$WATCH_QUITWAIT}" WATCH_POLL="${GW2_ON_MAC_WATCH_POLL:-$WATCH_POLL}"
 else
   H="$HOME"
   USER_TMP="$(getconf DARWIN_USER_TEMP_DIR)"
@@ -135,6 +148,10 @@ STATE="$APPDIR/state"                 # route, stage (none|waiting_game|finished
                                       # origin (download|import)
 MANIFEST="$APPDIR/install-manifest.json"
 DXMT_CONF="$APPDIR/dxmt.conf"
+# The last Play's session (watch-session keeps it; key=value lines, SESSION_KEYS) and the lock that
+# keeps one watcher per session (a folder with the watcher's pid in it)
+SESSION="$APPDIR/session"
+WATCH_LOCK="$APPDIR/.session.lock"
 # DXMT's caches, in the app's own cache folder (DXMT_CACHE_DIR=$CACHE, jdrly/dxmt #134) instead of
 # the per-user one ($(getconf DARWIN_USER_CACHE_DIR)dxmt/, which another DXMT setup of the game on
 # this Mac may use and this app never touches): per process <exe>/ (the game's Gw2-64.exe/:
@@ -144,7 +161,7 @@ DXMT_CACHE="$DXMT_CACHE_ROOT/Gw2-64.exe"
 STEAM_DIR="$BOTTLE/drive_c/Program Files (x86)/Steam"
 STEAM_EXE='C:\Program Files (x86)\Steam\steam.exe'
 # What uninstall removes in APPDIR (the folder itself goes too once empty)
-APP_FILES="engine bottle gamemode settings.conf state install-manifest.json dxmt.conf engine.new bottle.new"
+APP_FILES="engine bottle gamemode settings.conf state install-manifest.json dxmt.conf engine.new bottle.new session .session.lock"
 LOGFILE=/dev/null
 
 # --- Output and logging
@@ -521,14 +538,14 @@ apply_registry() {
 #   fastlocks=on     HEAT_SPIN=lock=20:game,event=30:game: short spins before sleeps (round 7)
 # (and, with no setting of their own, DXMT_DEPENDENCY_COMPRESSION=1, the checkpoint chain, #133,
 # and round 7's HEAT_LAZYCLOCK, HEAT_MSYNC_UNREG and HEAT_MSYNC_PORTFIX: see game_env)
-SETTING_KEYS="retina fpscap metalfx hud warm coolworkers fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts updates debug steambg"
+SETTING_KEYS="retina fpscap metalfx hud warm coolworkers fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts updates debug steambg quitsteam"
 FPS_CAPS="off 30 40 60 120"
 # CPUs the game sees (ncpu): 2 up to this Mac's logical CPUs, or all
 CPU_MAX="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 8)"
 UI_SCALES="1.5 1.75 1.8 2.0"
 setting_default() {
   case "$1" in
-    retina|warm|fastlocks|uiscale_sans|uiscale_cinema|gamemode|updates|steambg) echo on ;;
+    retina|warm|fastlocks|uiscale_sans|uiscale_cinema|gamemode|updates|steambg|quitsteam) echo on ;;
     metalfx|hud|uiscale) echo off ;;
     debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
     fpscap) echo off ;;
@@ -540,7 +557,7 @@ setting_default() {
 }
 setting_valid() { # <key> <value>
   case "$1" in
-    retina|metalfx|hud|warm|fastlocks|uiscale|uiscale_sans|uiscale_cinema|gamemode|updates|debug|steambg)
+    retina|metalfx|hud|warm|fastlocks|uiscale|uiscale_sans|uiscale_cinema|gamemode|updates|debug|steambg|quitsteam)
       [ "$2" = on ] || [ "$2" = off ] ;;
     fpscap) in_list "$2" "$FPS_CAPS" ;;
     ncpu) [ "$2" = all ] || { case "$2" in ''|*[!0-9]*) false ;; *) [ "$2" -ge 2 ] && [ "$2" -le "$CPU_MAX" ] ;; esac; } ;;
@@ -1438,6 +1455,214 @@ launch() {
   log "started: $*"
 }
 
+# --- The session's watcher (watch-session)
+#
+# Play records the session in $SESSION and starts watch-session detached (nohup: it outlives the
+# app's window, which "Quit GW2 on Mac after launching" closes). The watcher follows the session
+# through proc_list (only this engine's processes): it waits for Gw2-64.exe, then for its exit and
+# a grace, and then, if Play started Steam itself in the background with Quit Steam when the game
+# quits on, asks Steam to quit (steam.exe -shutdown), with wineserver -k for this bottle as the
+# fallback. Steam that already ran, or whose window showed, is left alone. Everything goes to
+# install.log under "---- session". The keys (lane B's session-status reads them too):
+#   route          steam|arenanet
+#   started_steam  yes: no Steam of the bottle ran before this Play
+#   steam_window   hidden (-silent) | shown (Steam's window; empty on the ArenaNet route)
+#   quit_steam     yes: the watcher quits Steam after the game (the decision at Play)
+#   watcher_pid    the watcher's pid
+#   stage          waiting_game|playing|grace|closing_steam|done
+#   started, game_started, game_ended, updated   seconds since 1970
+#   result         at done: quit, killed (wineserver -k), left_running, steam_already_gone,
+#                  timeout, steam_gone (Steam quit before the game appeared), no_game (ArenaNet:
+#                  nothing started), uninstalled, ended (stopped otherwise)
+SESSION_KEYS="route started_steam steam_window quit_steam watcher_pid stage started game_started game_ended updated result"
+session_get() { sed -n "s/^$1=//p" "$SESSION" 2>/dev/null | tail -1; }
+# session_set <key> <value> [<key> <value>...]: changes those keys (and updated), atomically
+session_set() {
+  local k v new
+  [ -d "$APPDIR" ] || return 0
+  new="updated=$(date +%s)"
+  while [ $# -ge 2 ]; do new="$new
+$1=$2"; shift 2; done
+  { for k in $SESSION_KEYS; do
+      case "
+$new" in
+        *"
+$k="*) v=$(printf '%s\n' "$new" | sed -n "s/^$k=//p" | tail -1) ;;
+        *) v=$(session_get "$k") ;;
+      esac
+      echo "$k=$v"
+    done; } >"$SESSION.new.$$" 2>/dev/null && mv -f "$SESSION.new.$$" "$SESSION" 2>/dev/null || rm -f "$SESSION.new.$$"
+}
+# has_kind <kind> <proc_list output>
+has_kind() { case "
+$2" in *"
+$1 "*) return 0 ;; esac; return 1; }
+
+# watcher_alive: the lock is held by a live watcher (or by a Play handing the session over to one)
+watcher_alive() {
+  local p
+  [ -d "$WATCH_LOCK" ] || return 1
+  p=$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)
+  if [ -z "$p" ]; then
+    # just taken (its pid follows at once); stale after 10 seconds
+    [ $(( $(date +%s) - $(stat -f %m "$WATCH_LOCK" 2>/dev/null || echo 0) )) -lt 10 ]
+    return
+  fi
+  ps -p "$p" -o command= 2>/dev/null | grep -q 'gw2om\.sh'
+}
+# take_watch_lock: the session's lock for this process (a stale one is taken over)
+take_watch_lock() {
+  mkdir -p "$APPDIR"
+  if ! mkdir "$WATCH_LOCK" 2>/dev/null; then
+    watcher_alive && return 1
+    rm -rf "$WATCH_LOCK"
+    mkdir "$WATCH_LOCK" 2>/dev/null || return 1
+  fi
+  echo $$ >"$WATCH_LOCK/pid"
+}
+# drop_watch_lock: only if this process holds it
+drop_watch_lock() {
+  [ "$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)" = $$ ] && rm -rf "$WATCH_LOCK"
+  return 0
+}
+# stop_watcher: ends the session's watcher (uninstall) and waits for it
+stop_watcher() {
+  local p i
+  watcher_alive || return 0
+  p=$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)
+  [ -n "$p" ] && [ "$p" != $$ ] || return 0
+  if [ -n "$DRY" ]; then echo "[dry-run] stop the session's watcher (pid $p)"; return 0; fi
+  kill "$p" 2>/dev/null || true
+  for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$p" 2>/dev/null || break; sleep 0.2; done
+  log "session: stopped its watcher (pid $p)"
+}
+
+# watch_exit: the watcher's end, however it ends
+watch_exit() {
+  [ "$(session_get stage)" = done ] || session_set stage done result "${WATCH_RESULT:-ended}"
+  log "session: done (${WATCH_RESULT:-ended})"
+  drop_watch_lock
+}
+
+# watch_poll: proc_list into WL, after a pause; WATCH_RESULT=uninstalled and false once the app's
+# install is gone
+watch_poll() {
+  sleep "$WATCH_POLL"
+  [ -f "$MANIFEST" ] || { WATCH_RESULT=uninstalled; log "session: GW2 on Mac was uninstalled; stopping"; return 1; }
+  WL=$(proc_list)
+}
+
+# watch-session [--handoff]: Play starts it with --handoff (its lock is handed over: the pid in it
+# becomes this one's); by hand, it takes the lock or says another watcher follows the session
+cmd_watch_session() {
+  local i start now last ended back route quit why
+  open_log
+  if [ -n "$DRY" ]; then echo "[dry-run] watch-session"; return 0; fi
+  if [ "${1:-}" = --handoff ]; then
+    i=0
+    while [ "$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)" != $$ ]; do
+      [ $i -lt 50 ] || { log "session: the watcher (pid $$) was not handed the session; another one follows it"; return 0; }
+      sleep 0.1; i=$((i + 1))
+    done
+  else
+    take_watch_lock || { echo "@done Another watcher follows this session (pid $(cat "$WATCH_LOCK/pid" 2>/dev/null || true))."; return 0; }
+    case "$(session_get stage)" in ''|done) drop_watch_lock; echo "@done No session to follow."; return 0 ;; esac
+  fi
+  WATCH_RESULT=""
+  trap watch_exit EXIT
+  trap 'exit 143' TERM INT
+  route=$(session_get route) quit=$(session_get quit_steam)
+  start=$(date +%s)
+  log "---- session $VERSION route=$route started_steam=$(session_get started_steam) steam_window=$(session_get steam_window) quit_steam=$quit (watcher pid $$)"
+  session_set stage waiting_game watcher_pid $$
+
+  # 1. Guild Wars 2 starts (Steam may update itself and sign in first). Steam and the bottle's
+  # wineserver gone for the grace (Steam restarts itself after an update) without the game means
+  # Steam was closed: left as it is.
+  last=$start
+  while :; do
+    watch_poll || return 0
+    now=$(date +%s)
+    has_kind game "$WL" && break
+    if has_kind steam "$WL" || has_kind session "$WL"; then last=$now; fi
+    if [ $((now - last)) -ge "$WATCH_GRACE" ]; then
+      if [ "$route" = steam ]; then
+        WATCH_RESULT=steam_gone; log "session: Steam is not running and Guild Wars 2 did not start (Steam was closed or did not start); nothing to quit"
+      else
+        WATCH_RESULT=no_game; log "session: Guild Wars 2's launcher did not start or quit before the game"
+      fi
+      return 0
+    fi
+    if [ $((now - start)) -ge "$WATCH_TIMEOUT" ]; then
+      WATCH_RESULT=timeout
+      log "session: Guild Wars 2 did not start within $((WATCH_TIMEOUT / 60)) minutes ($WATCH_TIMEOUT s); Steam is left running"
+      return 0
+    fi
+  done
+
+  # 2. The game runs, until it quits and doesn't start again within the grace
+  session_set stage playing game_started "$now" game_ended ""
+  log "session: Guild Wars 2 started ($((now - start)) s after Play)"
+  while :; do
+    while has_kind game "$WL"; do watch_poll || return 0; done
+    ended=$(date +%s)
+    session_set stage grace game_ended "$ended"
+    log "session: Guild Wars 2 quit; waiting $WATCH_GRACE s in case it starts again (its patcher, a restart)"
+    back=no
+    while [ $(( $(date +%s) - ended )) -lt "$WATCH_GRACE" ]; do
+      watch_poll || return 0
+      if has_kind game "$WL"; then back=yes; break; fi
+    done
+    [ "$back" = yes ] || break
+    session_set stage playing game_ended ""
+    log "session: Guild Wars 2 started again within the grace"
+  done
+
+  # 3. Steam quits, if Play started it in the background and the setting is (still) on
+  why=""
+  if [ "$quit" != yes ]; then
+    if [ "$route" != steam ]; then why="the ArenaNet route has no Steam"
+    elif [ "$(session_get started_steam)" != yes ]; then why="Steam already ran before Play"
+    elif [ "$(session_get steam_window)" != hidden ]; then why="Steam's window was shown (no remembered login, or Start Steam in the background off)"
+    else why="Quit Steam when the game quits was off"; fi
+  elif [ "$(setting quitsteam)" != on ]; then
+    why="Quit Steam when the game quits was turned off during the session"
+  fi
+  if [ -n "$why" ]; then
+    if has_kind steam "$WL"; then WATCH_RESULT=left_running; log "session: Steam stays open: $why"
+    else WATCH_RESULT=steam_already_gone; log "session: Steam is not running ($why)"; fi
+    return 0
+  fi
+  if ! has_kind steam "$WL"; then
+    WATCH_RESULT=steam_already_gone; log "session: Steam has already quit"; return 0
+  fi
+  session_set stage closing_steam
+  wine_allowed
+  game_env
+  log "session: asking Steam to quit (steam.exe -shutdown)"
+  echo "=== $(date '+%F %T') $STEAM_EXE -shutdown (the game quit)" >>"$LOGS/wine.log"
+  ( cd "$BOTTLE" && env -u WINELOADER -u WINESERVER -u DYLD_FALLBACK_LIBRARY_PATH "${E[@]}" \
+      nohup "$ENG/bin/wine" "$STEAM_EXE" -shutdown </dev/null >>"$LOGS/wine.log" 2>&1 & )
+  now=$(date +%s)
+  while :; do
+    watch_poll || return 0
+    if has_kind game "$WL"; then
+      WATCH_RESULT=left_running; log "session: Guild Wars 2 started again while Steam was quitting; Steam is left as it is"; return 0
+    fi
+    has_kind steam "$WL" || { WATCH_RESULT=quit; log "session: Steam quit ($(( $(date +%s) - now )) s after -shutdown)"; return 0; }
+    [ $(( $(date +%s) - now )) -lt "$WATCH_QUITWAIT" ] || break
+  done
+  log "session: Steam did not quit within $WATCH_QUITWAIT s; ending the bottle's Wine (wineserver -k)"
+  WINEPREFIX="$BOTTLE" "$ENG/bin/wineserver" -k >>"$LOGFILE" 2>&1 || true
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    WL=$(proc_list)
+    has_kind steam "$WL" || has_kind session "$WL" || break
+    sleep 0.5
+  done
+  end_leftovers >/dev/null
+  WATCH_RESULT=killed
+}
+
 cmd_install() {
   local route=${1:-} setup=${2:-} want src="" with_settings=yes
   CREATED="" FETCH_PID="" IMPORT_DST="" IMPORT_ACF=""
@@ -1621,16 +1846,49 @@ cmd_play() {
     [ "$key" = "$(cat "$LOGS/session.key")" ] ||
       echo "@notice Steam is still running with the settings it started with; quit Steam for the new ones."
   fi
-  if [ "$(state route)" = arenanet ]; then
+  # The session (watch-session): a new one unless a watcher still follows the last one (a second
+  # Play while Steam starts the game keeps it, and what it knew about Steam)
+  local fresh=no steam_before=no route silent="" quit=no
+  route=$(state route)
+  [ "$route" = arenanet ] || route=steam
+  if [ -z "$DRY" ]; then
+    if take_watch_lock; then
+      fresh=yes
+      trap drop_watch_lock EXIT
+      has_kind steam "$(proc_list)" && steam_before=yes
+    else
+      [ "$(session_get stage)" != closing_steam ] || die "Steam is quitting after your last session. Try again in a few seconds."
+    fi
+  fi
+  if [ "$route" = arenanet ]; then
     # shellcheck disable=SC2086
     launch "$GAME_EXE" $(setting launchopts)
   else
     # Once Steam remembers a login, it starts without its window (-silent): it signs in by itself
     # and starts the game. Before the first sign-in its window shows, as at the install.
-    local silent=""
     if [ "$(setting steambg)" = on ] && steam_remembers_login; then silent=-silent; fi
     # shellcheck disable=SC2086
     launch "$STEAM_EXE" ${silent:+"$silent"} -applaunch "$GW2_APPID" $(setting launchopts)
+  fi
+  if [ -n "$DRY" ]; then
+    echo "[dry-run] watch-session"
+  elif [ "$fresh" = yes ]; then
+    # Steam quits after the game only if this Play started it, without its window, and the
+    # setting is on
+    [ "$route" = steam ] && [ "$steam_before" = no ] && [ -n "$silent" ] && [ "$(setting quitsteam)" = on ] && quit=yes
+    { echo "route=$route"; echo "started_steam=$([ "$route" = steam ] && [ "$steam_before" = no ] && echo yes || echo no)"
+      echo "steam_window=$([ "$route" = steam ] && { [ -n "$silent" ] && echo hidden || echo shown; } || true)"
+      echo "quit_steam=$quit"; echo "watcher_pid="; echo "stage=waiting_game"; echo "started=$(date +%s)"
+      echo "game_started="; echo "game_ended="; echo "updated=$(date +%s)"; echo "result="; } >"$SESSION.new.$$"
+    mv -f "$SESSION.new.$$" "$SESSION"
+    nohup /bin/bash "$RES/gw2om.sh" watch-session --handoff </dev/null >/dev/null 2>&1 &
+    local wpid=$!
+    session_set watcher_pid "$wpid"
+    echo "$wpid" >"$WATCH_LOCK/pid"
+    trap - EXIT
+    log "session: watcher started (pid $wpid), quit_steam=$quit"
+  else
+    log "session: the watcher of the running session (pid $(cat "$WATCH_LOCK/pid" 2>/dev/null || true)) follows this Play too"
   fi
   echo "@done Starting Guild Wars 2."
 }
@@ -1651,6 +1909,7 @@ cmd_uninstall() {
   lock
   # (the folder itself goes too once empty)
   trap 'rmdir "$APPDIR/.lock" "$APPDIR" 2>/dev/null || true' EXIT
+  stop_watcher
   [ -n "$DRY" ] || stop_wine
   remove_gamemode_links
   phase 2
@@ -1695,6 +1954,7 @@ case "${1:-}" in
   repair) cmd_repair ;;
   uninstall) cmd_uninstall ;;
   play) cmd_play ;;
+  watch-session) shift; cmd_watch_session "$@" ;;
   settings) settings ;;
   set) shift; cmd_set "$@" ;;
   check-setup) shift; cmd_check_setup "$@" ;;
