@@ -152,6 +152,7 @@ DXMT_CONF="$APPDIR/dxmt.conf"
 # keeps one watcher per session (a folder with the watcher's pid in it)
 SESSION="$APPDIR/session"
 WATCH_LOCK="$APPDIR/.session.lock"
+SESSION_MUTEX="$APPDIR/.session.mutex"
 # DXMT's caches, in the app's own cache folder (DXMT_CACHE_DIR=$CACHE, jdrly/dxmt #134) instead of
 # the per-user one ($(getconf DARWIN_USER_CACHE_DIR)dxmt/, which another DXMT setup of the game on
 # this Mac may use and this app never touches): per process <exe>/ (the game's Gw2-64.exe/:
@@ -161,7 +162,7 @@ DXMT_CACHE="$DXMT_CACHE_ROOT/Gw2-64.exe"
 STEAM_DIR="$BOTTLE/drive_c/Program Files (x86)/Steam"
 STEAM_EXE='C:\Program Files (x86)\Steam\steam.exe'
 # What uninstall removes in APPDIR (the folder itself goes too once empty)
-APP_FILES="engine bottle gamemode settings.conf state install-manifest.json dxmt.conf engine.new bottle.new session .session.lock"
+APP_FILES="engine bottle gamemode settings.conf state install-manifest.json dxmt.conf engine.new bottle.new session .session.lock .session.mutex"
 LOGFILE=/dev/null
 
 # --- Output and logging
@@ -1467,14 +1468,18 @@ launch() {
 #   route          steam|arenanet
 #   started_steam  yes: no Steam of the bottle ran before this Play
 #   steam_window   hidden (-silent) | shown (Steam's window; empty on the ArenaNet route)
-#   quit_steam     yes: the watcher quits Steam after the game (the decision at Play)
+#   quit_steam     yes: the watcher quits Steam after the game (decided at Play; no once the
+#                  Steam that ran as the game started has quit, so a Steam opened after it is the
+#                  user's; again at a Play that joins the session and starts Steam itself)
 #   watcher_pid    the watcher's pid
 #   stage          waiting_game|playing|grace|closing_steam|done
 #   started, game_started, game_ended, updated   seconds since 1970
+#   replay         how many Plays joined the session (0 at its start): one after the game started
+#                  (in the grace) means the watcher waits for the game again
 #   result         at done: quit, killed (wineserver -k), left_running, steam_already_gone,
 #                  timeout, steam_gone (Steam quit before the game appeared), no_game (ArenaNet:
 #                  nothing started), uninstalled, ended (stopped otherwise)
-SESSION_KEYS="route started_steam steam_window quit_steam watcher_pid stage started game_started game_ended updated result"
+SESSION_KEYS="route started_steam steam_window quit_steam watcher_pid stage started game_started game_ended replay updated result"
 session_get() { sed -n "s/^$1=//p" "$SESSION" 2>/dev/null | tail -1; }
 # session_set <key> <value> [<key> <value>...]: changes those keys (and updated), atomically
 session_set() {
@@ -1498,33 +1503,48 @@ has_kind() { case "
 $2" in *"
 $1 "*) return 0 ;; esac; return 1; }
 
+# The session's mutex: a short lock around every change of who follows the session (taking the
+# watcher's lock, a Play joining a running session, the watcher's last decision), so a Play and
+# the watcher never decide at once. A holder that died leaves it: stale after 10 seconds.
+mutex_take() {
+  local i=0
+  [ -d "$APPDIR" ] || return 1   # (never creates the app's folder: uninstall may have removed it)
+  until mkdir "$SESSION_MUTEX" 2>/dev/null; do
+    if [ $(( $(date +%s) - $(stat -f %m "$SESSION_MUTEX" 2>/dev/null || date +%s) )) -ge 10 ]; then
+      rmdir "$SESSION_MUTEX" 2>/dev/null || true
+    fi
+    [ $i -lt 100 ] || return 1
+    sleep 0.1; i=$((i + 1))
+  done
+}
+mutex_drop() { rmdir "$SESSION_MUTEX" 2>/dev/null || true; }
+
 # watcher_alive: the lock is held by a live watcher (or by a Play handing the session over to one)
 watcher_alive() {
   local p
   [ -d "$WATCH_LOCK" ] || return 1
   p=$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)
   if [ -z "$p" ]; then
-    # just taken (its pid follows at once); stale after 10 seconds
+    # (its pid goes in under the mutex: missing only if its taker died) stale after 10 seconds
     [ $(( $(date +%s) - $(stat -f %m "$WATCH_LOCK" 2>/dev/null || echo 0) )) -lt 10 ]
     return
   fi
   ps -p "$p" -o command= 2>/dev/null | grep -q 'gw2om\.sh'
 }
-# take_watch_lock: the session's lock for this process (a stale one is taken over)
+# take_watch_lock (under the mutex): the session's lock for this process, unless a live watcher
+# holds it (a stale one is taken over)
 take_watch_lock() {
-  mkdir -p "$APPDIR"
-  if ! mkdir "$WATCH_LOCK" 2>/dev/null; then
+  if [ -d "$WATCH_LOCK" ]; then
     watcher_alive && return 1
     rm -rf "$WATCH_LOCK"
-    mkdir "$WATCH_LOCK" 2>/dev/null || return 1
   fi
+  mkdir "$WATCH_LOCK" 2>/dev/null || return 1
   echo $$ >"$WATCH_LOCK/pid"
 }
+# owns_watch_lock: this process holds the session's lock
+owns_watch_lock() { [ "$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)" = $$ ]; }
 # drop_watch_lock: only if this process holds it
-drop_watch_lock() {
-  [ "$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)" = $$ ] && rm -rf "$WATCH_LOCK"
-  return 0
-}
+drop_watch_lock() { if owns_watch_lock; then rm -rf "$WATCH_LOCK"; fi; return 0; }
 # stop_watcher: ends the session's watcher (uninstall) and waits for it
 stop_watcher() {
   local p i
@@ -1536,107 +1556,179 @@ stop_watcher() {
   for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$p" 2>/dev/null || break; sleep 0.2; done
   log "session: stopped its watcher (pid $p)"
 }
-
-# watch_exit: the watcher's end, however it ends
-watch_exit() {
-  [ "$(session_get stage)" = done ] || session_set stage done result "${WATCH_RESULT:-ended}"
-  log "session: done (${WATCH_RESULT:-ended})"
-  drop_watch_lock
+# steam_mains <proc_list output>: the pids of Steam's own steam.exe (not its helpers)
+steam_mains() {
+  printf '%s\n' "$1" | awk '$1 == "steam" { p = tolower($0); if (p ~ /[\/\\]steam\.exe$/) print $2 }' | tr '\n' ' '
+}
+# steam_decision: (with the session's keys as Play just wrote them) quit_steam
+steam_decision() {
+  [ "$1" = steam ] && [ "$2" = yes ] && [ "$3" = hidden ] && [ "$(setting quitsteam)" = on ] && echo yes || echo no
 }
 
-# watch_poll: proc_list into WL, after a pause; WATCH_RESULT=uninstalled and false once the app's
-# install is gone
+# watch_exit: the watcher's end, however it ends (a watcher that lost the session leaves it alone)
+watch_exit() {
+  if [ "${WATCH_LOST:-}" = yes ]; then log "session: the watcher (pid $$) stopped: another one follows the session"; return 0; fi
+  mutex_take || true
+  [ "$(session_get stage)" = done ] || session_set stage done result "${WATCH_RESULT:-ended}"
+  drop_watch_lock
+  mutex_drop
+  log "session: done (${WATCH_RESULT:-ended})"
+}
+
+# watch_poll: proc_list into WL after a pause, and a Play that joined the session (REPLAY); false
+# (WATCH_RESULT, WATCH_LOST) once the app's install is gone or another watcher has the session
 watch_poll() {
+  local r
   sleep "$WATCH_POLL"
+  owns_watch_lock || { WATCH_LOST=yes; return 1; }
   [ -f "$MANIFEST" ] || { WATCH_RESULT=uninstalled; log "session: GW2 on Mac was uninstalled; stopping"; return 1; }
   WL=$(proc_list)
+  r=$(session_get replay)
+  # (a Play that joined: the session's Steam is what that Play wrote, OWN again at the game's start)
+  [ "${r:-0}" -le "$REPLAY" ] || { REPLAY=$r JOINED=$(date +%s) OWN="" LOST_WHY=""; }
+}
+
+# watch_owner: while the game runs and in the grace, Steam stays this Play's only while one of
+# the steam.exe that ran when the game started (OWN) runs: once all have quit, a Steam opened
+# after them is the user's, and the session no longer quits Steam
+watch_owner() {
+  local p cur
+  [ "$(session_get quit_steam)" = yes ] && [ -n "$OWN" ] || return 0
+  cur=" $(steam_mains "$WL")"
+  for p in $OWN; do case "$cur " in *" $p "*) return 0 ;; esac; done
+  mutex_take || return 0
+  p=$(session_get replay)
+  if [ "${p:-0}" -gt "$REPLAY" ]; then
+    REPLAY=$p JOINED=$(date +%s)   # a Play joined meanwhile and set the session's Steam itself
+  else
+    session_set quit_steam no
+    LOST_WHY="Steam quit during the session (pids $OWN); a Steam opened after it is not this Play's"
+    log "session: $LOST_WHY"
+  fi
+  OWN=""
+  mutex_drop
 }
 
 # watch-session [--handoff]: Play starts it with --handoff (its lock is handed over: the pid in it
 # becomes this one's); by hand, it takes the lock or says another watcher follows the session
 cmd_watch_session() {
-  local i start now last ended back route quit why
+  local i start now last ended back route quit why since at_start
   open_log
   if [ -n "$DRY" ]; then echo "[dry-run] watch-session"; return 0; fi
   if [ "${1:-}" = --handoff ]; then
     i=0
-    while [ "$(cat "$WATCH_LOCK/pid" 2>/dev/null || true)" != $$ ]; do
+    while ! owns_watch_lock; do
       [ $i -lt 50 ] || { log "session: the watcher (pid $$) was not handed the session; another one follows it"; return 0; }
       sleep 0.1; i=$((i + 1))
     done
   else
-    take_watch_lock || { echo "@done Another watcher follows this session (pid $(cat "$WATCH_LOCK/pid" 2>/dev/null || true))."; return 0; }
-    case "$(session_get stage)" in ''|done) drop_watch_lock; echo "@done No session to follow."; return 0 ;; esac
+    [ -f "$SESSION" ] || { echo "@done No session to follow."; return 0; }
+    mutex_take || { echo "@error The session is busy; try again."; return 1; }
+    if ! take_watch_lock; then
+      mutex_drop
+      echo "@done Another watcher follows this session (pid $(cat "$WATCH_LOCK/pid" 2>/dev/null || true))."
+      return 0
+    fi
+    case "$(session_get stage)" in ''|done) drop_watch_lock; mutex_drop; echo "@done No session to follow."; return 0 ;; esac
+    mutex_drop
   fi
-  WATCH_RESULT=""
+  WATCH_RESULT="" WATCH_LOST="" LOST_WHY="" OWN=""
   trap watch_exit EXIT
   trap 'exit 143' TERM INT
-  route=$(session_get route) quit=$(session_get quit_steam)
+  route=$(session_get route)
   start=$(date +%s)
-  log "---- session $VERSION route=$route started_steam=$(session_get started_steam) steam_window=$(session_get steam_window) quit_steam=$quit (watcher pid $$)"
+  REPLAY=$(session_get replay); REPLAY=${REPLAY:-0} JOINED=0
+  log "---- session $VERSION route=$route started_steam=$(session_get started_steam) steam_window=$(session_get steam_window) quit_steam=$(session_get quit_steam) (watcher pid $$)"
   session_set stage waiting_game watcher_pid $$
 
-  # 1. Guild Wars 2 starts (Steam may update itself and sign in first). Steam and the bottle's
-  # wineserver gone for the grace (Steam restarts itself after an update) without the game means
-  # Steam was closed: left as it is.
-  last=$start
   while :; do
-    watch_poll || return 0
-    now=$(date +%s)
-    has_kind game "$WL" && break
-    if has_kind steam "$WL" || has_kind session "$WL"; then last=$now; fi
-    if [ $((now - last)) -ge "$WATCH_GRACE" ]; then
-      if [ "$route" = steam ]; then
-        WATCH_RESULT=steam_gone; log "session: Steam is not running and Guild Wars 2 did not start (Steam was closed or did not start); nothing to quit"
-      else
-        WATCH_RESULT=no_game; log "session: Guild Wars 2's launcher did not start or quit before the game"
-      fi
-      return 0
-    fi
-    if [ $((now - start)) -ge "$WATCH_TIMEOUT" ]; then
-      WATCH_RESULT=timeout
-      log "session: Guild Wars 2 did not start within $((WATCH_TIMEOUT / 60)) minutes ($WATCH_TIMEOUT s); Steam is left running"
-      return 0
-    fi
-  done
-
-  # 2. The game runs, until it quits and doesn't start again within the grace
-  session_set stage playing game_started "$now" game_ended ""
-  log "session: Guild Wars 2 started ($((now - start)) s after Play)"
-  while :; do
-    while has_kind game "$WL"; do watch_poll || return 0; done
-    ended=$(date +%s)
-    session_set stage grace game_ended "$ended"
-    log "session: Guild Wars 2 quit; waiting $WATCH_GRACE s in case it starts again (its patcher, a restart)"
-    back=no
-    while [ $(( $(date +%s) - ended )) -lt "$WATCH_GRACE" ]; do
+    # 1. Guild Wars 2 starts (Steam may update itself and sign in first; a Play that joins the
+    # session starts the wait again). Steam and the bottle's wineserver gone for the grace (Steam
+    # restarts itself after an update) without the game means Steam was closed: left as it is.
+    last=$start
+    while :; do
       watch_poll || return 0
-      if has_kind game "$WL"; then back=yes; break; fi
+      now=$(date +%s)
+      [ "$JOINED" -le "$start" ] || { start=$JOINED; last=$JOINED; }
+      has_kind game "$WL" && break
+      if has_kind steam "$WL" || has_kind session "$WL"; then last=$now; fi
+      if [ $((now - last)) -ge "$WATCH_GRACE" ]; then
+        if [ "$route" = steam ]; then
+          WATCH_RESULT=steam_gone; log "session: Steam is not running and Guild Wars 2 did not start (Steam was closed or did not start); nothing to quit"
+        else
+          WATCH_RESULT=no_game; log "session: Guild Wars 2's launcher did not start or quit before the game"
+        fi
+        return 0
+      fi
+      if [ $((now - start)) -ge "$WATCH_TIMEOUT" ]; then
+        WATCH_RESULT=timeout
+        log "session: Guild Wars 2 did not start within $((WATCH_TIMEOUT / 60)) minutes ($WATCH_TIMEOUT s); Steam is left running"
+        return 0
+      fi
     done
-    [ "$back" = yes ] || break
-    session_set stage playing game_ended ""
-    log "session: Guild Wars 2 started again within the grace"
+
+    # 2. The game runs, until it quits and doesn't start again within the grace. The Steam that
+    # runs as it starts is the session's (OWN).
+    OWN=$(steam_mains "$WL") at_start=$REPLAY
+    session_set stage playing game_started "$now" game_ended ""
+    log "session: Guild Wars 2 started ($((now - start)) s after Play; Steam pids ${OWN:-none})"
+    while :; do
+      while has_kind game "$WL"; do watch_poll || return 0; watch_owner; done
+      ended=$(date +%s)
+      session_set stage grace game_ended "$ended"
+      log "session: Guild Wars 2 quit; waiting $WATCH_GRACE s in case it starts again (its patcher, a restart)"
+      back=no
+      while [ $(( $(date +%s) - ended )) -lt "$WATCH_GRACE" ]; do
+        watch_poll || return 0
+        watch_owner
+        if has_kind game "$WL"; then back=yes; break; fi
+      done
+      [ "$back" = yes ] || break
+      session_set stage playing game_ended ""
+      log "session: Guild Wars 2 started again within the grace"
+    done
+
+    # 3. The decision, under the mutex: a Play that joined the session meanwhile (Play during the
+    # grace) means waiting for its game again; else Steam quits now (Play refuses while it does)
+    # if Play started it in the background and the setting is (still) on, or is left alone
+    mutex_take || true
+    since=$(session_get replay)
+    if [ "${since:-0}" -gt "$at_start" ]; then
+      REPLAY=$since start=$(date +%s)
+      session_set stage waiting_game
+      mutex_drop
+      log "session: Play was pressed again during the grace; waiting for the game again"
+      continue
+    fi
+    quit=$(session_get quit_steam)
+    why=""
+    if [ "$quit" != yes ]; then
+      if [ -n "$LOST_WHY" ]; then why=$LOST_WHY
+      elif [ "$route" != steam ]; then why="the ArenaNet route has no Steam"
+      elif [ "$(session_get started_steam)" != yes ]; then why="Steam already ran before Play"
+      elif [ "$(session_get steam_window)" != hidden ]; then why="Steam's window was shown (no remembered login, or Start Steam in the background off)"
+      else why="Quit Steam when the game quits was off"; fi
+    elif [ "$(setting quitsteam)" != on ]; then
+      why="Quit Steam when the game quits was turned off during the session"
+    elif ! has_kind steam "$WL"; then
+      WATCH_RESULT=steam_already_gone; log "session: Steam has already quit"
+    fi
+    if [ -n "$why" ]; then
+      if has_kind steam "$WL"; then WATCH_RESULT=left_running; log "session: Steam stays open: $why"
+      else WATCH_RESULT=steam_already_gone; log "session: Steam is not running ($why)"; fi
+    fi
+    if [ -n "$WATCH_RESULT" ]; then
+      session_set stage done result "$WATCH_RESULT"
+      drop_watch_lock
+      mutex_drop
+      return 0
+    fi
+    session_set stage closing_steam
+    mutex_drop
+    break
   done
 
-  # 3. Steam quits, if Play started it in the background and the setting is (still) on
-  why=""
-  if [ "$quit" != yes ]; then
-    if [ "$route" != steam ]; then why="the ArenaNet route has no Steam"
-    elif [ "$(session_get started_steam)" != yes ]; then why="Steam already ran before Play"
-    elif [ "$(session_get steam_window)" != hidden ]; then why="Steam's window was shown (no remembered login, or Start Steam in the background off)"
-    else why="Quit Steam when the game quits was off"; fi
-  elif [ "$(setting quitsteam)" != on ]; then
-    why="Quit Steam when the game quits was turned off during the session"
-  fi
-  if [ -n "$why" ]; then
-    if has_kind steam "$WL"; then WATCH_RESULT=left_running; log "session: Steam stays open: $why"
-    else WATCH_RESULT=steam_already_gone; log "session: Steam is not running ($why)"; fi
-    return 0
-  fi
-  if ! has_kind steam "$WL"; then
-    WATCH_RESULT=steam_already_gone; log "session: Steam has already quit"; return 0
-  fi
-  session_set stage closing_steam
+  # 4. Steam quits: -shutdown, then wineserver -k for this bottle
   wine_allowed
   game_env
   log "session: asking Steam to quit (steam.exe -shutdown)"
@@ -1652,6 +1744,7 @@ cmd_watch_session() {
     has_kind steam "$WL" || { WATCH_RESULT=quit; log "session: Steam quit ($(( $(date +%s) - now )) s after -shutdown)"; return 0; }
     [ $(( $(date +%s) - now )) -lt "$WATCH_QUITWAIT" ] || break
   done
+  owns_watch_lock || { WATCH_LOST=yes; return 0; }
   log "session: Steam did not quit within $WATCH_QUITWAIT s; ending the bottle's Wine (wineserver -k)"
   WINEPREFIX="$BOTTLE" "$ENG/bin/wineserver" -k >>"$LOGFILE" 2>&1 || true
   for i in 1 2 3 4 5 6 7 8 9 10; do
@@ -1846,27 +1939,41 @@ cmd_play() {
     [ "$key" = "$(cat "$LOGS/session.key")" ] ||
       echo "@notice Steam is still running with the settings it started with; quit Steam for the new ones."
   fi
-  # The session (watch-session): a new one unless a watcher still follows the last one (a second
-  # Play while Steam starts the game keeps it, and what it knew about Steam)
-  local fresh=no steam_before=no route silent="" quit=no
+  # The session (watch-session), under the session's mutex: a new one unless a watcher still
+  # follows the last one. A Play that joins it (while Steam starts the game, or in the grace after
+  # the game quit) tells the watcher (replay), which then waits for the game again; if no Steam
+  # runs any more, this Play starts it, and the session's Steam is this Play's. Refused while the
+  # watcher quits Steam.
+  local fresh=no steam_before=no route silent="" quit=no i
   route=$(state route)
   [ "$route" = arenanet ] || route=steam
+  if [ "$route" = steam ] && [ "$(setting steambg)" = on ] && steam_remembers_login; then silent=-silent; fi
   if [ -z "$DRY" ]; then
+    mutex_take || die "GW2 on Mac is still busy with the last session. Try again in a few seconds."
+    has_kind steam "$(proc_list)" && steam_before=yes
     if take_watch_lock; then
       fresh=yes
-      trap drop_watch_lock EXIT
-      has_kind steam "$(proc_list)" && steam_before=yes
+      trap 'drop_watch_lock; mutex_drop' EXIT
     else
-      [ "$(session_get stage)" != closing_steam ] || die "Steam is quitting after your last session. Try again in a few seconds."
+      [ "$(session_get stage)" != closing_steam ] || { mutex_drop; die "Steam is quitting after your last session. Try again in a few seconds."; }
+      i=$(session_get replay)
+      i=$(( ${i:-0} + 1 ))
+      if [ "$steam_before" = no ]; then
+        session_set replay "$i" started_steam "$([ "$route" = steam ] && echo yes || echo no)" \
+          steam_window "$([ "$route" = steam ] && { [ -n "$silent" ] && echo hidden || echo shown; } || true)" \
+          quit_steam "$(steam_decision "$route" yes "$([ -n "$silent" ] && echo hidden || echo shown)")"
+      else
+        session_set replay "$i"
+      fi
+      mutex_drop
     fi
   fi
   if [ "$route" = arenanet ]; then
     # shellcheck disable=SC2086
     launch "$GAME_EXE" $(setting launchopts)
   else
-    # Once Steam remembers a login, it starts without its window (-silent): it signs in by itself
-    # and starts the game. Before the first sign-in its window shows, as at the install.
-    if [ "$(setting steambg)" = on ] && steam_remembers_login; then silent=-silent; fi
+    # Once Steam remembers a login, it starts without its window (-silent, above): it signs in by
+    # itself and starts the game. Before the first sign-in its window shows, as at the install.
     # shellcheck disable=SC2086
     launch "$STEAM_EXE" ${silent:+"$silent"} -applaunch "$GW2_APPID" $(setting launchopts)
   fi
@@ -1875,16 +1982,17 @@ cmd_play() {
   elif [ "$fresh" = yes ]; then
     # Steam quits after the game only if this Play started it, without its window, and the
     # setting is on
-    [ "$route" = steam ] && [ "$steam_before" = no ] && [ -n "$silent" ] && [ "$(setting quitsteam)" = on ] && quit=yes
+    quit=$(steam_decision "$route" "$([ "$steam_before" = no ] && echo yes || echo no)" "$([ -n "$silent" ] && echo hidden || echo shown)")
     { echo "route=$route"; echo "started_steam=$([ "$route" = steam ] && [ "$steam_before" = no ] && echo yes || echo no)"
       echo "steam_window=$([ "$route" = steam ] && { [ -n "$silent" ] && echo hidden || echo shown; } || true)"
       echo "quit_steam=$quit"; echo "watcher_pid="; echo "stage=waiting_game"; echo "started=$(date +%s)"
-      echo "game_started="; echo "game_ended="; echo "updated=$(date +%s)"; echo "result="; } >"$SESSION.new.$$"
+      echo "game_started="; echo "game_ended="; echo "replay=0"; echo "updated=$(date +%s)"; echo "result="; } >"$SESSION.new.$$"
     mv -f "$SESSION.new.$$" "$SESSION"
     nohup /bin/bash "$RES/gw2om.sh" watch-session --handoff </dev/null >/dev/null 2>&1 &
     local wpid=$!
     session_set watcher_pid "$wpid"
     echo "$wpid" >"$WATCH_LOCK/pid"
+    mutex_drop
     trap - EXIT
     log "session: watcher started (pid $wpid), quit_steam=$quit"
   else

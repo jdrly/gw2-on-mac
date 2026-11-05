@@ -25,6 +25,10 @@ G="$APP/Contents/Resources/gw2om.sh"
 SANDBOX="${SANDBOX:-$ROOT/work/app-sandbox/test}"
 case "$SANDBOX" in "$ROOT"/work/app-sandbox/*) ;; *) echo "SANDBOX must be under work/app-sandbox/" >&2; exit 1 ;; esac
 SIGNED_PE="${SIGNED_PE:-$WS/work/bottles/gw2/drive_c/Program Files (x86)/Steam/steamapps/common/Guild Wars 2/Gw2-64.exe}"
+# the stand-in processes (sleepers) and watchers of an earlier run of this sandbox, and of this one
+# at its end
+end_sandbox_processes() { [ ! -d "$SANDBOX" ] || pkill -f "^$(cd "$SANDBOX" && pwd -P)/" 2>/dev/null || true; pkill -f "^/bin/bash $G watch-session" 2>/dev/null || true; }
+end_sandbox_processes
 rm -rf "$SANDBOX"
 mkdir -p "$SANDBOX"
 SANDBOX="$(cd "$SANDBOX" && pwd -P)"
@@ -326,10 +330,10 @@ section "Steam quits after the game (watch-session)"
 # from this shell (launchd reaps them), the Steam's pid in steam.pid for the stand-in wine
 SP="$SANDBOX/steam.pid"
 cp "$SANDBOX/sleeper" "$ENG/bin/steam.exe" && cp "$SANDBOX/sleeper" "$ENG/bin/Gw2-64.exe"
-steam_up() { ( "$ENG/bin/steam.exe" 300 & echo $! >"$SP" ); sleep 0.2; }
+steam_up() { ( "$ENG/bin/steam.exe" 120 & echo $! >"$SP" ); sleep 0.2; }
 steam_runs() { kill -0 "$(cat "$SP")" 2>/dev/null; }
 steam_down() { kill "$(cat "$SP")" 2>/dev/null; rm -f "$SP"; sleep 0.2; }
-game_up() { ( "$ENG/bin/Gw2-64.exe" 300 & echo $! >"$SANDBOX/game.pid" ); }
+game_up() { ( "$ENG/bin/Gw2-64.exe" 120 & echo $! >"$SANDBOX/game.pid" ); }
 game_down() { kill "$(cat "$SANDBOX/game.pid")" 2>/dev/null; }
 # a session: the game starts, runs, quits
 game_session() { game_up; wait_stage playing && game_down && wait_stage grace; }
@@ -402,12 +406,55 @@ game_session
 check "  Steam quits once" eval 'watch_done && [ "$(sess result)" = quit ] && [ "$(grep -c "steam.exe -shutdown" "$STANDIN_LOG")" = 1 ]'
 check "watch-session by hand with no session: nothing to follow" sh -c "'$G' watch-session | grep -q '@done No session to follow'"
 
+# the user quits the Steam Play started and opens another: that one is the user's
+splay; steam_up
+game_up; wait_stage playing
+steam_down; steam_up
+game_down
+check "Steam quit and opened again while the game runs: the new Steam is left alone" eval 'watch_done && [ "$(sess result)" = left_running ] && [ "$(sess quit_steam)" = no ] && steam_runs && ! has "$STANDIN_LOG" "steam.exe -shutdown"'
+check "  and the log says why" has "$LOGS/install.log" "Steam quit during the session"
+steam_down
+splay; steam_up
+game_session
+steam_down; steam_up
+check "the same in the grace" eval 'watch_done && [ "$(sess result)" = left_running ] && steam_runs && ! has "$STANDIN_LOG" "steam.exe -shutdown"'
+steam_down
+
+# Play in the grace, near its end (a 4 s grace here): the watcher waits for that Play's game
+# instead of quitting
+: >"$STANDIN_LOG"; GW2_ON_MAC_WATCH_GRACE=4 "$G" play >/dev/null 2>&1; started; steam_up
+game_session
+sleep 2.5; splay; sleep 3
+check "Play in the grace: the watcher waits for the game again, past the grace, no -shutdown" eval '[ "$(sess stage)" = waiting_game ] && [ "$(sess replay)" = 1 ] && steam_runs && ! has "$STANDIN_LOG" "steam.exe -shutdown"'
+game_session
+check "  then that game quits: Steam quits" eval 'watch_done && [ "$(sess result)" = quit ] && ! steam_runs'
+
+# a stale lock (a watcher that died) and two Plays at once: one watcher
+mkdir -p "$AD/.session.lock" && ( exit 0 ) & dp=$!; wait $dp; echo $dp >"$AD/.session.lock/pid"
+: >"$STANDIN_LOG"
+"$G" play >/dev/null 2>&1 & p1=$!
+"$G" play >/dev/null 2>&1 & p2=$!
+wait $p1 $p2; started; steam_up
+check "two Plays at once over a stale lock: one watcher, which holds the lock" eval '[ "$(watchers)" = 1 ] && [ "$(cat "$AD/.session.lock/pid")" = "$(sess watcher_pid)" ]'
+game_session
+check "  Steam quits once" eval 'watch_done && [ "$(sess result)" = quit ] && [ "$(grep -c "steam.exe -shutdown" "$STANDIN_LOG")" = 1 ]'
+
+# a watcher whose lock another took stops, without touching the session or Steam
+splay; steam_up
+wp=$(sess watcher_pid)
+echo 999999 >"$AD/.session.lock/pid"
+sleep 1
+check "a watcher that lost its lock stops, leaving the session and Steam alone" eval '! kill -0 "$wp" 2>/dev/null && [ "$(sess stage)" = waiting_game ] && steam_runs && ! has "$STANDIN_LOG" "steam.exe -shutdown"'
+rm -rf "$AD/.session.lock"; steam_down
+
 # a Steam that ignores -shutdown: wineserver -k (a stand-in wineserver that ends it)
 touch "$SANDBOX/steam.stubborn"
 mv "$ENG/bin/wineserver" "$SANDBOX/wineserver.heat"
 printf '#!/bin/bash\necho "wineserver $*" >>"$STANDIN_LOG"\n[ "$1" != -k ] || kill "$(cat "%s")" 2>/dev/null\nexit 0\n' "$SP" >"$ENG/bin/wineserver" && chmod 755 "$ENG/bin/wineserver"
 splay; steam_up
 game_session
+wait_stage closing_steam; "$G" play >"$SANDBOX/closing.txt" 2>&1
+check "Play while Steam is quitting is refused" has "$SANDBOX/closing.txt" "@error Steam is quitting"
 check "Steam ignores -shutdown: wineserver -k for the bottle after the wait" eval 'watch_done && [ "$(sess result)" = killed ] && has "$STANDIN_LOG" "steam.exe -shutdown" && has "$STANDIN_LOG" "^wineserver -k" && ! steam_runs'
 mv -f "$SANDBOX/wineserver.heat" "$ENG/bin/wineserver"
 rm -f "$SANDBOX/steam.stubborn" "$ENG/bin/steam.exe" "$ENG/bin/Gw2-64.exe"
@@ -610,5 +657,6 @@ check "the sources never changed" sources_unchanged
 
 echo
 echo "$pass passed, $fail failed"
+end_sandbox_processes
 [ -n "${KEEP:-}" ] || rm -rf "$SANDBOX"
 [ "$fail" = 0 ]
