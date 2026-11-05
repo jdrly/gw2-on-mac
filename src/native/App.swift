@@ -138,6 +138,12 @@ final class Installer {
   let credits: [String: String]
   // the Play button is starting the game (Play.swift)
   var launching = false
+  // the game's session after Play: its stages, then Playing (Session.swift); nil when none runs
+  var session: LaunchSession?
+  var sessionTask: Task<Void, Never>?
+  // which poller is current (a cancelled one's late result is dropped), and when a session ended
+  var sessionGeneration = 0
+  var sessionEnded = Date.distantPast
   // an operation has ended (a held app update may go ahead)
   var onIdle: (() -> Void)?
 
@@ -157,7 +163,9 @@ final class Installer {
   var appleSilicon: Bool { status["arch"].map { $0 == "arm64" } ?? true }
   // the setup (engine, bottle and graphics) is in place
   var installed: Bool { status["installed"] == "yes" }
-  var gameInstalled: Bool { status["game"] == "yes" }
+  // (ArenaNet's route counts its game as there only while neither its installer nor the game runs:
+  // a finished install whose game runs has it too)
+  var gameInstalled: Bool { status["game"] == "yes" || status["stage"] == "finished" && status["busy"] == "game" }
   // everything is done: Play
   var ready: Bool { installed && gameInstalled && status["stage"] == "finished" }
   var installedRoute: Route? { Route(rawValue: status["route"] ?? "") }
@@ -189,12 +197,18 @@ final class Installer {
   var imported: Bool { status["origin"] == "import" }
 
   // The panel the right column shows
-  enum Panel { case choose, installing, ready }
+  enum Panel { case choose, installing, ready, starting, playing }
   var panel: Panel {
     switch phase {
     case .working(.uninstall): return .installing
     case .working, .waitingForGame: return .installing
-    default: return ready ? .ready : .choose
+    default:
+      guard ready else { return .choose }
+      switch sessionStage {
+      case .playing: return .playing
+      case .some: return .starting
+      case nil: return .ready
+      }
     }
   }
 
@@ -231,6 +245,13 @@ final class Installer {
 
   private func applyStatus(_ values: [String: String]) {
     status = values
+    // a session runs (the window opened while the game starts or runs, or Steam closes after it):
+    // follow it. (Not for Steam alone, which may just idle after a session; nor right after a
+    // session ended.)
+    if ready, session == nil, sessionTask == nil, values["busy"] == "game" || values["session"] == "live",
+       Date().timeIntervalSince(sessionEnded) > 3 {
+      followSession(fromPlay: false)
+    }
     // A game install that waits for Steam or ArenaNet's installer picks up where it was after
     // the app restarts; once the game is there, the finishing touches run (once: a failed finish
     // waits for Install or Repair)

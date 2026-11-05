@@ -2,7 +2,8 @@
 // ink-stroke header with the GW2 / ON MAC wordmark, the tagline and the Unofficial badge; on the
 // left this Mac's six checks and what GW2 on Mac does; on the right the painting and one panel:
 // choose the install route (Steam or ArenaNet's installer), the install's steps with progress and
-// Cancel, or Ready (Play, Repair, Settings, Uninstall…); the disclaimer in the footer.
+// Cancel, Ready (Play, Repair, Settings, Uninstall…), or, after Play, Starting and Playing
+// (Session.swift); the disclaimer in the footer.
 //
 // Light and dark follow the system; each has its own header stroke (Art/header-light.png
 // multiplied on parchment, Art/header-dark.png lightened on the dark ink, where its black drops
@@ -51,6 +52,7 @@ struct MainView: View {
     .ignoresSafeArea()
     .frame(minWidth: MainView.designSize.width, minHeight: MainView.designSize.height)
     .animation(.smooth, value: installer.phase)
+    .animation(.smooth, value: installer.panel)
     .animation(.smooth, value: installer.status)
     .sheet(isPresented: $showLogSheet) { LogSheet(installer: installer) }
     .onChange(of: installer.closeSheets) { _, _ in
@@ -487,8 +489,9 @@ struct RightColumn: View {
   private func column(painting: Bool) -> some View {
     VStack(alignment: .leading, spacing: 12) {
       if painting {
+        // (lower while the game starts or runs: the stage list takes the room)
         ArtImage(name: "painting.webp")
-          .frame(width: 392, height: 132)
+          .frame(width: 392, height: installer.panel == .starting || installer.panel == .playing ? 110 : 132)
           .clipped()
           .accessibilityLabel("A painted landscape: a traveller on a cliff above a river valley and a city")
       }
@@ -496,6 +499,8 @@ struct RightColumn: View {
       case .choose: ChoosePanel(installer: installer, actions: actions)
       case .installing: InstallingPanel(installer: installer, actions: actions)
       case .ready: ReadyPanel(installer: installer, actions: actions)
+      case .starting: StartingPanel(installer: installer, session: installer.session ?? .init(fromPlay: false))
+      case .playing: PlayingPanel(installer: installer, session: installer.session ?? .init(fromPlay: false), actions: actions)
       }
       ResultNote(installer: installer, actions: actions)
     }
@@ -1011,14 +1016,9 @@ struct ReadyPanel: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       InkHeading(title: "Ready", size: 17, alignment: .center) {
-        HStack(spacing: 6) {
-          Pip(color: installer.installedOtherVersion ? Brand.warning : Brand.good)
-          Text(installer.installedOtherVersion ? "\(installer.installedVersion) · Repair to update"
-               : "Installed · \(installer.installedVersion)")
-            .font(.body(12, .bold)).bodyBox(12).foregroundStyle(Brand.fg2)
-        }
-        .padding(.vertical, 3).padding(.horizontal, 8)
-        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Brand.borderStrong, lineWidth: 1))
+        PanelChip(pip: installer.installedOtherVersion ? Brand.warning : Brand.good,
+                  text: installer.installedOtherVersion ? "\(installer.installedVersion) · Repair to update"
+                    : "Installed · \(installer.installedVersion)")
       }
       Button(action: actions.play) {
         HStack(spacing: 12) {
@@ -1027,22 +1027,20 @@ struct ReadyPanel: View {
         }
       }
       .buttonStyle(.crimsonPlay)
-      .disabled(installer.launching)
-      HStack {
-        secondary("wrench", "Repair", Brand.fg, actions.repair)
-          .help("Sets up the engine, the graphics and Game Mode again; keeps the game and your settings")
-        Spacer()
-        secondary("sliders-horizontal", "Settings", Brand.fg, actions.settings)
-        Spacer()
-        secondary("trash-2", "Uninstall…", Brand.fg3, actions.uninstall)
-      }
-      .padding(.horizontal, 4)
+      // (not while the watcher closes Steam after the game: Play starts it again once it's gone)
+      .disabled(installer.launching || closing)
+      .help(closing ? "Steam is closing after the game. Play again once it has." : "")
+      SecondaryActions(installer: installer, actions: actions)
       Rectangle().fill(Brand.border).frame(height: 1)
-      tip(installer.installedRoute == .arenanet ? "download" : "store",
-          installer.installedRoute == .arenanet
-            ? "Starts ArenaNet's launcher, then the game. Your login stays in it."
-            : "Starts Steam, then the game. After your first sign-in, Steam stays in the background.")
-      tip("sparkles", "The first visit to a busy map may hitch once while its shaders build. Later sessions build them ahead.")
+      if closing {
+        PanelTip(icon: "store", text: "Steam is closing…", spinning: true)
+      } else {
+        PanelTip(icon: installer.installedRoute == .arenanet ? "download" : "store",
+                 text: installer.installedRoute == .arenanet
+                   ? "Starts ArenaNet's launcher, then the game. Your login stays in it."
+                   : "Starts Steam, then the game. After your first sign-in, Steam stays in the background.")
+      }
+      PanelTip(icon: "sparkles", text: "The first visit to a busy map may hitch once while its shaders build. Later sessions build them ahead.")
     }
     .padding(.top, 14)
     .padding(.horizontal, 16)
@@ -1050,24 +1048,8 @@ struct ReadyPanel: View {
     .brandPanel()
   }
 
-  private func secondary(_ icon: String, _ title: String, _ color: Color, _ action: @escaping () -> Void) -> some View {
-    Button(action: action) {
-      HStack(spacing: 6) {
-        LucideIcon(name: icon, size: 14)
-        Text(title).font(.body(13.5, .semibold)).bodyBox(13.5)
-      }
-    }
-    .buttonStyle(QuietButtonStyle(color: color))
-    .disabled(installer.isBusy)
-  }
-
-  private func tip(_ icon: String, _ text: String) -> some View {
-    HStack(alignment: .top, spacing: 8) {
-      LucideIcon(name: icon, size: 14).foregroundStyle(Brand.gold)
-      Text(text).font(.body(12.5)).bodyBox(12.5, 1.3).foregroundStyle(Brand.fg2)
-        .fixedSize(horizontal: false, vertical: true)
-    }
-  }
+  // after the game: the watcher closes the Steam the Play started (gw2om.sh watch-session)
+  private var closing: Bool { installer.session?.closing ?? false }
 }
 
 // MARK: - Log

@@ -47,7 +47,7 @@ does the first one), and nothing is published.
 
 - **Main window**, three states: choose the route (Steam, ArenaNet installer, or game files I
   already have) → the install's steps with progress and Cancel → Ready (Play, Repair, Settings,
-  Uninstall…).
+  Uninstall…). After Play, Ready gives way to Starting and Playing (see *While the game starts*).
   - The chosen route's card opens; the others keep one line. The painting gives way when the
     panel needs its room (the list of found installs, a long message).
   - *This Mac* checks Rosetta, the engine, the graphics (DXMT), Game Mode, the game and disk space
@@ -180,6 +180,48 @@ which it applies in order.
   `stage` (`waiting_game`, `playing`, `grace`, `closing_steam`, `done`) and `result` say where
   the session is.
 
+### While the game starts
+
+After Play the panel shows **Starting**: the start's stages, done, current and waiting as the
+install's steps, with the time so far. The window polls `gw2om.sh session-status` every second
+while a session runs and stops when it ends. It prints `stage`, `detail`, `progress`, `elapsed`,
+`game_elapsed`, `steam` (bg, window or none), `game`, `closing`, `quit_steam` and `limiter_hint`
+from these:
+
+| Stage | Detected by |
+|---|---|
+| Starting Steam | the start is under way (the session's watcher waits for the game), no Steam sign-in yet |
+| Updating Steam (only when it happens) | Steam's `logs/bootstrap_log.txt` verifies Steam's own files, or downloads or installs an update (with its percent) |
+| Signing in | `steamwebhelper.exe` runs and `logs/connection_log.txt` isn't logged on since the start |
+| Checking game files (only when it happens) | `logs/content_log.txt` has app 1284210 validating or updating (an update's percent from its appmanifest) |
+| Starting Guild Wars 2 | Steam is signed in, or `Gw2-64.exe` runs |
+| Loading | DXMT's log of this session has the device, no frame yet |
+| Playing | DXMT's first `Present pacing` line |
+
+- **Only the session's lines count:** Steam's logs from the session's start on, and only their
+  state lines. Nothing of them is printed, so no account name or ID leaves `session-status`.
+- **The ArenaNet route** starts at Starting Guild Wars 2; the launcher's own window takes over.
+- **The window picks a session up when it opens** (`status` prints `session=live` while the
+  watcher waits for the game, follows it, waits through a restart's grace or closes Steam after
+  it; the window keeps polling while `session-status` says `watching=yes`), not a Steam idling on
+  its own.
+  A Play that joins a running session starts the stages again (`session-status --since <its
+  time>`).
+- **Show Steam** (`gw2om.sh show-steam`: `steam.exe steam://open/main` through the engine) brings
+  Steam's window up, for a sign-in Steam asks for. After 2 minutes without a sign-in in the
+  background, the tip says so. The chip says *Steam in the background* or *Steam window*. A
+  Steam whose window the user brought up stays open after the game: Show Steam asks the watcher
+  (a `shown` request) and waits for its answer; while Steam already quits, the window stays shut.
+- **Playing** shows how long the game has run, **Bring to Front** (the game's app, as Play does
+  when the game runs) and *Steam closes by itself when you quit the game* when the watcher will
+  close it (`quit_steam=yes` in its session file, `<app dir>/session`).
+- **A steadier 60:** while the game's own Frame Limiter (`frameLimit` in the bottle's
+  `GFXSettings.Gw2-64.exe.xml`, only read) is set to a value and `verticalSync` is on, Playing
+  suggests Unlimited with vsync: under Wine the two together land at about 58 instead of 60.
+  *Don't show again* keeps it away (the app's own preference).
+- **When the game quits** the panel is Ready again. While the watcher closes Steam, the tip says
+  *Steam is closing…* and Play waits.
+
 **Repair** sets up the engine (unpacked again if its loader changed), GW2 on Mac's pieces, the
 bottle's settings, Game Mode and Steam (if gone) again. It keeps the game and the settings.
 
@@ -212,7 +254,7 @@ changed, and Uninstall leaves them alone.
 
 The game folder gets `version.dll` and `gw2-ui-scale.ini` only while *Larger interface* is on.
 Another program's `version.dll` there is never touched. The app's own preferences (the chosen
-route, the Settings pane, *Quit after launching*) are in its defaults domain,
+route, the Settings pane, *Quit after launching*, the frame-limiter hint's *Don't show again*) are in its defaults domain,
 `cz.jandrly.gw2onmac`.
 
 ## Settings

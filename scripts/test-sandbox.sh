@@ -484,6 +484,184 @@ mv -f "$SANDBOX/wineserver.heat" "$ENG/bin/wineserver"
 rm -f "$SANDBOX/steam.stubborn" "$ENG/bin/steam.exe" "$ENG/bin/Gw2-64.exe"
 check "busy=none after the sessions" [ "$(st busy)" = none ]
 
+section "The session's stages (session-status: stand-in processes, fixture logs)"
+# Steam's and the game's processes are sleepers at the engine's paths; the watcher is a sleeper
+# named gw2om.sh holding the session's lock (as watch-session does), its session file written
+# here; Steam's logs carry a made-up account that must never show up in the output
+ss() { g session-status | sed -n "s/^$1=//p"; }
+at() { date -r "$1" '+%Y-%m-%d %H:%M:%S'; }
+now=$(date +%s) T0=$((now - 60))
+SL="$STEAM/logs"
+mkdir -p "$SL"
+OLD="[$(at $((now - 3600)))]" NEW="[$(at $((now - 30)))]"
+session_file() { { echo "route=steam"; echo "started_steam=yes"; [ -z "${SW-hidden}" ] || echo "steam_window=${SW-hidden}"; echo "quit_steam=${QS:-yes}"
+  echo "watcher_pid=$wp"; echo "stage=$1"; echo "started=$T0"; echo "replay=0"; echo "game_started=${GS:-}"
+  echo "requests=${RQ:-0}"; echo "updated=$now"; } >"$AD/session"; }
+# (the session's lock is a file with a kernel flock: a perl stand-in holds it; the stand-in
+# watcher's command line is "gw2om.sh watch-session", as watcher_proc looks for)
+rm -rf "$AD/.session.lock" && mkdir -p "$SANDBOX/watcher" && : >"$AD/session.req"
+/usr/bin/perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]); flock($f, LOCK_EX); sleep 120' "$AD/.session.lock" & lp=$!
+printf '#!/bin/bash\nsleep 120 & wait\n' >"$SANDBOX/watcher/gw2om.sh" && chmod 755 "$SANDBOX/watcher/gw2om.sh"
+"$SANDBOX/watcher/gw2om.sh" watch-session & wp=$!
+sleep 0.3
+# answer <accept|refuse>: the stand-in watcher's next look, once a request is in session.req: it
+# counts it, and leaves Steam open (accept) or has started quitting it (refuse)
+answer() {
+  local i=0
+  while [ "$(grep -c . "$AD/session.req" 2>/dev/null)" -lt 1 ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+  if [ "$1" = accept ]; then SW=shown QS=no RQ=1 session_file waiting_game; else RQ=1 session_file closing_steam; fi
+}
+cp "$SANDBOX/sleeper" "$ENG/bin/steam.exe" && cp "$SANDBOX/sleeper" "$ENG/bin/steamwebhelper.exe"
+: >"$SL/bootstrap_log.txt"; : >"$SL/content_log.txt"; : >"$SL/connection_log.txt"
+rm -f "$LOGS/Gw2-64_d3d11.log"
+# (no session file, no watcher: the last Play's session.env is recent, so a start is under way)
+rm -f "$AD/session"
+check "after play, nothing up yet, no watcher: starting_steam (from session.env)" [ "$(ss stage)" = starting_steam ]
+session_file waiting_game
+check "the watcher waits for the game, no Steam yet: starting_steam, steam=none" eval '[ "$(ss stage)/$(ss steam)" = starting_steam/none ]'
+check "  elapsed since the session's start" eval 'e=$(ss elapsed); [ "$e" -ge 60 ] && [ "$e" -le 65 ]'
+check "  status: session=live (the window picks it up when it opens)" [ "$(st session)" = live ]
+check "  a Play that joined the session (--since its time): elapsed from then" eval 'e=$(g session-status --since $((now - 5)) | sed -n "s/^elapsed=//p"); [ "$e" -ge 5 ] && [ "$e" -le 10 ]'
+check "  an earlier --since than the session's start: from the start" eval 'e=$(g session-status --since $((now - 900)) | sed -n "s/^elapsed=//p"); [ "$e" -ge 60 ] && [ "$e" -le 65 ]'
+session_file done
+check "  the watcher's session done: session=none, stage=none" eval '[ "$(st session)/$(ss stage)" = none/none ]'
+session_file waiting_game
+"$ENG/bin/steam.exe" 120 & sp=$!
+sleep 0.3
+{ echo "$NEW Startup - Steam Client launched with: \"C:\\Program Files (x86)\\Steam\\steam.exe\" -silent -applaunch 1284210"
+  echo "$NEW Verifying installation..."; echo "$NEW Verifying all executable checksums"; } >"$SL/bootstrap_log.txt"
+check "Steam verifies itself: updating_steam, 'Steam checks its own files'" eval '[ "$(ss stage)" = updating_steam ] && [ "$(ss detail)" = "Steam checks its own files" ]'
+echo "$NEW Package file strings_all.zip.vz.0123abcd_4567 missing or incorrect size" >>"$SL/bootstrap_log.txt"
+check "  a package it finds damaged: still updating_steam" [ "$(ss stage)" = updating_steam ]
+echo "$NEW Verification complete" >>"$SL/bootstrap_log.txt"
+check "  verification complete: no longer updating" [ "$(ss stage)" = starting_steam ]
+{ echo "$OLD Downloading update (100 of 200 KB)..."
+  echo "$NEW Startup - Steam Client launched with: \"C:\\Program Files (x86)\\Steam\\steam.exe\" -silent -applaunch 1284210"
+  echo "$NEW Verification complete"
+  echo "$NEW Downloading update (49,612 of 241,937 KB)..."; } >"$SL/bootstrap_log.txt"
+check "Steam downloads its update: updating_steam, 20%" eval '[ "$(ss stage)/$(ss progress)" = updating_steam/20 ] && [ "$(ss detail)" = "Steam updates itself · 20%" ]'
+check "  steam=bg (the watcher's steam_window=hidden)" [ "$(ss steam)" = bg ]
+echo "$NEW Installing update..." >>"$SL/bootstrap_log.txt"
+check "  installing it: still updating_steam" [ "$(ss stage)" = updating_steam ]
+{ echo "$NEW Update complete, launching Steam..."; echo "$NEW Shutdown"
+  echo "$NEW Startup - Steam Client launched with: \"C:\\Program Files (x86)\\Steam\\steam.exe\" -applaunch 1284210"
+  echo "$NEW Verification complete"; } >>"$SL/bootstrap_log.txt"
+check "update done, no web helper, not signed in: starting_steam" [ "$(ss stage)" = starting_steam ]
+"$ENG/bin/steamwebhelper.exe" 120 & hp=$!
+sleep 0.3
+{ echo "$OLD [Logged On, 0, 0] [U:1:39734314] RecvMsgClientLogOnResponse() : processing complete"
+  echo "$NEW [Connecting, 0, 0] [U:1:39734314] Connect() starting connection"
+  echo "$NEW [Logging On, 0, 0] [U:1:39734314] Logging on zz_acct_name 76561198000000042"; } >"$SL/connection_log.txt"
+check "the web helper up, not logged on since the start: signing_in (an older logon doesn't count)" [ "$(ss stage)" = signing_in ]
+SW="" session_file waiting_game
+check "  no steam_window in the session: from Steam's last start line (no -silent): steam=window" [ "$(ss steam)" = window ]
+session_file waiting_game
+echo "$NEW [Logged On, 0, 0] [U:1:39734314] RecvMsgClientLogOnResponse() : processing complete" >>"$SL/connection_log.txt"
+check "logged on, no content check, no game yet: starting_game" [ "$(ss stage)" = starting_game ]
+{ echo "$OLD AppID 1284210 state changed : Fully Installed,Validating,"
+  echo "$NEW AppID 1284210 state changed : Fully Installed,"; } >"$SL/content_log.txt"
+check "  an older check doesn't count" [ "$(ss stage)" = starting_game ]
+{ echo "$NEW AppID 1284210 update changed : Running Update,Validating,"
+  echo "$NEW User zz_acct_name (76561198000000042) [U:1:39734314] logged in"; } >>"$SL/content_log.txt"
+check "Steam validates the game: checking_files, 'Steam verifies Guild Wars 2'" eval '[ "$(ss stage)" = checking_files ] && [ "$(ss detail)" = "Steam verifies Guild Wars 2" ] && [ -z "$(ss progress)" ]'
+M="$STEAM/steamapps/appmanifest_1284210.acf"
+cp "$M" "$SANDBOX/acf.keep"
+{ grep -v -e BytesToDownload -e BytesDownloaded "$SANDBOX/acf.keep" | sed '$d'
+  printf '\t"BytesToDownload"\t\t"4000"\n\t"BytesDownloaded"\t\t"1000"\n}\n'; } >"$M"
+echo "$NEW AppID 1284210 update changed : Running Update,Downloading," >>"$SL/content_log.txt"
+check "Steam updates the game: checking_files with the appmanifest's progress (25%)" eval '[ "$(ss stage)/$(ss progress)" = checking_files/25 ] && [ "$(ss detail)" = "Steam updates Guild Wars 2 · 25%" ]'
+cp "$SANDBOX/acf.keep" "$M"
+echo "$NEW AppID 1284210 finished update (BytesDownloaded=1000, BytesStaged=0)" >>"$SL/content_log.txt"
+check "  update finished: starting_game" [ "$(ss stage)" = starting_game ]
+out=$(g session-status)
+check "no account name, Steam ID or log line in the output" eval '! printf "%s" "$out" | grep -qE "zz_acct_name|7656119|U:1:|Logged|AppID|steamapps"'
+mv "$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe" "$SANDBOX/gw2-loader-copy"
+cp "$SANDBOX/sleeper" "$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe"
+"$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe" 120 & gp=$!
+sleep 0.3
+check "Gw2-64.exe up, no DXMT log yet: starting_game, game=yes" eval '[ "$(ss stage)/$(ss game)" = starting_game/yes ]'
+printf 'info:  Found config file: x\ninfo:  Using feature level D3D_FEATURE_LEVEL_11_1\n' >"$LOGS/Gw2-64_d3d11.log"
+touch -t "$(date -r $((T0 - 600)) '+%Y%m%d%H%M.%S')" "$LOGS/Gw2-64_d3d11.log"
+check "  a DXMT log from before the session doesn't count" [ "$(ss stage)" = starting_game ]
+touch "$LOGS/Gw2-64_d3d11.log"
+check "the device is there, no frame yet: loading" [ "$(ss stage)" = loading ]
+echo 'info:  Present pacing: mode=vsync rate=60.0 refresh=60.00 cap=60 interval=1' >>"$LOGS/Gw2-64_d3d11.log"
+check "the first present: playing" [ "$(ss stage)" = playing ]
+check "  game_elapsed from the game process (the watcher hasn't seen it yet)" eval 'e=$(ss game_elapsed); [ -n "$e" ] && [ "$e" -le 5 ]'
+GS=$(($(date +%s) - 72)) session_file playing
+check "  game_elapsed from the watcher's game_started" eval 'e=$(ss game_elapsed); [ "$e" -ge 72 ] && [ "$e" -le 75 ]'
+check "  quit_steam=yes from the watcher, closing=no while the game runs" eval '[ "$(ss quit_steam)/$(ss closing)" = yes/no ]'
+kill $gp 2>/dev/null; wait $gp 2>/dev/null
+mv -f "$SANDBOX/gw2-loader-copy" "$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe"
+session_file grace
+check "the game quit, the watcher's grace: stage=none, closing=yes" eval '[ "$(ss stage)/$(ss closing)/$(ss game)" = none/yes/no ]'
+check "  status: session=live while Steam runs" [ "$(st session)" = live ]
+session_file closing_steam
+check "  closing_steam: closing=yes" [ "$(ss closing)" = yes ]
+QS=no session_file closing_steam
+check "  quit_steam=no (Steam's window, or the setting off): closing=no" [ "$(ss closing)" = no ]
+QS=no session_file grace
+check "a restart's grace with Steam staying: stage=none, closing=no, but watching=yes" eval '[ "$(ss stage)/$(ss closing)/$(ss watching)" = none/no/yes ]'
+cp "$SANDBOX/sleeper" "$SANDBOX/gw2-loader-tmp" && mv "$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe" "$SANDBOX/gw2-loader-copy"
+mv "$SANDBOX/gw2-loader-tmp" "$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe"
+"$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe" 120 & gp=$!
+sleep 0.3
+check "  the game back within the grace: playing again" eval '[ "$(ss stage)/$(ss game)" = playing/yes ]'
+kill $gp 2>/dev/null; wait $gp 2>/dev/null
+mv -f "$SANDBOX/gw2-loader-copy" "$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe"
+session_file closing_steam
+check "show-steam while the watcher quits Steam: refused, no request, nothing started" eval ': >"$STANDIN_LOG"; ! g show-steam >/dev/null 2>&1 && ! has "$STANDIN_LOG" "steam://open/main" && [ ! -s "$AD/session.req" ]'
+session_file waiting_game
+: >"$STANDIN_LOG"
+answer accept & ap=$!
+out=$(g show-steam 2>&1); wait $ap
+check "show-steam during the start: a 'shown' request, never a write of the session" eval '[ "$(cat "$AD/session.req")" = shown ]'
+check "  the watcher accepts: Steam's window opens" eval 'has <(echo "$out") "^@done" && started && has "$STANDIN_LOG" "steam.exe steam://open/main"'
+check "  session-status: steam=window, quit_steam=no" eval '[ "$(ss steam)/$(ss quit_steam)" = window/no ]'
+: >"$AD/session.req"; : >"$STANDIN_LOG"
+session_file waiting_game
+answer refuse & ap=$!
+out=$(g show-steam 2>&1) && rc=0 || rc=$?; wait $ap
+check "  the watcher refuses (it started quitting Steam): no window" eval '[ "$rc" != 0 ] && has <(echo "$out") "@error Steam is quitting" && ! has "$STANDIN_LOG" "steam://open/main"'
+: >"$AD/session.req"; : >"$STANDIN_LOG"
+session_file waiting_game
+out=$(GW2_ON_MAC_WATCH_POLL=0 g show-steam 2>&1) && rc=0 || rc=$?
+check "  the watcher doesn't answer: refused, no window (it might still quit that Steam)" eval '[ "$rc" != 0 ] && has <(echo "$out") "@error .*didn.t answer" && ! has "$STANDIN_LOG" "steam://open/main" && has "$LOGS/install.log" "Steam.s window stays shut"'
+: >"$AD/session.req"
+# (the lock held, the session not naming a running watcher yet: a Play handing the session over)
+wk=$wp; wp=$$; session_file waiting_game; wp=$wk
+out=$(GW2_ON_MAC_WATCH_POLL=0 g show-steam 2>&1) && rc=0 || rc=$?
+check "  the lock held, no watcher named yet (a Play handing over): refused, no request, no window" eval '[ "$rc" != 0 ] && has <(echo "$out") "@error .*handing the session over" && [ ! -s "$AD/session.req" ] && ! has "$STANDIN_LOG" "steam://open/main"'
+: >"$AD/session.req"
+session_file waiting_game
+kill $wp 2>/dev/null; wait $wp 2>/dev/null
+check "a dead watcher's unfinished session is over: Steam on its own is stage=none" eval '[ "$(ss stage)/$(ss closing)/$(ss quit_steam)/$(ss watching)" = none/no/no/no ]'
+check "  status: session=none (busy=steam)" [ "$(st session)/$(st busy)" = none/steam ]
+kill $lp 2>/dev/null; wait $lp 2>/dev/null
+: >"$STANDIN_LOG"
+check "show-steam with Steam running, no watcher: steam.exe steam://open/main through the engine" eval 'g show-steam | grep -q "^@done" && started && has "$STANDIN_LOG" "steam.exe steam://open/main"'
+kill $sp $hp 2>/dev/null; wait $sp $hp 2>/dev/null
+check "show-steam without Steam: refused" eval '! g show-steam >/dev/null 2>&1 && has <(g show-steam) "@error Steam isn.t running"'
+rm -rf "$AD/session" "$AD/session.req" "$AD/.session.lock" "$ENG/bin/steam.exe" "$ENG/bin/steamwebhelper.exe" "$LOGS/Gw2-64_d3d11.log"
+
+section "The frame-limiter hint (the game's GFXSettings, only read)"
+GFX="$BOTTLE/drive_c/users/crossover/AppData/Roaming/Guild Wars 2/GFXSettings.Gw2-64.exe.xml"
+mkdir -p "$(dirname "$GFX")"
+gfx() { printf '<?xml version="1.0" encoding="UTF-8"?>\n<GSA_SDK Version="2.1.18431650.0">\n    <GAMESETTINGS>\n        <OPTION Name="frameLimit" Registered="True" Type="Enum" Value="%s">\n            <ENUM EnumValue="unlimited"/>\n            <ENUM EnumValue="60"/>\n        </OPTION>\n        <OPTION Name="charModelLimit" Registered="True" Type="Enum" Value="highest">\n        </OPTION>\n        <OPTION Name="verticalSync" Registered="True" Type="Bool" Value="%s"/>\n    </GAMESETTINGS>\n</GSA_SDK>\n' "$1" "$2" >"$GFX"; }
+gfx 60 true
+check "Frame Limiter 60 with vsync: limiter_hint=yes, limiter_value=60" eval '[ "$(ss limiter_hint)/$(ss limiter_value)" = yes/60 ]'
+gfx 120 true
+check "  120 with vsync: yes (120)" eval '[ "$(ss limiter_hint)/$(ss limiter_value)" = yes/120 ]'
+gfx unlimited true
+check "  Unlimited with vsync: no" [ "$(ss limiter_hint)" = no ]
+gfx 60 false
+check "  60 without vsync: no" [ "$(ss limiter_hint)" = no ]
+sum=$(shasum "$GFX")
+g session-status >/dev/null
+check "  the file is only read" [ "$(shasum "$GFX")" = "$sum" ]
+rm -f "$GFX"
+check "  no settings file: no" [ "$(ss limiter_hint)" = no ]
+
 section "Repair and Troubleshooting"
 echo "something else" >"$ENG/lib/wine/dxgi/dxmt/x86_64-windows/d3d11.dll"
 check "graphics=other after a change in the engine" [ "$(st graphics)" = other ]

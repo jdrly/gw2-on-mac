@@ -190,10 +190,52 @@ func installer(_ state: String) -> Installer {
     i.operation = .uninstall
     i.phase = .working(.uninstall)
     i.stepIndex = 1
+  case let s where s.hasPrefix("session-"):
+    // after Play: the start's stages, Playing, Steam closing after the game (Session.swift)
+    st["busy"] = "steam"
+    // (ArenaNet's status while its game runs: game=no, busy=game; the panel must still follow it)
+    if s == "session-arenanet" { st["route"] = "arenanet"; st["game"] = "no"; st["busy"] = "game" }
+    i.session = session(String(s.dropFirst(8)))
   default: break
   }
   i.status = st
   return i
+}
+
+// A session as gw2om.sh session-status would report it
+@MainActor
+func session(_ state: String) -> Installer.LaunchSession {
+  var s = Installer.LaunchSession(fromPlay: true)
+  var v = ["route": "steam", "steam": "bg", "game": "no", "closing": "no", "quit_steam": "yes", "elapsed": "42",
+           "limiter_hint": "no", "limiter_value": "", "detail": "", "progress": "", "game_elapsed": ""]
+  var stage: Installer.Stage? = .checkingFiles
+  switch state {
+  case "starting":
+    // as the design: Steam signed in, then checks the game's files
+    v["detail"] = "Steam verifies Guild Wars 2 · 64%"; v["progress"] = "64"
+  case "updating":
+    stage = .updatingSteam; v["detail"] = "Steam updates itself · 23%"; v["progress"] = "23"; v["elapsed"] = "12"
+  case "signing-in":
+    // before the first sign-in: Steam's window shows
+    stage = .signingIn; v["steam"] = "window"; v["quit_steam"] = "no"; v["elapsed"] = "18"
+  case "loading":
+    stage = .loading; v["game"] = "yes"; v["elapsed"] = "71"
+  case "arenanet":
+    stage = .startingGame; v["route"] = "arenanet"; v["steam"] = "none"; v["quit_steam"] = "no"; v["game"] = "yes"
+    v["elapsed"] = "6"
+  case "playing":
+    stage = .playing; v["game"] = "yes"; v["game_elapsed"] = "72"; v["limiter_hint"] = "yes"; v["limiter_value"] = "60"
+  case "playing-nohint":
+    stage = .playing; v["game"] = "yes"; v["game_elapsed"] = "3725"; v["quit_steam"] = "no"
+  case "closing":
+    stage = nil; v["closing"] = "yes"; s.gameSeen = true
+  default: break
+  }
+  s.values = v
+  s.stage = stage
+  if state == "starting" { s.seen = [.startingSteam, .signingIn, .checkingFiles] }
+  if let stage { s.seen.insert(stage) }
+  return s
 }
 
 @MainActor
@@ -231,7 +273,66 @@ func renderAll(_ dir: URL, exports: URL?) async {
     ("main-arenanet-dark", "arenanet", true, nil),
     ("main-importing-light", "importing", false, nil),
     ("main-imported-light", "imported", false, nil),
+    ("main-starting-light", "session-starting", false, "7-starting.png"),
+    ("main-starting-dark", "session-starting", true, "7-starting-dark.png"),
+    ("main-playing-light", "session-playing", false, "8-playing.png"),
+    ("main-playing-dark", "session-playing", true, "8-playing-dark.png"),
+    ("main-closing-light", "session-closing", false, nil),
+    ("main-closing-dark", "session-closing", true, nil),
+    ("main-starting-updating-light", "session-updating", false, nil),
+    ("main-starting-signing-in-light", "session-signing-in", false, nil),
+    ("main-starting-loading-dark", "session-loading", true, nil),
+    ("main-starting-arenanet-light", "session-arenanet", false, nil),
+    ("main-playing-nohint-light", "session-playing-nohint", false, nil),
   ]
+  // the panel each session state must show (a model check: a wrong one fails the run)
+  let panels: [String: Installer.Panel] = ["session-starting": .starting, "session-updating": .starting,
+    "session-signing-in": .starting, "session-loading": .starting, "session-arenanet": .starting,
+    "session-playing": .playing, "session-playing-nohint": .playing, "session-closing": .ready]
+  for (state, want) in panels where installer(state).panel != want {
+    print("FAIL \(state): the panel is \(installer(state).panel), not \(want)")
+    exit(1)
+  }
+  // the session as the poller follows it: a restart's gap (the watcher's grace) keeps the session
+  // and its polling, the game back shows Playing again, the watcher's end ends it
+  do {
+    let i = installer("ready")
+    i.session = Installer.LaunchSession(fromPlay: false)
+    let steps: [([String: String], Bool, Installer.Panel)] = [
+      (["stage": "playing", "game": "yes", "watching": "yes"], true, .playing),
+      (["stage": "none", "game": "no", "closing": "no", "watching": "yes"], true, .ready),
+      (["stage": "loading", "game": "yes", "watching": "yes"], true, .starting),
+      (["stage": "playing", "game": "yes", "watching": "yes"], true, .playing),
+      (["stage": "none", "game": "no", "closing": "yes", "watching": "yes"], true, .ready),
+      (["stage": "none", "game": "no", "closing": "no", "watching": "no"], false, .ready),
+    ]
+    for (n, (values, goesOn, panel)) in steps.enumerated() {
+      let on = i.applySession(values)
+      guard on == goesOn, (i.session != nil) == goesOn, i.panel == panel else {
+        print("FAIL the session model, step \(n + 1): polling \(on), the panel \(i.panel), not \(goesOn) and \(panel)")
+        exit(1)
+      }
+    }
+  }
+  // a second Play while the poller still follows the first (the watcher's grace): the poller is
+  // replaced (its in-flight result dropped by generation) and the new one counts from the new Play
+  do {
+    let i = installer("ready")
+    i.followSession(fromPlay: true)
+    i.session?.started = Date(timeIntervalSince1970: 1_000)
+    let old = Task<Void, Never> { try? await Task.sleep(for: .seconds(60)) }
+    i.sessionTask = old
+    let generation = i.sessionGeneration
+    i.applySession(["stage": "none", "game": "no", "closing": "no", "watching": "yes"])
+    i.followSession(fromPlay: true)
+    let since = Int(i.session?.started.timeIntervalSince1970 ?? 0)
+    guard old.isCancelled, i.sessionGeneration > generation, since > 1_000,
+          i.sessionStatusArguments == ["session-status", "--since", String(since)], i.panel == .starting else {
+      print("FAIL a second Play during the grace: the poller \(old.isCancelled ? "replaced" : "kept"), "
+            + "\(i.sessionStatusArguments), the panel \(i.panel)")
+      exit(1)
+    }
+  }
   for (name, state, dark, design) in mains {
     let rep = await render(MainView(installer: installer(state), settings: settings()), size: size, dark: dark)
     write(rep, dir.appendingPathComponent(name + ".png"))

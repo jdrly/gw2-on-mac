@@ -35,6 +35,12 @@
 #                              Gw2-64.exe, then for its exit, and quits the Steam that Play started
 #                              in the background (Quit Steam when the game quits); play starts it
 #                              detached, one per session
+#   gw2om.sh session-status [--since EPOCH]
+#                              KEY=VALUE lines: how far the game's start is (stage, detail,
+#                              progress, elapsed, steam, game, closing, limiter_hint...), from
+#                              the session's processes, Steam's logs (their state lines only),
+#                              DXMT's log and the watcher's session file; the window polls it
+#   gw2om.sh show-steam        brings Steam's window up (steam.exe steam://open/main in the bottle)
 #   gw2om.sh settings          KEY=VALUE lines: the settings (Settings window) and their state
 #   gw2om.sh set K V           change one setting (see setting_valid)
 #   gw2om.sh check-setup FILE  is FILE ArenaNet's Gw2Setup-64.exe: a PE x86_64 executable with a
@@ -1289,6 +1295,7 @@ status() {
   echo "busy=$b"
   case "$b" in none) echo "busy_detail=" ;; *) echo "busy_detail=$(proc_names "$l" "$b")" ;; esac
   echo "uiscale=$(setting uiscale)"
+  echo "session=$(session_live)"
 }
 
 settings() {
@@ -2008,6 +2015,254 @@ cmd_play() {
   echo "@done Starting Guild Wars 2."
 }
 
+# --- The session's stages (session-status, which the window polls every second while the game
+# starts and runs)
+#
+# Stages, in order: starting_steam, updating_steam, signing_in, checking_files (Steam's route),
+# starting_game, loading, playing; none when no start is under way (Steam on its own, or nothing).
+# Steam's logs are read only for their state lines (since the session's start) and nothing of them
+# is printed: no account names or IDs ever leave this function.
+
+# since <log> <stamp>: Steam's log lines from "[<stamp>]" on (local time, as Steam writes it)
+since() { awk -v t="[$2]" '/^\[2[0-9][0-9][0-9]-/ && substr($0, 1, 21) >= t' "$1" 2>/dev/null || true; }
+# etime_seconds <ps etime>: [[dd-]hh:]mm:ss as seconds
+etime_seconds() {
+  echo "$1" | awk '{ d = 0; t = $0
+    if (index(t, "-")) { d = substr(t, 1, index(t, "-") - 1); t = substr(t, index(t, "-") + 1) }
+    n = split(t, p, ":"); s = 0; for (i = 1; i <= n; i++) s = s * 60 + p[i]; print d * 86400 + s }'
+}
+
+# The game's own Frame Limiter at a value together with vsync: under Wine it lands just under the
+# display's rate (58 instead of 60); Unlimited with vsync keeps a steady 60. Sets LIMIT (the
+# Frame Limiter's value, or empty) and LIMIT_HINT (yes|no). The game's settings file is only read.
+limiter_state() {
+  local gfx vsync
+  gfx="$BOTTLE/drive_c/users/$(bottle_user)/AppData/Roaming/Guild Wars 2/GFXSettings.Gw2-64.exe.xml"
+  LIMIT=$(sed -n 's/.*<OPTION Name="frameLimit"[^>]*Value="\([^"]*\)".*/\1/p' "$gfx" 2>/dev/null | head -1 || true)
+  vsync=$(sed -n 's/.*<OPTION Name="verticalSync"[^>]*Value="\([^"]*\)".*/\1/p' "$gfx" 2>/dev/null | head -1 || true)
+  LIMIT_HINT=no
+  if [ -n "$LIMIT" ] && [ "$LIMIT" != unlimited ] && [ "$vsync" = true ]; then LIMIT_HINT=yes; fi
+}
+
+# Steam updating or verifying itself (logs/bootstrap_log.txt since <stamp>): sets UPD (no, update
+# or verify) and UPD_PCT. Its verification at each start is usually done within the second; a
+# damaged install's takes longer, and is followed by the update that repairs it.
+steam_update_state() {
+  local last a b
+  UPD=no UPD_PCT=""
+  last=$(since "$STEAM_DIR/logs/bootstrap_log.txt" "$1" |
+    grep -E '\] (Downloading update|Download complete|Extracting package|Installing update|Cleaning up|Update complete|Verifying installation|Verifying file sizes|Verifying all executable|Package file|Unable to read and verify|uninstalled manifest found|Verification complete|Nothing to do|Shutdown|Startup - )' |
+    tail -1 | cut -c23- || true)
+  case "$last" in
+    "Verifying"*|"Package file"*|"Unable to read and verify"*|"uninstalled manifest found"*) UPD=verify; return ;;
+  esac
+  case "$last" in
+    "Downloading update ("*)
+      UPD=update
+      a=$(echo "$last" | sed -n 's/^Downloading update (\([0-9,]*\) of \([0-9,]*\) KB).*/\1/p' | tr -d ,)
+      b=$(echo "$last" | sed -n 's/^Downloading update (\([0-9,]*\) of \([0-9,]*\) KB).*/\2/p' | tr -d ,)
+      if [ -n "$a" ] && [ -n "$b" ] && [ "$b" -gt 0 ]; then UPD_PCT=$((a * 100 / b)); fi ;;
+    "Downloading update"*) UPD=update ;;
+    "Download complete"*|"Extracting package"*|"Installing update"*|"Cleaning up"*) UPD=update UPD_PCT=100 ;;
+  esac
+}
+
+# Steam checking or updating the game (logs/content_log.txt since <stamp>, its lines for app
+# 1284210): sets CONTENT (verify|update|none) and CONTENT_PCT (an update's download, from the
+# appmanifest)
+steam_content_state() {
+  local last
+  CONTENT=none CONTENT_PCT=""
+  last=$(since "$STEAM_DIR/logs/content_log.txt" "$1" |
+    grep -E "AppID $GW2_APPID (state changed|update changed|update started|update queued|scheduler update|finished update|update canceled|update stopped)" |
+    tail -1 | cut -c23- || true)
+  case "$last" in
+    *"finished update"*|*"update canceled"*|*"update stopped"*|*"App Running"*) ;;
+    *Validating*|*Verifying*) CONTENT=verify ;;
+    *Downloading*|*Staging*|*Committing*|*Preallocating*|*"Update Running"*|*"Running Update"*|*"update started"*|*"Update Queued"*|*"update queued"*|*Reconfiguring*)
+      CONTENT=update
+      game_state
+      if [ -n "$GAME_TOTAL" ] && [ "${GAME_TOTAL:-0}" -gt 0 ] 2>/dev/null; then CONTENT_PCT=$((GAME_BYTES * 100 / GAME_TOTAL)); fi ;;
+  esac
+}
+
+# Steam is signed in (logs/connection_log.txt since <stamp>): only the state word of its lines
+# ("[Logged On, ...]") is read
+steam_signed_in() {
+  [ "$(since "$STEAM_DIR/logs/connection_log.txt" "$1" | sed -n 's/^\[[^]]*\] \[\([A-Za-z ]*\), .*/\1/p' | tail -1)" = "Logged On" ]
+}
+
+# session_live: live while the watcher follows the session (it waits for the game, follows it,
+# waits through a restart's grace or closes Steam); none otherwise, Steam idling on its own included
+# (the polled paths, session-status and status, tell the watcher by its process alone: probing its
+# lock every second could make a Play that is just starting miss it)
+session_live() {
+  if [ -f "$SESSION" ] && watcher_proc "$(session_get watcher_pid)"; then
+    case "$(session_get stage)" in
+      waiting_game|playing|grace|closing_steam) echo live; return ;;
+    esac
+  fi
+  echo none
+}
+
+cmd_session_status() {
+  local since=""
+  if [ "${1:-}" = --since ]; then since=${2:-}; fi
+  local l now t0="" stamp="" s_stage="" alive=no pending=no gpid et dx
+  local stage=none detail="" progress="" elapsed="" game_elapsed="" steam=none game=no closing=no
+  local route quit
+  l=$(proc_list)
+  now=$(date +%s)
+  route=$(state route || true)
+  # the watcher's session (its file stays after the session; a dead watcher's unfinished one is over)
+  if [ -f "$SESSION" ]; then
+    s_stage=$(session_get stage)
+    t0=$(session_get started)
+    if watcher_proc "$(session_get watcher_pid)"; then alive=yes; fi
+    [ -z "$(session_get route)" ] || route=$(session_get route)
+  fi
+  # (without a watcher: the start play recorded in session.env)
+  if [ -z "$t0" ] && [ -f "$LOGS/session.env" ]; then
+    t0=$(date -j -f '%Y-%m-%d %H:%M:%S' "$(sed -n 's/^STARTED=//p' "$LOGS/session.env" | head -1)" +%s 2>/dev/null || true)
+  fi
+  # (--since: the window's Play, later than the session's start when that Play joined it)
+  case "$since" in ''|*[!0-9]*) ;; *) if [ -z "$t0" ] || [ "$since" -gt "$t0" ]; then t0=$since; fi ;; esac
+  if [ -n "$t0" ]; then
+    stamp=$(date -r "$t0" '+%Y-%m-%d %H:%M:%S')
+    elapsed=$((now - t0))
+  fi
+  quit=no
+  if [ "$alive" = yes ] && [ "$(session_get quit_steam)" = yes ]; then quit=yes; fi
+  # A start is under way: the watcher waits for the game, or (no watcher) play ran in the last
+  # 15 minutes, the watcher's own wait
+  if [ -f "$SESSION" ]; then
+    [ "$alive" = yes ] && [ "$s_stage" = waiting_game ] && pending=yes
+  elif [ -n "$elapsed" ] && [ "$elapsed" -lt 900 ]; then
+    pending=yes
+  fi
+  if printf '%s\n' "$l" | grep -q '^steam '; then
+    steam=bg
+    case "$(session_get steam_window)" in
+      shown) steam=window ;;
+      hidden) ;;
+      *) since "$STEAM_DIR/logs/bootstrap_log.txt" "${stamp:-0000}" | grep 'Startup - Steam Client launched with' | tail -1 |
+           grep -q -- ' -silent' || steam=window ;;
+    esac
+  fi
+  gpid=$(printf '%s\n' "$l" | awk '$1 == "game" { print $2; exit }')
+  if [ -n "$gpid" ]; then
+    game=yes
+    dx="$LOGS/Gw2-64_d3d11.log"
+    # (DXMT's log of this session: written since its start)
+    if [ -f "$dx" ] && { [ -z "$t0" ] || [ "$(stat -f %m "$dx")" -ge "$t0" ]; }; then
+      if grep -q -m1 '^info:  Present pacing' "$dx"; then stage=playing
+      elif grep -q -m1 'Using feature level' "$dx"; then stage=loading
+      else stage=starting_game; fi
+    else
+      stage=starting_game
+    fi
+    if [ "$stage" = playing ] && [ -n "$(session_get game_started)" ] && [ "$alive" = yes ]; then
+      game_elapsed=$((now - $(session_get game_started)))
+    else
+      et=$(ps -o etime= -p "$gpid" 2>/dev/null | tr -d ' ' || true)
+      [ -z "$et" ] || game_elapsed=$(etime_seconds "$et")
+    fi
+  elif [ "$pending" = yes ]; then
+    if [ "$route" = arenanet ]; then
+      stage=starting_game
+    elif [ "$steam" = none ]; then
+      stage=starting_steam
+    else
+      steam_update_state "$stamp"
+      steam_content_state "$stamp"
+      if [ "$UPD" != no ]; then
+        stage=updating_steam
+        if [ "$UPD" = verify ]; then detail="Steam checks its own files"; else detail="Steam updates itself${UPD_PCT:+ · $UPD_PCT%}"; fi
+        progress=$UPD_PCT
+      elif [ "$CONTENT" != none ]; then
+        stage=checking_files
+        if [ "$CONTENT" = verify ]; then detail="Steam verifies Guild Wars 2"; else detail="Steam updates Guild Wars 2"; fi
+        detail="$detail${CONTENT_PCT:+ · $CONTENT_PCT%}"
+        progress=$CONTENT_PCT
+      elif steam_signed_in "$stamp"; then
+        stage=starting_game
+      elif printf '%s\n' "$l" | grep -qi '^steam .*steamwebhelper'; then
+        stage=signing_in
+      else
+        stage=starting_steam
+      fi
+    fi
+  fi
+  # The watcher closes Steam after the game (its grace, then -shutdown)
+  if [ "$game" = no ] && [ "$quit" = yes ] && [ "$steam" != none ]; then
+    case "$s_stage" in grace|closing_steam) closing=yes ;; esac
+  fi
+  limiter_state
+  echo "stage=$stage"
+  echo "detail=$detail"
+  echo "progress=$progress"
+  echo "elapsed=$elapsed"
+  echo "game_elapsed=$game_elapsed"
+  echo "route=$route"
+  echo "steam=$steam"
+  echo "game=$game"
+  echo "closing=$closing"
+  echo "quit_steam=$quit"
+  # (the window keeps polling while it does: a game restarted within the grace shows again)
+  echo "watching=$([ "$(session_live)" = live ] && echo yes || echo no)"
+  echo "limiter_hint=$LIMIT_HINT"
+  echo "limiter_value=$LIMIT"
+}
+
+# Show Steam: its main window, through the running Steam (a second steam.exe hands the URL over)
+cmd_show_steam() {
+  local n h i=0 lim ask
+  open_log
+  log "---- show-steam"
+  [ "$(state route)" = steam ] || die "Guild Wars 2 doesn't start through Steam here."
+  printf '%s\n' "$(proc_list)" | grep -q '^steam ' || die "Steam isn't running."
+  # Steam's window up: the session leaves this Steam open after the game, as a Steam whose window
+  # showed from the start. The watcher decides (a "shown" request, as Play's join); while it
+  # already quits Steam, the window doesn't come up.
+  if lock_held || watcher_proc "$(session_get watcher_pid)"; then
+    [ "$(session_get stage)" != closing_steam ] || die "Steam is quitting after the game."
+    # Steam's window opens only once the watcher has answered (or is gone, and with it whoever
+    # would quit Steam): on no answer it stays shut, so the watcher can't quit a Steam the user
+    # brought up. (The watcher looks every WATCH_POLL seconds; as Play's join, it must run and
+    # name itself in the session first: a Play that has just taken the lock is still writing the
+    # session and emptying the requests.)
+    lim=$(awk -v p="$WATCH_POLL" 'BEGIN { print int((p * 3 + 3) * 10) }')
+    ask=yes
+    until watcher_proc "$(session_get watcher_pid)" && [ "$(session_get stage)" != done ]; do
+      lock_held || { ask=no; break; }
+      i=$((i + 1))
+      [ $i -lt "$lim" ] || die "GW2 on Mac is still handing the session over. Try Show Steam again in a moment."
+      sleep 0.1
+    done
+    if [ "$ask" = yes ]; then
+      n=$(session_request shown)
+      i=0
+      while :; do
+        h=$(session_get requests)
+        if [ "${h:-0}" -ge "$n" ]; then
+          [ "$(session_get stage)" != closing_steam ] || die "Steam is quitting after the game."
+          log "show-steam: the session leaves Steam open after the game (quit_steam=$(session_get quit_steam))"
+          break
+        fi
+        lock_held || break
+        i=$((i + 1))
+        if [ $i -ge "$lim" ]; then
+          log "show-steam: the watcher did not answer the request; Steam's window stays shut"
+          die "GW2 on Mac's session didn't answer. Try Show Steam again in a moment."
+        fi
+        sleep 0.1
+      done
+    fi
+  fi
+  launch "$STEAM_EXE" steam://open/main
+  echo "@done Steam's window opens."
+}
+
 cmd_env() {
   game_env
   gamemode_link >/dev/null 2>&1 || true
@@ -2070,6 +2325,8 @@ case "${1:-}" in
   uninstall) cmd_uninstall ;;
   play) cmd_play ;;
   watch-session) shift; cmd_watch_session "$@" ;;
+  session-status) shift; cmd_session_status "$@" ;;
+  show-steam) cmd_show_steam ;;
   settings) settings ;;
   set) shift; cmd_set "$@" ;;
   check-setup) shift; cmd_check_setup "$@" ;;
