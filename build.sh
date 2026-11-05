@@ -15,6 +15,8 @@
 #                                      (the interface addon)
 #   Contents/Resources/helpers/procpaths  every process's real executable (gw2om.sh's process
 #                                      check; src/helpers/procpaths.c)
+#   Contents/Resources/helpers/sessionlock  the game session's kernel lock (gw2om.sh's watcher;
+#                                      src/helpers/sessionlock.c)
 #   Contents/Resources/Fonts/, Art/    the design's typefaces (SIL OFL) and artwork
 #   Contents/Resources/Licenses/       licences of the app and everything bundled
 # The Wine engine is not bundled: gw2om.sh downloads it at install time from athei's wine-build
@@ -173,6 +175,8 @@ chmod 755 "$C/dxmt/x86_64-unix/winemetal.so" "$C/heat/ntdll.so" "$C/heat/wineser
 # The process lister gw2om.sh tells its own Wine processes by (proc_pidpath)
 mkdir -p "$R/helpers"
 clang -O2 -arch arm64 -mmacosx-version-min=$MACOS_MIN -o "$R/helpers/procpaths" src/helpers/procpaths.c
+# The session's lock (flock on an inherited descriptor: one watcher per game session)
+clang -O2 -arch arm64 -mmacosx-version-min=$MACOS_MIN -o "$R/helpers/sessionlock" src/helpers/sessionlock.c
 
 # Licences: the app's own (zlib), the overview of what is bundled and what is downloaded
 # (THIRD_PARTY_NOTICES.md), and each component's
@@ -251,6 +255,7 @@ xattr -cr "$APP"
 fw="$APP/Contents/Frameworks/Sparkle.framework"
 for f in "$fw/Versions/B/Autoupdate" "$fw/Versions/B/Updater.app" "$fw"; do codesign --force --sign - "$f"; done
 codesign --force --sign - "$R/helpers/procpaths"
+codesign --force --sign - "$R/helpers/sessionlock"
 codesign --force --sign - "$APP"
 codesign --verify --strict "$APP"
 echo "Built $APP ($(du -sh "$APP" | cut -f1))"

@@ -1532,18 +1532,19 @@ steam_decision() {
 }
 
 # The session's lock: a kernel lock (flock) on the file $WATCH_LOCK, taken on file descriptor 9
-# through macOS's perl (bash has no flock). The lock belongs to the open file, so the shell keeps
-# it after perl exits, the watcher inherits it from Play (the handoff), and the kernel releases it
-# when the last holder exits: no stale lock to recover. Wine never gets fd 9 (launch: 9>&-).
-PERL=/usr/bin/perl
+# by the app's own helper (helpers/sessionlock; bash has no flock). The lock belongs to the open
+# file, so the shell keeps it after the helper exits, the watcher inherits it from Play (the
+# handoff), and the kernel releases it when the last holder exits: no stale lock to recover. Wine
+# never gets fd 9 (launch: 9>&-).
+LOCKER="$RES/helpers/sessionlock"
 # lock9: takes the lock on fd 9 (open on $WATCH_LOCK), without waiting
-lock9() { "$PERL" -MFcntl=:flock -e 'open(my $f, ">&=", 9) or exit 2; flock($f, LOCK_EX | LOCK_NB) or exit 1; exit 0' 2>/dev/null; }
+lock9() { "$LOCKER" take 9 2>/dev/null; }
 # open_lock: fd 9 on the lock file (one left as a folder by an earlier build goes)
 open_lock() { [ ! -d "$WATCH_LOCK" ] || rm -rf "$WATCH_LOCK"; exec 9>>"$WATCH_LOCK"; }
 # lock_held: another process holds the lock
 lock_held() {
   [ -f "$WATCH_LOCK" ] || return 1
-  "$PERL" -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or exit 1; flock($f, LOCK_EX | LOCK_NB) and exit 1; exit 0' "$WATCH_LOCK" 2>/dev/null
+  "$LOCKER" held "$WATCH_LOCK" 2>/dev/null
 }
 # watcher_proc <pid>: a running watch-session
 watcher_proc() { [ -n "$1" ] && ps -p "$1" -o command= 2>/dev/null | grep -q 'gw2om\.sh watch-session'; }
@@ -1652,7 +1653,7 @@ cmd_watch_session() {
   if [ "${1:-}" = --handoff ]; then
     lock9 || { log "session: the watcher (pid $$) was not handed the session's lock"; return 0; }
   else
-    [ -f "$SESSION" ] && [ -x "$PERL" ] || { echo "@done No session to follow."; return 0; }
+    [ -f "$SESSION" ] && [ -x "$LOCKER" ] || { echo "@done No session to follow."; return 0; }
     open_lock
     lock9 || { echo "@done Another watcher follows this session (pid $(session_get watcher_pid))."; return 0; }
     case "$(session_get stage)" in ''|done) echo "@done No session to follow."; return 0 ;; esac
@@ -1964,8 +1965,8 @@ cmd_play() {
   if [ "$route" = steam ]; then
     if [ "$(setting steambg)" = on ] && steam_remembers_login; then silent=-silent window=hidden; else window=shown; fi
   fi
-  if [ -z "$DRY" ] && [ ! -x "$PERL" ]; then
-    log "session: no $PERL for the session's lock; no watcher (Steam stays open after the game)"
+  if [ -z "$DRY" ] && [ ! -x "$LOCKER" ]; then
+    warn "GW2 on Mac's session helper is missing ($LOCKER): Steam stays open after the game. Reinstall GW2 on Mac."
   elif [ -z "$DRY" ]; then
     open_lock
     for try in 1 2 3; do

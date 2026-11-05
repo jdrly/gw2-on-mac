@@ -162,7 +162,7 @@ package() {
   ditto "$SRC" "$APP"
   xattr -cr "$APP"
 
-  # Inside out: the process lister (helpers/procpaths), the Mach-O pieces gw2om.sh puts into the
+  # Inside out: the process lister and the session's lock (helpers/procpaths, sessionlock), the Mach-O pieces gw2om.sh puts into the
   # engine (DXMT's winemetal.so, the heat ntdll.so and wineserver, winemac.so and win32u.so: Wine
   # loads or runs them itself; every Mach-O of a notarized app is signed; DXMT's PE DLLs are not
   # Mach-O), Sparkle in its documented order (Autoupdate, Updater.app, the framework, each with
@@ -171,6 +171,7 @@ package() {
   echo "[release] signing nested code"
   local fw stage c
   sign "$APP/Contents/Resources/helpers/procpaths"
+  sign "$APP/Contents/Resources/helpers/sessionlock"
   c="$APP/Contents/Resources/components"
   sign "$c/dxmt/x86_64-unix/winemetal.so"
   sign "$c/heat/ntdll.so"

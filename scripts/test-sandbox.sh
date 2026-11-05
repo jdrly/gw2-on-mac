@@ -464,12 +464,22 @@ check "a lock file left behind doesn't block: a new session (replay=0)" eval 'wa
 watch_done
 
 # the lock held, but no watcher answers (a stuck holder): Play doesn't start the game (fails closed)
-/usr/bin/perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or exit 1; flock($f, LOCK_EX) or exit 1; sleep 30' "$AD/.session.lock" & hp=$!
+"$APP/Contents/Resources/helpers/sessionlock" hold "$AD/.session.lock" 30 & hp=$!
 sleep 0.3
 : >"$STANDIN_LOG"
 "$G" play >"$SANDBOX/stuck.txt" 2>&1 && rc=0 || rc=$?
 check "the session's lock held without an answer: Play refuses and starts nothing" eval '[ "$rc" != 0 ] && has "$SANDBOX/stuck.txt" "@error GW2 on Mac.s last session did not answer" && ! has "$STANDIN_LOG" "^wine "'
 kill $hp 2>/dev/null; wait $hp 2>/dev/null
+
+# the lock's helper: bundled and signed; without it, the game starts, with no watcher (Steam stays open)
+LK="$APP/Contents/Resources/helpers/sessionlock"
+check "helpers/sessionlock is bundled and signed" eval '[ -x "$LK" ] && codesign --verify "$LK" 2>/dev/null'
+watch_done
+mv "$LK" "$SANDBOX/sessionlock.aside"
+: >"$STANDIN_LOG"; wp=$(sess watcher_pid)
+"$G" play >"$SANDBOX/nolock.txt" 2>&1; started
+check "  without it: Play warns, starts the game, no watcher" eval 'has "$SANDBOX/nolock.txt" "^@warn .*session helper is missing" && has "$SANDBOX/nolock.txt" "^@done" && has "$STANDIN_LOG" "^wine " && [ "$(sess watcher_pid)" = "$wp" ] && [ "$(watchers)" = 0 ]'
+mv "$SANDBOX/sessionlock.aside" "$LK"
 
 # a Steam that ignores -shutdown: wineserver -k (a stand-in wineserver that ends it)
 touch "$SANDBOX/steam.stubborn"

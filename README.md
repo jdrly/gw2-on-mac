@@ -154,9 +154,8 @@ other settings, Play says Steam must quit first, because the game gets Steam's e
 **Steam quits after the game** (*Quit Steam when the game quits*, Settings › Game, on by default).
 Play records the session in `session` (next to `state`) and starts `gw2om.sh watch-session`
 detached, one per session, so it doesn't need the window. One per session: a kernel lock
-(`flock`, through macOS's `/usr/bin/perl`) on `.session.lock`, which Play takes and the watcher
-inherits, and which ends with the watcher (nothing stale to clean up; without perl, Play starts no
-watcher and Steam stays open). After Play's first version of `session`, the watcher is its only
+(`flock`, taken by the app's own helper `helpers/sessionlock`) on `.session.lock`, which Play takes
+and the watcher inherits, and which ends with the watcher (nothing stale to clean up). After Play's first version of `session`, the watcher is its only
 writer: others append a request to `session.req` (`join` from a Play, `shown` from Show Steam),
 which it applies in order.
 - It follows the session through the engine's own processes: it waits up to 15 minutes for
@@ -354,7 +353,7 @@ scripts/stage-components.sh    # copy DXMT, the heat Wine pieces, winemac and th
   (`brew install mingw-w64`) into `work/ui-scale/build` and runs its native test. Staging still
   takes the workspace's build of the same sources (the same but for the link timestamps).
 - `build.sh` checks `prebuilt/` again and compiles `src/native/*.swift` (arm64) and the
-  `procpaths` helper. It bundles the components, fonts, art and licences (`Resources/Licenses`,
+  `procpaths` and `sessionlock` helpers. It bundles the components, fonts, art and licences (`Resources/Licenses`,
   [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)), downloads Sparkle at a pinned version and
   sha256, and compiles the Icon Composer icon (`src/AppIcon.icon`) with actool into
   `Assets.car` plus the fallback `AppIcon.icns`.
@@ -427,7 +426,7 @@ Then move the app to the Bin.
 Not yet: GW2 on Mac publishes nothing so far. The pieces are SWTOR on Mac's, ready:
 
 - `scripts/release.sh` signs with Developer ID inside out (the bundled Mach-O components and
-  `procpaths`, Sparkle, the app; `src/entitlements/app.plist`), builds and notarizes the DMG, and
+  `procpaths` and `sessionlock`, Sparkle, the app; `src/entitlements/app.plist`), builds and notarizes the DMG, and
   builds and checks the Sparkle feed (`scripts/check-appcast.swift`, delta updates).
   - Every mode that creates or changes a GitHub release stops unless `GW2_ON_MAC_PUBLISH=1`.
   - The feed needs an app built with `GW2_ON_MAC_FEED_URL` (the latest release's `appcast.xml`)
@@ -447,6 +446,7 @@ src/native/              SwiftUI: App (model, menus), MainWindow, Settings, Play
 src/gw2om.sh             the backend (bash 3.2)
 src/collect-logs.sh      Collect Logs…
 src/helpers/procpaths.c  every process's real executable, for gw2om.sh's busy checks
+src/helpers/sessionlock.c  the game session's kernel lock (flock), for gw2om.sh's watcher
 src/fonts/, src/art/, src/icons/, src/AppIcon.icon, src/make-icon.swift, src/Info.plist
 addon/ui-scale/          the interface addon's source (version.dll) and its native test
 patches/                 the patches to Wine in the bundled ntdll.so, wineserver and winemac.so
