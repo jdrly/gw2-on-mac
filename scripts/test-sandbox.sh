@@ -507,10 +507,10 @@ OLD="[$(at $((now - 3600)))]" NEW="[$(at $((now - 30)))]"
 session_file() { { echo "route=steam"; echo "started_steam=yes"; [ -z "${SW-hidden}" ] || echo "steam_window=${SW-hidden}"; echo "quit_steam=${QS:-yes}"
   echo "watcher_pid=$wp"; echo "stage=$1"; echo "started=$T0"; echo "replay=0"; echo "game_started=${GS:-}"
   echo "requests=${RQ:-0}"; echo "updated=$now"; } >"$AD/session"; }
-# (the session's lock is a file with a kernel flock: a perl stand-in holds it; the stand-in
+# (the session's lock is a file with a kernel flock: the app's helper holds it; the stand-in
 # watcher's command line is "gw2om.sh watch-session", as watcher_proc looks for)
 rm -rf "$AD/.session.lock" && mkdir -p "$SANDBOX/watcher" && : >"$AD/session.req"
-/usr/bin/perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]); flock($f, LOCK_EX); sleep 120' "$AD/.session.lock" & lp=$!
+"$APP/Contents/Resources/helpers/sessionlock" hold "$AD/.session.lock" 120 & lp=$!
 printf '#!/bin/bash\nsleep 120 & wait\n' >"$SANDBOX/watcher/gw2om.sh" && chmod 755 "$SANDBOX/watcher/gw2om.sh"
 "$SANDBOX/watcher/gw2om.sh" watch-session & wp=$!
 sleep 0.3

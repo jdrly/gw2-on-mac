@@ -371,7 +371,7 @@ scripts/stage-components.sh    # copy DXMT, the heat Wine pieces, winemac and th
 Never against a real install, and never with Wine, Steam or the game running on Jan's screen.
 
 - `scripts/test-sandbox.sh` tests the backend of a built app end to end in
-  `work/app-sandbox/test` (256 checks). It uses a stand-in engine archive whose `bin/wine` only
+  `work/app-sandbox/test` (311 checks). It uses a stand-in engine archive whose `bin/wine` only
   pretends, plays Steam's and ArenaNet's downloads itself, and uses a clone of the game's own
   ArenaNet-signed `Gw2-64.exe` as the installer to check (`SIGNED_PE`, by default the one in
   the development workspace's bottle; without one those checks are skipped). It covers:
