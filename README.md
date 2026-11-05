@@ -40,7 +40,7 @@ app's Guild Wars 2 (CrossOver, Whisky, an app wrapper), cloned or copied into th
 original stays as it is. Every download of the game or Steam comes from Valve or ArenaNet; GW2 on
 Mac hosts nothing of the game.
 
-Status: version 0.1.0, built and tested in a sandbox. Nobody has run a real install yet (Jan
+Status: version 0.1.1, built and tested in a sandbox. Nobody has run a real install yet (Jan
 does the first one), and nothing is published.
 
 ## The window
@@ -242,7 +242,7 @@ items, nothing in `/Applications` besides the app itself):
 | `~/Library/Application Support/GW2 on Mac/engine/` | the Wine engine with GW2 on Mac's pieces (about 1 GB) | removed |
 | `…/GW2 on Mac/bottle/` | the game's Wine prefix: Steam, **the game's files** (about 75 GB; an APFS clone of your own when they came from the same disk, which takes no extra space until either changes), the game's own settings (and `GW2 on Mac backup <date>/` next to them after an import that replaced some) | removed, with the game |
 | `…/GW2 on Mac/gamemode/GW2.app` | the Game Mode bundle | removed |
-| `…/GW2 on Mac/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `session` | the settings, the route and stage, what was installed, DXMT's options, the last Play's session (its watcher's stage) | removed |
+| `…/GW2 on Mac/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `session`, `session.req`, `.session.lock` | the settings, the route and stage, what was installed, DXMT's options, the last Play's session (its watcher's stage), the requests to its watcher, its lock | removed |
 | `~/Library/Caches/GW2 on Mac/downloads/` | the engine archive, `SteamSetup.exe`, a copy of `Gw2Setup-64.exe` | removed |
 | `~/Library/Caches/GW2 on Mac/dxmt/Gw2-64.exe/` | DXMT's shader cache, pipeline archives and recorded pipelines for the game (`DXMT_CACHE_DIR` points DXMT here; another process, such as the launcher's `CefHost.exe`, gets its own folder next to it) | removed; *Reset the shader cache* empties it too |
 | `$(getconf DARWIN_USER_TEMP_DIR)winetemp-…/Gw2-64.exe` | the Game Mode link | removed |
@@ -357,7 +357,7 @@ scripts/stage-components.sh    # copy DXMT, the heat Wine pieces, winemac and th
   [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)), downloads Sparkle at a pinned version and
   sha256, and compiles the Icon Composer icon (`src/AppIcon.icon`) with actool into
   `Assets.car` plus the fallback `AppIcon.icns`.
-  - `GW2_ON_MAC_VERSION` sets the version (0.1.0; `X.Y.Z-dev.N` makes a development build, as
+  - `GW2_ON_MAC_VERSION` sets the version (0.1.1; `X.Y.Z-dev.N` makes a development build, as
     SWTOR on Mac's).
   - `GW2_ON_MAC_FEED_URL` and `GW2_ON_MAC_ED_PUBLIC_KEY` turn updates on.
 - The icon's layers: `swift src/make-icon.swift layers src/AppIcon.icon` (the wordmark; the
@@ -433,7 +433,7 @@ Not yet: GW2 on Mac publishes nothing so far. The pieces are SWTOR on Mac's, rea
     and `GW2_ON_MAC_ED_PUBLIC_KEY`.
   - `--sign-only` and `--no-notarize` work locally today.
   - Untested: `wineserver` under the hardened runtime.
-- Release notes: [`release-notes/`](release-notes) in SWTOR on Mac's format (`0.1.0.md`).
+- Release notes: [`release-notes/`](release-notes) in SWTOR on Mac's format (`0.1.0.md`, `0.1.1.md`).
 - Versioning: `X.Y.Z` for releases, `X.Y.Z-dev.N` for development builds, with SWTOR on Mac's
   bundle-version scheme. The `release/` output is ignored by git.
 
