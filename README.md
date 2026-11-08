@@ -238,7 +238,9 @@ crash log dumps the game's threads and modules, and I can't be sure it holds no 
 names. If I ask for it, look through it before you attach it.
 
 Send the zip with a short description to Pharaphobia on [Discord](https://discord.gg/AnV3fZWz2b),
-or attach it to a [GitHub issue](https://github.com/jdrly/gw2-on-mac/issues). Please don't send it
+or attach it to a [GitHub issue](https://github.com/jdrly/gw2-on-mac/issues). The *Discord* button
+at the top of the window opens the server, and it's also the place for arcdps and addon
+questions. Please don't send it
 to ArenaNet's support.
 
 ## What it puts on your Mac
@@ -665,7 +667,7 @@ the same source, which differs only in link timestamps.
 downloads Sparkle at a pinned version and sha256, and compiles the Icon Composer icon
 `src/AppIcon.icon` with actool into `Assets.car` and a fallback `AppIcon.icns`.
 
-- `GW2_ON_MAC_VERSION` sets the version, 0.1.1 by default. `X.Y.Z-dev.N` makes a development build,
+- `GW2_ON_MAC_VERSION` sets the version, 0.1.2 by default. `X.Y.Z-dev.N` makes a development build,
   as in SWTOR on Mac.
 - `GW2_ON_MAC_FEED_URL` and `GW2_ON_MAC_ED_PUBLIC_KEY` turn updates on. Without them Sparkle stays
   off, which is normal for local builds.

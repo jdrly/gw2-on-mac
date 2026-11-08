@@ -121,8 +121,8 @@ func compare(design: URL, render: NSBitmapImageRep, to url: URL) {
 func installer(_ state: String) -> Installer {
   let i = Installer()
   var st: [String: String] = [
-    "version": "0.1.1", "engine": "cx-26.3.0-8", "engine_title": "CrossOver 26.3 · Wine 11", "rosetta": "yes",
-    "arch": "arm64", "installed": "yes", "installed_version": "0.1.1", "engine_installed": "yes", "graphics": "yes",
+    "version": "0.1.2", "engine": "cx-26.3.0-8", "engine_title": "CrossOver 26.3 · Wine 11", "rosetta": "yes",
+    "arch": "arm64", "installed": "yes", "installed_version": "0.1.2", "engine_installed": "yes", "graphics": "yes",
     "gamemode": "yes", "route": "steam", "steam": "yes", "game": "yes", "stage": "finished",
     "disk_free": "412000000000", "disk_needed": "75000000000", "busy": "none", "uiscale": "off",
   ]

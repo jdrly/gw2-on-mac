@@ -183,8 +183,25 @@ struct WindowBackground: View {
   }
 }
 
+// A chip on the header's ink: an icon and a label on dark glass, for the header's buttons
+struct HeaderChip: View {
+  let icon: String
+  let label: String
+
+  var body: some View {
+    HStack(spacing: 6) {
+      LucideIcon(name: icon, size: 13).foregroundStyle(Brand.badgeText)
+      Text(label).font(.body(12, .semibold)).bodyBox(12).foregroundStyle(Brand.headerText)
+    }
+    .padding(.vertical, 5).padding(.horizontal, 10)
+    .background(Color(hex: 0x1E1813, alpha: 0x99 / 255), in: .rect(cornerRadius: 5))
+    .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color(hex: 0xF6E6C4, alpha: 0x55 / 255), lineWidth: 1))
+  }
+}
+
 struct Header: View {
   @State private var showNotice = false
+  @Environment(\.openURL) private var openURL
 
   var body: some View {
     ZStack(alignment: .topLeading) {
@@ -200,14 +217,18 @@ struct Header: View {
         #if GW2_DEV
         DevBuildBadge()
         #endif
+        // Discord, where I answer questions, arcdps and addon questions and bug reports. Lucide's
+        // chat bubble, as on gw2onmac.com, not Discord's logo.
+        Button { openURL(Support.discord) } label: {
+          HeaderChip(icon: "message-circle", label: "Discord")
+        }
+        .buttonStyle(.plain)
+        .pointerStyle(.link)
+        .help("Help, arcdps and addon questions, and bug reports: Pharaphobia on Discord")
+        .accessibilityLabel("Discord")
+        .accessibilityHint("Opens the Discord server for help in your browser")
         Button { showNotice.toggle() } label: {
-          HStack(spacing: 6) {
-            LucideIcon(name: "shield-alert", size: 13).foregroundStyle(Brand.badgeText)
-            Text("Unofficial fan project").font(.body(12, .semibold)).bodyBox(12).foregroundStyle(Brand.headerText)
-          }
-          .padding(.vertical, 5).padding(.horizontal, 10)
-          .background(Color(hex: 0x1E1813, alpha: 0x99 / 255), in: .rect(cornerRadius: 5))
-          .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color(hex: 0xF6E6C4, alpha: 0x55 / 255), lineWidth: 1))
+          HeaderChip(icon: "shield-alert", label: "Unofficial fan project")
         }
         .buttonStyle(.plain)
         .pointerStyle(.link)
