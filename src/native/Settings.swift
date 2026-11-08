@@ -5,9 +5,10 @@
 // makes the game's environment from them at each start (gw2om.sh play). They take effect the next
 // time the game starts.
 //
-// No Keyboard or Mouse pane: those settings (SWTOR on Mac's game keys by keyboard position and raw
-// mouse-look) are patches of Wine's Mac driver, and GW2 on Mac's winemac.so carries only the
-// launcher fix. Porting them is a separate task.
+// Mouse is SWTOR on Mac's raw mouse-look: an option of the app's build of Wine's Mac driver, which
+// gw2om.sh turns on for Gw2-64.exe in the bottle's registry (only while no session runs, like
+// Retina). The driver also has SWTOR on Mac's game keys by keyboard position; there is no Keyboard
+// pane, and nothing turns it on.
 
 import AppKit
 import SwiftUI
@@ -103,11 +104,14 @@ final class GameSettings {
   static let interfaceScales: [(String, String)] = [
     ("1.5", "1.5×"), ("1.75", "1.67×"), ("1.8", "1.83×"), ("2.0", "2.06×"),
   ]
+  // Mouse-look speed: a factor on the macOS pointer's speed (gw2om.sh MOUSE_SPEEDS)
+  static let mouseSpeeds: [(String, String)] = ["0.5", "0.75", "1", "1.25", "1.5", "1.75", "2", "2.5", "3"]
+    .map { ($0, $0 == "1" ? "1× (pointer speed)" : "\($0)×") }
 }
 
 // The panes, in sidebar order
 enum SettingsPane: String, CaseIterable, Identifiable {
-  case graphics, performance, interface, game, updates, troubleshooting
+  case graphics, performance, interface, game, mouse, updates, troubleshooting
 
   var id: Self { self }
 
@@ -117,6 +121,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     case .performance: "Performance"
     case .interface: "Interface"
     case .game: "Game"
+    case .mouse: "Mouse"
     case .updates: "Updates"
     case .troubleshooting: "Troubleshooting"
     }
@@ -128,6 +133,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     case .performance: "flame"
     case .interface: "type"
     case .game: "swords"
+    case .mouse: "mouse"
     case .updates: "refresh-cw"
     case .troubleshooting: "stethoscope"
     }
@@ -354,6 +360,17 @@ struct SettingsView: View {
         SettingRow("Quit GW2 on Mac after launching", "It doesn't need to stay open while you play.") {
           InkSwitch(isOn: $quitAfterLaunch)
         }
+      }
+
+    case .mouse:
+      SettingsGroup {
+        SettingRow("Raw mouse-look", "While you hold a mouse button to turn the camera, the game gets every movement straight from the mouse as it happens, not once per screen refresh, and the pointer stays put. Turn it off for Wine's usual mouse-look.") {
+          InkSwitch(isOn: settings.toggle("rawmouse"))
+        }
+        SettingRow("Mouse-look speed", "How fast the camera turns with raw mouse-look, compared with your pointer speed in System Settings. The game's own camera settings apply on top.") {
+          InkPopup(selection: settings.choice("mousespeed", "1"), options: GameSettings.mouseSpeeds)
+        }
+        .disabled(settings.values["rawmouse"] != "on")
       }
 
     case .updates:

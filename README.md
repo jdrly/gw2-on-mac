@@ -54,9 +54,8 @@ does the first one), and nothing is published.
     (a warning under 75 GB).
   - Light and dark follow the system, each with its own header stroke.
 - **Settings** (⌘, or the main window's Settings), one pane each: Graphics, Performance,
-  Interface, Game, Updates, Troubleshooting. Changes take effect the next time the game starts.
-  - There is no Keyboard or Mouse pane: SWTOR on Mac's game-keys-by-position and raw mouse-look
-    are patches of Wine's Mac driver that our `winemac.so` doesn't carry yet (a follow-up).
+  Interface, Game, Mouse, Updates, Troubleshooting. Changes take effect the next time
+  the game starts.
 - **Menus**: About, Check for Updates… (off until there is a feed), Settings…, Collect Logs…, and
   Help (Discord, GitHub issues).
 
@@ -70,7 +69,9 @@ failed or cancelled first install leaves nothing behind):
    unpacked and checked. GW2 on Mac's pieces then go into it:
    - DXMT `e02a4d6` over the engine's `dxgi/dxmt` tree
    - the heat `ntdll.so` and `wineserver`
-   - `winemac.so` (the launcher fix) and `win32u.so` (its drawing at -O2)
+   - Wine's Mac driver, `winemac.so` with its PE sides `winemac.drv` (x86_64 and i386: they start
+     raw mouse-look's input thread and go with this `winemac.so` only): the launcher fix and raw
+     mouse-look; and `win32u.so` (the launcher's drawing at -O2)
 
    The engine's own files stay as `<name>.stock`, checked against their known sha256 first.
 2. **The game's own bottle**: `wineboot`, then Retina mode (`RetinaMode` in `user.reg`),
@@ -224,6 +225,17 @@ from these:
 **Repair** sets up the engine (unpacked again if its loader changed), GW2 on Mac's pieces, the
 bottle's settings, Game Mode and Steam (if gone) again. It keeps the game and the settings.
 
+**After an update of the app** its new pieces for the engine (0.1.1: the Mac driver with raw
+mouse-look) go in by themselves at the next Play, without Repair. `status` says `graphics=update`
+while the engine has the pieces an earlier GW2 on Mac put there, as its `install-manifest.json`
+records them (0.1.0's names DXMT by its version and leaves out the Mac driver's PE sides, which it
+didn't replace: those count as the engine's own), and *This Mac* shows *DXMT · updates at Play*.
+Play, finding no session, installs this version's pieces (`.stock` kept as at the install) and
+writes the manifest of this version. A file that is neither this version's nor what the manifest
+records is something else: `graphics=other`, *needs Repair*, as before. An engine that already
+has this version's pieces counts as set up (`graphics=yes`), and Play only brings the manifest up
+to this version.
+
 **Game Mode**: macOS turns it on only for a process whose executable belongs to a bundle with
 `LSSupportsGameMode`, and every Wine process runs Wine's loader. As SWGL on Mac and Jan's
 development setup do it:
@@ -281,6 +293,8 @@ use). The defaults are the mix Jan plays with.
 | | Quit Steam when the game quits (`quitsteam`) | on | the Steam Play started in the background quits once the game has quit (see Play). Shown only while *Start Steam in the background* is on |
 | | Launch options (`launchopts`) | none | arguments for `Gw2-64.exe` (letters, digits, `-_.:=,/+` only) |
 | | Quit GW2 on Mac after launching | off | the app's own preference |
+| Mouse | Raw mouse-look (`rawmouse`) | on | `RawMouseWhenCursorHidden=y` for `Gw2-64.exe` (off: `n`): while the game hides the pointer to turn the camera, the mouse's own moves from GameController's `GCMouse`, sent by an input thread of the Mac driver as they come, the macOS pointer frozen (see below) |
+| | Mouse-look speed (`mousespeed`) | 1× | `RawMouseGameControllerScale` for `Gw2-64.exe` (0.5× to 3×): a factor on the macOS pointer's speed, which raw mouse-look matches at 1× |
 | Updates | Check automatically (`updates`) | on | Sparkle's automatic checks, once there is a feed |
 | Troubleshooting | Debug logging (`debug`) | off (on in development builds) | `DXMT_LOG_LEVEL=debug`, the heat counters (`WINE_HEAT_COUNT`), `WINEDEBUG=err+all,fixme-all` |
 
@@ -290,9 +304,27 @@ too), `DXMT_CONFIG_FILE`, `DXMT_LOG_PATH`, `DXMT_CACHE_DIR` (the app's cache fol
 `WINE_HEAT_EVPOOL=1`, `WINE_HEAT_WAKE=one,skip`, `WINE_HEAT_LAZYCLOCK=1`,
 `WINE_HEAT_MSYNC_UNREG=1`, `WINE_HEAT_MSYNC_PORTFIX=1`.
 
-Registry settings (Retina, the addon's override) are written straight into the bottle's
-`user.reg`, as SWTOR on Mac does, and only while no Wine session of the bottle runs. Otherwise
-they wait for the next Play that finds none.
+Registry settings (Retina, the addon order and override, the Mouse options) are written
+straight into the bottle's `user.reg`, as SWTOR on Mac does, and only while no Wine session of
+the bottle runs or starts: the writes hold the session's lock, which a Play takes before it starts
+Wine and its watcher keeps for the session. Otherwise they wait for the next Play that finds none.
+
+**Raw mouse-look** is SWTOR on Mac's port of SWGL on Mac's two mouse patches. While the game
+hides the pointer to turn the camera, Wine's stock Mac driver moves the real pointer for each of
+the game's re-centring `SetCursorPos` calls, and the moves reach the game once per screen
+refresh. With the setting on, the macOS pointer stays where it is and the game gets the mouse's
+moves as relative motion, from GameController's `GCMouse` (around 1000 a second for a typical
+mouse), sent to the Wine server by an input thread of the driver as they arrive. `GCMouse`
+reports the mouse's own counts, so the driver measures their ratio to the pointer's moves while
+you turn and sends them at that ratio: at *Mouse-look speed* 1× the camera turns as fast as with
+the pointer (System Settings' pointer speed and Retina included); until the first measurement,
+and for a device `GCMouse` doesn't report (a trackpad), the pointer's own moves are sent. The
+pointer is hidden with a blank cursor image, never by turning the cursor off (that would drop
+the game out of direct presentation). SWG-specific parts stay off (`IgnoreStaleCursorWarps`).
+
+The same Mac driver build carries SWTOR on Mac's game keys by keyboard position
+(`winemac-physical-keys.patch`, `PhysicalKeyboard`). It does nothing unless the registry turns it
+on, and GW2 on Mac never does: there is no Keyboard pane.
 
 `Gw2-64.exe` always gets `d3d11` and `dxgi` as `native,builtin`, so an addon placed as
 `d3d11.dll` or `dxgi.dll` next to it (arcdps, the Nexus loader) loads first. It then loads
@@ -341,7 +373,7 @@ scripts/stage-components.sh    # copy DXMT, the heat Wine pieces, winemac and th
   workspace, whose build scripts are not in this repository. `stage-components.sh` copies them
   from that workspace: `GW2_ON_MAC_WORKSPACE` (default `../gw2-on-mac`, next to this
   repository), and in it the builds the app ships (`work/dxmt-rollback/e02a4d6-install`,
-  `work/heat/install-r7c`, `work/winemac/install`, `work/ui-scale/build`; override with
+  `work/heat/install-r7c`, `work/winemac/install-km`, `work/ui-scale/build`; override with
   `DXMT_INSTALL`, `HEAT_INSTALL`, `WINEMAC_INSTALL`, `UISCALE_BUILD`). It changes nothing in the
   workspace and checks each file against its build record and this repository's
   [`patches/`](patches). `prebuilt/` is ignored by git.
@@ -352,7 +384,10 @@ scripts/stage-components.sh    # copy DXMT, the heat Wine pieces, winemac and th
   [`patches/ntdll-msync-alert-fd.patch`](patches/ntdll-msync-alert-fd.patch) (from SWTOR on Mac),
   [`patches/ntdll-heat.patch`](patches/ntdll-heat.patch),
   [`patches/wineserver-msync-unregister.patch`](patches/wineserver-msync-unregister.patch) and
-  [`patches/winemac-gw2-launcher.patch`](patches/winemac-gw2-launcher.patch), configured as the
+  [`patches/winemac-gw2-launcher.patch`](patches/winemac-gw2-launcher.patch), and SWTOR on Mac's
+  keyboard and mouse patches of the Mac driver (`patches/winemac-physical-keys.patch`,
+  `winemac-swgl-relative-mouse.patch`, `winemac-swgl-input-thread.patch`,
+  `winemac-swtor-mouse.patch`, unchanged), configured as the
   engine. Each component's `VERSION` record (also in the app, `Resources/Licenses`) names its
   sources, patches and sha256. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 - The interface addon is this repository's own code, [`addon/ui-scale`](addon/ui-scale):
@@ -456,7 +491,7 @@ src/helpers/procpaths.c  every process's real executable, for gw2om.sh's busy ch
 src/helpers/sessionlock.c  the game session's kernel lock (flock), for gw2om.sh's watcher
 src/fonts/, src/art/, src/icons/, src/AppIcon.icon, src/make-icon.swift, src/Info.plist
 addon/ui-scale/          the interface addon's source (version.dll) and its native test
-patches/                 the patches to Wine in the bundled ntdll.so, wineserver and winemac.so
+patches/                 the patches to Wine in the bundled ntdll.so, wineserver and Mac driver
 scripts/                 stage-components, build-addon, test-sandbox, ui-render, session-report,
                          release, check-appcast, gen-icons
 release-notes/           the notes of each release
@@ -467,7 +502,11 @@ prebuilt/, dist/, release/, work/, .cache/   build and test output (ignored)
 
 - The first real install hasn't run yet: Jan does it, after which the Steam route's `StateFlags`
   and the ArenaNet route's completion heuristic should be checked against what really happens.
-- No Keyboard or Mouse pane until SWTOR on Mac's winemac patches are ported to our build.
+- Raw mouse-look is SWTOR on Mac's, tested there for long; in Guild Wars 2 its Mac driver build
+  has had one in-game test so far (Jan, 2026-11-08).
+- No Keyboard pane: SWTOR on Mac's game keys by keyboard position is in the driver but nothing
+  turns it on (dropped from 0.1.1; it trades Z and Y on QWERTZ layouts, and how Guild Wars 2
+  names keys in its bindings is unchecked).
 - DXMT's caches live in the app's own cache folder (`DXMT_CACHE_DIR`, jdrly/dxmt #134), so they
   are no longer shared with another DXMT setup of the game on the same Mac. Caches an older
   build left in `$(getconf DARWIN_USER_CACHE_DIR)dxmt/Gw2-64.exe/` are not moved or removed

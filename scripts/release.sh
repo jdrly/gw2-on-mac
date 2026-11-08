@@ -164,8 +164,8 @@ package() {
 
   # Inside out: the process lister and the session's lock (helpers/procpaths, sessionlock), the Mach-O pieces gw2om.sh puts into the
   # engine (DXMT's winemetal.so, the heat ntdll.so and wineserver, winemac.so and win32u.so: Wine
-  # loads or runs them itself; every Mach-O of a notarized app is signed; DXMT's PE DLLs are not
-  # Mach-O), Sparkle in its documented order (Autoupdate, Updater.app, the framework, each with
+  # loads or runs them itself; every Mach-O of a notarized app is signed; DXMT's PE DLLs and
+  # winemac.drv are not Mach-O), Sparkle in its documented order (Autoupdate, Updater.app, the framework, each with
   # the hardened runtime and no --deep; build.sh removed its XPC services), then the app
   # (app.plist: no exceptions). Untested so far: wineserver under the hardened runtime.
   echo "[release] signing nested code"

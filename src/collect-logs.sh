@@ -373,6 +373,7 @@ sha12() { shasum -a 256 "$1" 2>/dev/null | cut -c1-12; }
   echo "  ntdll.so $(sha12 "$E/lib/wine/x86_64-unix/ntdll.so") (app's $(sha12 "$RES/components/heat/ntdll.so"))," \
     "wineserver $(sha12 "$E/bin/wineserver") (app's $(sha12 "$RES/components/heat/wineserver"))," \
     "winemac.so $(sha12 "$E/lib/wine/x86_64-unix/winemac.so") (app's $(sha12 "$RES/components/winemac/winemac.so"))," \
+    "winemac.drv $(sha12 "$E/lib/wine/x86_64-windows/winemac.drv") (app's $(sha12 "$RES/components/winemac/x86_64-windows/winemac.drv"))," \
     "win32u.so $(sha12 "$E/lib/wine/x86_64-unix/win32u.so") (app's $(sha12 "$RES/components/winemac/win32u.so"))"
   echo "  DXMT tree: $(cat "$E/lib/wine/dxgi/dxmt/VERSION" 2>/dev/null || echo "the engine's"), d3d11.dll $(sha12 "$E/lib/wine/dxgi/dxmt/x86_64-windows/d3d11.dll") (app's $(sha12 "$RES/components/dxmt/x86_64-windows/d3d11.dll"))"
   echo "Game Mode bundle: $([ -x "$APPDIR/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe" ] && echo present || echo none)"

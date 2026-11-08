@@ -11,7 +11,8 @@
 #   Contents/Resources/components/     what gw2om.sh puts into its engine and bottle, staged in
 #                                      prebuilt/ by scripts/stage-components.sh from the
 #                                      development workspace's builds: dxmt/ (the jdrly/dxmt fork), heat/ (ntdll.so and
-#                                      wineserver), winemac/ (winemac.so, win32u.so), ui-scale/
+#                                      wineserver), winemac/ (winemac.so and its PE sides
+#                                      x86_64-windows/, i386-windows/winemac.drv, win32u.so), ui-scale/
 #                                      (the interface addon)
 #   Contents/Resources/helpers/procpaths  every process's real executable (gw2om.sh's process
 #                                      check; src/helpers/procpaths.c)
@@ -98,7 +99,8 @@ P=prebuilt
 [ -f "$P/STAGED" ] || { echo "No $P/; run scripts/stage-components.sh" >&2; exit 1; }
 for f in dxmt/VERSION dxmt/LICENSE dxmt/COPYING.LIB dxmt/x86_64-unix/winemetal.so \
   heat/ntdll.so heat/wineserver heat/VERSION heat/WINESERVER.txt heat/LICENSE heat/COPYING.LIB \
-  winemac/winemac.so winemac/win32u.so winemac/VERSION winemac/LICENSE winemac/COPYING.LIB \
+  winemac/winemac.so winemac/x86_64-windows/winemac.drv winemac/i386-windows/winemac.drv winemac/win32u.so \
+  winemac/VERSION winemac/LICENSE winemac/COPYING.LIB \
   ui-scale/version.dll ui-scale/gw2-ui-scale.ini; do
   [ -f "$P/$f" ] || { echo "Missing $P/$f; run scripts/stage-components.sh" >&2; exit 1; }
 done
@@ -111,11 +113,14 @@ for p in ntdll-heat.patch ntdll-msync-alert-fd.patch; do
   grep -q "patches/$p sha256 $(sha "patches/$p")" "$P/heat/VERSION" ||
     { echo "$P/heat was not built from patches/$p as it is now; rebuild and restage" >&2; exit 1; }
 done
-for l in winemac.so win32u.so; do
+for l in winemac.so x86_64-windows/winemac.drv i386-windows/winemac.drv win32u.so; do
   grep -q "sha256 $(sha "$P/winemac/$l")" "$P/winemac/VERSION" || { echo "$P/winemac/$l does not match its VERSION" >&2; exit 1; }
 done
-grep -q "patches/winemac-gw2-launcher.patch sha256 $(sha patches/winemac-gw2-launcher.patch)" "$P/winemac/VERSION" ||
-  { echo "$P/winemac was not built from patches/winemac-gw2-launcher.patch as it is now" >&2; exit 1; }
+WINEMAC_PATCHES="winemac-gw2-launcher.patch winemac-physical-keys.patch winemac-swgl-relative-mouse.patch winemac-swgl-input-thread.patch winemac-swtor-mouse.patch"
+for p in $WINEMAC_PATCHES; do
+  grep -q "patches/$p sha256 $(sha "patches/$p")" "$P/winemac/VERSION" ||
+    { echo "$P/winemac was not built from patches/$p as it is now; rebuild and restage" >&2; exit 1; }
+done
 grep -aq 'gw2-on-mac ui-scale' "$P/ui-scale/version.dll" || { echo "$P/ui-scale/version.dll is not the addon" >&2; exit 1; }
 DXMT_VERSION="$(cat "$P/dxmt/VERSION")"
 DXMT_COMMIT="${DXMT_VERSION##*-g}"
@@ -189,8 +194,9 @@ cp "$P/heat/COPYING.LIB" "$P/heat/LICENSE" "$L/wine/"
 cp "$P/heat/VERSION" "$L/wine/ntdll-VERSION.txt"
 cp "$P/heat/WINESERVER.txt" "$L/wine/wineserver-VERSION.txt"
 cp "$P/winemac/VERSION" "$L/wine/winemac-win32u-VERSION.txt"
-cp patches/ntdll-msync-alert-fd.patch patches/ntdll-heat.patch patches/wineserver-msync-unregister.patch \
-  patches/winemac-gw2-launcher.patch "$L/wine/"
+for p in ntdll-msync-alert-fd.patch ntdll-heat.patch wineserver-msync-unregister.patch $WINEMAC_PATCHES; do
+  cp "patches/$p" "$L/wine/"
+done
 cp "$SPARKLE/LICENSE" "$L/sparkle/LICENSE"
 cp src/fonts/*-OFL.txt "$L/fonts/"
 cp src/icons/LICENSE.txt "$L/lucide/LICENSE.txt"
@@ -206,7 +212,7 @@ https://github.com/jdrly/dxmt/tree/$DXMT_COMMIT: LGPL-2.1-or-later (dxmt/COPYING
 Its complete source is that commit of the fork.
 
 components/heat, components/winemac: Wine's ntdll.so, wineserver, winemac.so and win32u.so
-(x86_64 unix sides) from the sources of the app's Wine engine (CodeWeavers' CrossOver 26.3 with
+(x86_64 unix sides) and winemac.drv (the Mac driver's x86_64 and i386 PE sides) from the sources of the app's Wine engine (CodeWeavers' CrossOver 26.3 with
 athei's patches, athei/wine $WINE_COMMIT), with the patches in wine/ (applied as their records,
 wine/*-VERSION.txt, say): LGPL-2.1-or-later, see wine/COPYING.LIB and wine/LICENSE. Their
 complete source is https://github.com/athei/wine/tree/$WINE_COMMIT (CodeWeavers' CrossOver

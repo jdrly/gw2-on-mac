@@ -5,7 +5,9 @@ GW2 on Mac's own code (the app in `src/native`, `gw2om.sh`, `collect-logs.sh`,
 `version.dll` from this repository's [`addon/ui-scale`](addon/ui-scale)) is under the [zlib license](LICENSE),
 copyright (c) 2026 Jan Drlý. The patches to Wine in this repository's [`patches/`](patches)
 (`ntdll-heat.patch`, `wineserver-msync-unregister.patch`, `winemac-gw2-launcher.patch`, and SWTOR
-on Mac's `ntdll-msync-alert-fd.patch`) are changes to Wine and under Wine's LGPL-2.1-or-later.
+on Mac's `ntdll-msync-alert-fd.patch`, `winemac-physical-keys.patch` and `winemac-swtor-mouse.patch`,
+and SWGL on Mac's `winemac-swgl-relative-mouse.patch` and `winemac-swgl-input-thread.patch`, as
+SWTOR on Mac carries them) are changes to Wine and under Wine's LGPL-2.1-or-later.
 
 The app bundles a few components and downloads the Wine engine at install time. Guild Wars 2,
 its installer and launcher, its files and Steam are never bundled or downloaded from anywhere but
@@ -18,7 +20,7 @@ installer, which the player downloads from ArenaNet's site.
 |---|---|---|---|
 | **DXMT** `v0.80-441-ge02a4d6`, the [jdrly/dxmt](https://github.com/jdrly/dxmt) fork of [3Shain/dxmt](https://github.com/3Shain/dxmt) (Feifan He for CodeWeavers, and contributors), built in the development workspace (see below) | `Contents/Resources/components/dxmt/` (`d3d11.dll`, `dxgi.dll`, `d3d10core.dll`, `winemetal.dll` for x86_64 and i386, `winemetal.so`) | LGPL-2.1-or-later. Complete source: [jdrly/dxmt at `e02a4d6`](https://github.com/jdrly/dxmt/tree/e02a4d6) | `Resources/Licenses/dxmt/LICENSE`, `COPYING.LIB` |
 | **Wine's ntdll and wineserver** (the x86_64 unix `ntdll.so` and `wineserver`) from the Wine sources of the app's engine: CodeWeavers' CrossOver 26.3 sources (<https://www.codeweavers.com/crossover/source>) with athei's patches, [athei/wine `d23b397`](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0), changed by SWTOR on Mac's [`patches/ntdll-msync-alert-fd.patch`](patches/ntdll-msync-alert-fd.patch), [`patches/ntdll-heat.patch`](patches/ntdll-heat.patch) and [`patches/wineserver-msync-unregister.patch`](patches/wineserver-msync-unregister.patch) (dappermint/winecx `8df1826853`), configured and built at -O0 as the engine | `Contents/Resources/components/heat/` | LGPL-2.1-or-later. Complete source: those sources plus the patches (also in the app) | `Resources/Licenses/wine/COPYING.LIB`, `LICENSE`, the patches, `ntdll-VERSION.txt`, `wineserver-VERSION.txt` |
-| **Wine's Mac driver and win32u** (the x86_64 unix `winemac.so` and `win32u.so`) from the same sources, `winemac.so` changed by [`patches/winemac-gw2-launcher.patch`](patches/winemac-gw2-launcher.patch) (the launcher's flashing), `win32u.so` with its layered-window drawing built at -O2 | `Contents/Resources/components/winemac/` | LGPL-2.1-or-later. Complete source: those sources plus the patch | `Resources/Licenses/wine/COPYING.LIB`, `LICENSE`, `winemac-gw2-launcher.patch`, `winemac-win32u-VERSION.txt` |
+| **Wine's Mac driver and win32u** (the x86_64 unix `winemac.so` and `win32u.so`, and the Mac driver's x86_64 and i386 PE sides `winemac.drv`) from the same sources, the Mac driver changed by [`patches/winemac-gw2-launcher.patch`](patches/winemac-gw2-launcher.patch) (the launcher's flashing), [`patches/winemac-physical-keys.patch`](patches/winemac-physical-keys.patch) (game keys by keyboard position, which the app doesn't turn on), [`patches/winemac-swgl-relative-mouse.patch`](patches/winemac-swgl-relative-mouse.patch), [`patches/winemac-swgl-input-thread.patch`](patches/winemac-swgl-input-thread.patch) and [`patches/winemac-swtor-mouse.patch`](patches/winemac-swtor-mouse.patch) (raw mouse-look), in that order; `win32u.so` with its layered-window drawing built at -O2 | `Contents/Resources/components/winemac/` | LGPL-2.1-or-later. Complete source: those sources plus the patches | `Resources/Licenses/wine/COPYING.LIB`, `LICENSE`, the five `winemac-*.patch`, `winemac-win32u-VERSION.txt` |
 | **Sparkle** 2.10.0, <https://sparkle-project.org> (app updates, off until there is a feed; with bsdiff, sais, and other notices) | `Contents/Frameworks/Sparkle.framework` | MIT | `Resources/Licenses/sparkle/LICENSE` |
 | **Cinzel** (variable, `wght` 400 to 900), copyright 2020 The Cinzel Project Authors, <https://github.com/NDISCOVER/Cinzel>, from [google/fonts `ofl/cinzel`](https://github.com/google/fonts/tree/main/ofl/cinzel) (`Cinzel[wght].ttf`, sha256 `f4d83d34…2a4e0f34`), unmodified | `Contents/Resources/Fonts/Cinzel-Variable.ttf` | SIL Open Font License 1.1 | `Resources/Licenses/fonts/Cinzel-OFL.txt` |
 | **Marcellus**, copyright 2012 Brian J. Bonislawsky DBA Astigmatic (AOETI), from [google/fonts `ofl/marcellus`](https://github.com/google/fonts/tree/main/ofl/marcellus) (`Marcellus-Regular.ttf`, sha256 `1cf0cd10…4abb2f81`), unmodified | `Contents/Resources/Fonts/Marcellus-Regular.ttf` | SIL Open Font License 1.1 | `Resources/Licenses/fonts/Marcellus-OFL.txt` |
@@ -52,8 +54,9 @@ sha256.
 
 The installer changes its copy of the engine in these places (and leaves out its SDK: headers,
 Wine's tests, man pages): the bundled DXMT goes over the engine's `lib/wine/dxgi/dxmt` tree (its
-`d3d10.dll` and `d3d10_1.dll` stay), and the bundled `ntdll.so`, `wineserver`, `winemac.so` and
-`win32u.so` replace the engine's, which are kept as `<name>.stock`.
+`d3d10.dll` and `d3d10_1.dll` stay), and the bundled `ntdll.so`, `wineserver`, `winemac.so`, its
+`x86_64-windows` and `i386-windows` `winemac.drv` and `win32u.so` replace the engine's, which are
+kept as `<name>.stock`.
 
 ## Trademarks
 

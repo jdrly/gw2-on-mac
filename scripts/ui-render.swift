@@ -133,6 +133,9 @@ func installer(_ state: String) -> Installer {
     // disk is short
     st["game"] = "no"; st["stage"] = "none"; st["steam"] = "no"; st["route"] = ""
     st["disk_free"] = "62000000000"
+  case "ready-update":
+    // just updated from 0.1.0: the engine has 0.1.0's pieces, the next Play puts the new ones in
+    st["graphics"] = "update"; st["installed_version"] = "0.1.0"
   case "fresh":
     st = st.merging(["installed": "no", "engine_installed": "no", "graphics": "no", "gamemode": "no", "game": "no",
                      "stage": "none", "steam": "no", "route": "", "installed_version": ""]) { $1 }
@@ -247,7 +250,7 @@ func settings() -> GameSettings {
              "warm": "on", "coolworkers": "3", "fastlocks": "on", "ncpu": "8", "uiscale": "off", "uiscale_state": "off",
              "uiscale_size": "1.75", "uiscale_sans": "on", "uiscale_cinema": "on", "gamemode": "on", "launchopts": "",
              "route": "steam", "updates": "off", "debug": "off", "steambg": "on", "quitsteam": "on", "cpus": "12",
-             "steam_login": "no"])
+             "steam_login": "no", "rawmouse": "on", "mousespeed": "1"])
   return s
 }
 
@@ -260,6 +263,7 @@ func renderAll(_ dir: URL, exports: URL?) async {
     ("main-installing-light", "installing", false, "2-installing.png"),
     ("main-ready-light", "ready", false, "3-ready-to-play.png"),
     ("main-ready-dark", "ready", true, "5-ready-to-play-dark.png"),
+    ("main-ready-update-light", "ready-update", false, nil),
     ("main-choose-dark", "choose", true, nil),
     ("main-installing-dark", "installing", true, nil),
     ("main-fresh-light", "fresh", false, nil),
@@ -358,7 +362,7 @@ func renderAll(_ dir: URL, exports: URL?) async {
                                          to: dir.appendingPathComponent("compare-" + name + ".png")) }
   }
   for pane in SettingsPane.allCases {
-    for dark in [false, true] where !dark || pane == .performance || pane == .interface || pane == .game {
+    for dark in [false, true] where !dark || [.performance, .interface, .game, .mouse].contains(pane) {
       UserDefaults.standard.set(pane.rawValue, forKey: SettingsView.selectedPaneKey)
       let name = "settings-\(pane.rawValue)-\(dark ? "dark" : "light")"
       let rep = await render(SettingsView(settings: settings()), size: SettingsView.designSize, dark: dark)

@@ -61,6 +61,8 @@
 #   GW2_ON_MAC_ENGINE_URL, GW2_ON_MAC_ENGINE_SHA256, GW2_ON_MAC_ENGINE_SIZE   another engine
 #                              archive (a stand-in whose bin/wine only pretends)
 #   GW2_ON_MAC_ENGINE_CHECKS=0 don't check the unpacked engine's files against the real engine's
+#   GW2_ON_MAC_WINEMAC_PE64_STOCK, GW2_ON_MAC_WINEMAC_PE32_STOCK   the sha256 of a stand-in
+#                              engine's own winemac.drv (x86_64, i386)
 #   GW2_ON_MAC_STEAMSETUP_URL  another SteamSetup.exe
 #   GW2_ON_MAC_SIGNER          the signer check-setup accepts (default ArenaNet)
 #   GW2_ON_MAC_ALLOW_WINE=1    let the real engine's Wine run in a sandbox (never in the tests)
@@ -99,6 +101,8 @@ ENGINE_SHA256=1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d
 ENGINE_LOADER_SHA256=2100dea802b2c560ba5d719c20ba1fcc1c8a09daf66580a4da6dd48e552d5a05
 ENGINE_NTDLL_SHA256=f1ca0f092c9435299bb06f2e6e9c92b52b4b0ab5016a42c1a4ce01ccc18c9f4a
 ENGINE_WINEMAC_SHA256=e0ed7ac7405c21ae5644370aec778ff333c8ef6c27e45e6dd739ee83ad422001
+ENGINE_WINEMAC_PE64_SHA256=eff4337246760e5752fe4bd19d729c860e8be0763f73f8787bb6543fcee9b43d
+ENGINE_WINEMAC_PE32_SHA256=2de18f69739238fa5c6e1c4e9def2c153a7d96dd8502019d39778dc47a103054
 ENGINE_WIN32U_SHA256=3f58b3fdd196fc6e04211a5009fe3ab078b435e2915641d237c084f737e09837
 ENGINE_WINESERVER_SHA256=c65ca777e46e2f05dedf838743aeba6bd6b7f7e7cc650f6f979fa87be1f7003e
 # Valve's Steam installer, from Valve's CDN (Valve updates it in place: not pinned, its sha256
@@ -128,6 +132,9 @@ if [ -n "$ROOT" ]; then
   ENGINE_SHA256="${GW2_ON_MAC_ENGINE_SHA256:-$ENGINE_SHA256}"
   ENGINE_SIZE="${GW2_ON_MAC_ENGINE_SIZE:-$ENGINE_SIZE}"
   ENGINE_CHECKS="${GW2_ON_MAC_ENGINE_CHECKS:-1}"
+  # (a stand-in engine's own winemac.drv, which an earlier version left in place: graphics_state)
+  ENGINE_WINEMAC_PE64_SHA256="${GW2_ON_MAC_WINEMAC_PE64_STOCK:-$ENGINE_WINEMAC_PE64_SHA256}"
+  ENGINE_WINEMAC_PE32_SHA256="${GW2_ON_MAC_WINEMAC_PE32_STOCK:-$ENGINE_WINEMAC_PE32_SHA256}"
   STEAM_SETUP_URL="${GW2_ON_MAC_STEAMSETUP_URL:-$STEAM_SETUP_URL}"
   SIGNER="${GW2_ON_MAC_SIGNER:-ArenaNet}"
   SYS_APPS="$ROOT/Applications"
@@ -518,13 +525,39 @@ get_reg() {
 }
 REG_MAC='Software\\Wine\\Mac Driver'
 REG_GW2_DLLS='Software\\Wine\\AppDefaults\\Gw2-64.exe\\DllOverrides'
+# the Mac driver's options for Gw2-64.exe only (the game and its launcher; Steam's processes keep
+# Wine's behaviour)
+REG_GW2_MAC='Software\\Wine\\AppDefaults\\Gw2-64.exe\\Mac Driver'
+
+# registry_lock: the session's lock (WATCH_LOCK, see watch-session) on fd 8, without waiting. A
+# Play takes it before it starts Wine and its watcher holds it for the whole session, so while the
+# registry writes hold it no session can start (that Play waits for it, see join_session); fails
+# if a Play or a session holds it, or without the lock's helper (a Play then starts the game
+# unlocked, so the writes wait for it to be back). registry_unlock releases it (and so does the
+# process's exit).
+registry_lock() {
+  [ -z "$DRY" ] || return 0
+  [ -x "$LOCKER" ] || { warn "GW2 on Mac's session helper is missing ($LOCKER): registry settings wait for it. Reinstall GW2 on Mac."; return 1; }
+  [ ! -d "$WATCH_LOCK" ] || rm -rf "$WATCH_LOCK"
+  exec 8>>"$WATCH_LOCK"
+  "$LOCKER" take 8 2>/dev/null && return 0
+  exec 8>&-
+  return 1
+}
+registry_unlock() { [ -z "$DRY" ] || return 0; exec 8>&-; }
 
 # The bottle's registry settings from settings.conf (Retina mode; for Gw2-64.exe only, the
-# d3d11/dxgi addon order and the addon's version.dll override): only while no session runs, else
-# at the next game start that finds none (play)
+# d3d11/dxgi addon order, the addon's version.dll override, raw mouse-look and its speed): only
+# while no session runs or starts (Wine reads user.reg when its wineserver starts and writes it
+# back), else at the next game start that finds none (play)
 apply_registry() {
   [ -f "$BOTTLE/user.reg" ] || [ -n "$DRY" ] || return 0
+  if ! registry_lock; then
+    log "registry settings wait for the next start without a running session (its lock is held, or its helper missing)"
+    return 0
+  fi
   if session_running; then
+    registry_unlock
     log "registry settings wait for the next start without a running session"
     return 0
   fi
@@ -535,11 +568,14 @@ apply_registry() {
   # gets the built-in as before. Gw2-64.exe only: Steam and the launcher keep the default order.
   set_reg "$REG_GW2_DLLS" d3d11 native,builtin
   set_reg "$REG_GW2_DLLS" dxgi native,builtin
+  set_reg "$REG_GW2_MAC" RawMouseWhenCursorHidden "$([ "$(setting rawmouse)" = on ] && echo y || echo n)"
+  set_reg "$REG_GW2_MAC" RawMouseGameControllerScale "$(setting mousespeed)"
   if [ "$(setting uiscale)" = on ] && [ "$(uiscale_state)" = on ]; then
     set_reg "$REG_GW2_DLLS" version native,builtin
   else
     del_reg "$REG_GW2_DLLS" version
   fi
+  registry_unlock
 }
 
 # --- Settings
@@ -549,17 +585,25 @@ apply_registry() {
 #   warm=on          DXMT_WARM=all: pipelines built ahead by recent use (jdrly/dxmt #128)
 #   coolworkers=3    HEAT_QOS=1=utility:3: only the first 3 job workers on the cooler cores
 #   fastlocks=on     HEAT_SPIN=lock=20:game,event=30:game: short spins before sleeps (round 7)
+#   rawmouse=on      raw mouse-look, as SWTOR on Mac's default (mousespeed=1: as fast as the
+#                    macOS pointer). The bundled Mac driver also carries SWTOR on Mac's game keys
+#                    by keyboard position (PhysicalKeyboard), which stays inert: no setting
+#                    writes it
 # (and, with no setting of their own, DXMT_DEPENDENCY_COMPRESSION=1, the checkpoint chain, #133,
 # and round 7's HEAT_LAZYCLOCK, HEAT_MSYNC_UNREG and HEAT_MSYNC_PORTFIX: see game_env)
-SETTING_KEYS="retina fpscap metalfx hud warm coolworkers fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts updates debug steambg quitsteam"
+SETTING_KEYS="retina fpscap metalfx hud warm coolworkers fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam"
 FPS_CAPS="off 30 40 60 120"
+# Mouse-look speed (mousespeed): RawMouseGameControllerScale, a factor on the macOS pointer's
+# speed (SWTOR on Mac's MOUSE_SPEEDS)
+MOUSE_SPEEDS="0.5 0.75 1 1.25 1.5 1.75 2 2.5 3"
 # CPUs the game sees (ncpu): 2 up to this Mac's logical CPUs, or all
 CPU_MAX="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 8)"
 UI_SCALES="1.5 1.75 1.8 2.0"
 setting_default() {
   case "$1" in
-    retina|warm|fastlocks|uiscale_sans|uiscale_cinema|gamemode|updates|steambg|quitsteam) echo on ;;
+    retina|warm|fastlocks|uiscale_sans|uiscale_cinema|gamemode|rawmouse|updates|steambg|quitsteam) echo on ;;
     metalfx|hud|uiscale) echo off ;;
+    mousespeed) echo 1 ;;
     debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
     fpscap) echo off ;;
     coolworkers) echo 3 ;;
@@ -570,8 +614,9 @@ setting_default() {
 }
 setting_valid() { # <key> <value>
   case "$1" in
-    retina|metalfx|hud|warm|fastlocks|uiscale|uiscale_sans|uiscale_cinema|gamemode|updates|debug|steambg|quitsteam)
+    retina|metalfx|hud|warm|fastlocks|uiscale|uiscale_sans|uiscale_cinema|gamemode|rawmouse|updates|debug|steambg|quitsteam)
       [ "$2" = on ] || [ "$2" = off ] ;;
+    mousespeed) in_list "$2" "$MOUSE_SPEEDS" ;;
     fpscap) in_list "$2" "$FPS_CAPS" ;;
     ncpu) [ "$2" = all ] || { case "$2" in ''|*[!0-9]*) false ;; *) [ "$2" -ge 2 ] && [ "$2" -le "$CPU_MAX" ] ;; esac; } ;;
     uiscale_size) in_list "$2" "$UI_SCALES" ;;
@@ -678,7 +723,9 @@ install_file() {
 
 # GW2 on Mac's pieces in the engine: DXMT as the dxmt DXGI tree (the PE DLLs and winemetal.so of
 # one build always together); the heat ntdll.so (the msync fix, the heat probes) and wineserver
-# (msync unregister fix); winemac.so (the launcher fix) and win32u.so (its drawing at -O2)
+# (msync unregister fix); Wine's Mac driver, winemac.so and its PE sides (the launcher fix, game
+# keys by keyboard position, inert, and raw mouse-look; the PE sides start raw mouse-look's input thread
+# and go with this winemac.so only) and win32u.so (its drawing at -O2)
 install_components() {
   local u="$ENG/lib/wine/x86_64-unix" t="$ENG/lib/wine/dxgi/dxmt" f a
   say "Installing DXMT $DXMT_VERSION as the game's Direct3D 11 (the engine's dxmt tree)"
@@ -697,28 +744,62 @@ install_components() {
   else
     echo "[dry-run] DXMT files into $t"
   fi
-  say "Installing the tuned Wine pieces: ntdll.so and wineserver (heat), winemac.so and win32u.so (the launcher fix)"
+  say "Installing the tuned Wine pieces: ntdll.so and wineserver (heat), the Mac driver (the launcher fix, raw mouse-look) and win32u.so"
   install_file "$COMP/heat/ntdll.so" "$u/ntdll.so" 755 "$ENGINE_NTDLL_SHA256"
   install_file "$COMP/heat/wineserver" "$ENG/bin/wineserver" 755 "$ENGINE_WINESERVER_SHA256"
+  install_file "$COMP/winemac/x86_64-windows/winemac.drv" "$ENG/lib/wine/x86_64-windows/winemac.drv" 644 "$ENGINE_WINEMAC_PE64_SHA256"
+  install_file "$COMP/winemac/i386-windows/winemac.drv" "$ENG/lib/wine/i386-windows/winemac.drv" 644 "$ENGINE_WINEMAC_PE32_SHA256"
   install_file "$COMP/winemac/winemac.so" "$u/winemac.so" 755 "$ENGINE_WINEMAC_SHA256"
   install_file "$COMP/winemac/win32u.so" "$u/win32u.so" 755 "$ENGINE_WIN32U_SHA256"
-  log "engine components: dxmt $DXMT_VERSION, ntdll $(sha256 "$COMP/heat/ntdll.so"), wineserver $(sha256 "$COMP/heat/wineserver"), winemac $(sha256 "$COMP/winemac/winemac.so"), win32u $(sha256 "$COMP/winemac/win32u.so")"
+  log "engine components: dxmt $DXMT_VERSION, ntdll $(sha256 "$COMP/heat/ntdll.so"), wineserver $(sha256 "$COMP/heat/wineserver"), winemac $(sha256 "$COMP/winemac/winemac.so") (PE $(sha256 "$COMP/winemac/x86_64-windows/winemac.drv"), $(sha256 "$COMP/winemac/i386-windows/winemac.drv")), win32u $(sha256 "$COMP/winemac/win32u.so")"
 }
 
 engine_ok() { [ -x "$ENG/bin/wine" ] && [ "$(cat "$ENG/.gw2om-source" 2>/dev/null || true)" = "$ENGINE_SHA256" ]; }
 
-# Graphics in the engine: yes (this app's DXMT and Wine pieces), other (something else), no
+# comp_state <app's file> <engine's file> <manifest key> [<also old>]: same (the app's own), old
+# (the file its manifest records, which an earlier GW2 on Mac put there; or <also old>: a sha256 of
+# what an earlier version left in place), other (anything else)
+comp_state() {
+  local h
+  if cmp -s "$1" "$2"; then echo same; return; fi
+  [ -f "$2" ] || { echo other; return; }
+  h=$(sha256 "$2")
+  if [ "$h" = "$(json_get "$MANIFEST" "$3")" ] || { [ -n "${4:-}" ] && [ "$h" = "$4" ]; }; then echo old; else echo other; fi
+}
+
+# Graphics in the engine: yes (this app's DXMT and Wine pieces), update (an earlier GW2 on Mac's,
+# as its manifest records them: an update of the app brought new ones, which Play puts in by
+# itself, update_components), other (something else: Repair), no (no engine)
 graphics_state() {
-  local u="$ENG/lib/wine/x86_64-unix" t="$ENG/lib/wine/dxgi/dxmt"
+  local u="$ENG/lib/wine/x86_64-unix" t="$ENG/lib/wine/dxgi/dxmt" r=yes dx="" s
   [ -x "$ENG/bin/wine" ] || { echo no; return; }
-  if cmp -s "$COMP/dxmt/x86_64-windows/d3d11.dll" "$t/x86_64-windows/d3d11.dll" &&
-    cmp -s "$COMP/dxmt/x86_64-unix/winemetal.so" "$t/x86_64-unix/winemetal.so" &&
-    cmp -s "$COMP/heat/ntdll.so" "$u/ntdll.so" && cmp -s "$COMP/winemac/winemac.so" "$u/winemac.so" &&
-    cmp -s "$COMP/winemac/win32u.so" "$u/win32u.so" && cmp -s "$COMP/heat/wineserver" "$ENG/bin/wineserver"; then
-    echo yes
-  else
-    echo other
-  fi
+  # (0.1.0's manifest names DXMT's version only: its tree counts as old by its VERSION record)
+  if [ -z "$(json_get "$MANIFEST" dxmt_d3d11_sha256)" ] && [ -f "$t/VERSION" ] &&
+    [ "$(cat "$t/VERSION")" = "$(json_get "$MANIFEST" dxmt)" ]; then dx=1; fi
+  for s in \
+    "$(comp_state "$COMP/dxmt/x86_64-windows/d3d11.dll" "$t/x86_64-windows/d3d11.dll" dxmt_d3d11_sha256 ${dx:+"$(sha256 "$t/x86_64-windows/d3d11.dll")"})" \
+    "$(comp_state "$COMP/dxmt/x86_64-unix/winemetal.so" "$t/x86_64-unix/winemetal.so" winemetal_sha256 ${dx:+"$(sha256 "$t/x86_64-unix/winemetal.so")"})" \
+    "$(comp_state "$COMP/heat/ntdll.so" "$u/ntdll.so" ntdll_sha256)" \
+    "$(comp_state "$COMP/heat/wineserver" "$ENG/bin/wineserver" wineserver_sha256)" \
+    "$(comp_state "$COMP/winemac/winemac.so" "$u/winemac.so" winemac_sha256)" \
+    "$(comp_state "$COMP/winemac/win32u.so" "$u/win32u.so" win32u_sha256)" \
+    "$(comp_state "$COMP/winemac/x86_64-windows/winemac.drv" "$ENG/lib/wine/x86_64-windows/winemac.drv" winemac_pe64_sha256 "$ENGINE_WINEMAC_PE64_SHA256")" \
+    "$(comp_state "$COMP/winemac/i386-windows/winemac.drv" "$ENG/lib/wine/i386-windows/winemac.drv" winemac_pe32_sha256 "$ENGINE_WINEMAC_PE32_SHA256")"; do
+    case "$s" in other) echo other; return ;; old) r=update ;; esac
+  done
+  echo "$r"
+}
+
+# After an update of the app (graphics_state update): its pieces into the engine over an earlier
+# version's, without Repair, and the manifest of this version; only while no session runs (play)
+update_components() {
+  lock
+  trap 'rmdir "$APPDIR/.lock" 2>/dev/null || true' EXIT
+  say "GW2 on Mac $VERSION has new pieces for the engine; putting them in"
+  install_components
+  write_manifest
+  rmdir "$APPDIR/.lock" 2>/dev/null || true
+  trap - EXIT
 }
 
 # install_engine [force]: the verified engine unpacked into $ENG (unless it's there already),
@@ -1327,7 +1408,7 @@ cmd_set() {
   case "$key" in
     fpscap) write_dxmt_conf ;;
     uiscale|uiscale_size|uiscale_sans|uiscale_cinema) sync_uiscale; apply_registry ;;
-    retina) apply_registry ;;
+    retina|rawmouse|mousespeed) apply_registry ;;
     gamemode) [ "$value" = off ] || gamemode_current || install_gamemode ;;
   esac
   if session_running; then
@@ -1353,9 +1434,13 @@ write_manifest() {
   "engine": "$ENGINE_NAME",
   "engine_sha256": "$ENGINE_SHA256",
   "dxmt": "$DXMT_VERSION",
+  "dxmt_d3d11_sha256": "$(sha256 "$COMP/dxmt/x86_64-windows/d3d11.dll")",
+  "winemetal_sha256": "$(sha256 "$COMP/dxmt/x86_64-unix/winemetal.so")",
   "ntdll_sha256": "$(sha256 "$COMP/heat/ntdll.so")",
   "wineserver_sha256": "$(sha256 "$COMP/heat/wineserver")",
   "winemac_sha256": "$(sha256 "$COMP/winemac/winemac.so")",
+  "winemac_pe64_sha256": "$(sha256 "$COMP/winemac/x86_64-windows/winemac.drv")",
+  "winemac_pe32_sha256": "$(sha256 "$COMP/winemac/i386-windows/winemac.drv")",
   "win32u_sha256": "$(sha256 "$COMP/winemac/win32u.so")",
   "app_files": ["$(echo $APP_FILES | sed 's/ /", "/g')"],
   "logs": "$LOGS",
@@ -1950,6 +2035,12 @@ cmd_play() {
     leftovers) end_leftovers ;;
   esac
   if ! session_running; then
+    # an update of the app brings its new pieces for the engine without Repair; the manifest
+    # follows this version (it names the pieces a later update counts as its own)
+    case "$(graphics_state)" in
+      update) [ -n "$DRY" ] && echo "[dry-run] the app's new pieces into the engine" || update_components ;;
+      yes) [ "$(json_get "$MANIFEST" version)" = "$VERSION" ] || [ -n "$DRY" ] || write_manifest ;;
+    esac
     apply_registry
     write_dxmt_conf
   fi

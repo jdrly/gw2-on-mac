@@ -369,8 +369,10 @@ struct ThisMac: View {
       Check(id: "Engine", icon: "wine", value: s["engine_installed"] == "yes" ? engine : "\(engine) · not set up",
             tone: s["engine_installed"] == "yes" ? .good : .off),
       Check(id: "Graphics", icon: "sparkles",
-            value: s["graphics"] == "yes" ? "DXMT · Metal 4" : s["graphics"] == "other" ? "DXMT · needs Repair" : "DXMT · not set up",
-            tone: s["graphics"] == "yes" ? .good : s["graphics"] == "other" ? .bad : .off),
+            // (update: an earlier version's pieces, which the next Play replaces by itself)
+            value: s["graphics"] == "yes" ? "DXMT · Metal 4" : s["graphics"] == "update" ? "DXMT · updates at Play"
+              : s["graphics"] == "other" ? "DXMT · needs Repair" : "DXMT · not set up",
+            tone: s["graphics"] == "yes" ? .good : s["graphics"] == "update" ? .pending : s["graphics"] == "other" ? .bad : .off),
       Check(id: "Game Mode", icon: "gamepad-2",
             value: s["gamemode"] == "yes" ? "Ready" : s["gamemode"] == "off" ? "Off in Settings" : "Not set up",
             tone: s["gamemode"] == "yes" ? .good : .off),

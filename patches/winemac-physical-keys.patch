@@ -1,0 +1,194 @@
+PhysicalKeyboard: game keys by their position on a US keyboard, for the Mac driver of the
+CrossOver 26.3 engine SWTOR on Mac uses (athei's wine-build cx-26.3.0-8, Wine 11.0,
+dlls/winemac.drv). Part of SWTOR on Mac, https://github.com/jdrly/swtor-on-mac.
+
+This patch changes Wine's Mac driver, which is licensed under the GNU Lesser General Public
+License 2.1 or later (see the copyright headers of the files it changes); the patch and the
+winemac.so built with it are under the same license. Changed by Jan Drlý, 2026-10. Applies to
+the sources that engine is built from (CodeWeavers' CrossOver 26.3 with athei's patches):
+  https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0
+  (athei/wine@cx-26-patched, named in the release notes of athei/wine-build cx-26.3.0-8)
+Built by scripts/build-winemac.sh. The same change as the patch SWTOR on Mac 0.0.4-0.0.6 carried
+for CrossOver 24.0.7; only the option declarations moved (CrossOver 26 declares the Mac Driver
+options as bool in macdrv_cocoa.h).
+
+New Mac Driver option, OFF by default, per-app configurable like the others:
+  HKCU\Software\Wine\Mac Driver                         "PhysicalKeyboard"="y"
+  HKCU\Software\Wine\AppDefaults\<app>.exe\Mac Driver   "PhysicalKeyboard"="y"
+Off (Wine's behaviour), the driver picks a key's virtual-key code by matching what it types in
+the current input source, and names it by what it types: on Czech the number row is VK_1..VK_0
+(found through Shift) but GetKeyNameText calls it + ě š č ř ž ý á í é; on French AZERTY & é "
+' ( ...; the key labelled Z on Czech or German QWERTZ is VK_Z.
+On, every key gets the virtual-key code of its position on a US keyboard (default_map, which
+already gives the scan codes), and GetKeyNameText and MapVirtualKey's VK_TO_CHAR (a key's
+label) name character keys as on a US keyboard: "1".."0", "Q", "[", ... Text is unchanged:
+ToUnicodeEx, VkKeyScanEx and the IME path find the Mac key code through the same table and
+translate it with the current layout, so typing still gives the layout's characters (dead
+keys, Shift and Option included). Trade-off: everything follows US positions, so on QWERTZ
+layouts the key labelled Z is VK_Y and named "Y" (and the other way round).
+
+Test hook (no effect unless set): WINEMAC_TEST_KEYBOARD_LAYOUT=<input source ID> makes a new
+thread start with that installed keyboard layout instead of the current one, so tests can
+check layouts without changing the system's input source.
+
+--- a/dlls/winemac.drv/cocoa_app.m
++++ b/dlls/winemac.drv/cocoa_app.m
+@@ -2825,9 +2825,29 @@
+ void macdrv_get_input_source_info(CFDataRef* uchr, CGEventSourceKeyboardType* keyboard_type, bool* is_iso, TISInputSourceRef* input_source)
+ {
+     OnMainThread(^{
+-        TISInputSourceRef inputSourceLayout;
++        TISInputSourceRef inputSourceLayout = NULL;
++        /* For tests only: WINEMAC_TEST_KEYBOARD_LAYOUT=<input source ID> (for example
++           com.apple.keylayout.German) makes a new thread start with that installed keyboard
++           layout instead of the current one, without changing the system's input source. */
++        const char* testLayout = getenv("WINEMAC_TEST_KEYBOARD_LAYOUT");
+ 
+-        inputSourceLayout = TISCopyCurrentKeyboardLayoutInputSource();
++        if (testLayout && *testLayout)
++        {
++            CFStringRef layoutID = CFStringCreateWithCString(NULL, testLayout, kCFStringEncodingUTF8);
++            CFDictionaryRef filter = CFDictionaryCreate(NULL, (const void**)&kTISPropertyInputSourceID,
++                                                        (const void**)&layoutID, 1,
++                                                        &kCFTypeDictionaryKeyCallBacks,
++                                                        &kCFTypeDictionaryValueCallBacks);
++            CFArrayRef sources = TISCreateInputSourceList(filter, TRUE);
++
++            if (sources && CFArrayGetCount(sources))
++                inputSourceLayout = (TISInputSourceRef)CFRetain(CFArrayGetValueAtIndex(sources, 0));
++            if (sources) CFRelease(sources);
++            CFRelease(filter);
++            CFRelease(layoutID);
++        }
++        if (!inputSourceLayout)
++            inputSourceLayout = TISCopyCurrentKeyboardLayoutInputSource();
+         if (inputSourceLayout)
+         {
+             CFDataRef data = TISGetInputSourceProperty(inputSourceLayout,
+--- a/dlls/winemac.drv/keyboard.c
++++ b/dlls/winemac.drv/keyboard.c
+@@ -274,6 +274,27 @@
+     { 0x02DC,                   "SMALL TILDE" },
+     { 0x02DD,                   "DOUBLE ACUTE ACCENT" },
+ };
++
++
++/* PhysicalKeyboard: the name of a character key's vkey on a US keyboard (0: not one) */
++static WCHAR us_key_char(unsigned int vkey)
++{
++    static const struct {
++        WORD vkey;
++        WCHAR wchar;
++    } oem_chars[] = {
++        { VK_OEM_1, ';' }, { VK_OEM_PLUS, '=' }, { VK_OEM_COMMA, ',' }, { VK_OEM_MINUS, '-' },
++        { VK_OEM_PERIOD, '.' }, { VK_OEM_2, '/' }, { VK_OEM_3, '`' }, { VK_OEM_4, '[' },
++        { VK_OEM_5, '\\' }, { VK_OEM_6, ']' }, { VK_OEM_7, '\'' }, { VK_OEM_102, '\\' },
++    };
++    int i;
++
++    if (('0' <= vkey && vkey <= '9') || ('A' <= vkey && vkey <= 'Z'))
++        return vkey;
++    for (i = 0; i < ARRAY_SIZE(oem_chars); i++)
++        if (oem_chars[i].vkey == vkey) return oem_chars[i].wchar;
++    return 0;
++}
+ 
+ 
+ static Boolean char_matches_string(WCHAR wchar, UniChar *string, CollatorRef collatorRef)
+@@ -676,6 +697,29 @@
+         DWORD temp = thread_data->keyc2scan[kVK_ANSI_Grave];
+         thread_data->keyc2scan[kVK_ANSI_Grave] = thread_data->keyc2scan[kVK_ISO_Section];
+         thread_data->keyc2scan[kVK_ISO_Section] = temp;
++    }
++
++    if (physical_keyboard)
++    {
++        /* PhysicalKeyboard: every key gets the vkey of its position on a US keyboard,
++           whatever the current layout types with it (so the number row is VK_1..VK_0 on
++           a Czech or French layout too). Text still comes from the current layout:
++           ToUnicodeEx, VkKeyScanEx and the IME go from vkey to key code through this
++           same table. */
++        for (keyc = 0; keyc < ARRAY_SIZE(default_map); keyc++)
++        {
++            if (!thread_data->keyc2scan[keyc]) continue; /* not a known Mac key code */
++            thread_data->keyc2vkey[keyc] = default_map[keyc].vkey;
++            TRACE("keyc 0x%04x -> vkey 0x%04x (physical)\n", keyc, default_map[keyc].vkey);
++        }
++        if (thread_data->iso_keyboard)
++        {
++            /* The vkeys follow the scan codes swapped above: the key left of the
++               digits is VK_OEM_3, as on a US keyboard, the extra ISO key VK_OEM_102. */
++            thread_data->keyc2vkey[kVK_ANSI_Grave] = VK_OEM_102;
++            thread_data->keyc2vkey[kVK_ISO_Section] = VK_OEM_3;
++        }
++        return;
+     }
+ 
+     uchr = (const UCKeyboardLayout*)CFDataGetBytePtr(thread_data->keyboard_layout_uchr);
+@@ -1386,6 +1430,7 @@
+             UniCharCount len;
+             OSStatus status;
+             unsigned int vkey;
++            WCHAR us_char;
+             int i;
+ 
+             uchr = (const UCKeyboardLayout*)CFDataGetBytePtr(thread_data->keyboard_layout_uchr);
+@@ -1396,6 +1441,16 @@
+             if (len && buffer[0] > 32)
+                 buffer[len] = 0;
+ 
++            /* PhysicalKeyboard: character keys are named as on a US keyboard ("1", "Q", "["),
++               matching their vkeys, not by what the current layout types. */
++            if (physical_keyboard && size > 1 && (us_char = us_key_char(thread_data->keyc2vkey[keyc])))
++            {
++                buffer[0] = us_char;
++                buffer[1] = 0;
++                len = 1;
++                deadKeyState = 0;
++            }
++
+             vkey = thread_data->keyc2vkey[keyc];
+             if (lparam & (1 << 25))
+             {
+@@ -1579,6 +1634,11 @@
+ 
+             if ((VK_PRIOR <= wCode && wCode <= VK_HELP) ||
+                 (VK_F1 <= wCode && wCode <= VK_F24))
++                break;
++
++            /* PhysicalKeyboard: a character key's label, as on a US keyboard (like
++               GetKeyNameText); typed text comes from ToUnicodeEx. */
++            if (physical_keyboard && (ret = us_key_char(wCode)))
+                 break;
+ 
+             if (!thread_data || !thread_data->keyboard_layout_uchr)
+--- a/dlls/winemac.drv/macdrv_cocoa.h
++++ b/dlls/winemac.drv/macdrv_cocoa.h
+@@ -141,6 +141,7 @@
+ extern bool use_confinement_cursor_clipping;
+ extern bool cursor_clipping_locks_windows;
+ extern bool use_precise_scrolling;
++extern bool physical_keyboard;  /* PhysicalKeyboard: vkeys by US key position */
+ extern int gl_surface_mode;
+ extern CFDictionaryRef localized_strings;
+ extern bool retina_enabled;  /* Whether Retina mode is enabled via registry setting. */
+--- a/dlls/winemac.drv/macdrv_main.c
++++ b/dlls/winemac.drv/macdrv_main.c
+@@ -56,6 +56,7 @@
+ bool allow_immovable_windows = true;
+ bool use_confinement_cursor_clipping = true;
+ bool cursor_clipping_locks_windows = true;
++bool physical_keyboard = false;
+ bool use_precise_scrolling = true;
+ int gl_surface_mode = GL_SURFACE_IN_FRONT_OPAQUE;
+ bool retina_enabled = false;
+@@ -370,6 +371,9 @@
+ 
+     if (!get_config_key(hkey, appkey, "CursorClippingLocksWindows", buffer, sizeof(buffer)))
+         cursor_clipping_locks_windows = IS_OPTION_TRUE(buffer[0]);
++
++    if (!get_config_key(hkey, appkey, "PhysicalKeyboard", buffer, sizeof(buffer)))
++        physical_keyboard = IS_OPTION_TRUE(buffer[0]);
+ 
+     if (!get_config_key(hkey, appkey, "UsePreciseScrolling", buffer, sizeof(buffer)))
+         use_precise_scrolling = IS_OPTION_TRUE(buffer[0]);
