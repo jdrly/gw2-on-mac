@@ -276,8 +276,10 @@ Storage, stays where it is.
 
 ## Known limits
 
-- I haven't done a real install with the app yet. When I do, I'll check the Steam route's
-  `StateFlags` and the ArenaNet route's 1 GB rule against a real install.
+- I've installed and played through the app since 2026-11-04, on the Steam route with my existing
+  game files imported, and I now play on the published 0.1.1. A fresh Steam download and
+  ArenaNet's installer haven't had a real install yet, so the Steam route's `StateFlags` check and
+  the ArenaNet route's 1 GB rule are still unchecked against a real download.
 - Raw mouse-look comes from SWTOR on Mac, where people have used it for a long time. In Guild
   Wars 2 this Mac driver build has had one in-game test so far, on 2026-11-08.
 - arcdps on DXMT has had one check, on 2026-11-08 with arcdps 1.2026.1023.2303. It loads and

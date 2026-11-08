@@ -4,7 +4,7 @@
 # creates its own engine and bottle and installs the game into them, through Steam or ArenaNet's
 # own installer. The app bundles only its own pieces:
 #   Contents/MacOS/GW2onMac            the window, menus, Settings and updates (src/native), arm64
-#   Contents/Frameworks/Sparkle.framework  app updates (Sparkle 2, pinned below; off until a feed)
+#   Contents/Frameworks/Sparkle.framework  app updates (Sparkle 2, pinned below; off without a feed)
 #   Contents/Resources/gw2om.sh        install/status/play/settings/uninstall logic (src/gw2om.sh)
 #   Contents/Resources/collect-logs.sh "Collect Logs…" (src/collect-logs.sh)
 #   Contents/Resources/session-report.sh  a game session in short (scripts/session-report.sh)
@@ -30,7 +30,7 @@
 #
 # Signing for distribution (Developer ID, hardened runtime, notarization) is scripts/release.sh,
 # which re-signs a copy of dist/ inside out. GW2_ON_MAC_VERSION=X.Y.Z[-dev.N] sets the version;
-# GW2_ON_MAC_FEED_URL and GW2_ON_MAC_ED_PUBLIC_KEY turn updates on (no feed yet: off).
+# GW2_ON_MAC_FEED_URL and GW2_ON_MAC_ED_PUBLIC_KEY turn updates on; a build without them has them off.
 set -euo pipefail
 cd "$(dirname "$0")"
 ROOT="$PWD"
@@ -144,7 +144,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 R="$APP/Contents/Resources"
 sed -e "s/@VERSION@/$APP_VERSION/g" -e "s/@BUILD@/$BUNDLE_VERSION/g" -e "s/@CHANNEL@/$CHANNEL/g" \
   src/Info.plist >"$APP/Contents/Info.plist"
-# Updates: off until there is a feed. GW2_ON_MAC_FEED_URL and GW2_ON_MAC_ED_PUBLIC_KEY (Sparkle's
+# Updates: off without a feed. GW2_ON_MAC_FEED_URL and GW2_ON_MAC_ED_PUBLIC_KEY (Sparkle's
 # EdDSA public key, generate_keys) turn them on for a release build (scripts/release.sh).
 if [ -n "${GW2_ON_MAC_FEED_URL:-}" ]; then
   [ -n "${GW2_ON_MAC_ED_PUBLIC_KEY:-}" ] || { echo "GW2_ON_MAC_FEED_URL needs GW2_ON_MAC_ED_PUBLIC_KEY" >&2; exit 1; }

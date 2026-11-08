@@ -3,9 +3,9 @@
 # update feed for Sparkle (src/native/Updates.swift): SWTOR on Mac's release script, as is, for
 # GW2 on Mac (paths below are relative to the repository root).
 #
-# NOTHING IS PUBLISHED YET. GW2 on Mac has no GitHub release and no feed: every mode that creates
-# or changes a GitHub release (the default, --ci, --dev, --feed) stops unless GW2_ON_MAC_PUBLISH=1,
-# and a feed needs an app built with GW2_ON_MAC_FEED_URL and GW2_ON_MAC_ED_PUBLIC_KEY (./build.sh
+# Releases go out from here. 0.1.0 and 0.1.1 are published, with their feed. As a safety stop,
+# every mode that creates or changes a GitHub release (the default, --ci, --dev, --feed) stops
+# unless GW2_ON_MAC_PUBLISH=1. A feed needs an app built with GW2_ON_MAC_FEED_URL and GW2_ON_MAC_ED_PUBLIC_KEY (./build.sh
 # puts them into Info.plist's SUFeedURL and SUPublicEDKey; without them Sparkle stays off).
 #
 #   release/<version>/GW2 on Mac.app                   Developer ID, hardened runtime
@@ -62,7 +62,7 @@ MODE="${1:-}"
 case "$MODE:${2:-}" in
   :|--ci:|--dev:|--feed:*)
     [ "${GW2_ON_MAC_PUBLISH:-}" = 1 ] || {
-      echo "GW2 on Mac publishes nothing yet: this mode creates or changes a GitHub release. Use --sign-only, --no-notarize or --no-release, or set GW2_ON_MAC_PUBLISH=1 when releases begin." >&2
+      echo "This mode creates or changes a GitHub release. Set GW2_ON_MAC_PUBLISH=1 to publish, or use --sign-only, --no-notarize or --no-release." >&2
       exit 1; } ;;
 esac
 DEV_NO_RELEASE=""

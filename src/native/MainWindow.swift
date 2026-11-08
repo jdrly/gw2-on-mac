@@ -438,7 +438,7 @@ struct CheckCell: View {
 
 struct WhatItDoes: View {
   private let features: [(String, String, String)] = [
-    ("zap", "Direct3D 11 straight to Metal", "Our DXMT build draws through Metal 4, tuned for busy maps."),
+    ("zap", "Direct3D 11 straight to Metal", "My DXMT build draws through Metal 4, tuned for busy maps."),
     ("flame", "Tuned for crowds", "A tuned Wine for better performance in busy scenes."),
     ("type", "Sharp text at 4K", "A larger interface drawn from the game's own crisp fonts."),
     ("undo-2", "Yours, and reversible", "Your own Steam or ArenaNet install. Uninstall removes everything."),

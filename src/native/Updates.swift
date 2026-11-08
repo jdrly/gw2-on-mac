@@ -2,9 +2,10 @@
 // the same update window (the app's own, in SwiftUI) and the same signing setup (SUFeedURL and
 // SUPublicEDKey in Info.plist; the feed is built by scripts/release.sh).
 //
-// OFF for now: GW2 on Mac has no feed yet, so Info.plist carries an empty SUFeedURL and no
-// SUPublicEDKey, and start() leaves Sparkle unstarted (Check for Updates… is disabled, the
-// Updates pane says so). Turning it on is setting both keys (README.md, Releasing).
+// Release builds carry the feed, the latest GitHub release's appcast.xml, and the EdDSA public key,
+// which build.sh puts into Info.plist from GW2_ON_MAC_FEED_URL and GW2_ON_MAC_ED_PUBLIC_KEY. A build
+// without them has an empty SUFeedURL and no SUPublicEDKey, and start() leaves Sparkle unstarted:
+// Check for Updates… is disabled and the Updates pane says so (README.md, Releasing).
 //
 // Sparkle keeps its settings in the app's defaults (cz.jandrly.gw2onmac). Installing an update
 // always takes a click. Only an install, repair or uninstall in progress holds an update.
@@ -48,7 +49,7 @@ final class Updates: NSObject, SPUUpdaterDelegate {
       NSLog("GW2 on Mac: not running as %@; no update checks", Updates.appBundleID)
       return
     }
-    // no feed yet (Info.plist's SUFeedURL is empty) and no test feed: updates stay off
+    // a build without a feed (Info.plist's SUFeedURL is empty) and no test feed: updates stay off
     let feed = (app.object(forInfoDictionaryKey: "SUFeedURL") as? String) ?? ""
     let override = UserDefaults.standard.string(forKey: Updates.feedOverrideKey) ?? ""
     guard !feed.isEmpty || !override.isEmpty else {

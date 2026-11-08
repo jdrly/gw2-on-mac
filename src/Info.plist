@@ -41,10 +41,10 @@
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>Unofficial. Not made, endorsed or supported by ArenaNet or NCSOFT. Guild Wars 2 is a trademark of NCSOFT Corporation.</string>
-	<!-- Sparkle (src/native/Updates.swift), wired as in SWTOR on Mac but OFF: there is no feed
-	     yet, so SUFeedURL is empty and there is no SUPublicEDKey; the app then never starts
-	     Sparkle. Releasing (README) sets both: the feed of the latest GitHub release and the
-	     public EdDSA key. Installing always takes a click. -->
+	<!-- Sparkle (src/native/Updates.swift), wired as in SWTOR on Mac. Here SUFeedURL is empty
+	     and there is no SUPublicEDKey, so a plain build never starts Sparkle. build.sh sets both
+	     for a release build: the feed of the latest GitHub release and the public EdDSA key.
+	     Installing always takes a click. -->
 	<key>SUFeedURL</key>
 	<string></string>
 	<key>SUVerifyUpdateBeforeExtraction</key>

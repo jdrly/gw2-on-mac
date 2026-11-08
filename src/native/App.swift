@@ -67,7 +67,7 @@ final class Installer {
     let finishing = Step(id: 5, title: "Finishing touches", detail: finishingDetail)
     let common = [
       Step(id: 1, title: "The Wine engine", detail: "CrossOver 26.3 · from athei/wine-build"),
-      Step(id: 2, title: "The game's own bottle", detail: "Retina, Game Mode and our graphics"),
+      Step(id: 2, title: "The game's own bottle", detail: "Retina, Game Mode and my graphics"),
     ]
     let files = "Cloned or copied; the originals stay as they are"
     if imported {
