@@ -53,7 +53,7 @@ final class Updates: NSObject, SPUUpdaterDelegate {
     let feed = (app.object(forInfoDictionaryKey: "SUFeedURL") as? String) ?? ""
     let override = UserDefaults.standard.string(forKey: Updates.feedOverrideKey) ?? ""
     guard !feed.isEmpty || !override.isEmpty else {
-      NSLog("GW2 on Mac: no update feed yet; updates are off")
+      NSLog("GW2 on Mac: this build has no update feed. Updates are off.")
       return
     }
     let driver = UserDriver(host: app)

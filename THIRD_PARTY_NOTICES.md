@@ -35,12 +35,12 @@ the painting and the app icon's ensō. The app has no ArenaNet or NCSOFT logo, f
 
 The bundled DXMT, Wine and addon binaries aren't in this repository. Today only my private
 development workspace builds them. `scripts/stage-components.sh` copies them from that
-workspace's `work/` folder into the ignored `prebuilt/` and checks them against their build records
-and this repository's `patches/`. The workspace is `GW2_ON_MAC_WORKSPACE`, by default
+workspace's `work/` folder into the ignored `prebuilt/`. It checks the Wine pieces against their
+build records and this repository's `patches/`. The workspace is `GW2_ON_MAC_WORKSPACE`, by default
 `../gw2-on-mac`. Their complete corresponding source is public. It's the pinned upstreams named
 above, jdrly/dxmt `e02a4d6` and athei/wine `d23b397` with CodeWeavers' CrossOver 26.3 sources and
 athei's patches, plus the patches in [`patches/`](patches). The app also carries those patches in
-`Resources/Licenses/wine/` with each component's build record. The addon's source is
+`Resources/Licenses/wine/` with the Wine pieces' build records. The addon's source is
 [`addon/ui-scale`](addon/ui-scale), and `scripts/build-addon.sh` builds it. `build.sh` downloads
 Sparkle at a pinned version and sha256.
 

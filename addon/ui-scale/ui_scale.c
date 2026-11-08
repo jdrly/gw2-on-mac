@@ -513,8 +513,8 @@ static void log_cache(void)
 }
 
 /* A fingerprint of GetFont's cache (which fonts are built, their objects and heights), so the
- * log shows every font the game builds later, e.g. when a story dialogue opens (I saw on 2026-11-04
- * that its text stays small). Read-only. */
+ * log shows every font the game builds later, e.g. when a story dialogue opens. I saw on 2026-11-04
+ * that story dialogue text stays small. Read-only. */
 static uint64_t cache_sig(void)
 {
   uint64_t h = 1469598103934665603ull;

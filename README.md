@@ -94,7 +94,9 @@ copy. On the Steam route, if Steam's record says the game is incomplete, the ins
 download step and Steam continues from the files. Otherwise Steam may still verify them at the
 first Play.
 
-If the first install fails or you cancel it, it removes everything it created. You can quit
+If the first install fails or you cancel it, it removes the engine, the bottle, the settings and
+the install state it created, and any game files it copied. Other files it made on the way can
+stay, such as cached downloads, logs, `dxmt.conf` and the Game Mode bundle. You can quit
 the app during a Steam or ArenaNet download. The window picks the download up again when you open
 it, and *Stop waiting* stops following it but keeps the engine and the bottle.
 
@@ -132,8 +134,7 @@ Some details:
   with other settings, Play asks you to quit Steam first, because the game inherits Steam's
   environment.
 - If the game's own Frame Limiter is set while vertical sync is on, the window suggests
-  *Unlimited* with vsync. Under Wine the two together land at about 58 frames per second instead of
-  60. *Don't show again* hides the tip.
+  *Unlimited* with vsync. *Don't show again* hides the tip.
 
 **Repair** puts the engine, my pieces in it, the bottle's settings, Game Mode and Steam back in
 place. It keeps the game and your settings. Use it when the window says so.
@@ -141,7 +142,8 @@ place. It keeps the game and your settings. Use it when the window says so.
 ## Settings
 
 Open Settings with ⌘, or from the window. Each pane covers one area. The defaults are the mix I
-play with, and every setting also exists as `gw2om.sh set <key> <value>` for scripting.
+play with. The settings with a key in the table also exist as `gw2om.sh set <key> <value>` for
+scripting.
 
 | Pane | Setting | Key | Default | What it does |
 |---|---|---|---|---|
@@ -196,7 +198,8 @@ switch asks first, and you use it at your own risk.
 - On downloads `d3d11.dll` and its `.md5sum` from deltaconnected.com, checks the file against that
   checksum and checks that it is arcdps. Then it goes next to `Gw2-64.exe` as `d3d11.dll`.
   From then on arcdps updates itself.
-- Off removes arcdps's `d3d11.dll` and keeps its settings in `addons/arcdps` for next time.
+- Off removes arcdps from `d3d11.dll` or `dxgi.dll` and keeps its settings in `addons/arcdps` for
+  next time.
 - An arcdps you put there yourself, or that came with your game files, shows as on.
 - Another addon in the same place, such as the Nexus loader, is left alone, and the switch says
   which file it found.
@@ -333,7 +336,9 @@ it as `<name>.stock`.
 ## Installing, step by step
 
 `gw2om.sh install <route>` runs five phases. A failed or cancelled first install removes what that
-run created.
+run tracked as created: the engine, the bottle, `settings.conf`, `state`, `install-manifest.json`,
+and an import's copied game folder with Steam's record. Other files it made can stay, such as
+cached downloads, logs, `dxmt.conf` and a finished Game Mode bundle.
 
 1. **The engine.** Download, check, unpack, check the loader, then my pieces as above.
 2. **The bottle.** `wineboot`, Retina mode in `user.reg`, `settings.conf`, `dxmt.conf` and the
@@ -411,8 +416,10 @@ sequenceDiagram
     X->>X: wait up to 15 minutes for the game
     G-->>X: the game quits
     X->>X: wait 30 seconds in case it restarts
-    X->>S: steam.exe -shutdown
-    X->>X: after 20 seconds, wineserver -k if Steam still runs
+    opt if Play started Steam hidden, its window stayed hidden and quitsteam is on
+        X->>S: steam.exe -shutdown
+        X->>X: after 20 seconds, wineserver -k if Steam still runs
+    end
 ```
 
 `gw2om.sh play` runs `steam.exe -applaunch 1284210 <launch options>` on the Steam route, adding
@@ -421,7 +428,7 @@ ArenaNet route it runs `Gw2-64.exe <launch options>`. It also makes the Game Mod
 `session.env` and rotates the logs when no session runs.
 
 One session runs at a time. The session's lock is a kernel `flock` on `.session.lock`, taken by the
-app's helper `helpers/sessionlock`. Play takes it before it looks at anything and passes it to the
+app's helper `helpers/sessionlock`. Play takes it before it updates engine files or registry settings, and passes it to the
 watcher, `gw2om.sh watch-session`, which it starts detached so the window can quit. The lock ends
 with the watcher, so nothing stale is left behind. After Play writes the first version of the
 `session` file, the watcher is its only writer. Others append requests to `session.req`: `join` from
@@ -618,8 +625,15 @@ scripts aren't in this repository. `stage-components.sh` copies them from `GW2_O
 by default `../gw2-on-mac` next to this checkout. The builds the app ships are
 `work/dxmt-rollback/e02a4d6-install`, `work/heat/install-r7c`, `work/winemac/install-km` and
 `work/ui-scale/build`. `DXMT_INSTALL`, `HEAT_INSTALL`, `WINEMAC_INSTALL` and `UISCALE_BUILD`
-override them. The script changes nothing in the workspace and checks each file against its build
-record and this repository's [`patches/`](patches). Git ignores `prebuilt/`.
+override them. The script changes nothing in the workspace. Git ignores `prebuilt/`. What it
+checks differs per component:
+
+- The Wine pieces must match the sha256 in their build records, `VERSION` and `WINESERVER.txt`,
+  and those records must name this repository's [`patches/`](patches) with their current sha256.
+  The workspace's copies of the patches must also equal this repository's.
+- DXMT's files must all be there. Its `VERSION` holds only the revision, `v0.80-441-ge02a4d6`.
+- The addon's `version.dll` and `gw2-ui-scale.ini` must be there, and the DLL must carry the
+  addon's marker string.
 
 **Their source.** The complete corresponding source is public, under LGPL-2.1-or-later. DXMT is
 [jdrly/dxmt at `e02a4d6`](https://github.com/jdrly/dxmt/tree/e02a4d6). The Wine pieces are
@@ -635,9 +649,9 @@ these patches:
   `winemac-physical-keys.patch`, `winemac-swgl-relative-mouse.patch`,
   `winemac-swgl-input-thread.patch` and `winemac-swtor-mouse.patch`
 
-They're configured as the engine is. Each component's `VERSION` record, also in the app under
-`Resources/Licenses`, names its sources, patches and sha256. See
-[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+They're configured as the engine is. The Wine pieces' build records, also in the app under
+`Resources/Licenses`, name their sources, patches and sha256. DXMT's record names its revision,
+and the commit above is its source. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 **The interface addon** is this repository's own code in [`addon/ui-scale`](addon/ui-scale).
 `scripts/build-addon.sh` builds `version.dll` with Homebrew's mingw-w64 (`brew install mingw-w64`)
