@@ -587,7 +587,7 @@ extension Notification.Name {
   static let collectLogs = Notification.Name("GW2onMacCollectLogs")
 }
 
-// The warning before the larger interface goes in (Jan's rule: off by default, a clear warning,
+// The warning before the larger interface goes in (my rule: off by default, a clear warning,
 // installed only after the user confirms)
 struct InterfaceWarning: View {
   @Binding var isPresented: Bool

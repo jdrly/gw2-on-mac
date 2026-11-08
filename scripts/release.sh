@@ -21,7 +21,7 @@
 # looks its ticket up online when the app is first opened); the ticket is stapled to the DMG.
 #
 # Needs the Developer ID Application identity in the keychain, a notarytool keychain profile
-# (default swgl-notary: Jan's App Store Connect API key, the same team as SWGL on Mac and SWTOR on Mac;
+# (default swgl-notary: my App Store Connect API key, the same team as SWGL on Mac and SWTOR on Mac;
 # xcrun notarytool store-credentials <name> --key … --key-id … --issuer …), Sparkle's EdDSA
 # key in the login keychain (Sparkle's generate_keys, the same key as SWGL on Mac; build.sh
 # unpacks the tools into .cache/sparkle-<version>/bin), gh logged in, and release notes in
@@ -41,7 +41,7 @@
 #
 # Releases from GitHub Actions (SWTOR on Mac's .github/workflows/release.yml; GW2 on Mac has no
 # workflow yet) come in two halves, so
-# Sparkle's EdDSA key never leaves Jan's Mac:
+# Sparkle's EdDSA key never leaves my Mac:
 #   scripts/release.sh --ci          (CI) sign, package, notarize, and create the draft release
 #                                    with the DMG only
 #   scripts/release.sh --ci-dry-run  (CI) the same without a release (the workflow keeps the DMG
@@ -58,7 +58,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 MODE="${1:-}"
-# (see the header: nothing is published until Jan says so)
+# (see the header: these modes need GW2_ON_MAC_PUBLISH=1)
 case "$MODE:${2:-}" in
   :|--ci:|--dev:|--feed:*)
     [ "${GW2_ON_MAC_PUBLISH:-}" = 1 ] || {

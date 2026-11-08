@@ -22,7 +22,7 @@
 #include "sigs.h"
 #include "ui_scale.h"
 
-#define DEFAULT_SCALE 1.75   /* Larger's target scale (Jan, 2026-10-28); the font-0 strikes give 30/18 = 1.67 */
+#define DEFAULT_SCALE 1.75   /* Larger's target scale (my pick, 2026-10-28); the font-0 strikes give 30/18 = 1.67 */
 #define NSTEPS        3      /* size steps in the font data (measured 2026-10-28) */
 #define LARGER        2      /* the step this changes */
 #define MAX_FAMILIES  64
@@ -513,8 +513,8 @@ static void log_cache(void)
 }
 
 /* A fingerprint of GetFont's cache (which fonts are built, their objects and heights), so the
- * log shows every font the game builds later, e.g. when a story dialogue opens (Jan, 2026-11-04:
- * its text stays small). Read-only. */
+ * log shows every font the game builds later, e.g. when a story dialogue opens (I saw on 2026-11-04
+ * that its text stays small). Read-only. */
 static uint64_t cache_sig(void)
 {
   uint64_t h = 1469598103934665603ull;
@@ -530,7 +530,7 @@ static uint64_t cache_sig(void)
   return h;
 }
 
-/* 1 while our values are in place, 0 when the game replaced some (logged). */
+/* 1 while the addon's values are in place, 0 when the game replaced some (logged). */
 static int still_applied(void)
 {
   int orig = 0, ours = 0;

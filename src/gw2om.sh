@@ -252,7 +252,7 @@ set_state() {
 # Programs are told by their real executable (helpers/procpaths): Wine 11 rewrites argv[0], so ps
 # shows C:\...\name.exe for its processes, while their executable is the engine's loader, a
 # winetemp link to it or the Game Mode bundle's copy. Only this engine's processes count (another
-# Wine, another sandbox's test or Jan's own setup never stop this one).
+# Wine, another sandbox's test or my own setup never stop this one).
 winetemp_tag() {
   local l="$ENG/lib/wine/x86_64-unix/wine"
   if [ -f "$l" ]; then echo "/winetemp-$(stat -f '%i-%z' "$l")-"; fi
@@ -597,7 +597,7 @@ apply_registry() {
 
 # --- Settings
 #
-# The defaults are the mix Jan plays with (in the development workspace). Some are newer than
+# The defaults are the mix I play with in my development workspace. Some are newer than
 # the rest; Settings turns each off:
 #   warm=on          DXMT_WARM=all: pipelines built ahead by recent use (jdrly/dxmt #128)
 #   coolworkers=3    HEAT_QOS=1=utility:3: only the first 3 job workers on the cooler cores
@@ -1426,7 +1426,7 @@ game_runs_anywhere() {
 }
 
 # import_game <source dir> <bottle's game dir>: the folder cloned (same disk) or copied (with a
-# free-space check and progress); our own addon's files (version.dll with its mark,
+# free-space check and progress); my own addon's files (version.dll with its mark,
 # gw2-ui-scale.*) are left out; any other addon comes along as it is (ADDONS names them)
 import_game() {
   local src=$1 dst=$2 total pid

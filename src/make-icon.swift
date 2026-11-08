@@ -1,6 +1,6 @@
 // The app icon: an Icon Composer document (src/AppIcon.icon) that macOS 26 and later draws as a
 // Liquid Glass icon (glass rim, specular highlights, shadow; Default, Dark, Tinted and Clear).
-// The design (Jan's, the approved design's frame "App Icon"): the window's
+// My design, the frame "App Icon" in the design file I approved: the window's
 // "GW2 / ON MAC" wordmark in Cinzel over a crimson ensō with ink splatter, on dark ink. Original
 // artwork: no ArenaNet or Guild Wars logo. The layers carry no tile, rim or shadow: the system draws
 // those, and icon.json holds the background gradient and each group's glass settings (fine-tune

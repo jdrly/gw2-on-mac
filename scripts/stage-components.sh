@@ -1,10 +1,10 @@
 #!/bin/bash
 # Stages the components GW2 on Mac's app bundles into prebuilt/ (ignored by git: Wine and DXMT
-# binaries stay out of the repository), copied from the builds in the development workspace's
+# binaries stay out of the repository), copied from the builds in my development workspace's
 # work/, the ones the live engine runs. Nothing in the workspace is changed. build.sh checks
 # prebuilt/ against the records copied here, the way SWTOR on Mac's build.sh checks its prebuilt/.
 #
-# Only Jan's private development workspace (GW2_ON_MAC_WORKSPACE) builds these binaries today; its
+# Only my private development workspace (GW2_ON_MAC_WORKSPACE) builds these binaries today; its
 # build scripts are not part of this repository. What they build from is public: the complete
 # corresponding source of each LGPL component is its pinned upstream plus this repository's
 # patches/ (see THIRD_PARTY_NOTICES.md), and each component's VERSION record names both.

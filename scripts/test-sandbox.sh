@@ -6,7 +6,7 @@
 # its environment). Steam's and ArenaNet's downloads of the game are played by this script
 # (Steam's appmanifest, the game folder). Processes for the busy checks are copies of /bin/sleep
 # at the engine's paths. The ArenaNet installer is a clone of a file signed by ArenaNet (by
-# default the game's own Gw2-64.exe from the development workspace's bottle, only read; without
+# default the game's own Gw2-64.exe from my development workspace's bottle, only read; without
 # one, those checks are skipped).
 #
 #   scripts/test-sandbox.sh [path/to/GW2 on Mac.app]
@@ -364,7 +364,7 @@ rm -f "$GD/dxgi.dll"
 cp "$COMP/dxmt/x86_64-windows/d3d11.dll" "$GD/d3d11.dll"
 check "a real d3d11.dll that isn't arcdps (DXMT's): foreign" [ "$(arcst)" = foreign ]
 rm -f "$GD/d3d11.dll"
-# the real arcdps, if the development workspace has a copy (only read)
+# the real arcdps, if my development workspace has a copy (only read)
 ARCDPS_REAL="${ARCDPS_REAL:-$WS/work/arcdps/2026-11-08/d3d11.dll}"
 if [ -f "$ARCDPS_REAL" ]; then
   cp "$ARCDPS_REAL" "$GD/d3d11.dll"
@@ -451,7 +451,7 @@ g set steambg on >/dev/null
 
 section "Busy checks (a sleeper at the engine's paths)"
 watch_done   # the watchers of the Plays above have given up (no Steam came)
-# (macOS kills copies of /bin/sleep: an ad-hoc signed program of our own keeps its signature)
+# (macOS kills copies of /bin/sleep: an ad-hoc signed program of my own keeps its signature)
 printf '#include <unistd.h>\n#include <stdlib.h>\nint main(int c, char **v) { sleep(c > 1 ? atoi(v[1]) : 60); return 0; }\n' >"$SANDBOX/sleeper.c"
 clang -O2 -o "$SANDBOX/sleeper" "$SANDBOX/sleeper.c"
 cp "$SANDBOX/sleeper" "$ENG/bin/leftover"
@@ -984,7 +984,7 @@ echo "this version's winemac.so, as a later version sees it" >"$SANDBOX/winemac-
 cp "$SANDBOX/winemac-rec.so" "$U/winemac.so"
 check "a file the engine's record names (from an install of an earlier version): graphics=update" eval 'sed -i "" "s|^[0-9a-f]* lib/wine/x86_64-unix/winemac.so\$|$(shasum -a 256 "$SANDBOX/winemac-rec.so" | cut -d" " -f1) lib/wine/x86_64-unix/winemac.so|" "$ENG/.gw2om-components" && [ "$(st graphics)" = update ]'
 cp "$COMP/winemac/winemac.so" "$U/winemac.so"
-# an engine that already has this version's pieces under 0.1.0's manifest (Jan's): set up
+# an engine that already has this version's pieces under 0.1.0's manifest (as mine has): set up
 sed -i '' -e 's/"version": "[^"]*"/"version": "0.1.0"/' "$MF"; rm -f "$ENG/.gw2om-components"
 check "this version's pieces under 0.1.0's manifest, no record: graphics=yes" [ "$(st graphics)" = yes ]
 out=$(g play 2>&1); started
@@ -1064,7 +1064,7 @@ check "  stage=none, engine and bottle stay" [ "$(st stage)/$(st installed)" = n
 g uninstall >/dev/null 2>&1
 
 section "Use existing game files (other Wine apps' installs)"
-# CrossOver (a Steam install, with our own addon, another addon and the game's settings), Whisky
+# CrossOver (a Steam install, with my own addon, another addon and the game's settings), Whisky
 # and a Sikarugir wrapper (ArenaNet installs), a broken one (Gw2.dat too small). Gw2.dat is sparse.
 CX="$H/Library/Application Support/CrossOver/Bottles/Steam GW2/drive_c"
 CXG="$CX/Program Files (x86)/Steam/steamapps/common/Guild Wars 2"
