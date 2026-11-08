@@ -628,9 +628,11 @@ by default `../gw2-on-mac` next to this checkout. The builds the app ships are
 override them. The script changes nothing in the workspace. Git ignores `prebuilt/`. What it
 checks differs per component:
 
-- The Wine pieces must match the sha256 in their build records, `VERSION` and `WINESERVER.txt`,
-  and those records must name this repository's [`patches/`](patches) with their current sha256.
-  The workspace's copies of the patches must also equal this repository's.
+- The Wine binaries must match the sha256 in their build records, `VERSION` and
+  `WINESERVER.txt`. For ntdll and the Mac driver, the script also checks the records' patch hashes
+  against this repository's [`patches/`](patches). It compares existing workspace copies of
+  `ntdll-heat.patch`, `wineserver-msync-unregister.patch` and the Mac driver patches with this
+  repository's copies.
 - DXMT's files must all be there. Its `VERSION` holds only the revision, `v0.80-441-ge02a4d6`.
 - The addon's `version.dll` and `gw2-ui-scale.ini` must be there, and the DLL must carry the
   addon's marker string.
