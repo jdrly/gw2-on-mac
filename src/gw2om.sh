@@ -519,9 +519,9 @@ get_reg() {
 REG_MAC='Software\\Wine\\Mac Driver'
 REG_GW2_DLLS='Software\\Wine\\AppDefaults\\Gw2-64.exe\\DllOverrides'
 
-# The bottle's registry settings from settings.conf (Retina mode; the addon's version.dll
-# override for Gw2-64.exe only): only while no session runs, else at the next game start that
-# finds none (play)
+# The bottle's registry settings from settings.conf (Retina mode; for Gw2-64.exe only, the
+# d3d11/dxgi addon order and the addon's version.dll override): only while no session runs, else
+# at the next game start that finds none (play)
 apply_registry() {
   [ -f "$BOTTLE/user.reg" ] || [ -n "$DRY" ] || return 0
   if session_running; then
@@ -529,6 +529,12 @@ apply_registry() {
     return 0
   fi
   set_reg "$REG_MAC" RetinaMode "$([ "$(setting retina)" = on ] && echo y || echo n)"
+  # Addons that install as d3d11.dll (or dxgi.dll) next to Gw2-64.exe, like arcdps and Nexus,
+  # load first, then load the system32 d3d11.dll: Wine's built-in, which the compatdb points at
+  # GW2 on Mac's DXMT. Without a native-first order Wine skips them. With no such file the game
+  # gets the built-in as before. Gw2-64.exe only: Steam and the launcher keep the default order.
+  set_reg "$REG_GW2_DLLS" d3d11 native,builtin
+  set_reg "$REG_GW2_DLLS" dxgi native,builtin
   if [ "$(setting uiscale)" = on ] && [ "$(uiscale_state)" = on ]; then
     set_reg "$REG_GW2_DLLS" version native,builtin
   else

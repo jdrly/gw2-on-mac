@@ -64,7 +64,10 @@ sett() { g settings | sed -n "s/^$1=//p"; }
 has() { grep -q -- "$2" "$1" 2>/dev/null; }
 # play starts Wine detached: wait (up to 5 s) for the stand-in's log of that start
 started() { local i=0; while ! grep -q '^wine ' "$STANDIN_LOG" 2>/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done; }
-reg() { grep -A3 "^\[$1\]" "$BOTTLE/user.reg" 2>/dev/null | grep -q "^\"$2\"=\"$3\""; }
+# reg <key> <name> <value>: the value is set in that section; noreg <key> <name>: the name isn't
+regsec() { sed -n "/^\[$1\]/,/^\$/p" "$BOTTLE/user.reg" 2>/dev/null; }
+reg() { regsec "$1" | grep -q "^\"$2\"=\"$3\""; }
+noreg() { ! regsec "$1" | grep -q "^\"$2\"="; }
 same() { cmp -s "$1" "$2"; }
 # the session's file, and waits (up to 10 s) for its watcher to reach a stage or end
 sess() { sed -n "s/^$1=//p" "$AD/session" 2>/dev/null; }
@@ -215,6 +218,9 @@ check "set hud off: no WINE_HEAT_METAL_HUD" sh -c "'$G' set hud off >/dev/null &
 check "set debug on: DXMT_LOG_LEVEL=debug and the heat counters" sh -c "'$G' set debug on >/dev/null && '$G' env | grep -qx DXMT_LOG_LEVEL=debug && '$G' env | grep -qx WINE_HEAT_COUNT=1"
 g set retina off >/dev/null; check "set retina off: RetinaMode=n" reg 'Software\\\\Wine\\\\Mac Driver' RetinaMode n
 g set retina on >/dev/null; check "set retina on: RetinaMode=y" reg 'Software\\\\Wine\\\\Mac Driver' RetinaMode y
+check "  d3d11 addons (arcdps) load first for Gw2-64.exe" reg 'Software\\\\Wine\\\\AppDefaults\\\\Gw2-64.exe\\\\DllOverrides' d3d11 native,builtin
+check "  so do dxgi.dll addons" reg 'Software\\\\Wine\\\\AppDefaults\\\\Gw2-64.exe\\\\DllOverrides' dxgi native,builtin
+check "  the default order for every other program" noreg 'Software\\\\Wine\\\\DllOverrides' d3d11
 check "set gamemode off: no WINEDLLPATH" sh -c "'$G' set gamemode off >/dev/null && ! '$G' env | grep -q WINEDLLPATH && [ \"\$('$G' status | sed -n 's/^gamemode=//p')\" = off ]"
 g set gamemode on >/dev/null
 check "set launchopts -maploadinfo" g set launchopts "-maploadinfo"
@@ -235,6 +241,7 @@ check "set uiscale_size 2.0 and sans off: the ini follows" sh -c "'$G' set uisca
 echo "addon log" >"$GD/gw2-ui-scale.log"
 check "set uiscale off: dll, ini and override gone, the log moved to Logs" sh -c "'$G' set uiscale off >/dev/null && [ ! -e '$GD/version.dll' ] && [ ! -e '$GD/gw2-ui-scale.ini' ] && [ ! -e '$GD/gw2-ui-scale.log' ] && ls '$LOGS'/gw2-ui-scale-*.log >/dev/null"
 check "  the override removed" sh -c "! grep -q '^\"version\"=' '$BOTTLE/user.reg'"
+check "  the d3d11 addon order stays" reg 'Software\\\\Wine\\\\AppDefaults\\\\Gw2-64.exe\\\\DllOverrides' d3d11 native,builtin
 echo "another addon" >"$GD/version.dll"
 check "another version.dll: uiscale_state=foreign" [ "$(sett uiscale_state)" = foreign ]
 g set uiscale on >/dev/null 2>&1 || true

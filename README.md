@@ -294,6 +294,13 @@ Registry settings (Retina, the addon's override) are written straight into the b
 `user.reg`, as SWTOR on Mac does, and only while no Wine session of the bottle runs. Otherwise
 they wait for the next Play that finds none.
 
+`Gw2-64.exe` always gets `d3d11` and `dxgi` as `native,builtin`, so an addon placed as
+`d3d11.dll` or `dxgi.dll` next to it (arcdps, the Nexus loader) loads first. It then loads
+`system32\d3d11.dll`, Wine's built-in, which the compatdb points at the DXMT tree (checked on
+2026-11-08 with arcdps 1.2026.1023.2303: the chain arcdps → system32 `d3d11.dll` →
+`winemetal.dll`, and a device created). With no such file the game gets the built-in as before.
+Steam and the launcher keep Wine's default order.
+
 ## Logs and bug reports
 
 - **Collect Logs…** (menu and Settings › Troubleshooting) zips the logs to the Desktop. It is
