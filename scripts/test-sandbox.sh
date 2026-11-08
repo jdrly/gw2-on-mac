@@ -928,6 +928,39 @@ check "an update killed after 16 files (new winemac.drv, old winemac.so): the jo
 out=$(g play 2>&1) && rc=0 || rc=$?; started
 check "  the next Play takes over the lock it left, finishes the update and starts the game" eval '[ "$rc" = 0 ] && is_new && [ ! -e "$ENG/.gw2om-update" ] && [ "$(st graphics)" = yes ] && has "$LOGS/install.log" "finishing an interrupted update" && has "$STANDIN_LOG" "^wine "'
 watch_done
+# killed while backing up (a partial copy of winemac.so's backup, nothing committed), then the
+# retry fails between the Mac driver's pieces: the rollback puts the intact originals back
+as_010; : >"$STANDIN_LOG"
+GW2_ON_MAC_UPDATE_KILL_IN_BACKUP=17 "$G" play >"$SANDBOX/killed.txt" 2>&1
+check "an update killed while backing up winemac.so: a partial backup (.part), nothing committed, the engine untouched" eval '[ -f "$ENG/.gw2om-update/old/17.part" ] && [ ! -e "$ENG/.gw2om-update/old/17" ] && [ ! -e "$ENG/.gw2om-update/committing" ] && is_010 && nolaunch'
+out=$(GW2_ON_MAC_UPDATE_FAIL_AFTER=16 "$G" play 2>&1) && rc=0 || rc=$?
+check "  the retry backs it up again; failing after 16 files, it rolls back to the intact originals" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "test: the update fails" && is_010 && [ ! -e "$ENG/.gw2om-update" ] && nolaunch'
+# a backup slot that isn't the untouched live file (before any commit) is never trusted
+mkdir -p "$ENG/.gw2om-update/old" && head -c 5 "$U/winemac.so" >"$ENG/.gw2om-update/old/17"
+out=$(GW2_ON_MAC_UPDATE_FAIL_AFTER=16 "$G" play 2>&1) && rc=0 || rc=$?
+check "a truncated backup slot from before any commit is made again: the rollback is intact" eval '[ "$rc" != 0 ] && is_010 && [ ! -e "$ENG/.gw2om-update" ]'
+out=$(g play 2>&1) && rc=0 || rc=$?; started
+check "  a Play without a failure then updates the engine" eval '[ "$rc" = 0 ] && is_new && [ "$(st graphics)" = yes ]'
+watch_done
+# the install lock: one left by a process that is gone is taken over by exactly one contender (the
+# claim, a kernel lock), and a live owner's lock is never removed by anyone else
+( exit 0 ) & dp=$!; wait $dp
+mkdir "$AD/.lock" && echo "$dp" >"$AD/.lock/pid"
+touch "$PAUSE"; rm -f "$PAUSE.at"
+GW2_ON_MAC_TEST_PAUSE="$PAUSE" GW2_ON_MAC_TEST_PAUSE_AT=lock-stale-checked "$G" set launchopts -contenderA >"$SANDBOX/contA.txt" 2>&1 & ca=$!
+check "a lock left by a gone process: the first contender has the claim (paused after its check)" eval 'wait_at && "$APP/Contents/Resources/helpers/sessionlock" held "$AD/.lock-claim"'
+out=$(g repair 2>&1) && rc=0 || rc=$?
+check "  a second contender is refused meanwhile and leaves the lock alone" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "Another GW2 on Mac" && [ "$(cat "$AD/.lock/pid")" = "$dp" ]'
+out=$(g set launchopts -contenderB 2>&1) && rc=0 || rc=$?
+check "  so does a third (a settings change)" eval '[ "$rc" != 0 ] && [ "$(cat "$AD/.lock/pid")" = "$dp" ]'
+rm -f "$PAUSE"; wait $ca; rc=$?
+check "  the first one takes it over, does its work and removes its own lock" eval '[ "$rc" = 0 ] && [ "$(sett launchopts)" = -contenderA ] && [ ! -e "$AD/.lock" ] && has "$LOGS/install.log" "taking over the install lock"'
+"$SANDBOX/sleeper" 30 & lp=$!
+mkdir "$AD/.lock" && echo "$lp" >"$AD/.lock/pid"
+out=$(g set launchopts -x 2>&1) && rc=0 || rc=$?
+check "a live owner's lock: refused, and the lock stays the owner's" eval '[ "$rc" != 0 ] && [ "$(cat "$AD/.lock/pid")" = "$lp" ] && [ "$(sett launchopts)" = -contenderA ]'
+kill $lp 2>/dev/null; wait $lp 2>/dev/null; rm -rf "$AD/.lock"
+g set launchopts -maploadinfo >/dev/null
 # a later version's update: what this version put in (its record) counts as an earlier version's
 echo "this version's winemac.so, as a later version sees it" >"$SANDBOX/winemac-rec.so"
 cp "$SANDBOX/winemac-rec.so" "$U/winemac.so"

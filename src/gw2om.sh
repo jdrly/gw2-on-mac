@@ -74,9 +74,10 @@
 #   GW2_ON_MAC_OLD_COMPONENTS  a file of "<path in the engine> <sha256>" lines: stand-ins for an
 #                              earlier version's engine pieces (graphics_state update)
 #   GW2_ON_MAC_TEST_PAUSE, GW2_ON_MAC_TEST_PAUSE_AT   wait at a point while that file is there
-#                              (test_pause: play-classified, update-<n>)
+#                              (test_pause: play-classified, update-<n>, lock-stale-checked)
 #   GW2_ON_MAC_UPDATE_FAIL_AFTER, GW2_ON_MAC_UPDATE_KILL_AFTER   an update fails (or is killed)
 #                              after <n> of its files
+#   GW2_ON_MAC_UPDATE_KILL_IN_BACKUP   an update is killed halfway through backing up its <n>th file
 #   GW2_ON_MAC_ALLOW_WINE=1    let the real engine's Wine run in a sandbox (never in the tests)
 #   GW2_ON_MAC_IMPORT_COPY=1   install import copies even on the same disk (the other-disk path)
 #   GW2_ON_MAC_FREE_KB=<n>     the free space the app's disk reports (KB)
@@ -187,7 +188,7 @@ DXMT_CACHE="$DXMT_CACHE_ROOT/Gw2-64.exe"
 STEAM_DIR="$BOTTLE/drive_c/Program Files (x86)/Steam"
 STEAM_EXE='C:\Program Files (x86)\Steam\steam.exe'
 # What uninstall removes in APPDIR (the folder itself goes too once empty)
-APP_FILES="engine bottle gamemode settings.conf state install-manifest.json dxmt.conf engine.new bottle.new session session.req .session.lock"
+APP_FILES="engine bottle gamemode settings.conf state install-manifest.json dxmt.conf engine.new bottle.new session session.req .session.lock .lock-claim"
 LOGFILE=/dev/null
 
 # --- Output and logging
@@ -918,9 +919,16 @@ update_components() {
   i=0
   while IFS='	' read -r src dst mode; do
     i=$((i + 1))
-    [ ! -e "$UPD/old/$i" ] && [ ! -e "$UPD/old/$i.none" ] || continue
+    rm -f "$UPD/old/$i.part"
+    # (a backup slot is complete once renamed into place; before any commit the live file is
+    # untouched, so a backup that isn't the same as it is made again)
+    if [ -e "$UPD/old/$i.none" ] || { [ -f "$UPD/old/$i" ] && { [ -f "$UPD/committing" ] || cmp -s "$UPD/old/$i" "$ENG/$dst"; }; }; then continue; fi
     if [ -f "$ENG/$dst" ]; then
-      cp -p "$ENG/$dst" "$UPD/old/$i" || die "Could not back up the engine's $dst. Free some disk space and try again."
+      if [ -n "$ROOT" ] && [ "${GW2_ON_MAC_UPDATE_KILL_IN_BACKUP:-}" = "$i" ]; then
+        head -c 5 "$ENG/$dst" >"$UPD/old/$i.part"; kill -9 $$
+      fi
+      { cp -p "$ENG/$dst" "$UPD/old/$i.part" && cmp -s "$ENG/$dst" "$UPD/old/$i.part" && mv -f "$UPD/old/$i.part" "$UPD/old/$i"; } ||
+        die "Could not back up the engine's $dst. Free some disk space and try again."
       h=$(stock_sha256 "$dst")
       if [ -n "$h" ] && [ ! -f "$ENG/$dst.stock" ] && [ "$(sha256 "$ENG/$dst")" = "$h" ]; then cp -p "$ENG/$dst" "$ENG/$dst.stock"; fi
     else
@@ -948,7 +956,7 @@ update_components() {
   rm -rf "$UPD"
   log "update: done, the engine has $VERSION's pieces"
   trap - EXIT
-  rm -rf "$APPDIR/.lock"
+  unlock
 }
 # update_exit: a failed update puts the live files back from old/ (if any had moved) and drops the
 # journal; if that fails too, the journal stays and the next Play finishes the update
@@ -966,7 +974,7 @@ update_exit() {
     if [ -n "$ok" ]; then rm -rf "$UPD"; log "update failed (status $st): the engine's pieces are as they were"
     else log "update failed (status $st) and could not be rolled back: the next Play finishes it"; fi
   fi
-  rm -rf "$APPDIR/.lock"
+  unlock
 }
 
 # install_engine [force]: the verified engine unpacked into $ENG (unless it's there already),
@@ -1268,7 +1276,7 @@ set_arcdps() {
     echo "@done arcdps would be in the game folder."
     return 0
   fi
-  trap 'rm -rf "$CACHE/downloads/arcdps"; rm -rf "$APPDIR/.lock"' EXIT
+  trap 'rm -rf "$CACHE/downloads/arcdps"; unlock' EXIT
   step "Downloading arcdps from deltaconnected.com"
   rm -rf "$dir" && mkdir -p "$dir"
   sum=$(curl -fsSL --connect-timeout 20 --max-time 60 --max-filesize 4096 "$ARCDPS_URL/d3d11.dll.md5sum" 2>>"$LOGFILE") ||
@@ -1700,7 +1708,7 @@ cmd_set() {
   open_log
   log "---- set $key=$value"
   lock
-  trap 'rm -rf "$APPDIR/.lock"' EXIT
+  trap 'unlock' EXIT
   if [ "$key" = arcdps ]; then set_arcdps "$value"; return; fi
   write_settings "$key" "$value"
   case "$key" in
@@ -1716,22 +1724,35 @@ cmd_set() {
   fi
 }
 
+# lock: the install lock (no two installs, repairs, uninstalls, settings changes or engine
+# updates at once): the folder .lock, created atomically, with its owner's pid in it. One whose
+# owner is gone (killed, the Mac switched off) is taken over, but only under the claim
+# (.lock-claim, a kernel lock every contender must get: the session helper's flock, held just for
+# the check and the new pid, so no child ever inherits it): two contenders can't both take it.
+# unlock removes it only for its owner.
+LOCK_CLAIM="$APPDIR/.lock-claim"
 lock() {
-  local p
+  local p age
   [ -n "$DRY" ] && return
   mkdir -p "$APPDIR" "$LOGS"
-  if ! mkdir "$APPDIR/.lock" 2>/dev/null; then
-    # (its holder's pid: one that is gone, killed or the Mac switched off, left it behind)
-    p=$(cat "$APPDIR/.lock/pid" 2>/dev/null || true)
-    if [ -n "$p" ] && ! kill -0 "$p" 2>/dev/null; then
-      log "taking over a lock left by process $p, which is gone"
-      echo $$ >"$APPDIR/.lock/pid"
-      return 0
-    fi
-    die "Another GW2 on Mac install, repair or uninstall is running."
+  if mkdir "$APPDIR/.lock" 2>/dev/null; then echo $$ >"$APPDIR/.lock/pid"; return 0; fi
+  [ -x "$LOCKER" ] || die "Another GW2 on Mac install, repair or uninstall is running."
+  exec 6>>"$LOCK_CLAIM"
+  if ! "$LOCKER" take 6 2>/dev/null; then exec 6>&-; die "Another GW2 on Mac install, repair or uninstall is running."; fi
+  p=$(cat "$APPDIR/.lock/pid" 2>/dev/null || true)
+  age=$(( $(date +%s) - $(stat -f %m "$APPDIR/.lock" 2>/dev/null || date +%s) ))
+  # (gone: its pid no longer runs; or no pid after a minute, its owner killed right after mkdir)
+  if [ -d "$APPDIR/.lock" ] && { { [ -n "$p" ] && ! kill -0 "$p" 2>/dev/null; } || { [ -z "$p" ] && [ "$age" -gt 60 ]; }; }; then
+    test_pause lock-stale-checked
+    log "taking over the install lock left by ${p:-a process} that is gone"
+    echo $$ >"$APPDIR/.lock/pid"
+    exec 6>&-
+    return 0
   fi
-  echo $$ >"$APPDIR/.lock/pid"
+  exec 6>&-
+  die "Another GW2 on Mac install, repair or uninstall is running."
 }
+unlock() { [ "$(cat "$APPDIR/.lock/pid" 2>/dev/null || true)" != "$$" ] || rm -rf "$APPDIR/.lock"; }
 
 write_manifest() {
   put "$MANIFEST" 644 <<EOF
@@ -1776,7 +1797,7 @@ on_install_exit() {
     rm -rf "$APPDIR"/*.new "$APPDIR/gamemode"/.GW2.app.new.* 2>/dev/null || true
     log "install failed (status $st)"
   fi
-  rm -rf "$APPDIR/.lock"
+  unlock
 }
 
 # preflight [import]: (an import checks the space its copy needs itself)
@@ -2258,7 +2279,7 @@ cmd_finish() {
   game_state
   [ "$GAME" = yes ] || [ -n "$DRY" ] || die "Guild Wars 2 is not installed yet."
   lock
-  trap 'rm -rf "$APPDIR/.lock"' EXIT
+  trap 'unlock' EXIT
   finish_touches
   log "finish complete"
   echo "@done Guild Wars 2 is ready. Press Play."
@@ -2706,7 +2727,7 @@ cmd_uninstall() {
   check_not_running
   lock
   # (the folder itself goes too once empty)
-  trap 'rm -rf "$APPDIR/.lock"; rmdir "$APPDIR" 2>/dev/null || true' EXIT
+  trap 'unlock; rmdir "$APPDIR" 2>/dev/null || true' EXIT
   stop_watcher
   [ -n "$DRY" ] || stop_wine
   remove_gamemode_links

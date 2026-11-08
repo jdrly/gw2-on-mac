@@ -244,11 +244,16 @@ mouse-look) go in by themselves at the next Play, without Repair.
   through Wine's start and handed to the session's watcher) and the install lock, with no Wine of
   the bottle running. Another Play meanwhile starts nothing and says to try again.
 - **How:** as one transaction in `engine/.gw2om-update`: every new file staged and compared first,
-  the live ones backed up (`.stock` kept for an engine's own file, as at the install), then one
-  rename per file, a final comparison, the record and the manifest of this version. A failure
-  puts the backups back. An interruption (a kill, the Mac switched off) leaves the journal: the
-  engine counts as `update`, the game doesn't start on a half-replaced set, and the next Play
-  finishes the update (it takes over the install lock a gone process left).
+  the live ones backed up (each copied to a temporary name, compared with the original, then
+  renamed into its slot, so a half-written backup never counts; `.stock` kept for an engine's own
+  file, as at the install), then one rename per file, a final comparison, the record and the
+  manifest of this version. A failure puts the backups back. An interruption (a kill, the Mac
+  switched off) leaves the journal: the engine counts as `update`, the game doesn't start on a
+  half-replaced set, and the next Play finishes the update.
+- **The install lock** (`.lock`, with its owner's pid) keeps installs, repairs, uninstalls,
+  settings changes and updates apart. One left by a process that is gone is taken over only under
+  `.lock-claim`, a kernel lock (the session helper's flock) that every contender must get, so two
+  can't both take it; only its owner removes it.
 - **And:** Play never starts the game on a set with a missing piece (it says Repair). An engine
   that already has this version's pieces counts as set up (`graphics=yes`); Play only brings the
   manifest up to this version.
@@ -271,7 +276,7 @@ items, nothing in `/Applications` besides the app itself):
 | `~/Library/Application Support/GW2 on Mac/engine/` | the Wine engine with GW2 on Mac's pieces (about 1 GB) | removed |
 | `…/GW2 on Mac/bottle/` | the game's Wine prefix: Steam, **the game's files** (about 75 GB; an APFS clone of your own when they came from the same disk, which takes no extra space until either changes), the game's own settings (and `GW2 on Mac backup <date>/` next to them after an import that replaced some) | removed, with the game |
 | `…/GW2 on Mac/gamemode/GW2.app` | the Game Mode bundle | removed |
-| `…/GW2 on Mac/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `session`, `session.req`, `.session.lock` | the settings, the route and stage, what was installed, DXMT's options, the last Play's session (its watcher's stage), the requests to its watcher, its lock | removed |
+| `…/GW2 on Mac/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `session`, `session.req`, `.session.lock`, `.lock-claim` | the settings, the route and stage, what was installed, DXMT's options, the last Play's session (its watcher's stage), the requests to its watcher, its lock, the install lock's claim | removed |
 | `~/Library/Caches/GW2 on Mac/downloads/` | the engine archive, `SteamSetup.exe`, a copy of `Gw2Setup-64.exe` | removed |
 | `~/Library/Caches/GW2 on Mac/dxmt/Gw2-64.exe/` | DXMT's shader cache, pipeline archives and recorded pipelines for the game (`DXMT_CACHE_DIR` points DXMT here; another process, such as the launcher's `CefHost.exe`, gets its own folder next to it) | removed; *Reset the shader cache* empties it too |
 | `$(getconf DARWIN_USER_TEMP_DIR)winetemp-…/Gw2-64.exe` | the Game Mode link | removed |
@@ -454,7 +459,7 @@ scripts/stage-components.sh    # copy DXMT, the heat Wine pieces, winemac and th
 Never against a real install, and never with Wine, Steam or the game running on Jan's screen.
 
 - `scripts/test-sandbox.sh` tests the backend of a built app end to end in
-  `work/app-sandbox/test` (400 checks). It uses a stand-in engine archive whose `bin/wine` only
+  `work/app-sandbox/test` (409 checks). It uses a stand-in engine archive whose `bin/wine` only
   pretends, plays Steam's and ArenaNet's downloads itself, and uses a clone of the game's own
   ArenaNet-signed `Gw2-64.exe` as the installer to check (`SIGNED_PE`, by default the one in
   the development workspace's bottle; without one those checks are skipped). It covers:
@@ -471,6 +476,8 @@ Never against a real install, and never with Wine, Steam or the game running on 
     two Plays with the first paused after classifying and halfway through the replacement
     (`GW2_ON_MAC_TEST_PAUSE`); a failure and a kill between the Mac driver's pieces
     (`GW2_ON_MAC_UPDATE_FAIL_AFTER`, `…_KILL_AFTER`): rolled back, or finished by the next Play; a
+    kill halfway through a backup followed by a failing retry (`…_KILL_IN_BACKUP`): intact
+    originals; two contenders for a gone process's install lock (one wins, the other is refused); a
     missing piece refuses Play; this version's pieces under 0.1.0's manifest count as set up
   - play, the busy checks, repair, reset-shaders, reinstall-engine, the lock
   - Collect Logs' redaction (and no arcdps log), uninstall, a failed install's rollback
