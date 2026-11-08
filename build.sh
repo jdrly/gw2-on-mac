@@ -176,6 +176,12 @@ C="$R/components"
 mkdir -p "$C"
 cp -R "$P/dxmt" "$P/heat" "$P/winemac" "$P/ui-scale" "$C/"
 chmod 755 "$C/dxmt/x86_64-unix/winemetal.so" "$C/heat/ntdll.so" "$C/heat/wineserver" "$C/winemac/winemac.so" "$C/winemac/win32u.so"
+# The components as staged, before scripts/release.sh signs their Mach-O files: gw2om.sh counts an
+# engine file with one of these hashes as this version's too (graphics_state), so an engine set up
+# from the same build unsigned (a development install) needs no update
+(cd "$C" && find . -type f ! -name INVENTORY | sed 's|^\./||' | sort | while read -r f; do
+  echo "$(shasum -a 256 "$f" | cut -d' ' -f1)  $f"
+done) >"$C/INVENTORY"
 
 # The process lister gw2om.sh tells its own Wine processes by (proc_pidpath)
 mkdir -p "$R/helpers"

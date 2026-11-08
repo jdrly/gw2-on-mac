@@ -71,6 +71,12 @@
 #   GW2_ON_MAC_SIGNER          the signer check-setup accepts (default ArenaNet)
 #   GW2_ON_MAC_ARCDPS_URL      another place for arcdps's d3d11.dll and d3d11.dll.md5sum (a
 #                              fixture: file://...)
+#   GW2_ON_MAC_OLD_COMPONENTS  a file of "<path in the engine> <sha256>" lines: stand-ins for an
+#                              earlier version's engine pieces (graphics_state update)
+#   GW2_ON_MAC_TEST_PAUSE, GW2_ON_MAC_TEST_PAUSE_AT   wait at a point while that file is there
+#                              (test_pause: play-classified, update-<n>)
+#   GW2_ON_MAC_UPDATE_FAIL_AFTER, GW2_ON_MAC_UPDATE_KILL_AFTER   an update fails (or is killed)
+#                              after <n> of its files
 #   GW2_ON_MAC_ALLOW_WINE=1    let the real engine's Wine run in a sandbox (never in the tests)
 #   GW2_ON_MAC_IMPORT_COPY=1   install import copies even on the same disk (the other-disk path)
 #   GW2_ON_MAC_FREE_KB=<n>     the free space the app's disk reports (KB)
@@ -543,6 +549,8 @@ REG_GW2_MAC='Software\\Wine\\AppDefaults\\Gw2-64.exe\\Mac Driver'
 # process's exit).
 registry_lock() {
   [ -z "$DRY" ] || return 0
+  # (a Play that holds the session's lock already, on fd 9: SESSION_LOCKED)
+  [ -z "${SESSION_LOCKED:-}" ] || return 0
   [ -x "$LOCKER" ] || { warn "GW2 on Mac's session helper is missing ($LOCKER): registry settings wait for it. Reinstall GW2 on Mac."; return 1; }
   [ ! -d "$WATCH_LOCK" ] || rm -rf "$WATCH_LOCK"
   exec 8>>"$WATCH_LOCK"
@@ -550,7 +558,7 @@ registry_lock() {
   exec 8>&-
   return 1
 }
-registry_unlock() { [ -z "$DRY" ] || return 0; exec 8>&-; }
+registry_unlock() { [ -z "$DRY" ] && [ -z "${SESSION_LOCKED:-}" ] || return 0; exec 8>&-; }
 
 # The bottle's registry settings from settings.conf (Retina mode; for Gw2-64.exe only, the
 # d3d11/dxgi addon order, the addon's version.dll override, raw mouse-look and its speed): only
@@ -757,55 +765,208 @@ install_components() {
   install_file "$COMP/winemac/i386-windows/winemac.drv" "$ENG/lib/wine/i386-windows/winemac.drv" 644 "$ENGINE_WINEMAC_PE32_SHA256"
   install_file "$COMP/winemac/winemac.so" "$u/winemac.so" 755 "$ENGINE_WINEMAC_SHA256"
   install_file "$COMP/winemac/win32u.so" "$u/win32u.so" 755 "$ENGINE_WIN32U_SHA256"
+  record_components
+  [ -n "$DRY" ] || rm -rf "$UPD"
   log "engine components: dxmt $DXMT_VERSION, ntdll $(sha256 "$COMP/heat/ntdll.so"), wineserver $(sha256 "$COMP/heat/wineserver"), winemac $(sha256 "$COMP/winemac/winemac.so") (PE $(sha256 "$COMP/winemac/x86_64-windows/winemac.drv"), $(sha256 "$COMP/winemac/i386-windows/winemac.drv")), win32u $(sha256 "$COMP/winemac/win32u.so")"
 }
 
 engine_ok() { [ -x "$ENG/bin/wine" ] && [ "$(cat "$ENG/.gw2om-source" 2>/dev/null || true)" = "$ENGINE_SHA256" ]; }
 
-# comp_state <app's file> <engine's file> <manifest key> [<also old>]: same (the app's own), old
-# (the file its manifest records, which an earlier GW2 on Mac put there; or <also old>: a sha256 of
-# what an earlier version left in place), other (anything else)
+# --- GW2 on Mac's pieces in the engine, and an update of the app
+#
+# component_list: every file install_components puts into the engine, one
+# "<path in components/>\t<path in the engine>\t<mode>" a line (an update's whole inventory)
+component_list() {
+  local a f m
+  for a in x86_64-windows i386-windows x86_64-unix; do
+    m=644; [ "$a" != x86_64-unix ] || m=755
+    for f in "$COMP/dxmt/$a"/*; do
+      [ -f "$f" ] || continue
+      printf 'dxmt/%s/%s\tlib/wine/dxgi/dxmt/%s/%s\t%s\n' "$a" "${f##*/}" "$a" "${f##*/}" "$m"
+    done
+  done
+  for f in VERSION LICENSE COPYING.LIB; do printf 'dxmt/%s\tlib/wine/dxgi/dxmt/%s\t644\n' "$f" "$f"; done
+  printf '%s\t%s\t%s\n' heat/ntdll.so lib/wine/x86_64-unix/ntdll.so 755 heat/wineserver bin/wineserver 755 \
+    winemac/x86_64-windows/winemac.drv lib/wine/x86_64-windows/winemac.drv 644 \
+    winemac/i386-windows/winemac.drv lib/wine/i386-windows/winemac.drv 644 \
+    winemac/winemac.so lib/wine/x86_64-unix/winemac.so 755 winemac/win32u.so lib/wine/x86_64-unix/win32u.so 755
+}
+
+# What 0.1.0 put into the engine: "<path in the engine> <sha256>" for each file it installed, its
+# Mach-O files twice (as staged, unsigned, and as the notarized DMG has them, signed). The Mac
+# driver's PE sides were the engine's own then (stock_sha256). From 0.1.1 on the engine records
+# what install_components put in (COMP_RECORD), so a later update needs no table of its own.
+OLD_COMPONENTS='lib/wine/dxgi/dxmt/i386-windows/d3d10core.dll dc9bcf8d749e94e1936ad3ff7480f8d56fa5600010abe1e4c238069751664a13
+lib/wine/dxgi/dxmt/i386-windows/d3d11.dll abec265a1422bf8941f8df223d152f475c68ab2f1745ea0d38a119cb10d2201f
+lib/wine/dxgi/dxmt/i386-windows/dxgi.dll 278bfe4828c7e5de091302bfa3f2959513af01b9c02fca63be569c8a8a5bd3c9
+lib/wine/dxgi/dxmt/i386-windows/winemetal.dll 5ffc2d419bdaff9bf2a8e6e448830404623349c42fb79ced4d658c24ef85909c
+lib/wine/dxgi/dxmt/x86_64-windows/d3d10core.dll f72e41075eb692269cf26a9e86aea382725b25029ffa7313e72e309fec3cfcc5
+lib/wine/dxgi/dxmt/x86_64-windows/d3d11.dll 45ec7333e54614137e30d499afc6f1af4f6dfec387405145edc5375bc75390b7
+lib/wine/dxgi/dxmt/x86_64-windows/dxgi.dll 4459675cd67c06e42fe16c00c399ec4e00e325d60fdbb811503d1c4f8bc810c2
+lib/wine/dxgi/dxmt/x86_64-windows/winemetal.dll bf93b2166c775bf8b8f38dfa322a57ade240f56e8cfb09d6c0f430a6cb96e3e8
+lib/wine/dxgi/dxmt/x86_64-unix/winemetal.so 88ae565d38da0053ba611f8b905f90213723e891a5ba1b31b382ab2c6bad539b
+lib/wine/dxgi/dxmt/x86_64-unix/winemetal.so 447c72cee0cc15ee76360a7e985e4ee613c1649f6e5355f1f6bc7781f8033ca5
+lib/wine/dxgi/dxmt/VERSION 6fb25be51cd23bd25cf68fed39a5e1ac4487ccaf4bad91facb3c4627ceb84b38
+lib/wine/dxgi/dxmt/LICENSE b87c35aef7b2cf14de854118ca55ce5c4b284c85b5f002421fb8d46d868c2d17
+lib/wine/dxgi/dxmt/COPYING.LIB e237fa56668030e928551ddd60f05df5fe957f75eab874bbd017e085ed722e7c
+lib/wine/x86_64-unix/ntdll.so 4ab02782a803e303a3abe03ef295eaec7c1479f84d1a5a33a2faffb82c2dcbbf
+lib/wine/x86_64-unix/ntdll.so a37ad28b49bca84a40dcc3eb0a43d183bcb167f359b545227a9f0606e70d465c
+bin/wineserver 5eb11f77bfcbdfa19b32e843fef5a18d015ce298c6bb91fb01036a47f48c2d78
+bin/wineserver e48ff5e1630d1208e3ed097e138cc1193f1c9ab5bd99d6dfb94c6cad3b0c88c7
+lib/wine/x86_64-unix/winemac.so 2647959551bb467d69c048ab0f606a69289b304146d596d27db267bbd1c66d9b
+lib/wine/x86_64-unix/winemac.so f7ddd72443775b2d9192b1babae850ddc7c11dd306d645fb4ead414708cdb1da
+lib/wine/x86_64-unix/win32u.so b607c7602f6de0f4a6784d765ed4451dbc42cef7072648ebfd73fcf9606fd13c
+lib/wine/x86_64-unix/win32u.so 8aed31c9fe9c343af99330d419e81f61fd9340d30b2d7021fb7ad305cd9524d9'
+# (a sandbox: the tests' stand-ins for earlier versions' files, the same format)
+[ -z "$ROOT" ] || [ -z "${GW2_ON_MAC_OLD_COMPONENTS:-}" ] || OLD_COMPONENTS="$OLD_COMPONENTS
+$(cat "$GW2_ON_MAC_OLD_COMPONENTS")"
+# stock_sha256 <path in the engine>: the engine's own file there, for the paths GW2 on Mac replaces
+stock_sha256() {
+  case "$1" in
+    lib/wine/x86_64-unix/ntdll.so) echo "$ENGINE_NTDLL_SHA256" ;;
+    bin/wineserver) echo "$ENGINE_WINESERVER_SHA256" ;;
+    lib/wine/x86_64-unix/winemac.so) echo "$ENGINE_WINEMAC_SHA256" ;;
+    lib/wine/x86_64-unix/win32u.so) echo "$ENGINE_WIN32U_SHA256" ;;
+    lib/wine/x86_64-windows/winemac.drv) echo "$ENGINE_WINEMAC_PE64_SHA256" ;;
+    lib/wine/i386-windows/winemac.drv) echo "$ENGINE_WINEMAC_PE32_SHA256" ;;
+  esac
+}
+COMP_RECORD="$ENG/.gw2om-components"   # "<sha256> <path in the engine>" of what install_components put in
+UPD="$ENG/.gw2om-update"               # an update under way (update_components): its journal
+
+# comp_state <path in components/> <path in the engine>: same (this version's: the app's file, or
+# its build as staged, unsigned: components/INVENTORY, as a notarized app's are signed), old (what
+# an earlier version put there: OLD_COMPONENTS, the engine's record, or for the Mac driver's PE
+# sides the engine's own), other (missing, or anything else: never overwritten without Repair)
 comp_state() {
   local h
-  if cmp -s "$1" "$2"; then echo same; return; fi
-  [ -f "$2" ] || { echo other; return; }
-  h=$(sha256 "$2")
-  if [ "$h" = "$(json_get "$MANIFEST" "$3")" ] || { [ -n "${4:-}" ] && [ "$h" = "$4" ]; }; then echo old; else echo other; fi
+  [ -f "$ENG/$2" ] || { echo other; return; }
+  if cmp -s "$COMP/$1" "$ENG/$2"; then echo same; return; fi
+  h=$(sha256 "$ENG/$2")
+  if grep -qx "$h  $1" "$COMP/INVENTORY" 2>/dev/null; then echo same; return; fi
+  if printf '%s\n' "$OLD_COMPONENTS" | grep -qx "$2 $h" || grep -qx "$h $2" "$COMP_RECORD" 2>/dev/null; then echo old; return; fi
+  case "$2" in *winemac.drv) [ "$h" != "$(stock_sha256 "$2")" ] || { echo old; return; } ;; esac
+  echo other
 }
 
-# Graphics in the engine: yes (this app's DXMT and Wine pieces), update (an earlier GW2 on Mac's,
-# as its manifest records them: an update of the app brought new ones, which Play puts in by
-# itself, update_components), other (something else: Repair), no (no engine)
+# Graphics in the engine: yes (this version's DXMT and Wine pieces: every file of component_list),
+# update (each one this version's or an earlier GW2 on Mac's, at least one earlier: Play puts this
+# version's in, update_components; or an update was interrupted, which Play finishes), other
+# (something else: Repair), no (no engine). components_missing: the files of the list that aren't
+# there at all (Play doesn't start the game then).
 graphics_state() {
-  local u="$ENG/lib/wine/x86_64-unix" t="$ENG/lib/wine/dxgi/dxmt" r=yes dx="" s
+  local r=yes src dst mode
   [ -x "$ENG/bin/wine" ] || { echo no; return; }
-  # (0.1.0's manifest names DXMT's version only: its tree counts as old by its VERSION record)
-  if [ -z "$(json_get "$MANIFEST" dxmt_d3d11_sha256)" ] && [ -f "$t/VERSION" ] &&
-    [ "$(cat "$t/VERSION")" = "$(json_get "$MANIFEST" dxmt)" ]; then dx=1; fi
-  for s in \
-    "$(comp_state "$COMP/dxmt/x86_64-windows/d3d11.dll" "$t/x86_64-windows/d3d11.dll" dxmt_d3d11_sha256 ${dx:+"$(sha256 "$t/x86_64-windows/d3d11.dll")"})" \
-    "$(comp_state "$COMP/dxmt/x86_64-unix/winemetal.so" "$t/x86_64-unix/winemetal.so" winemetal_sha256 ${dx:+"$(sha256 "$t/x86_64-unix/winemetal.so")"})" \
-    "$(comp_state "$COMP/heat/ntdll.so" "$u/ntdll.so" ntdll_sha256)" \
-    "$(comp_state "$COMP/heat/wineserver" "$ENG/bin/wineserver" wineserver_sha256)" \
-    "$(comp_state "$COMP/winemac/winemac.so" "$u/winemac.so" winemac_sha256)" \
-    "$(comp_state "$COMP/winemac/win32u.so" "$u/win32u.so" win32u_sha256)" \
-    "$(comp_state "$COMP/winemac/x86_64-windows/winemac.drv" "$ENG/lib/wine/x86_64-windows/winemac.drv" winemac_pe64_sha256 "$ENGINE_WINEMAC_PE64_SHA256")" \
-    "$(comp_state "$COMP/winemac/i386-windows/winemac.drv" "$ENG/lib/wine/i386-windows/winemac.drv" winemac_pe32_sha256 "$ENGINE_WINEMAC_PE32_SHA256")"; do
-    case "$s" in other) echo other; return ;; old) r=update ;; esac
-  done
+  [ ! -d "$UPD" ] || { echo update; return; }
+  while IFS='	' read -r src dst mode; do
+    case "$(comp_state "$src" "$dst")" in other) echo other; return ;; old) r=update ;; esac
+  done <<LIST
+$(component_list)
+LIST
   echo "$r"
 }
+components_missing() {
+  local src dst mode
+  while IFS='	' read -r src dst mode; do [ -f "$ENG/$dst" ] || echo "$dst"; done <<LIST
+$(component_list)
+LIST
+}
+# record_components: COMP_RECORD of what is now in the engine (this version's files)
+record_components() {
+  local src dst mode
+  [ -z "$DRY" ] || return 0
+  while IFS='	' read -r src dst mode; do echo "$(sha256 "$COMP/$src") $dst"; done >"$COMP_RECORD.new" <<LIST
+$(component_list)
+LIST
+  mv -f "$COMP_RECORD.new" "$COMP_RECORD"
+}
 
-# After an update of the app (graphics_state update): its pieces into the engine over an earlier
-# version's, without Repair, and the manifest of this version; only while no session runs (play)
+# test_pause <point>: the tests' interleavings (a sandbox only): waits at <point> while the file
+# GW2_ON_MAC_TEST_PAUSE is there, if GW2_ON_MAC_TEST_PAUSE_AT names that point (<file>.at says it
+# got there)
+test_pause() {
+  [ -n "$ROOT" ] && [ -n "${GW2_ON_MAC_TEST_PAUSE:-}" ] && [ "${GW2_ON_MAC_TEST_PAUSE_AT:-}" = "$1" ] || return 0
+  local i=0
+  touch "$GW2_ON_MAC_TEST_PAUSE.at"
+  while [ -e "$GW2_ON_MAC_TEST_PAUSE" ] && [ $i -lt 600 ]; do sleep 0.1; i=$((i + 1)); done
+}
+
+# update_components: after an update of the app (graphics_state update), from Play while it holds
+# the session's lock (no session can start or run) and the install lock (no install, repair or
+# uninstall): this version's pieces into the engine without Repair, as one transaction in UPD:
+#   1. every file of component_list staged in new/ and compared with the app's
+#   2. the live files backed up in old/ (an interrupted earlier run's backups stay: the originals);
+#      .stock kept for an engine's own file, as install_file does
+#   3. "committing", then each staged file renamed into place (one rename each, the same disk)
+#   4. every file compared again; the record, the manifest; the journal removed
+# A failure rolls back from old/ (update_exit). An interruption (power, a kill) leaves the
+# journal: graphics_state says update, and the next Play runs it again to the end.
 update_components() {
+  local src dst mode i h moved=0
   lock
-  trap 'rmdir "$APPDIR/.lock" 2>/dev/null || true' EXIT
+  trap update_exit EXIT
   say "GW2 on Mac $VERSION has new pieces for the engine; putting them in"
-  install_components
+  if [ -f "$UPD/committing" ]; then log "update: finishing an interrupted update"; fi
+  mkdir -p "$UPD/new" "$UPD/old"
+  component_list >"$UPD/list"
+  i=0
+  while IFS='	' read -r src dst mode; do
+    i=$((i + 1))
+    { cp "$COMP/$src" "$UPD/new/$i" && chmod "$mode" "$UPD/new/$i" && cmp -s "$COMP/$src" "$UPD/new/$i"; } ||
+      die "Could not prepare GW2 on Mac's new pieces for the engine ($dst). Free some disk space and try again, or click Repair."
+  done <"$UPD/list"
+  i=0
+  while IFS='	' read -r src dst mode; do
+    i=$((i + 1))
+    [ ! -e "$UPD/old/$i" ] && [ ! -e "$UPD/old/$i.none" ] || continue
+    if [ -f "$ENG/$dst" ]; then
+      cp -p "$ENG/$dst" "$UPD/old/$i" || die "Could not back up the engine's $dst. Free some disk space and try again."
+      h=$(stock_sha256 "$dst")
+      if [ -n "$h" ] && [ ! -f "$ENG/$dst.stock" ] && [ "$(sha256 "$ENG/$dst")" = "$h" ]; then cp -p "$ENG/$dst" "$ENG/$dst.stock"; fi
+    else
+      : >"$UPD/old/$i.none"
+    fi
+  done <"$UPD/list"
+  date +%s >"$UPD/committing"
+  i=0
+  while IFS='	' read -r src dst mode; do
+    i=$((i + 1))
+    mkdir -p "$(dirname "$ENG/$dst")"
+    mv -f "$UPD/new/$i" "$ENG/$dst" || die "Could not put GW2 on Mac's $dst into the engine."
+    moved=$((moved + 1))
+    if [ -n "$ROOT" ]; then
+      [ "${GW2_ON_MAC_UPDATE_FAIL_AFTER:-}" != "$moved" ] || die "test: the update fails after $moved files"
+      [ "${GW2_ON_MAC_UPDATE_KILL_AFTER:-}" != "$moved" ] || kill -9 $$
+      test_pause "update-$moved"
+    fi
+  done <"$UPD/list"
+  while IFS='	' read -r src dst mode; do
+    cmp -s "$COMP/$src" "$ENG/$dst" || die "GW2 on Mac's $dst did not arrive in the engine as it should."
+  done <"$UPD/list"
+  record_components
   write_manifest
-  rmdir "$APPDIR/.lock" 2>/dev/null || true
+  rm -rf "$UPD"
+  log "update: done, the engine has $VERSION's pieces"
   trap - EXIT
+  rm -rf "$APPDIR/.lock"
+}
+# update_exit: a failed update puts the live files back from old/ (if any had moved) and drops the
+# journal; if that fails too, the journal stays and the next Play finishes the update
+update_exit() {
+  local st=$? src dst mode i=0 ok=1
+  if [ $st -ne 0 ] && [ -d "$UPD" ]; then
+    if [ -f "$UPD/committing" ]; then
+      while IFS='	' read -r src dst mode; do
+        i=$((i + 1))
+        if [ -f "$UPD/old/$i" ]; then mv -f "$UPD/old/$i" "$ENG/$dst" || ok=""
+        elif [ -e "$UPD/old/$i.none" ]; then rm -f "$ENG/$dst" || ok=""
+        fi
+      done <"$UPD/list"
+    fi
+    if [ -n "$ok" ]; then rm -rf "$UPD"; log "update failed (status $st): the engine's pieces are as they were"
+    else log "update failed (status $st) and could not be rolled back: the next Play finishes it"; fi
+  fi
+  rm -rf "$APPDIR/.lock"
 }
 
 # install_engine [force]: the verified engine unpacked into $ENG (unless it's there already),
@@ -1107,7 +1268,7 @@ set_arcdps() {
     echo "@done arcdps would be in the game folder."
     return 0
   fi
-  trap 'rm -rf "$CACHE/downloads/arcdps"; rmdir "$APPDIR/.lock" 2>/dev/null || true' EXIT
+  trap 'rm -rf "$CACHE/downloads/arcdps"; rm -rf "$APPDIR/.lock"' EXIT
   step "Downloading arcdps from deltaconnected.com"
   rm -rf "$dir" && mkdir -p "$dir"
   sum=$(curl -fsSL --connect-timeout 20 --max-time 60 --max-filesize 4096 "$ARCDPS_URL/d3d11.dll.md5sum" 2>>"$LOGFILE") ||
@@ -1539,7 +1700,7 @@ cmd_set() {
   open_log
   log "---- set $key=$value"
   lock
-  trap 'rmdir "$APPDIR/.lock" 2>/dev/null || true' EXIT
+  trap 'rm -rf "$APPDIR/.lock"' EXIT
   if [ "$key" = arcdps ]; then set_arcdps "$value"; return; fi
   write_settings "$key" "$value"
   case "$key" in
@@ -1556,9 +1717,20 @@ cmd_set() {
 }
 
 lock() {
+  local p
   [ -n "$DRY" ] && return
   mkdir -p "$APPDIR" "$LOGS"
-  mkdir "$APPDIR/.lock" 2>/dev/null || die "Another GW2 on Mac install, repair or uninstall is running."
+  if ! mkdir "$APPDIR/.lock" 2>/dev/null; then
+    # (its holder's pid: one that is gone, killed or the Mac switched off, left it behind)
+    p=$(cat "$APPDIR/.lock/pid" 2>/dev/null || true)
+    if [ -n "$p" ] && ! kill -0 "$p" 2>/dev/null; then
+      log "taking over a lock left by process $p, which is gone"
+      echo $$ >"$APPDIR/.lock/pid"
+      return 0
+    fi
+    die "Another GW2 on Mac install, repair or uninstall is running."
+  fi
+  echo $$ >"$APPDIR/.lock/pid"
 }
 
 write_manifest() {
@@ -1604,7 +1776,7 @@ on_install_exit() {
     rm -rf "$APPDIR"/*.new "$APPDIR/gamemode"/.GW2.app.new.* 2>/dev/null || true
     log "install failed (status $st)"
   fi
-  rmdir "$APPDIR/.lock" 2>/dev/null || true
+  rm -rf "$APPDIR/.lock"
 }
 
 # preflight [import]: (an import checks the space its copy needs itself)
@@ -2086,7 +2258,7 @@ cmd_finish() {
   game_state
   [ "$GAME" = yes ] || [ -n "$DRY" ] || die "Guild Wars 2 is not installed yet."
   lock
-  trap 'rmdir "$APPDIR/.lock" 2>/dev/null || true' EXIT
+  trap 'rm -rf "$APPDIR/.lock"' EXIT
   finish_touches
   log "finish complete"
   echo "@done Guild Wars 2 is ready. Press Play."
@@ -2171,24 +2343,6 @@ cmd_play() {
     installer) die "ArenaNet's installer is still running. Let it finish first." ;;
     leftovers) end_leftovers ;;
   esac
-  if ! session_running; then
-    # an update of the app brings its new pieces for the engine without Repair; the manifest
-    # follows this version (it names the pieces a later update counts as its own)
-    case "$(graphics_state)" in
-      update) [ -n "$DRY" ] && echo "[dry-run] the app's new pieces into the engine" || update_components ;;
-      yes) [ "$(json_get "$MANIFEST" version)" = "$VERSION" ] || [ -n "$DRY" ] || write_manifest ;;
-    esac
-    apply_registry
-    write_dxmt_conf
-  fi
-  [ "$(graphics_state)" = yes ] || [ -n "$DRY" ] || warn "The engine's graphics are not GW2 on Mac's. Click Repair."
-  # A running session keeps the settings it started with: Steam passes its own environment on
-  if session_running && [ -f "$LOGS/session.key" ]; then
-    game_env
-    key=$(printf '%s\n' "${E[@]}" | shasum | cut -c1-12)
-    [ "$key" = "$(cat "$LOGS/session.key")" ] ||
-      echo "@notice Steam is still running with the settings it started with; quit Steam for the new ones."
-  fi
   # The session (watch-session): a new one (this Play takes the session's lock) unless a watcher
   # still follows the last one. Then this Play joins it (while Steam starts the game, or in the
   # grace after the game quit) and waits until the watcher has it; refused while Steam quits.
@@ -2213,11 +2367,50 @@ cmd_play() {
       case "$rc" in
         0) joined=yes; break ;;
         1) die "Steam is quitting after your last session. Try again in a few seconds." ;;
-        3) die "GW2 on Mac's last session did not answer. Try again in a few seconds." ;;
+        3) [ ! -d "$UPD" ] && [ ! -d "$APPDIR/.lock" ] || die "GW2 on Mac is busy putting its new pieces into the engine. Try again in a moment."
+           die "GW2 on Mac's last session did not answer. Try again in a few seconds." ;;
       esac
       # (2: the lock is free again: the last watcher has ended, this Play takes the session)
     done
     [ "$fresh" = yes ] || [ "$joined" = yes ] || die "GW2 on Mac is still busy with the last session. Try again in a few seconds."
+  fi
+  # This Play's own session (it holds the session's lock: no other Play, session or registry write
+  # until its watcher takes over), with no Wine of the bottle running: an update's new engine
+  # pieces go in (update_components; the manifest follows this version, it names the pieces a later
+  # update counts as its own), then the registry and DXMT's options. A Play that joined a session
+  # changes nothing; without the session helper the registry waits and so does an update.
+  if [ "$fresh" = yes ] && [ -z "$DRY" ]; then SESSION_LOCKED=yes; fi
+  if { [ "$fresh" = yes ] || [ -n "$DRY" ] || [ ! -x "$LOCKER" ]; } && ! session_running; then
+    GRAPHICS=$(graphics_state)
+    test_pause play-classified
+    case "$GRAPHICS" in
+      update)
+        if [ -n "$DRY" ]; then echo "[dry-run] the app's new pieces into the engine"
+        elif [ "$fresh" = yes ]; then update_components
+        fi ;;
+      yes) [ "$(json_get "$MANIFEST" version)" = "$VERSION" ] || [ -n "$DRY" ] || write_manifest ;;
+    esac
+    apply_registry
+    write_dxmt_conf
+  fi
+  # the game starts only on a whole set of GW2 on Mac's pieces (no file missing, no update half done)
+  if [ -z "$DRY" ]; then
+    MISSING=$(components_missing | head -1)
+    [ -z "$MISSING" ] || die "The engine is missing GW2 on Mac's $MISSING. Click Repair (with the game and Steam closed)."
+    case "$(graphics_state)" in
+      yes) ;;
+      update)
+        [ ! -d "$UPD" ] || die "GW2 on Mac's update of the engine's pieces is not finished. Quit the game and Steam, then click Play again (or Repair)."
+        warn "GW2 on Mac's new pieces for the engine go in at the next Play without a running session." ;;
+      *) warn "The engine's graphics are not GW2 on Mac's. Click Repair." ;;
+    esac
+  fi
+  # A running session keeps the settings it started with: Steam passes its own environment on
+  if session_running && [ -f "$LOGS/session.key" ]; then
+    game_env
+    key=$(printf '%s\n' "${E[@]}" | shasum | cut -c1-12)
+    [ "$key" = "$(cat "$LOGS/session.key")" ] ||
+      echo "@notice Steam is still running with the settings it started with; quit Steam for the new ones."
   fi
   if [ "$route" = arenanet ]; then
     # shellcheck disable=SC2086
@@ -2513,7 +2706,7 @@ cmd_uninstall() {
   check_not_running
   lock
   # (the folder itself goes too once empty)
-  trap 'rmdir "$APPDIR/.lock" "$APPDIR" 2>/dev/null || true' EXIT
+  trap 'rm -rf "$APPDIR/.lock"; rmdir "$APPDIR" 2>/dev/null || true' EXIT
   stop_watcher
   [ -n "$DRY" ] || stop_wine
   remove_gamemode_links

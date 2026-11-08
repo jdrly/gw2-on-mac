@@ -131,6 +131,9 @@ export GW2_ON_MAC_ENGINE_CHECKS=0
 # (the stand-in engine's own winemac.drv, below)
 export GW2_ON_MAC_WINEMAC_PE64_STOCK="$(echo "engine's x86_64-windows winemac.drv" | shasum -a 256 | cut -d' ' -f1)"
 export GW2_ON_MAC_WINEMAC_PE32_STOCK="$(echo "engine's i386-windows winemac.drv" | shasum -a 256 | cut -d' ' -f1)"
+# (stand-ins for an earlier version's files, see "An update of the app")
+export GW2_ON_MAC_OLD_COMPONENTS="$SANDBOX/old-components" OLDC="$SANDBOX/old-components"
+: >"$OLDC"
 export GW2_ON_MAC_STEAMSETUP_URL="file://$SANDBOX/SteamSetup.exe"
 unset GW2_ON_MAC_DRY_RUN GW2_ON_MAC_ALLOW_WINE GW2_ON_MAC_SIGNER
 # the session's watcher (play starts it), with its times shortened: a 2 s grace, 2 s for Steam to
@@ -847,41 +850,99 @@ g repair >/dev/null 2>&1
 check "  repair puts the app's back" same "$COMP/winemac/i386-windows/winemac.drv" "$ENG/lib/wine/i386-windows/winemac.drv"
 check "the game and the settings stay" [ "$(st game)/$(sett launchopts)" = yes/-maploadinfo ]
 
-# An update of the app (0.1.0 to this one): the engine has 0.1.0's pieces, as its manifest records
-# them (0.1.0's names no PE side of the Mac driver and DXMT by its version only), and the next Play
-# puts this version's in, without Repair
-MF="$AD/install-manifest.json" U="$ENG/lib/wine/x86_64-unix"
+# An update of the app (0.1.0 to this one): the engine has 0.1.0's pieces (stand-ins, listed as an
+# earlier version's in $OLDC: GW2_ON_MAC_OLD_COMPONENTS, a sandbox's addition to the app's table of
+# 0.1.0's real hashes) and the Mac driver's PE sides as the engine's own; the next Play puts this
+# version's in, without Repair, as one transaction under the session's lock
+MF="$AD/install-manifest.json" U="$ENG/lib/wine/x86_64-unix" T="$ENG/lib/wine/dxgi/dxmt"
 echo "0.1.0's winemac.so" >"$SANDBOX/winemac-0.1.0.so"
-as_010() {   # <manifest's winemac.so>: the manifest as 0.1.0 wrote it
-  sed -i '' -e 's/"version": "[^"]*"/"version": "0.1.0"/' -e "s/\"winemac_sha256\": \"[^\"]*\"/\"winemac_sha256\": \"$(shasum -a 256 "$1" | cut -d' ' -f1)\"/" \
-    -e '/"winemac_pe64_sha256"/d' -e '/"winemac_pe32_sha256"/d' -e '/"dxmt_d3d11_sha256"/d' -e '/"winemetal_sha256"/d' "$MF"
+echo "0.1.0's i386 dxgi.dll" >"$SANDBOX/dxgi32-0.1.0.dll"
+printf 'lib/wine/x86_64-unix/winemac.so %s\nlib/wine/dxgi/dxmt/i386-windows/dxgi.dll %s\n' \
+  "$(shasum -a 256 "$SANDBOX/winemac-0.1.0.so" | cut -d' ' -f1)" "$(shasum -a 256 "$SANDBOX/dxgi32-0.1.0.dll" | cut -d' ' -f1)" >"$OLDC"
+as_010() {   # the engine and the manifest as 0.1.0 left them (no record of the pieces)
+  cp "$SANDBOX/winemac-0.1.0.so" "$U/winemac.so"; cp "$SANDBOX/dxgi32-0.1.0.dll" "$T/i386-windows/dxgi.dll"
+  for a in x86_64-windows i386-windows; do cp "$ENG/lib/wine/$a/winemac.drv.stock" "$ENG/lib/wine/$a/winemac.drv"; done
+  rm -f "$ENG/.gw2om-components"
+  sed -i '' -e 's/"version": "[^"]*"/"version": "0.1.0"/' -e '/"winemac_pe64_sha256"/d' -e '/"winemac_pe32_sha256"/d' "$MF"
 }
-cp "$SANDBOX/winemac-0.1.0.so" "$U/winemac.so"
-for a in x86_64-windows i386-windows; do cp "$ENG/lib/wine/$a/winemac.drv.stock" "$ENG/lib/wine/$a/winemac.drv"; done
-as_010 "$SANDBOX/winemac-0.1.0.so"
-check "after an update from 0.1.0: graphics=update (0.1.0's winemac.so, the engine's own winemac.drv)" [ "$(st graphics)" = update ]
+is_010() { same "$SANDBOX/winemac-0.1.0.so" "$U/winemac.so" && same "$SANDBOX/dxgi32-0.1.0.dll" "$T/i386-windows/dxgi.dll" && has "$ENG/lib/wine/i386-windows/winemac.drv" "engine's"; }
+is_new() {   # every file of this version in the engine
+  same "$COMP/winemac/winemac.so" "$U/winemac.so" && same "$COMP/winemac/x86_64-windows/winemac.drv" "$ENG/lib/wine/x86_64-windows/winemac.drv" &&
+    same "$COMP/winemac/i386-windows/winemac.drv" "$ENG/lib/wine/i386-windows/winemac.drv" && same "$COMP/dxmt/i386-windows/dxgi.dll" "$T/i386-windows/dxgi.dll"
+}
+nolaunch() { ! grep -q '^wine ' "$STANDIN_LOG"; }
+PAUSE="$SANDBOX/pause"
+wait_at() { local i=0; until [ -e "$PAUSE.at" ] || [ $i -ge 100 ]; do sleep 0.1; i=$((i + 1)); done; [ -e "$PAUSE.at" ]; }
 watch_done
-: >"$STANDIN_LOG"
-out=$(g play 2>&1) && rc=0 || rc=$?; started
-check "  Play puts this version's pieces in by itself and starts the game" eval '[ "$rc" = 0 ] && echo "$out" | grep -q "has new pieces for the engine" && ! echo "$out" | grep -q "Click Repair" && has "$STANDIN_LOG" "^wine "'
-check "  graphics=yes, no Repair" [ "$(st graphics)" = yes ]
-check "  the new winemac.so and both winemac.drv in" eval 'same "$COMP/winemac/winemac.so" "$U/winemac.so" && same "$COMP/winemac/x86_64-windows/winemac.drv" "$ENG/lib/wine/x86_64-windows/winemac.drv" && same "$COMP/winemac/i386-windows/winemac.drv" "$ENG/lib/wine/i386-windows/winemac.drv"'
-check "  the engine's own kept as .stock" eval 'has "$U/winemac.so.stock" "engine" && has "$ENG/lib/wine/i386-windows/winemac.drv.stock" "engine"'
+as_010
+check "after an update from 0.1.0: graphics=update (0.1.0's winemac.so and i386 dxgi.dll, the engine's own winemac.drv)" [ "$(st graphics)" = update ]
+# damaged or someone else's files are never overwritten by the update: Repair
+cp "$T/x86_64-windows/d3d11.dll" "$SANDBOX/d3d11.keep"; echo "damaged" >"$T/x86_64-windows/d3d11.dll"
+check "  a damaged DXMT d3d11.dll (its VERSION as 0.1.0's): graphics=other" [ "$(st graphics)" = other ]
+: >"$STANDIN_LOG"; out=$(g play 2>&1); started
+check "    Play doesn't touch the engine and says Repair" eval 'echo "$out" | grep -q "Click Repair" && has "$T/x86_64-windows/d3d11.dll" damaged && is_010'
+watch_done; cp "$SANDBOX/d3d11.keep" "$T/x86_64-windows/d3d11.dll"
+echo "someone's d3d10core" >"$T/i386-windows/d3d10core.dll"
+check "  another program's i386 d3d10core.dll (a sibling the update replaces): graphics=other" [ "$(st graphics)" = other ]
+cp "$COMP/dxmt/i386-windows/d3d10core.dll" "$T/i386-windows/d3d10core.dll"
+echo "someone's ntdll.so" >"$SANDBOX/ntdll.keep.x"; cp "$U/ntdll.so" "$SANDBOX/ntdll.keep"; cp "$SANDBOX/ntdll.keep.x" "$U/ntdll.so"
+check "  an ntdll.so of someone else's: graphics=other" [ "$(st graphics)" = other ]
+cp "$SANDBOX/ntdll.keep" "$U/ntdll.so"
+check "  back to 0.1.0's: graphics=update" [ "$(st graphics)" = update ]
+# two Plays: the first one classifies under the session's lock and pauses; the second can't start
+# anything or change the engine meanwhile
+touch "$PAUSE"; rm -f "$PAUSE.at"; : >"$STANDIN_LOG"
+GW2_ON_MAC_TEST_PAUSE="$PAUSE" GW2_ON_MAC_TEST_PAUSE_AT=play-classified "$G" play >"$SANDBOX/playA.txt" 2>&1 & pa=$!
+check "two Plays: the first one pauses after classifying, holding the session's lock" eval 'wait_at && "$APP/Contents/Resources/helpers/sessionlock" held "$AD/.session.lock"'
+out=$(g play 2>&1) && rc=0 || rc=$?
+check "  the second one is refused, starts nothing and leaves the engine alone" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "^@error" && nolaunch && is_010'
+rm -f "$PAUSE"; wait $pa; rc=$?; started
+check "  the first one then updates the engine and starts the game" eval '[ "$rc" = 0 ] && has "$SANDBOX/playA.txt" "has new pieces for the engine" && is_new && [ "$(st graphics)" = yes ] && [ "$(grep -c "^wine " "$STANDIN_LOG")" = 1 ]'
+check "  the engine's own winemac.drv kept as .stock" has "$ENG/lib/wine/i386-windows/winemac.drv.stock" "engine's"
 check "  the manifest is this version's, with the Mac driver's PE sides" eval '[ "$(plutil -extract version raw -o - "$MF")" = "$(st version)" ] && [ "$(plutil -extract winemac_pe32_sha256 raw -o - "$MF")" = "$(shasum -a 256 "$COMP/winemac/i386-windows/winemac.drv" | cut -d" " -f1)" ]'
+check "  the engine records the pieces it got; no journal left" eval 'grep -qx "$(shasum -a 256 "$COMP/winemac/winemac.so" | cut -d" " -f1) lib/wine/x86_64-unix/winemac.so" "$ENG/.gw2om-components" && [ ! -e "$ENG/.gw2om-update" ] && [ ! -e "$AD/.lock" ]'
 watch_done
-# an engine that already has this version's pieces (put in by hand) under 0.1.0's manifest: set up
-as_010 "$SANDBOX/winemac-0.1.0.so"
-check "this version's pieces under 0.1.0's manifest: graphics=yes" [ "$(st graphics)" = yes ]
+# a Play paused halfway through the replacement: the engine counts as an update under way, and a
+# second Play neither starts the game on the half-replaced set nor touches it
+inv() { ( eval "$(sed -n '/^component_list() {/,/^}/p' "$G")"; component_list ); }
+check "the update's inventory: 18 files, the Mac driver's PE sides 15th and 16th, winemac.so 17th" eval '[ "$(inv | wc -l | tr -d " ")" = 18 ] && [ "$(inv | sed -n 15,17p | cut -f2 | tr "\n" " ")" = "lib/wine/x86_64-windows/winemac.drv lib/wine/i386-windows/winemac.drv lib/wine/x86_64-unix/winemac.so " ]'
+as_010
+touch "$PAUSE"; rm -f "$PAUSE.at"; : >"$STANDIN_LOG"
+GW2_ON_MAC_TEST_PAUSE="$PAUSE" GW2_ON_MAC_TEST_PAUSE_AT=update-16 "$G" play >"$SANDBOX/playA.txt" 2>&1 & pa=$!
+check "a Play paused after 16 of the update's 18 files (the new winemac.drv in, the old winemac.so still): graphics=update (its journal)" eval 'wait_at && [ -d "$ENG/.gw2om-update" ] && same "$COMP/winemac/i386-windows/winemac.drv" "$ENG/lib/wine/i386-windows/winemac.drv" && same "$SANDBOX/winemac-0.1.0.so" "$U/winemac.so" && [ "$(st graphics)" = update ]'
+out=$(g play 2>&1) && rc=0 || rc=$?
+check "  a second Play is refused (busy with the update) and starts nothing" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "busy putting its new pieces" && nolaunch'
+rm -f "$PAUSE"; wait $pa; rc=$?; started
+check "  the first one finishes and starts the game once" eval '[ "$rc" = 0 ] && is_new && [ "$(st graphics)" = yes ] && [ "$(grep -c "^wine " "$STANDIN_LOG")" = 1 ]'
+watch_done
+# a failure halfway: the engine's files back as they were, the game not started
+as_010; : >"$STANDIN_LOG"
+out=$(GW2_ON_MAC_UPDATE_FAIL_AFTER=16 "$G" play 2>&1) && rc=0 || rc=$?
+check "an update failing after 16 files (between the Mac driver's pieces): Play fails and starts nothing" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "^@error test: the update fails" && nolaunch'
+check "  the engine is 0.1.0's again (rolled back), no journal, no lock left: graphics=update" eval 'is_010 && [ ! -e "$ENG/.gw2om-update" ] && [ ! -e "$AD/.lock" ] && [ "$(st graphics)" = update ]'
+# killed halfway (power, kill -9): the journal stays, nothing starts on the half-replaced set, and
+# the next Play finishes the update
+as_010; : >"$STANDIN_LOG"
+GW2_ON_MAC_UPDATE_KILL_AFTER=16 "$G" play >"$SANDBOX/killed.txt" 2>&1; rc=$?
+check "an update killed after 16 files (new winemac.drv, old winemac.so): the journal stays, graphics=update, nothing started" eval '[ "$rc" != 0 ] && [ -f "$ENG/.gw2om-update/committing" ] && same "$SANDBOX/winemac-0.1.0.so" "$U/winemac.so" && [ "$(st graphics)" = update ] && nolaunch'
+out=$(g play 2>&1) && rc=0 || rc=$?; started
+check "  the next Play takes over the lock it left, finishes the update and starts the game" eval '[ "$rc" = 0 ] && is_new && [ ! -e "$ENG/.gw2om-update" ] && [ "$(st graphics)" = yes ] && has "$LOGS/install.log" "finishing an interrupted update" && has "$STANDIN_LOG" "^wine "'
+watch_done
+# a later version's update: what this version put in (its record) counts as an earlier version's
+echo "this version's winemac.so, as a later version sees it" >"$SANDBOX/winemac-rec.so"
+cp "$SANDBOX/winemac-rec.so" "$U/winemac.so"
+check "a file the engine's record names (from an install of an earlier version): graphics=update" eval 'sed -i "" "s|^[0-9a-f]* lib/wine/x86_64-unix/winemac.so\$|$(shasum -a 256 "$SANDBOX/winemac-rec.so" | cut -d" " -f1) lib/wine/x86_64-unix/winemac.so|" "$ENG/.gw2om-components" && [ "$(st graphics)" = update ]'
+cp "$COMP/winemac/winemac.so" "$U/winemac.so"
+# an engine that already has this version's pieces under 0.1.0's manifest (Jan's): set up
+sed -i '' -e 's/"version": "[^"]*"/"version": "0.1.0"/' "$MF"; rm -f "$ENG/.gw2om-components"
+check "this version's pieces under 0.1.0's manifest, no record: graphics=yes" [ "$(st graphics)" = yes ]
 out=$(g play 2>&1); started
-check "  Play changes no piece and brings the manifest to this version" eval '! echo "$out" | grep -q "new pieces" && [ "$(plutil -extract version raw -o - "$MF")" = "$(st version)" ] && [ -n "$(plutil -extract winemac_pe64_sha256 raw -o - "$MF")" ]'
+check "  Play changes no piece and brings the manifest to this version" eval '! echo "$out" | grep -q "new pieces" && [ "$(plutil -extract version raw -o - "$MF")" = "$(st version)" ]'
 watch_done
-# 0.1.0's winemac.so, but a file that no GW2 on Mac put there: Repair, as before
-cp "$SANDBOX/winemac-0.1.0.so" "$U/winemac.so"; as_010 "$SANDBOX/winemac-0.1.0.so"
-echo "someone's ntdll.so" >"$U/ntdll.so"
-check "0.1.0's winemac.so with an ntdll.so of someone else's: graphics=other" [ "$(st graphics)" = other ]
-out=$(g play 2>&1); started
-check "  Play leaves the engine alone and says Repair" eval 'echo "$out" | grep -q "Click Repair" && same "$SANDBOX/winemac-0.1.0.so" "$U/winemac.so"'
-watch_done
+# a piece missing altogether: no game on an incomplete set
+mv "$ENG/lib/wine/i386-windows/winemac.drv" "$SANDBOX/winemac32.keep"; : >"$STANDIN_LOG"
+out=$(g play 2>&1) && rc=0 || rc=$?
+check "a missing i386 winemac.drv: Play refuses (Repair) and starts nothing" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "missing GW2 on Mac.s lib/wine/i386-windows/winemac.drv" && nolaunch'
 g repair >/dev/null 2>&1
 check "  repair: graphics=yes" [ "$(st graphics)" = yes ]
 echo "shader" >"$DXMT_CACHE/shaders_320.db"

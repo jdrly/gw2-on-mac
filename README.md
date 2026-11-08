@@ -228,15 +228,30 @@ from these:
 bottle's settings, Game Mode and Steam (if gone) again. It keeps the game and the settings.
 
 **After an update of the app** its new pieces for the engine (0.1.1: the Mac driver with raw
-mouse-look) go in by themselves at the next Play, without Repair. `status` says `graphics=update`
-while the engine has the pieces an earlier GW2 on Mac put there, as its `install-manifest.json`
-records them (0.1.0's names DXMT by its version and leaves out the Mac driver's PE sides, which it
-didn't replace: those count as the engine's own), and *This Mac* shows *DXMT · updates at Play*.
-Play, finding no session, installs this version's pieces (`.stock` kept as at the install) and
-writes the manifest of this version. A file that is neither this version's nor what the manifest
-records is something else: `graphics=other`, *needs Repair*, as before. An engine that already
-has this version's pieces counts as set up (`graphics=yes`), and Play only brings the manifest up
-to this version.
+mouse-look) go in by themselves at the next Play, without Repair.
+- **What counts:** every file `install_components` puts into the engine (`component_list`: DXMT's
+  PE DLLs for both architectures, `winemetal.so` and its records, `ntdll.so`, `wineserver`,
+  `winemac.so`, both `winemac.drv`, `win32u.so`; 18 files) must be either this version's or an
+  earlier GW2 on Mac's. This version's: the app's file, or its staged build before the release
+  signs it (`components/INVENTORY`, written by `build.sh`, so an engine set up from the same build
+  unsigned counts too). An earlier version's: 0.1.0's pinned hashes (`OLD_COMPONENTS`: each file
+  as staged and as the notarized DMG has it; the Mac driver's PE sides were the engine's own then),
+  and from 0.1.1 on the engine's own record of what the app put in (`engine/.gw2om-components`).
+  `status` then says `graphics=update` and *This Mac* shows *DXMT · updates at Play*. A file that
+  is neither (damaged, someone else's, missing) is `graphics=other`, *needs Repair*, and is never
+  overwritten without it.
+- **When:** only in a Play that holds the session's lock (taken before anything is looked at, kept
+  through Wine's start and handed to the session's watcher) and the install lock, with no Wine of
+  the bottle running. Another Play meanwhile starts nothing and says to try again.
+- **How:** as one transaction in `engine/.gw2om-update`: every new file staged and compared first,
+  the live ones backed up (`.stock` kept for an engine's own file, as at the install), then one
+  rename per file, a final comparison, the record and the manifest of this version. A failure
+  puts the backups back. An interruption (a kill, the Mac switched off) leaves the journal: the
+  engine counts as `update`, the game doesn't start on a half-replaced set, and the next Play
+  finishes the update (it takes over the install lock a gone process left).
+- **And:** Play never starts the game on a set with a missing piece (it says Repair). An engine
+  that already has this version's pieces counts as set up (`graphics=yes`); Play only brings the
+  manifest up to this version.
 
 **Game Mode**: macOS turns it on only for a process whose executable belongs to a bundle with
 `LSSupportsGameMode`, and every Wine process runs Wine's loader. As SWGL on Mac and Jan's
@@ -439,7 +454,7 @@ scripts/stage-components.sh    # copy DXMT, the heat Wine pieces, winemac and th
 Never against a real install, and never with Wine, Steam or the game running on Jan's screen.
 
 - `scripts/test-sandbox.sh` tests the backend of a built app end to end in
-  `work/app-sandbox/test` (386 checks). It uses a stand-in engine archive whose `bin/wine` only
+  `work/app-sandbox/test` (400 checks). It uses a stand-in engine archive whose `bin/wine` only
   pretends, plays Steam's and ArenaNet's downloads itself, and uses a clone of the game's own
   ArenaNet-signed `Gw2-64.exe` as the installer to check (`SIGNED_PE`, by default the one in
   the development workspace's bottle; without one those checks are skipped). It covers:
@@ -451,8 +466,12 @@ Never against a real install, and never with Wine, Steam or the game running on 
     by default the workspace's copy, only read): the md5 check, a page instead of the checksum, no
     server, a self-updated arcdps, `dxgi.dll`, another addon left alone (`foreign`), refusals while
     a session runs or a Play holds its lock
-  - an update from 0.1.0: Play puts the new Mac driver in without Repair; an engine with this
-    version's pieces under 0.1.0's manifest counts as set up; a stranger's file still needs Repair
+  - an update from 0.1.0 (stand-in 0.1.0 files, `GW2_ON_MAC_OLD_COMPONENTS`): Play puts the new
+    pieces in without Repair; damaged or someone else's DXMT, sibling and Wine files stay (Repair);
+    two Plays with the first paused after classifying and halfway through the replacement
+    (`GW2_ON_MAC_TEST_PAUSE`); a failure and a kill between the Mac driver's pieces
+    (`GW2_ON_MAC_UPDATE_FAIL_AFTER`, `…_KILL_AFTER`): rolled back, or finished by the next Play; a
+    missing piece refuses Play; this version's pieces under 0.1.0's manifest count as set up
   - play, the busy checks, repair, reset-shaders, reinstall-engine, the lock
   - Collect Logs' redaction (and no arcdps log), uninstall, a failed install's rollback
   - Steam's `-silent` with and without a remembered login, the CPU counts
