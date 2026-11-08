@@ -217,8 +217,8 @@ struct Header: View {
         #if GW2_DEV
         DevBuildBadge()
         #endif
-        // Discord, where I answer questions, arcdps and addon questions and bug reports. Lucide's
-        // chat bubble, as on gw2onmac.com, not Discord's logo.
+        // I answer GW2 on Mac and addon questions on Discord. You can report bugs there too.
+        // The icon is Lucide's chat bubble, as on gw2onmac.com, not Discord's logo.
         Button { openURL(Support.discord) } label: {
           HeaderChip(icon: "message-circle", label: "Discord")
         }
