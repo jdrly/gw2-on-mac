@@ -17,7 +17,8 @@
 #                  their computer, account and address fields taken out), the game's graphics
 #                  settings (GFXSettings.Gw2-64.exe.xml), the addon's log in the game folder, and
 #                  Steam's bootstrap_log, content_log, gameprocess_log and shader_log (Steam IDs
-#                  taken out). Never Local.dat (the game's saved login), Steam's config or its
+#                  taken out). Not arcdps's logs (addons/arcdps): its crash log dumps the game's
+#                  threads and modules, which may hold account or character names. Never Local.dat (the game's saved login), Steam's config or its
 #                  login, connection or account logs, nor anything else of the bottle.
 #   system-info.txt  macOS, chip, memory, displays, versions, the state of the install and its
 #                  engine pieces, which crash reports are in the zip, the GPU error count
@@ -379,6 +380,12 @@ sha12() { shasum -a 256 "$1" 2>/dev/null | cut -c1-12; }
   echo "Game Mode bundle: $([ -x "$APPDIR/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe" ] && echo present || echo none)"
   echo "Game: $([ -n "$GAME_DIR" ] && [ -f "$GAME_DIR/Gw2-64.exe" ] && echo "installed, Gw2-64.exe $(stat -f '%z bytes, %Sm' "$GAME_DIR/Gw2-64.exe")" || echo "not found")"
   [ -z "$GAME_DIR" ] || echo "  interface addon (version.dll): $([ -f "$GAME_DIR/version.dll" ] && { grep -aq 'gw2-on-mac ui-scale' "$GAME_DIR/version.dll" && echo "GW2 on Mac's" || echo "another program's"; } || echo none)"
+  # d3d11.dll and dxgi.dll addons (arcdps, Nexus): which, by a quick look (gw2om.sh's arcdps_state
+  # reads the exports); arcdps's own logs stay out (its crash log dumps the game's memory)
+  for f in d3d11.dll dxgi.dll; do
+    [ -n "$GAME_DIR" ] && [ -f "$GAME_DIR/$f" ] || continue
+    echo "  $f addon: $(LC_ALL=C grep -aq addextension2 "$GAME_DIR/$f" && LC_ALL=C grep -aq arcdps "$GAME_DIR/$f" && echo arcdps || echo "another program's"), $(stat -f '%z bytes, %Sm' "$GAME_DIR/$f")"
+  done
   echo "DXMT's cache for the game: $(du -sk "$DXMT_CACHE" 2>/dev/null | awk '{ printf "%.1f MB", $1 / 1024 }' || echo none)"
   echo "Mac: $(sysctl -n hw.model), $(sysctl -n machdep.cpu.brand_string)" \
     "($(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null)+$(sysctl -n hw.perflevel1.physicalcpu 2>/dev/null) cores)," \

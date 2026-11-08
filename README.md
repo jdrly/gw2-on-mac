@@ -16,7 +16,9 @@ installed. Website: [gw2onmac.com](https://gw2onmac.com).
 > ArenaNet. GW2 on Mac only provides the compatibility layer the game runs on (Wine, plus DXMT
 > for Direct3D 11 on Metal), the same kind of software as CrossOver or Proton. The one exception
 > is the optional *Larger interface* addon (off by default; it asks first), which changes the
-> game's memory for a sharper interface at 4K.
+> game's memory for a sharper interface at 4K. The *arcdps* switch (off by default; it asks first)
+> downloads deltaconnected's third-party arcdps from deltaconnected.com; GW2 on Mac doesn't host
+> or change it.
 >
 > **All support for GW2 on Mac comes from its developer, Jan Drlý (Pharaphobia).** For help,
 > contact Pharaphobia on [Discord](https://discord.gg/AnV3fZWz2b) or open a
@@ -263,8 +265,9 @@ items, nothing in `/Applications` besides the app itself):
 Other Wine apps' bottles and wrappers are only ever read (*Game files I already have*), never
 changed, and Uninstall leaves them alone.
 
-The game folder gets `version.dll` and `gw2-ui-scale.ini` only while *Larger interface* is on.
-Another program's `version.dll` there is never touched. The app's own preferences (the chosen
+The game folder gets `version.dll` and `gw2-ui-scale.ini` only while *Larger interface* is on,
+and arcdps's `d3d11.dll` only when you turn *arcdps* on. Another program's `version.dll`,
+`d3d11.dll` or `dxgi.dll` there is never touched. The app's own preferences (the chosen
 route, the Settings pane, *Quit after launching*, the frame-limiter hint's *Don't show again*) are in its defaults domain,
 `cz.jandrly.gw2onmac`.
 
@@ -288,6 +291,7 @@ use). The defaults are the mix Jan plays with.
 | | Interface Size "Larger" (`uiscale_size`) | 1.75 | the ini's `scale` (1.5, 1.75, 1.8, 2.0) |
 | | Small text in Cronos (`uiscale_sans`) | on | the ini's `sans=cronos` (else `keep`) |
 | | Cinematic dialogue (`uiscale_cinema`) | on | the ini's `cinema=1` |
+| | arcdps (`arcdps`, not in `settings.conf`) | off | deltaconnected's addon as `d3d11.dll` next to `Gw2-64.exe`: on downloads it from deltaconnected.com, off removes it (see *arcdps* below). Turning it on asks first. On or off is what the game folder holds (`arcdps_state`) |
 | Game | Game Mode (`gamemode`) | on | the bundle and link above |
 | | Start Steam in the background (`steambg`) | on | Steam route: `-silent` once Steam remembers a login (see Play) |
 | | Quit Steam when the game quits (`quitsteam`) | on | the Steam Play started in the background quits once the game has quit (see Play). Shown only while *Start Steam in the background* is on |
@@ -332,6 +336,28 @@ on, and GW2 on Mac never does: there is no Keyboard pane.
 2026-11-08 with arcdps 1.2026.1023.2303: the chain arcdps → system32 `d3d11.dll` →
 `winemetal.dll`, and a device created). With no such file the game gets the built-in as before.
 Steam and the launcher keep Wine's default order.
+
+**arcdps** (Settings › Interface; `gw2om.sh set arcdps on|off`). Nothing of it is hosted by GW2 on
+Mac, and it changes only while no session runs or starts (it takes the session's lock, as the
+registry writes do).
+- **On** (after a warning sheet: a third-party addon by deltaconnected, not supported by ArenaNet,
+  NCSOFT or GW2 on Mac, which reads the game's memory; at your own risk): downloads
+  `https://www.deltaconnected.com/arcdps/x64/d3d11.dll.md5sum` and `d3d11.dll` (with progress in
+  the row), checks the file against that md5 and that it is arcdps, and puts it next to
+  `Gw2-64.exe` as `d3d11.dll`. Errors read as the app's other downloads'. arcdps updates itself
+  from then on.
+- **What counts as arcdps:** it updates itself, so not a hash. A `d3d11.dll` or `dxgi.dll` is
+  arcdps when it is a PE whose export directory lists `addextension2` (arcdps's extension API)
+  and the file names arcdps (checked against arcdps 1.2026.1023.2303). Another addon may mention
+  arcdps and look up its exports, but doesn't export them.
+- **Off** removes arcdps's `d3d11.dll` (or `dxgi.dll`) and keeps `addons/arcdps/`, its settings.
+- **`arcdps_state`** (`status`, `settings`): `on` (arcdps is there, also one you placed yourself
+  or that came with *Game files I already have*), `off`, `foreign` (another program's `d3d11.dll`
+  or `dxgi.dll`, named in `arcdps_foreign`, e.g. the Nexus loader: the switch leaves it alone and
+  says so) or `nogame`.
+- **Collect Logs leaves arcdps's logs out.** `addons/arcdps/arcdps_lastcrash.log` dumps the game's
+  threads and modules at a crash; we can't be sure it holds no account or character names, and
+  the redaction can't find names it doesn't know. Attach it yourself if asked, after a look.
 
 ## Logs and bug reports
 
@@ -413,13 +439,22 @@ scripts/stage-components.sh    # copy DXMT, the heat Wine pieces, winemac and th
 Never against a real install, and never with Wine, Steam or the game running on Jan's screen.
 
 - `scripts/test-sandbox.sh` tests the backend of a built app end to end in
-  `work/app-sandbox/test` (311 checks). It uses a stand-in engine archive whose `bin/wine` only
+  `work/app-sandbox/test` (386 checks). It uses a stand-in engine archive whose `bin/wine` only
   pretends, plays Steam's and ArenaNet's downloads itself, and uses a clone of the game's own
   ArenaNet-signed `Gw2-64.exe` as the installer to check (`SIGNED_PE`, by default the one in
   the development workspace's bottle; without one those checks are skipped). It covers:
   - dry runs, both routes, finish, every setting and what it does, the addon
+  - raw mouse-look's registry values (for `Gw2-64.exe` only, never `PhysicalKeyboard`), and that
+    registry writes wait while a session's lock is held
+  - arcdps on and off from a stand-in deltaconnected.com (`GW2_ON_MAC_ARCDPS_URL`, a `file://`
+    folder; stand-in PEs with and without arcdps's exports, and the real arcdps as `ARCDPS_REAL`,
+    by default the workspace's copy, only read): the md5 check, a page instead of the checksum, no
+    server, a self-updated arcdps, `dxgi.dll`, another addon left alone (`foreign`), refusals while
+    a session runs or a Play holds its lock
+  - an update from 0.1.0: Play puts the new Mac driver in without Repair; an engine with this
+    version's pieces under 0.1.0's manifest counts as set up; a stranger's file still needs Repair
   - play, the busy checks, repair, reset-shaders, reinstall-engine, the lock
-  - Collect Logs' redaction, uninstall, a failed install's rollback
+  - Collect Logs' redaction (and no arcdps log), uninstall, a failed install's rollback
   - Steam's `-silent` with and without a remembered login, the CPU counts
   - the session's watcher, with stand-in Steam and game processes (the busy checks' signed
     sleepers) and shortened times (`GW2_ON_MAC_WATCH_TIMEOUT`, `…_GRACE`, `…_QUITWAIT`,
@@ -516,4 +551,6 @@ prebuilt/, dist/, release/, work/, .cache/   build and test output (ignored)
 - Blish HUD and macOS 28's Rosetta changes are not covered.
 - *Game files I already have*: GameHub's bottle location is a guess (its folders, searched a few
   levels deep); Choose folder… is the sure way. An addon's `d3d11.dll` (arcdps) in the source
-  folder comes along as it is; whether it works with DXMT is untested.
+  folder comes along as it is (arcdps then shows as on in Settings).
+- arcdps on DXMT: one check so far (2026-11-08, arcdps 1.2026.1023.2303: it loads and creates
+  its device through DXMT); its overlay in play and the Nexus loader are untested.

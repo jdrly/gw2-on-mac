@@ -1015,12 +1015,22 @@ struct ReadyPanel: View {
   let installer: Installer
   let actions: PanelActions
 
+  // after an update of the app: its new engine pieces go in at the next Play (graphics=update); an
+  // engine that has them already is this version's (Play only brings the manifest along); anything
+  // else needs Repair
+  private var versionChip: (warn: Bool, text: String) {
+    guard installer.installedOtherVersion else { return (false, "Installed · \(installer.installedVersion)") }
+    switch installer.status["graphics"] {
+    case "update": return (true, "\(installer.installedVersion) · updates at Play")
+    case "yes": return (false, "Installed · \(installer.appVersion)")
+    default: return (true, "\(installer.installedVersion) · Repair to update")
+    }
+  }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       InkHeading(title: "Ready", size: 17, alignment: .center) {
-        PanelChip(pip: installer.installedOtherVersion ? Brand.warning : Brand.good,
-                  text: installer.installedOtherVersion ? "\(installer.installedVersion) · Repair to update"
-                    : "Installed · \(installer.installedVersion)")
+        PanelChip(pip: versionChip.warn ? Brand.warning : Brand.good, text: versionChip.text)
       }
       Button(action: actions.play) {
         HStack(spacing: 12) {

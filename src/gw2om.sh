@@ -43,6 +43,10 @@
 #   gw2om.sh show-steam        brings Steam's window up (steam.exe steam://open/main in the bottle)
 #   gw2om.sh settings          KEY=VALUE lines: the settings (Settings window) and their state
 #   gw2om.sh set K V           change one setting (see setting_valid)
+#   gw2om.sh set arcdps on|off arcdps into the game folder (downloaded from deltaconnected.com,
+#                              checked against its published md5) or out of it (only arcdps; its
+#                              addons/arcdps settings stay), while no session runs; status and
+#                              settings print arcdps, arcdps_state (on|off|foreign|nogame)
 #   gw2om.sh check-setup FILE  is FILE ArenaNet's Gw2Setup-64.exe: a PE x86_64 executable with a
 #                              valid Authenticode signature by ArenaNet ("@done <what>")
 #   gw2om.sh reset-shaders     deletes DXMT's caches (shaders, pipelines, recipes) in the app's
@@ -65,6 +69,8 @@
 #                              engine's own winemac.drv (x86_64, i386)
 #   GW2_ON_MAC_STEAMSETUP_URL  another SteamSetup.exe
 #   GW2_ON_MAC_SIGNER          the signer check-setup accepts (default ArenaNet)
+#   GW2_ON_MAC_ARCDPS_URL      another place for arcdps's d3d11.dll and d3d11.dll.md5sum (a
+#                              fixture: file://...)
 #   GW2_ON_MAC_ALLOW_WINE=1    let the real engine's Wine run in a sandbox (never in the tests)
 #   GW2_ON_MAC_IMPORT_COPY=1   install import copies even on the same disk (the other-disk path)
 #   GW2_ON_MAC_FREE_KB=<n>     the free space the app's disk reports (KB)
@@ -1006,6 +1012,126 @@ sync_uiscale() {
   fi
 }
 
+# --- arcdps (deltaconnected's addon; Settings › Interface): downloaded on request from
+# deltaconnected.com (never hosted or changed by GW2 on Mac) into the game folder as d3d11.dll,
+# where it loads first (the d3d11/dxgi order for Gw2-64.exe, apply_registry) and passes the game's
+# Direct3D 11 on to DXMT. It updates itself, so it is recognised by what it is, not by a hash: a PE
+# whose export table has arcdps's extension API (addextension2) and that names arcdps. As dxgi.dll
+# it counts too. Its settings (addons/arcdps/) stay when it goes. Another d3d11.dll or dxgi.dll
+# (Nexus, ReShade...) is never touched: state foreign.
+ARCDPS_URL=https://www.deltaconnected.com/arcdps/x64
+[ -z "$ROOT" ] || ARCDPS_URL="${GW2_ON_MAC_ARCDPS_URL:-$ARCDPS_URL}"
+ARCDPS_DLLS="d3d11.dll dxgi.dll"
+
+pe32() { od -An -tu4 -j "$2" -N4 "$1" 2>/dev/null | tr -d ' ' || true; }   # <file> <offset>
+pe16() { od -An -tu2 -j "$2" -N2 "$1" 2>/dev/null | tr -d ' ' || true; }
+# pe_export_names <file>: the strings of a PE's export directory (the DLL's name and its export
+# names, one a line); nothing for a file that isn't a PE or exports nothing
+pe_export_names() {
+  local f=$1 pe opt nsec optsz dd rva size s i va vs rs raw off=""
+  [ "$(head -c 2 "$f" 2>/dev/null || true)" = MZ ] || return 0
+  pe=$(pe32 "$f" 60)
+  [ "$(bytes "$f" "${pe:-0}" 4 | od -An -tx1 | tr -d ' \n' || true)" = 50450000 ] || return 0
+  nsec=$(pe16 "$f" $((pe + 6))) optsz=$(pe16 "$f" $((pe + 20))) opt=$((pe + 24))
+  case "$(pe16 "$f" "$opt")" in
+    523) dd=$((opt + 112)) ;;   # PE32+
+    267) dd=$((opt + 96)) ;;    # PE32
+    *) return 0 ;;
+  esac
+  rva=$(pe32 "$f" "$dd") size=$(pe32 "$f" $((dd + 4)))
+  [ "${rva:-0}" -gt 0 ] && [ "${size:-0}" -gt 0 ] && [ "$size" -le 65536 ] || return 0
+  s=$((opt + ${optsz:-0})) i=0
+  while [ "$i" -lt "${nsec:-0}" ] && [ "$i" -lt 96 ]; do
+    vs=$(pe32 "$f" $((s + 8))) va=$(pe32 "$f" $((s + 12))) rs=$(pe32 "$f" $((s + 16))) raw=$(pe32 "$f" $((s + 20)))
+    vs=${vs:-0} va=${va:-0} rs=${rs:-0} raw=${raw:-0}
+    [ "$vs" -ge "$rs" ] || vs=$rs
+    if [ "$rva" -ge "$va" ] && [ "$rva" -lt $((va + vs)) ]; then off=$((raw + rva - va)); break; fi
+    s=$((s + 40)) i=$((i + 1))
+  done
+  [ -n "$off" ] || return 0
+  bytes "$f" "$off" "$size" | LC_ALL=C tr '\0' '\n' || true
+}
+# is_arcdps <file>
+is_arcdps() {
+  local names nl='
+'
+  [ -f "$1" ] || return 1
+  names=$(pe_export_names "$1")
+  case "$nl$names$nl" in *"${nl}addextension2${nl}"*) ;; *) return 1 ;; esac
+  LC_ALL=C grep -aq arcdps "$1"
+}
+# arcdps_state: ARC (on: arcdps is in the game folder, as d3d11.dll or dxgi.dll; off; foreign:
+# another program's d3d11.dll or dxgi.dll, ARC_FOREIGN its names; nogame), ARC_DLL (arcdps's file)
+arcdps_state() {
+  local n
+  ARC=off ARC_FOREIGN="" ARC_DLL=""
+  game_state
+  [ -n "$GAME_DIR" ] || { ARC=nogame; return 0; }
+  for n in $ARCDPS_DLLS; do
+    [ -f "$GAME_DIR/$n" ] || continue
+    if is_arcdps "$GAME_DIR/$n"; then ARC=on ARC_DLL=${ARC_DLL:+$ARC_DLL }$n; else ARC_FOREIGN=${ARC_FOREIGN:+$ARC_FOREIGN }$n; fi
+  done
+  [ "$ARC" = on ] || [ -z "$ARC_FOREIGN" ] || ARC=foreign
+  return 0
+}
+
+# set arcdps on|off (cmd_set): only while no session runs or starts (the session's lock, as the
+# registry writes take it)
+set_arcdps() {
+  local dir="$CACHE/downloads/arcdps" sum want got n gone=""
+  arcdps_state
+  [ "$ARC" != nogame ] || die "Guild Wars 2 is not installed yet: arcdps goes into its folder once it is."
+  ! session_running || die "Quit Guild Wars 2 and Steam first: arcdps goes into or out of the game folder only while they are closed."
+  registry_lock || die "A game session is starting. Try again once Guild Wars 2 and Steam have quit."
+  if [ "$1" = off ]; then
+    for n in $ARCDPS_DLLS; do
+      if is_arcdps "$GAME_DIR/$n"; then run rm -f "$GAME_DIR/$n"; gone=${gone:+$gone and }$n; fi
+    done
+    registry_unlock
+    if [ -n "$gone" ]; then
+      say "arcdps removed from the game folder ($gone); its settings stay in addons/arcdps"
+      echo "@done arcdps is off: its $gone is out of the game folder. Its settings stay in addons/arcdps for next time."
+    elif [ -n "$ARC_FOREIGN" ]; then
+      echo "@done arcdps isn't in the game folder. The other $ARC_FOREIGN there (another addon?) stays as it is."
+    else
+      echo "@done arcdps isn't in the game folder."
+    fi
+    return 0
+  fi
+  case "$ARC" in
+    on) registry_unlock; echo "@done arcdps is already in the game folder ($ARC_DLL)."; return 0 ;;
+    foreign) die "The game folder has another $ARC_FOREIGN (Nexus or another addon?). GW2 on Mac leaves it alone, so it can't add arcdps: remove that file, or add arcdps through that addon." ;;
+  esac
+  if [ -n "$DRY" ]; then
+    echo "[dry-run] download $ARCDPS_URL/d3d11.dll, check it against $ARCDPS_URL/d3d11.dll.md5sum, put it into $GAME_DIR/d3d11.dll"
+    echo "@done arcdps would be in the game folder."
+    return 0
+  fi
+  trap 'rm -rf "$CACHE/downloads/arcdps"; rmdir "$APPDIR/.lock" 2>/dev/null || true' EXIT
+  step "Downloading arcdps from deltaconnected.com"
+  rm -rf "$dir" && mkdir -p "$dir"
+  sum=$(curl -fsSL --connect-timeout 20 --max-time 60 --max-filesize 4096 "$ARCDPS_URL/d3d11.dll.md5sum" 2>>"$LOGFILE") ||
+    die "The download of arcdps's checksum from $ARCDPS_URL/d3d11.dll.md5sum failed. Check your internet connection and try again."
+  want=$(printf '%s\n' "$sum" | awk 'NR == 1 { print tolower($1) }')
+  case "$want" in
+    *[!0-9a-f]*|"") die "$ARCDPS_URL/d3d11.dll.md5sum is not a checksum (a captive portal, proxy or content filter in the way?). Try again." ;;
+  esac
+  [ ${#want} = 32 ] || die "$ARCDPS_URL/d3d11.dll.md5sum is not a checksum (a captive portal, proxy or content filter in the way?). Try again."
+  download "$ARCDPS_URL/d3d11.dll" "$dir/d3d11.dll" arcdps
+  got=$(md5 -q "$dir/d3d11.dll")
+  [ "$got" = "$want" ] ||
+    die "The arcdps download is not the file deltaconnected.com publishes: its md5 is $got, the published one $want. Something on the way changes it (a proxy, VPN, antivirus or content filter), or arcdps was updated meanwhile. Try again."
+  is_arcdps "$dir/d3d11.dll" || die "The file from $ARCDPS_URL/d3d11.dll is not arcdps. Try again later."
+  # (no session can start meanwhile: this holds its lock)
+  arcdps_state
+  [ "$ARC" = off ] || die "The game folder changed during the download ($ARC). Try again."
+  run install -m 644 "$dir/d3d11.dll" "$GAME_DIR/.d3d11.dll.gw2om-new"
+  run mv -f "$GAME_DIR/.d3d11.dll.gw2om-new" "$GAME_DIR/d3d11.dll"
+  registry_unlock
+  log "arcdps: $ARCDPS_URL/d3d11.dll into $GAME_DIR/d3d11.dll (md5 $got, sha256 $(sha256 "$GAME_DIR/d3d11.dll"))"
+  echo "@done arcdps is in the game folder (d3d11.dll from deltaconnected.com). It loads the next time the game starts, and from then on it updates itself."
+}
+
 # --- Existing game files (install import): another Wine app's Guild Wars 2, cloned into the bottle
 # (the same disk: APFS clonefile, instant and without extra space) or copied (another disk). The
 # source is only read: its files, its bottle and its app stay as they are.
@@ -1382,6 +1508,10 @@ status() {
   echo "busy=$b"
   case "$b" in none) echo "busy_detail=" ;; *) echo "busy_detail=$(proc_names "$l" "$b")" ;; esac
   echo "uiscale=$(setting uiscale)"
+  arcdps_state
+  echo "arcdps=$([ "$ARC" = on ] && echo on || echo off)"
+  echo "arcdps_state=$ARC"
+  echo "arcdps_foreign=$ARC_FOREIGN"
   echo "session=$(session_live)"
 }
 
@@ -1392,18 +1522,25 @@ settings() {
   echo "route=$(state route)"
   for k in $SETTING_KEYS; do echo "$k=$(setting "$k")"; done
   echo "uiscale_state=$(uiscale_state)"
+  arcdps_state
+  echo "arcdps=$([ "$ARC" = on ] && echo on || echo off)"
+  echo "arcdps_state=$ARC"
+  echo "arcdps_foreign=$ARC_FOREIGN"
   echo "cpus=$CPU_MAX"
   echo "steam_login=$(steam_remembers_login && echo yes || echo no)"
 }
 
 cmd_set() {
   local key="${1:-}" value="${2:-}"
-  setting_valid "$key" "$value" || { echo "@error Unknown setting: $key=$value"; exit 2; }
+  # (arcdps: not kept in settings.conf; the game folder says whether it is on, arcdps_state)
+  { [ "$key" = arcdps ] && { [ "$value" = on ] || [ "$value" = off ]; }; } || setting_valid "$key" "$value" ||
+    { echo "@error Unknown setting: $key=$value"; exit 2; }
   [ -f "$MANIFEST" ] || die "GW2 on Mac is not installed."
   open_log
   log "---- set $key=$value"
   lock
   trap 'rmdir "$APPDIR/.lock" 2>/dev/null || true' EXIT
+  if [ "$key" = arcdps ]; then set_arcdps "$value"; return; fi
   write_settings "$key" "$value"
   case "$key" in
     fpscap) write_dxmt_conf ;;

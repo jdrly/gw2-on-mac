@@ -244,13 +244,14 @@ func session(_ state: String) -> Installer.LaunchSession {
 }
 
 @MainActor
-func settings() -> GameSettings {
+func settings(_ extra: [String: String] = [:]) -> GameSettings {
   let s = GameSettings()
   s.preview(["installed": "yes", "running": "no", "retina": "on", "fpscap": "off", "metalfx": "off", "hud": "off",
              "warm": "on", "coolworkers": "3", "fastlocks": "on", "ncpu": "8", "uiscale": "off", "uiscale_state": "off",
              "uiscale_size": "1.75", "uiscale_sans": "on", "uiscale_cinema": "on", "gamemode": "on", "launchopts": "",
              "route": "steam", "updates": "off", "debug": "off", "steambg": "on", "quitsteam": "on", "cpus": "12",
-             "steam_login": "no", "rawmouse": "on", "mousespeed": "1"])
+             "steam_login": "no", "rawmouse": "on", "mousespeed": "1", "arcdps": "off", "arcdps_state": "off",
+             "arcdps_foreign": ""].merging(extra) { $1 })
   return s
 }
 
@@ -373,9 +374,37 @@ func renderAll(_ dir: URL, exports: URL?) async {
       }
     }
   }
+  // arcdps in the Interface pane: on, downloading, another addon's d3d11.dll in its place, just placed
+  UserDefaults.standard.set(SettingsPane.interface.rawValue, forKey: SettingsView.selectedPaneKey)
+  let arcdps: [(String, Bool, [String: String], (GameSettings) -> Void)] = [
+    ("on", false, ["arcdps": "on", "arcdps_state": "on"], { _ in }),
+    ("on", true, ["arcdps": "on", "arcdps_state": "on"], { _ in }),
+    ("downloading", false, ["arcdps": "on"], { s in
+      s.arcdpsWorking = true
+      s.arcdpsProgress = .init(label: "arcdps", done: 620_000, total: 1_506_304)
+    }),
+    ("downloading", true, ["arcdps": "on"], { s in
+      s.arcdpsWorking = true
+      s.arcdpsProgress = .init(label: "arcdps", done: 620_000, total: 1_506_304)
+    }),
+    ("foreign", false, ["arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"], { _ in }),
+    ("foreign", true, ["arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"], { _ in }),
+    ("placed", false, ["arcdps": "on", "arcdps_state": "on"], { s in
+      s.arcdpsResult = "arcdps is in the game folder (d3d11.dll from deltaconnected.com). It loads the next time the game starts, and from then on it updates itself."
+    }),
+  ]
+  for (name, dark, values, adjust) in arcdps {
+    let s = settings(values)
+    adjust(s)
+    write(await render(SettingsView(settings: s), size: SettingsView.designSize, dark: dark),
+          dir.appendingPathComponent("settings-interface-arcdps-\(name)-\(dark ? "dark" : "light").png"))
+  }
   for dark in [false, true] {
     let sheet = InterfaceWarning(isPresented: .constant(true)) {}
     write(await render(sheet, size: CGSize(width: 460, height: 300), dark: dark, chrome: false),
           dir.appendingPathComponent("sheet-interface-warning-\(dark ? "dark" : "light").png"))
+    let arcSheet = ArcdpsWarning(isPresented: .constant(true)) {}
+    write(await render(arcSheet, size: CGSize(width: 460, height: 248), dark: dark, chrome: false),
+          dir.appendingPathComponent("sheet-arcdps-warning-\(dark ? "dark" : "light").png"))
   }
 }

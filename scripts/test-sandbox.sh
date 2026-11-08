@@ -293,6 +293,102 @@ g set uiscale off >/dev/null 2>&1 || true
 check "  turning it off leaves it alone too" has "$GD/version.dll" "another addon"
 rm -f "$GD/version.dll"
 
+section "arcdps (Settings › Interface)"
+# Stand-in PEs (an x86_64 DLL whose export directory holds the given names; a fixture, not a
+# loadable DLL): arcdps exports its extension API (addextension2) and names itself; another addon
+# can carry those words elsewhere and is still not arcdps
+le32w() { printf "\\x$(printf %02x $(($1 & 255)))\\x$(printf %02x $((($1 >> 8) & 255)))\\x$(printf %02x $((($1 >> 16) & 255)))\\x$(printf %02x $((($1 >> 24) & 255)))"; }
+le16w() { printf "\\x$(printf %02x $(($1 & 255)))\\x$(printf %02x $((($1 >> 8) & 255)))"; }
+make_pe() {   # <out> <export names...>
+  local out=$1 strs n size
+  shift
+  strs="d3d11.dll"; for n in "$@"; do strs="$strs $n"; done
+  size=$((40 + $(printf '%s\n' $strs | wc -c)))
+  {
+    printf 'MZ'; head -c 58 /dev/zero; le32w 64
+    printf 'PE\0\0'; le16w 34404; le16w 1; head -c 12 /dev/zero; le16w 240; le16w 8226
+    le16w 523; head -c 106 /dev/zero; le32w 16; le32w 4096; le32w "$size"; head -c 120 /dev/zero
+    printf '.edata\0\0'; le32w 512; le32w 4096; le32w 512; le32w 512; head -c 16 /dev/zero
+    head -c 144 /dev/zero
+    head -c 12 /dev/zero; le32w 4136; le32w 1; head -c 20 /dev/zero
+    for n in $strs; do printf '%s\0' "$n"; done
+    head -c $((512 - size)) /dev/zero
+  } >"$out"
+}
+ARCSRV="$SANDBOX/deltaconnected"
+mkdir -p "$ARCSRV" "$SANDBOX/pe"
+make_pe "$SANDBOX/pe/arcdps.dll" CreateDXGIFactory D3D11CreateDevice addextension2 listextension removeextension2
+printf 'arcdps build 20261023 (stand-in)\n' >>"$SANDBOX/pe/arcdps.dll"
+make_pe "$SANDBOX/pe/nexus.dll" CreateDXGIFactory D3D11CreateDevice
+printf 'GetProcAddress addextension2 for arcdps\n' >>"$SANDBOX/pe/nexus.dll"
+cp "$SANDBOX/pe/arcdps.dll" "$ARCSRV/d3d11.dll"
+echo "$(md5 -q "$ARCSRV/d3d11.dll")  d3d11.dll" >"$ARCSRV/d3d11.dll.md5sum"
+export GW2_ON_MAC_ARCDPS_URL="file://$ARCSRV"
+arcst() { g status | sed -n "s/^arcdps_state=//p"; }
+check "arcdps off by default: status arcdps=off, arcdps_state=off" [ "$(st arcdps)/$(arcst)" = off/off ]
+check "  settings say so too, and settings.conf has no arcdps key" eval '[ "$(sett arcdps)/$(sett arcdps_state)" = off/off ] && ! grep -q "^arcdps=" "$AD/settings.conf"'
+out=$(g set arcdps on 2>&1) && rc=0 || rc=$?
+check "set arcdps on: downloads it (with progress) and says so" eval '[ "$rc" = 0 ] && echo "$out" | grep -q "^@progress arcdps " && echo "$out" | grep -q "^@done arcdps is in the game folder"'
+check "  d3d11.dll next to Gw2-64.exe is the published file" same "$ARCSRV/d3d11.dll" "$GD/d3d11.dll"
+check "  arcdps=on, arcdps_state=on" [ "$(st arcdps)/$(arcst)" = on/on ]
+check "  nothing left in the downloads, no temporary file in the game folder" eval '[ ! -e "$CACHE/downloads/arcdps" ] && ! ls -a "$GD" | grep -q gw2om-new'
+check "  the d3d11 addon order is set for Gw2-64.exe" reg 'Software\\\\Wine\\\\AppDefaults\\\\Gw2-64.exe\\\\DllOverrides' d3d11 native,builtin
+check "set arcdps on again: already there" sh -c "'$G' set arcdps on | grep -q 'already in the game folder'"
+# arcdps updates itself: a newer arcdps (another hash) still counts as arcdps
+printf 'self-updated\n' >>"$GD/d3d11.dll"
+mkdir -p "$GD/addons/arcdps" && echo "[session]" >"$GD/addons/arcdps/arcdps.ini"
+check "an arcdps that updated itself (another hash) is still on" [ "$(arcst)" = on ]
+check "set arcdps off: d3d11.dll removed" sh -c "'$G' set arcdps off | grep -q '^@done arcdps is off' && [ ! -e '$GD/d3d11.dll' ]"
+check "  its settings (addons/arcdps) stay" has "$GD/addons/arcdps/arcdps.ini" session
+check "  arcdps_state=off" [ "$(arcst)" = off ]
+check "arcdps x maybe refused (exit 2)" sh -c "'$G' set arcdps maybe >/dev/null; [ \$? = 2 ]"
+# as dxgi.dll it counts too, and off removes it there
+cp "$SANDBOX/pe/arcdps.dll" "$GD/dxgi.dll"
+check "arcdps as dxgi.dll: on" [ "$(st arcdps)/$(arcst)" = on/on ]
+g set arcdps off >/dev/null 2>&1
+check "  off removes that dxgi.dll" [ ! -e "$GD/dxgi.dll" ]
+# another addon's d3d11.dll (Nexus): foreign, never touched
+cp "$SANDBOX/pe/nexus.dll" "$GD/d3d11.dll"
+check "another addon's d3d11.dll (with arcdps's words outside its exports): arcdps_state=foreign, arcdps=off" [ "$(arcst)/$(st arcdps)" = foreign/off ]
+check "  arcdps_foreign names it" [ "$(st arcdps_foreign)" = d3d11.dll ]
+out=$(g set arcdps on 2>&1) && rc=0 || rc=$?
+check "  set arcdps on refused, saying why, the file left alone" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "^@error The game folder has another d3d11.dll" && same "$SANDBOX/pe/nexus.dll" "$GD/d3d11.dll"'
+check "  set arcdps off leaves it alone too" sh -c "'$G' set arcdps off | grep -q 'stays as it is' && cmp -s '$SANDBOX/pe/nexus.dll' '$GD/d3d11.dll'"
+mv "$GD/d3d11.dll" "$GD/dxgi.dll"
+check "  another addon's dxgi.dll: foreign as well" eval '[ "$(arcst)" = foreign ] && ! "$G" set arcdps on >/dev/null 2>&1 && same "$SANDBOX/pe/nexus.dll" "$GD/dxgi.dll"'
+rm -f "$GD/dxgi.dll"
+# DXMT's own d3d11.dll (a real PE, other exports) is not arcdps either
+cp "$COMP/dxmt/x86_64-windows/d3d11.dll" "$GD/d3d11.dll"
+check "a real d3d11.dll that isn't arcdps (DXMT's): foreign" [ "$(arcst)" = foreign ]
+rm -f "$GD/d3d11.dll"
+# the real arcdps, if the development workspace has a copy (only read)
+ARCDPS_REAL="${ARCDPS_REAL:-$WS/work/arcdps/2026-11-08/d3d11.dll}"
+if [ -f "$ARCDPS_REAL" ]; then
+  cp "$ARCDPS_REAL" "$GD/d3d11.dll"
+  check "the real arcdps (deltaconnected's d3d11.dll): on" [ "$(arcst)" = on ]
+  rm -f "$GD/d3d11.dll"
+else
+  echo "  skip   the real arcdps (no $ARCDPS_REAL)"
+fi
+# a download that isn't the published file, a checksum that isn't one, no server
+echo "something on the way" >>"$ARCSRV/d3d11.dll"
+out=$(g set arcdps on 2>&1) && rc=0 || rc=$?
+check "a download that doesn't match the published md5: refused, nothing placed" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "^@error The arcdps download is not the file deltaconnected.com publishes" && [ ! -e "$GD/d3d11.dll" ] && [ ! -e "$CACHE/downloads/arcdps" ]'
+cp "$SANDBOX/pe/nexus.dll" "$ARCSRV/d3d11.dll"; echo "$(md5 -q "$ARCSRV/d3d11.dll")  d3d11.dll" >"$ARCSRV/d3d11.dll.md5sum"
+check "  a matching file that isn't arcdps: refused" eval '! "$G" set arcdps on >"$SANDBOX/arc.txt" 2>&1 && has "$SANDBOX/arc.txt" "is not arcdps" && [ ! -e "$GD/d3d11.dll" ]'
+echo "<html>portal</html>" >"$ARCSRV/d3d11.dll.md5sum"
+check "  a checksum that is a web page: refused" eval '! "$G" set arcdps on >"$SANDBOX/arc.txt" 2>&1 && has "$SANDBOX/arc.txt" "is not a checksum" && [ ! -e "$GD/d3d11.dll" ]'
+check "  no server: refused, saying so" sh -c "! GW2_ON_MAC_ARCDPS_URL='file://$SANDBOX/nowhere' '$G' set arcdps on >'$SANDBOX/arc.txt' 2>&1 && grep -q 'Check your internet connection' '$SANDBOX/arc.txt' && [ ! -e '$GD/d3d11.dll' ]"
+cp "$SANDBOX/pe/arcdps.dll" "$ARCSRV/d3d11.dll"; echo "$(md5 -q "$ARCSRV/d3d11.dll")  d3d11.dll" >"$ARCSRV/d3d11.dll.md5sum"
+check "the base address can be changed only in a sandbox" sh -c "grep -q '^\[ -z \"\$ROOT\" \] || ARCDPS_URL=' '$G'"
+check "dry run: says what it would download, places nothing" sh -c "GW2_ON_MAC_DRY_RUN=1 '$G' set arcdps on | grep -q 'dry-run.*deltaconnected\|dry-run.*d3d11.dll.md5sum' && [ ! -e '$GD/d3d11.dll' ]"
+# while a Play holds the session's lock, nothing changes in the game folder
+"$APP/Contents/Resources/helpers/sessionlock" hold "$AD/.session.lock" 30 & hp=$!
+i=0; until "$APP/Contents/Resources/helpers/sessionlock" held "$AD/.session.lock" || [ $i -ge 50 ]; do sleep 0.1; i=$((i + 1)); done
+check "set arcdps on while a Play holds the session's lock: refused, nothing placed" eval '! "$G" set arcdps on >"$SANDBOX/arc.txt" 2>&1 && has "$SANDBOX/arc.txt" "session is starting" && [ ! -e "$GD/d3d11.dll" ]'
+kill $hp 2>/dev/null; wait $hp 2>/dev/null
+rm -rf "$GD/addons"
+
 section "Play"
 : >"$STANDIN_LOG"
 out=$(g play 2>&1) && rc=0 || rc=$?
@@ -310,6 +406,8 @@ printf '[2026-11-04] AppID 1284210 update started : download 0/58900000000\nUser
 printf 'Crash\nName: ZZ-MACHINE\nIpAddr: 192.168.77.5\nLogin: zz.person@example.com\nException: c0000005\n' >"$BOTTLE/drive_c/users/crossover/AppData/Roaming/Guild Wars 2/ArenaNet.log"
 printf 'started by %s from %s/Library, mail zz.person@example.com, token=abcDEF123secret\n' "$(id -un)" "$HOME" >>"$LOGS/wine.log"
 printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60\ninfo:  STATS fps=60.0 ms=16.7/24.8 cb=1.1 rp=31.7(+0.0 merged) encode=0.23+1.03/10.3\ninfo:  HITCH frame=52 ms=120.0 dxmt(ms/calls): create=4.0/37 flush=3.5/1\n' >"$LOGS/Gw2-64_d3d11.log"
+mkdir -p "$GD/addons/arcdps" && printf 'crash\nself: Zz Charname Q, zz_arc_acct.1234\n' >"$GD/addons/arcdps/arcdps_lastcrash.log"
+echo "info: build" >"$GD/addons/arcdps/arcdps.log"; cp "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll"
 mkdir -p "$SANDBOX/zip"
 zip=$("$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip" 2>"$SANDBOX/collect.err" | tail -1)
 check "collect-logs makes a zip" [ -f "$zip" ]
@@ -328,6 +426,9 @@ check "  the token value is gone" sh -c "! grep -rq abcDEF123secret '$Z'"
 check "  the home folder is gone" sh -c "! grep -rqF '$HOME/' '$Z'"
 check "  never Local.dat or Steam's config" sh -c "! find '$Z' -name Local.dat -o -name loginusers.vdf | grep -q ."
 check "  the crash log kept its exception" has "$Z/game-logs/ArenaNet.log" "Exception: c0000005"
+check "  no arcdps log (its crash log may hold character names)" sh -c "! find '$Z' -iname 'arcdps*' | grep -q . && ! grep -rq 'Zz Charname Q' '$Z'"
+check "  system-info names the d3d11.dll addon: arcdps" has "$Z/system-info.txt" "d3d11.dll addon: arcdps"
+rm -rf "$GD/addons" "$GD/d3d11.dll"
 
 section "Steam in the background after the first login"
 LU="$STEAM/config/loginusers.vdf"
@@ -365,6 +466,7 @@ check "uninstall refused while it runs" sh -c "! '$G' uninstall >/dev/null 2>&1"
 check "repair refused while it runs" sh -c "! '$G' repair >/dev/null 2>&1"
 check "set rawmouse off while it runs: saved" sh -c "'$G' set rawmouse off | grep -q 'after Steam has quit' && [ \"\$('$G' settings | sed -n 's/^rawmouse=//p')\" = off ]"
 check "  but the registry waits (Wine reads it at the session's start)" reg "$GW2_MAC" RawMouseWhenCursorHidden y
+check "set arcdps on while it runs: refused, nothing placed" eval '! "$G" set arcdps on >"$SANDBOX/arc.txt" 2>&1 && has "$SANDBOX/arc.txt" "Quit Guild Wars 2 and Steam first" && [ ! -e "$STEAM/steamapps/common/Guild Wars 2/d3d11.dll" ]'
 kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
 mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
 mv "$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe" "$SANDBOX/gw2-loader-copy"

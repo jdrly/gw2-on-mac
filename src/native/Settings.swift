@@ -24,6 +24,14 @@ final class GameSettings {
   // last one's answer
   var action: String?
   var actionResult: String?
+  // arcdps (gw2om.sh set arcdps on|off): placing it means a download from deltaconnected.com, whose
+  // progress the row shows; whether it is on comes from the game folder (arcdps, arcdps_state)
+  var arcdpsWorking = false
+  var arcdpsProgress: Installer.Progress?
+  var arcdpsResult: String?
+  private var arcdpsProcess: Process?
+  private var arcdpsDone: String?
+  private var arcdpsFailure: String?
 
   private let script = Brand.resources.appendingPathComponent("gw2om.sh")
 
@@ -71,6 +79,71 @@ final class GameSettings {
           ?? "The setting could not be saved."
       }
       reload()
+    }
+  }
+
+  // arcdps on or off, with gw2om.sh's lines as they come (its @progress while it downloads)
+  func setArcdps(_ on: Bool) {
+    guard !arcdpsWorking else { return }
+    let previous = values["arcdps"]
+    values["arcdps"] = on ? "on" : "off"
+    arcdpsWorking = true
+    arcdpsProgress = nil
+    arcdpsResult = nil
+    error = nil
+    arcdpsDone = nil
+    arcdpsFailure = nil
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/bash")
+    process.arguments = [script.path, "set", "arcdps", on ? "on" : "off"]
+    process.standardInput = FileHandle.nullDevice
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = FileHandle.nullDevice
+    let reader = LineReader { [weak self] line in
+      Task { @MainActor in
+        guard let self else { return }
+        if line.hasPrefix("@progress ") {
+          let parts = line.split(separator: " ")
+          if parts.count >= 4, let d = Int64(parts[parts.count - 2]), let t = Int64(parts[parts.count - 1]) {
+            self.arcdpsProgress = Installer.Progress(label: "arcdps", done: d, total: t)
+          }
+        } else if line.hasPrefix("@error ") {
+          self.arcdpsFailure = String(line.dropFirst(7))
+        } else if line.hasPrefix("@done ") {
+          self.arcdpsDone = String(line.dropFirst(6))
+        }
+      }
+    }
+    pipe.fileHandleForReading.readabilityHandler = { handle in
+      let data = handle.availableData
+      if data.isEmpty { handle.readabilityHandler = nil; reader.finish() } else { reader.feed(data) }
+    }
+    process.terminationHandler = { [weak self] _ in
+      // (after the last lines: they are handled on the main actor in order)
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        MainActor.assumeIsolated {
+          guard let self else { return }
+          self.arcdpsProcess = nil
+          self.arcdpsWorking = false
+          self.arcdpsProgress = nil
+          if let done = self.arcdpsDone {
+            self.arcdpsResult = done
+          } else {
+            self.values["arcdps"] = previous
+            self.error = self.arcdpsFailure ?? "arcdps could not be turned \(on ? "on" : "off")."
+          }
+          self.reload()
+        }
+      }
+    }
+    do {
+      try process.run()
+      arcdpsProcess = process
+    } catch {
+      arcdpsWorking = false
+      values["arcdps"] = previous
+      self.error = "arcdps could not be turned \(on ? "on" : "off"): \(error.localizedDescription)"
     }
   }
 
@@ -151,6 +224,7 @@ struct SettingsView: View {
   @AppStorage(Installer.quitAfterLaunchKey) private var quitAfterLaunch = false
   @AppStorage(Self.selectedPaneKey) private var selectedPane: SettingsPane = .graphics
   @State private var confirmInterface = false
+  @State private var confirmArcdps = false
   @State private var confirmAction: String?
   @Environment(\.colorScheme) private var scheme
 
@@ -188,6 +262,9 @@ struct SettingsView: View {
     }
     .sheet(isPresented: $confirmInterface) {
       InterfaceWarning(isPresented: $confirmInterface) { settings.set("uiscale", "on") }
+    }
+    .sheet(isPresented: $confirmArcdps) {
+      ArcdpsWarning(isPresented: $confirmArcdps) { settings.setArcdps(true) }
     }
     .alert(confirmAction == "reset-shaders" ? "Reset the shader cache?" : "Reinstall the engine?",
            isPresented: Binding(get: { confirmAction != nil }, set: { if !$0 { confirmAction = nil } })) {
@@ -314,12 +391,23 @@ struct SettingsView: View {
             if on { confirmInterface = true } else { settings.set("uiscale", "off") }
           }))
         }
+        SettingRow("arcdps", arcdpsDescription, progress: arcdpsFraction) {
+          InkSwitch(isOn: Binding(get: { settings.values["arcdps"] == "on" }, set: { on in
+            if on { confirmArcdps = true } else { settings.setArcdps(false) }
+          }))
+          .disabled(!arcdpsCanSwitch)
+        }
       }
       if let state = settings.values["uiscale_state"], state != "off", state != "on" {
         note("triangle-alert", interfaceStateNote(state), Brand.accent)
       }
+      if let text = arcdpsStateNote {
+        note("triangle-alert", text, Brand.accent)
+      } else if let result = settings.arcdpsResult, !settings.arcdpsWorking {
+        note("info", result, Brand.fg3)
+      }
       SettingsGroup {
-        SettingRow("Interface Size \"Larger\"", "How large the game's Larger size draws, from the game's own pre-rendered fonts (the nearest size it has).") {
+        SettingRow("Interface Size \"Larger\"", "How large the game's Larger size draws, from the game's own pre-rendered fonts.") {
           InkPopup(selection: settings.choice("uiscale_size", "1.75"), options: GameSettings.interfaceScales)
         }
         SettingRow("Small text in Cronos", "Chat, the tracker and labels have no larger font of their own: draws them in the game's Cronos face at the larger size, sharp.") {
@@ -422,9 +510,45 @@ struct SettingsView: View {
   }
 
   private var interfaceDescription: String {
-    "Makes the game's Interface Size \"Larger\" larger and sharp at 4K, from the game's own fonts. An "
-      + "addon in the game folder (version.dll), off by default: it changes the game's memory, which "
-      + "ArenaNet doesn't support."
+    "Makes Interface Size \"Larger\" larger and sharp at 4K, from the game's own fonts. An addon "
+      + "(version.dll) that changes the game's memory, which ArenaNet doesn't support."
+  }
+
+  // arcdps: what it is, or the download while it runs
+  private var arcdpsDescription: String {
+    if settings.arcdpsWorking {
+      if settings.values["arcdps"] != "on" { return "Removing arcdps from the game folder…" }
+      guard let p = settings.arcdpsProgress, p.total > 0 else { return "Downloading arcdps from deltaconnected.com…" }
+      return "Downloading arcdps from deltaconnected.com… \(Installer.megabytes(p.done)) of \(Installer.megabytes(p.total)) MB"
+    }
+    return "deltaconnected's addon (d3d11.dll), downloaded from deltaconnected.com; it updates itself. "
+      + "It reads the game's memory, which ArenaNet doesn't support."
+  }
+
+  private var arcdpsFraction: Double? {
+    guard settings.arcdpsWorking else { return nil }
+    guard let p = settings.arcdpsProgress, p.total > 0 else { return 0 }
+    return min(1, Double(p.done) / Double(p.total))
+  }
+
+  // on: always (it can be removed); off: only into an empty place, with the game installed and closed
+  private var arcdpsCanSwitch: Bool {
+    guard !settings.arcdpsWorking, !settings.running else { return false }
+    if settings.values["arcdps"] == "on" { return true }
+    return settings.values["arcdps_state"] == "off"
+  }
+
+  private var arcdpsStateNote: String? {
+    if settings.arcdpsWorking { return nil }
+    let foreign = settings.values["arcdps_foreign"].flatMap { $0.isEmpty ? nil : $0 } ?? "d3d11.dll"
+    switch settings.values["arcdps_state"] {
+    case "foreign":
+      return "The game folder has another \(foreign.replacingOccurrences(of: " ", with: " and ")) (Nexus or another addon?). GW2 on Mac leaves it alone, so it doesn't add arcdps."
+    case "nogame":
+      return "The game is not installed yet: arcdps can go in once it is."
+    default:
+      return settings.running && settings.loaded ? "Quit the game and Steam to turn arcdps on or off." : nil
+    }
   }
 
   private func interfaceStateNote(_ state: String) -> String {
@@ -500,6 +624,43 @@ struct InterfaceWarning: View {
   }
 }
 
+// The warning before arcdps goes in (as the larger interface's: off by default, a clear warning,
+// installed only after the user confirms)
+struct ArcdpsWarning: View {
+  @Binding var isPresented: Bool
+  let confirm: () -> Void
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      HStack(spacing: 10) {
+        LucideIcon(name: "triangle-alert", size: 22).foregroundStyle(Brand.accent)
+        Text("Turn on arcdps?").font(.head(19)).foregroundStyle(Brand.fg)
+      }
+      VStack(alignment: .leading, spacing: 8) {
+        bullet("arcdps is a third-party addon by deltaconnected. It is not made or supported by ArenaNet, NCSOFT or GW2 on Mac.")
+        bullet("It reads the game's memory while it runs. Use it at your own risk: there is no help or warranty for it from GW2 on Mac.")
+        bullet("GW2 on Mac downloads it from deltaconnected.com and puts it into the game folder as d3d11.dll. From then on arcdps updates itself.")
+        bullet("Turning it off removes d3d11.dll and keeps arcdps's settings (addons/arcdps).")
+      }
+      HStack {
+        Spacer()
+        Button("Cancel") { isPresented = false }.keyboardShortcut(.cancelAction)
+        Button("Download and Turn On") { isPresented = false; confirm() }.keyboardShortcut(.defaultAction).tint(Brand.accent)
+      }
+    }
+    .padding(22)
+    .frame(width: 460)
+    .background(Brand.bg)
+  }
+
+  private func bullet(_ text: String) -> some View {
+    HStack(alignment: .top, spacing: 8) {
+      Circle().fill(Brand.accent).frame(width: 5, height: 5).padding(.top, 6)
+      Text(text).font(.body(13)).bodyBox(13).foregroundStyle(Brand.fg2).fixedSize(horizontal: false, vertical: true)
+    }
+  }
+}
+
 // A raised group of settings rows (the design's "Group")
 struct SettingsGroup<Content: View>: View {
   @ViewBuilder var content: Content
@@ -520,11 +681,14 @@ struct SettingsGroup<Content: View>: View {
 struct SettingRow<Control: View>: View {
   let title: String
   let detail: String
+  // a bar under the detail while something runs (0 to 1), as the install's steps draw theirs
+  var progress: Double?
   @ViewBuilder var control: Control
 
-  init(_ title: String, _ detail: String, @ViewBuilder control: () -> Control) {
+  init(_ title: String, _ detail: String, progress: Double? = nil, @ViewBuilder control: () -> Control) {
     self.title = title
     self.detail = detail
+    self.progress = progress
     self.control = control()
   }
 
@@ -534,6 +698,16 @@ struct SettingRow<Control: View>: View {
         Text(title).font(.body(14, .bold)).bodyBox(14).foregroundStyle(Brand.fg)
         Text(detail).font(.body(12.5)).bodyBox(12.5, 1.3).foregroundStyle(Brand.fg2)
           .fixedSize(horizontal: false, vertical: true)
+        if let progress {
+          GeometryReader { geo in
+            ZStack(alignment: .leading) {
+              Capsule().fill(Brand.surface)
+              Capsule().fill(Brand.accent).frame(width: geo.size.width * progress)
+            }
+          }
+          .frame(height: 5)
+          .padding(.top, 4)
+        }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       control.labelsHidden().accessibilityLabel(Text(title))
