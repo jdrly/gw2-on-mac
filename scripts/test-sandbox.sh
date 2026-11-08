@@ -948,10 +948,10 @@ watch_done
 mkdir "$AD/.lock" && echo "$dp" >"$AD/.lock/pid"
 touch "$PAUSE"; rm -f "$PAUSE.at"
 GW2_ON_MAC_TEST_PAUSE="$PAUSE" GW2_ON_MAC_TEST_PAUSE_AT=lock-stale-checked "$G" set launchopts -contenderA >"$SANDBOX/contA.txt" 2>&1 & ca=$!
-check "a lock left by a gone process: the first contender has the claim (paused after its check)" eval 'wait_at && "$APP/Contents/Resources/helpers/sessionlock" held "$AD/.lock-claim"'
-out=$(g repair 2>&1) && rc=0 || rc=$?
+check "a lock left by a gone process: the first contender has the claim (paused after its check)" eval 'wait_at && "$APP/Contents/Resources/helpers/sessionlock" held "$LOGS/.lock-claim"'
+out=$(GW2_ON_MAC_LOCK_WAIT=1 "$G" repair 2>&1) && rc=0 || rc=$?
 check "  a second contender is refused meanwhile and leaves the lock alone" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "Another GW2 on Mac" && [ "$(cat "$AD/.lock/pid")" = "$dp" ]'
-out=$(g set launchopts -contenderB 2>&1) && rc=0 || rc=$?
+out=$(GW2_ON_MAC_LOCK_WAIT=1 "$G" set launchopts -contenderB 2>&1) && rc=0 || rc=$?
 check "  so does a third (a settings change)" eval '[ "$rc" != 0 ] && [ "$(cat "$AD/.lock/pid")" = "$dp" ]'
 rm -f "$PAUSE"; wait $ca; rc=$?
 check "  the first one takes it over, does its work and removes its own lock" eval '[ "$rc" = 0 ] && [ "$(sett launchopts)" = -contenderA ] && [ ! -e "$AD/.lock" ] && has "$LOGS/install.log" "taking over the install lock"'
@@ -960,6 +960,24 @@ mkdir "$AD/.lock" && echo "$lp" >"$AD/.lock/pid"
 out=$(g set launchopts -x 2>&1) && rc=0 || rc=$?
 check "a live owner's lock: refused, and the lock stays the owner's" eval '[ "$rc" != 0 ] && [ "$(cat "$AD/.lock/pid")" = "$lp" ] && [ "$(sett launchopts)" = -contenderA ]'
 kill $lp 2>/dev/null; wait $lp 2>/dev/null; rm -rf "$AD/.lock"
+g set launchopts -maploadinfo >/dev/null
+# a fresh acquisition can't slip in between a contender's reading of the owner and its check:
+# owner A holds the lock; contender B reads A's pid under the claim and pauses; A finishes, but
+# unlocking needs the claim too, so A waits; a fresh contender C waits for the claim and is
+# refused; B then finds A still running and is refused; A unlocks
+wait_file() { local i=0; until [ -e "$1" ] || [ $i -ge 100 ]; do sleep 0.1; i=$((i + 1)); done; [ -e "$1" ]; }
+P1="$SANDBOX/pauseA" P2="$SANDBOX/pauseB"
+touch "$P1" "$P2"; rm -f "$P1.at" "$P2.at"
+GW2_ON_MAC_TEST_PAUSE="$P1" GW2_ON_MAC_TEST_PAUSE_AT=locked "$G" set launchopts -ownerA >"$SANDBOX/ownA.txt" 2>&1 & oa=$!
+wait_file "$P1.at"
+GW2_ON_MAC_TEST_PAUSE="$P2" GW2_ON_MAC_TEST_PAUSE_AT=lock-owner-read "$G" set launchopts -contenderB >"$SANDBOX/contB.txt" 2>&1 & ob=$!
+check "owner A holds the lock; contender B has read A's pid under the claim (paused)" eval 'wait_file "$P2.at" && [ "$(cat "$AD/.lock/pid")" = "$oa" ] && "$APP/Contents/Resources/helpers/sessionlock" held "$LOGS/.lock-claim"'
+rm -f "$P1"; sleep 0.5
+check "  A, done, waits for the claim to unlock: the lock is still A's" eval 'kill -0 $oa 2>/dev/null && [ "$(cat "$AD/.lock/pid")" = "$oa" ]'
+out=$(GW2_ON_MAC_LOCK_WAIT=1 "$G" set launchopts -freshC 2>&1) && rc=0 || rc=$?
+check "  a fresh acquisition (C) waits for the claim and is refused: the lock still A's, nothing of C's" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "Another GW2 on Mac" && [ "$(cat "$AD/.lock/pid")" = "$oa" ] && [ "$(sett launchopts)" != -freshC ]'
+rm -f "$P2"; wait $ob; rb=$?; wait $oa; ra=$?
+check "  B, resumed, finds A still there and is refused; A unlocks and ends: its setting, no lock left" eval '[ "$rb" != 0 ] && has "$SANDBOX/contB.txt" "Another GW2 on Mac" && [ "$ra" = 0 ] && [ "$(sett launchopts)" = -ownerA ] && [ ! -e "$AD/.lock" ]'
 g set launchopts -maploadinfo >/dev/null
 # a later version's update: what this version put in (its record) counts as an earlier version's
 echo "this version's winemac.so, as a later version sees it" >"$SANDBOX/winemac-rec.so"

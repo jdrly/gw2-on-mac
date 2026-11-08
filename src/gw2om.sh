@@ -74,10 +74,12 @@
 #   GW2_ON_MAC_OLD_COMPONENTS  a file of "<path in the engine> <sha256>" lines: stand-ins for an
 #                              earlier version's engine pieces (graphics_state update)
 #   GW2_ON_MAC_TEST_PAUSE, GW2_ON_MAC_TEST_PAUSE_AT   wait at a point while that file is there
-#                              (test_pause: play-classified, update-<n>, lock-stale-checked)
+#                              (test_pause: play-classified, update-<n>, locked, lock-owner-read,
+#                              lock-stale-checked)
 #   GW2_ON_MAC_UPDATE_FAIL_AFTER, GW2_ON_MAC_UPDATE_KILL_AFTER   an update fails (or is killed)
 #                              after <n> of its files
 #   GW2_ON_MAC_UPDATE_KILL_IN_BACKUP   an update is killed halfway through backing up its <n>th file
+#   GW2_ON_MAC_LOCK_WAIT       how long a contender waits for the install lock's claim (5 s)
 #   GW2_ON_MAC_ALLOW_WINE=1    let the real engine's Wine run in a sandbox (never in the tests)
 #   GW2_ON_MAC_IMPORT_COPY=1   install import copies even on the same disk (the other-disk path)
 #   GW2_ON_MAC_FREE_KB=<n>     the free space the app's disk reports (KB)
@@ -188,7 +190,7 @@ DXMT_CACHE="$DXMT_CACHE_ROOT/Gw2-64.exe"
 STEAM_DIR="$BOTTLE/drive_c/Program Files (x86)/Steam"
 STEAM_EXE='C:\Program Files (x86)\Steam\steam.exe'
 # What uninstall removes in APPDIR (the folder itself goes too once empty)
-APP_FILES="engine bottle gamemode settings.conf state install-manifest.json dxmt.conf engine.new bottle.new session session.req .session.lock .lock-claim"
+APP_FILES="engine bottle gamemode settings.conf state install-manifest.json dxmt.conf engine.new bottle.new session session.req .session.lock"
 LOGFILE=/dev/null
 
 # --- Output and logging
@@ -1725,34 +1727,66 @@ cmd_set() {
 }
 
 # lock: the install lock (no two installs, repairs, uninstalls, settings changes or engine
-# updates at once): the folder .lock, created atomically, with its owner's pid in it. One whose
-# owner is gone (killed, the Mac switched off) is taken over, but only under the claim
-# (.lock-claim, a kernel lock every contender must get: the session helper's flock, held just for
-# the check and the new pid, so no child ever inherits it): two contenders can't both take it.
-# unlock removes it only for its owner.
-LOCK_CLAIM="$APPDIR/.lock-claim"
+# updates at once): the folder .lock with its owner's pid. Creating it and publishing the pid,
+# taking over one whose owner is gone (killed, the Mac switched off) and removing it all happen
+# under the claim: Logs/.lock-claim, a kernel lock (the session helper's flock) that every contender
+# must get, held only for those few steps and released before anything else runs, so no child
+# (Wine, Steam) ever inherits it. unlock removes .lock only for its owner.
+LOCK_CLAIM="$LOGS/.lock-claim"     # (in the logs folder, which uninstall keeps: the same file for good)
+LOCK_WAIT=5                       # seconds a contender waits for the claim (held only briefly)
+[ -z "$ROOT" ] || LOCK_WAIT="${GW2_ON_MAC_LOCK_WAIT:-$LOCK_WAIT}"
+claim() {   # <seconds>: the claim on fd 6, waiting up to that long
+  local i=0 n=$(( $1 * 10 ))
+  exec 6>>"$LOCK_CLAIM"
+  until "$LOCKER" take 6 2>/dev/null; do
+    i=$((i + 1))
+    [ "$i" -lt "$n" ] || { exec 6>&-; return 1; }
+    sleep 0.1
+  done
+}
+unclaim() { exec 6>&-; }
 lock() {
   local p age
   [ -n "$DRY" ] && return
   mkdir -p "$APPDIR" "$LOGS"
-  if mkdir "$APPDIR/.lock" 2>/dev/null; then echo $$ >"$APPDIR/.lock/pid"; return 0; fi
-  [ -x "$LOCKER" ] || die "Another GW2 on Mac install, repair or uninstall is running."
-  exec 6>>"$LOCK_CLAIM"
-  if ! "$LOCKER" take 6 2>/dev/null; then exec 6>&-; die "Another GW2 on Mac install, repair or uninstall is running."; fi
+  if [ ! -x "$LOCKER" ]; then
+    # (without the helper: no claim, so no takeover either)
+    mkdir "$APPDIR/.lock" 2>/dev/null || die "Another GW2 on Mac install, repair or uninstall is running."
+    echo $$ >"$APPDIR/.lock/pid"
+    return 0
+  fi
+  claim "$LOCK_WAIT" || die "Another GW2 on Mac install, repair or uninstall is running."
+  if mkdir "$APPDIR/.lock" 2>/dev/null; then
+    echo $$ >"$APPDIR/.lock/pid"
+    unclaim
+    test_pause locked
+    return 0
+  fi
   p=$(cat "$APPDIR/.lock/pid" 2>/dev/null || true)
+  test_pause lock-owner-read
   age=$(( $(date +%s) - $(stat -f %m "$APPDIR/.lock" 2>/dev/null || date +%s) ))
-  # (gone: its pid no longer runs; or no pid after a minute, its owner killed right after mkdir)
+  # (gone: its pid no longer runs, which it can't while it holds .lock (unlock needs the claim);
+  # or no pid after a minute: its owner killed right after mkdir)
   if [ -d "$APPDIR/.lock" ] && { { [ -n "$p" ] && ! kill -0 "$p" 2>/dev/null; } || { [ -z "$p" ] && [ "$age" -gt 60 ]; }; }; then
     test_pause lock-stale-checked
     log "taking over the install lock left by ${p:-a process} that is gone"
     echo $$ >"$APPDIR/.lock/pid"
-    exec 6>&-
+    unclaim
+    test_pause locked
     return 0
   fi
-  exec 6>&-
+  unclaim
   die "Another GW2 on Mac install, repair or uninstall is running."
 }
-unlock() { [ "$(cat "$APPDIR/.lock/pid" 2>/dev/null || true)" != "$$" ] || rm -rf "$APPDIR/.lock"; }
+unlock() {
+  [ "$(cat "$APPDIR/.lock/pid" 2>/dev/null || true)" = "$$" ] || return 0
+  if [ -x "$LOCKER" ]; then
+    # (if the claim can't be had, .lock stays: once this process is gone, it is taken over)
+    claim 20 || { log "the install lock's claim stayed busy; .lock is left for a takeover"; return 0; }
+  fi
+  [ "$(cat "$APPDIR/.lock/pid" 2>/dev/null || true)" != "$$" ] || rm -rf "$APPDIR/.lock"
+  unclaim
+}
 
 write_manifest() {
   put "$MANIFEST" 644 <<EOF
