@@ -165,6 +165,8 @@ final class GameSettings {
   static let frameCaps: [(String, String)] = [
     ("off", "Off"), ("30", "30 fps"), ("40", "40 fps"), ("60", "60 fps"), ("120", "120 fps"),
   ]
+  // DXMT: my fork (components/dxmt) or the engine's own, kept next to it (gw2om.sh apply_dxmt)
+  static let dxmts: [(String, String)] = [("fork", "My fork"), ("engine", "The engine's")]
   // CPUs the game sees: 2 up to this Mac's logical CPUs (gw2om.sh settings: cpus, sysctl
   // hw.logicalcpu), or all
   var cpuCount: Int { Int(values["cpus"] ?? "") ?? ProcessInfo.processInfo.processorCount }
@@ -364,6 +366,9 @@ struct SettingsView: View {
         }
         SettingRow("Frame cap", "A steady cap paced by Metal, at a divisor of your display's refresh. Use it with the game's own vsync.") {
           InkPopup(selection: settings.choice("fpscap", "off"), options: GameSettings.frameCaps)
+        }
+        SettingRow("DXMT", "What draws the game, and Steam's windows with it: my DXMT fork (Metal 4, shader warming, MetalFX), or the engine's own to compare. Switches while Steam is closed.") {
+          InkPopup(selection: settings.choice("dxmt", "fork"), options: GameSettings.dxmts)
         }
       }
       SettingsGroup {

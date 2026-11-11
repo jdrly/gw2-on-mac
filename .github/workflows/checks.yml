@@ -82,6 +82,11 @@ jobs:
       - name: Fetch the components
         run: scripts/stage-components.sh --fetch
 
+      # Until prebuilt.lock pins an archive with my arm64 DXMT (jdrly/dxmt#182), a stand-in in its
+      # layout: what the sandbox needs, never a release (scripts/release.sh refuses it)
+      - name: Stand-in DXMT, if the archive has none
+        run: if [ ! -d prebuilt/dxmt ]; then scripts/stage-components.sh --standin; fi
+
       - name: Build
         run: ./build.sh
 
@@ -89,7 +94,7 @@ jobs:
       - name: VERSIONS and the component hashes
         run: |
           apps=(dist/*.app); r="${apps[0]}/Contents/Resources"
-          { echo '```'; cat "$r/VERSIONS"; echo; (cd "$r" && shasum -a 256 components/ui-scale/*); echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+          { echo '```'; cat "$r/VERSIONS"; echo; (cd "$r" && find components -type f | LC_ALL=C sort | xargs shasum -a 256); echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Pack the app for the next jobs
         run: tar -cf "$RUNNER_TEMP/app.tar" dist .cache/sparkle-2.10.0
@@ -100,9 +105,18 @@ jobs:
           path: ${{ runner.temp }}/app.tar
           retention-days: 7
 
-      # Both refusals change the files this job has finished with.
+      # The refusals change the files this job has finished with.
       - name: build.sh refuses a changed component, stage-components.sh a changed archive
         run: |
+          cp prebuilt/dxmt/aarch64-windows/d3d11.dll "$RUNNER_TEMP/d3d11.dll"
+          printf x >>prebuilt/dxmt/aarch64-windows/d3d11.dll
+          if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took a DXMT that isn't its record's"; exit 1; fi
+          grep 'prebuilt/dxmt does not match its record' "$RUNNER_TEMP/build.txt"
+          cp "$RUNNER_TEMP/d3d11.dll" prebuilt/dxmt/aarch64-windows/d3d11.dll
+          echo extra >prebuilt/dxmt/i386-windows/d3d12.dll
+          if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took a file the DXMT record doesn't name"; exit 1; fi
+          grep "prebuilt/dxmt has files its record" "$RUNNER_TEMP/build.txt"
+          rm prebuilt/dxmt/i386-windows/d3d12.dll
           printf 'not the addon' >prebuilt/ui-scale/version.dll
           if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took a changed version.dll"; exit 1; fi
           grep 'version.dll is not the addon' "$RUNNER_TEMP/build.txt"

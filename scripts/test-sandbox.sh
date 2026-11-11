@@ -97,7 +97,9 @@ for a in aarch64-windows i386-windows aarch64-unix; do
   mkdir -p "$S/lib/wine/dxgi/dxmt/$a"
   for f in d3d11.dll dxgi.dll d3d10core.dll winemetal.dll d3d10.dll; do echo "engine's $a $f" >"$S/lib/wine/dxgi/dxmt/$a/$f"; done
 done
-rm -f "$S/lib/wine/dxgi/dxmt/aarch64-unix/"*.dll && echo "engine's winemetal.so" >"$S/lib/wine/dxgi/dxmt/aarch64-unix/winemetal.so"
+# (winemetal.so as the real engine has it: a link to lib/wine/aarch64-unix/winemetal.so)
+echo "engine's winemetal.so" >"$S/lib/wine/aarch64-unix/winemetal.so"
+rm -f "$S/lib/wine/dxgi/dxmt/aarch64-unix/"*.dll && ln -s ../../../aarch64-unix/winemetal.so "$S/lib/wine/dxgi/dxmt/aarch64-unix/winemetal.so"
 echo "engine's ntdll.so" >"$S/lib/wine/aarch64-unix/ntdll.so"
 echo "<plist/>" >"$S/lib/wine/aarch64-unix/wine.app/Contents/Info.plist"
 ln -s ../lib/wine/aarch64-unix/wine.app/Contents/MacOS/wine "$S/bin/wine"
@@ -155,6 +157,7 @@ out=$(GW2_ON_MAC_DRY_RUN=1 g install steam 2>&1); rc=$?
 check "dry-run install steam exits 0" [ "$rc" = 0 ]
 check "dry-run install steam reaches phase 4" has <(echo "$out") "@phase 4"
 check "dry-run prints the game's environment" has <(echo "$out") "WINEPREFIX=$BOTTLE"
+check "  with my DXMT fork's variables (it goes into the engine)" eval 'echo "$out" | grep -qxF "[dry-run]   DXMT_CACHE_DIR=$CACHE" && echo "$out" | grep -qxF "[dry-run]   DXMT_WARM=all" && echo "$out" | grep -q "^\[dry-run\] my DXMT fork (.*) as the engine.s DXMT tree"'
 check "  with the rules file and no WINE_COMPATDB" eval 'echo "$out" | grep -qxF "[dry-run]   WINE_COMPATDB_FILE=$AD/compatdb.rules" && ! echo "$out" | grep -q "WINE_COMPATDB="'
 check "dry-run creates nothing" eval '[ ! -e "$AD" ] && [ ! -e "$CACHE" ]'
 check "fresh status: not installed" [ "$(st installed)" = no ]
@@ -191,6 +194,26 @@ check "  nothing left of those installs but the verified download and the log" \
   eval '[ -z "$(ls -A "$AD" 2>/dev/null)" ] && [ "$(ls "$CACHE/downloads")" = engine.tar.xz ]'
 rm -rf "$CACHE"
 
+# dxgi_is fork|engine: the engine's DXMT trees as the app leaves them (lib/wine/dxgi). fork: dxmt is
+# the stand-in engine's tree with every file of the app's components/dxmt over it (its winemetal.so
+# a file of its own, not the engine's link) and the mark, and dxmt.engine the engine's own as it
+# ships (its link included). engine: dxmt is the engine's own, and no dxmt.engine.
+dxgi_is() {
+  local D="$ENG/lib/wine/dxgi" f
+  if [ "$1" = engine ]; then
+    diff -r "$S/lib/wine/dxgi/dxmt" "$D/dxmt" >/dev/null && [ -L "$D/dxmt/aarch64-unix/winemetal.so" ] && [ ! -e "$D/dxmt.engine" ]
+    return
+  fi
+  diff -r "$S/lib/wine/dxgi/dxmt" "$D/dxmt.engine" >/dev/null && [ -L "$D/dxmt.engine/aarch64-unix/winemetal.so" ] &&
+    [ -f "$D/dxmt/.gw2om-dxmt" ] && [ ! -e "$D/dxmt.fork" ] && [ ! -L "$D/dxmt/aarch64-unix/winemetal.so" ] &&
+    same "$S/lib/wine/dxgi/dxmt/aarch64-windows/d3d10.dll" "$D/dxmt/aarch64-windows/d3d10.dll" || return 1
+  for f in $(cd "$COMP/dxmt" && find . -type f); do same "$COMP/dxmt/$f" "$D/dxmt/$f" || return 1; done
+  # (and the engine's own winemetal.so, which the link points at, as it ships)
+  same "$S/lib/wine/aarch64-unix/winemetal.so" "$ENG/lib/wine/aarch64-unix/winemetal.so"
+}
+# wineapp_sums <engine>: every file in wine.app with its sha256
+wineapp_sums() { (cd "$1/lib/wine/aarch64-unix/wine.app" && find . -type f -exec shasum -a 256 {} + | LC_ALL=C sort); }
+
 # --- Steam route
 section "Install through Steam"
 # (a file in the downloads folder under the engine's name that isn't the engine, as a player may
@@ -207,17 +230,21 @@ check "the phases 1-4 in order" [ "$(echo "$out" | grep '^@phase' | tr '\n' ' ')
 check "@progress lines for the engine" has <(echo "$out") "@progress Wine engine"
 check "installed=yes" [ "$(st installed)" = yes ]
 check "engine_installed=yes" [ "$(st engine_installed)" = yes ]
-check "graphics=yes (the engine's own DXMT)" [ "$(st graphics)" = yes ]
+check "graphics=yes: my DXMT fork, as Settings asks by default" [ "$(st graphics)/$(st dxmt)/$(st dxmt_tree)" = yes/fork/fork ]
+check "  status names the fork's build" eval '[ "$(st dxmt_version)" = "$(head -1 "$COMP/dxmt/VERSION")" ] && [ -n "$(st dxmt_commit)" ]'
+check "  the install says so" has <(echo "$out") "^DXMT: my DXMT fork ($(head -1 "$COMP/dxmt/VERSION")) draws the game"
+check "  the engine's DXMT tree is mine, the engine's own next to it as it ships" dxgi_is fork
 check "gamemode=engine" [ "$(st gamemode)" = engine ]
 check "steam=yes" [ "$(st steam)" = yes ]
 check "stage=waiting_game" [ "$(st stage)" = waiting_game ]
 check "route=steam" [ "$(st route)" = steam ]
 check "game=no yet" [ "$(st game)" = no ]
 # (the engine as it ships: every file the stand-in's, minus the SDK, plus the app's record of the
-# archive; nothing of the app's in it)
-engine_diff() { diff -rq "$S" "$ENG" 2>&1 | sed -e "s|$S|S|g" -e "s|$ENG|E|g" | LC_ALL=C sort | tr '\n' '|'; }
+# archive; nothing of the app's in it but its DXMT trees, which dxgi_is checks)
+engine_diff() { diff -rq -x dxgi "$S" "$ENG" 2>&1 | sed -e "s|$S|S|g" -e "s|$ENG|E|g" | LC_ALL=C sort | tr '\n' '|'; }
 SDK_DIFF="Only in E: .gw2om-source|Only in S/lib/wine: tests|Only in S/lib/wine: x86_64-windows|Only in S/share: man|Only in S: include|"
 check "the engine is the stand-in as it ships, without its SDK (include, tests, x86_64-windows, man)" [ "$(engine_diff)" = "$SDK_DIFF" ]
+check "  wine.app's files have the stand-in's hashes" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
 check "  bin/wine and lib/wine/aarch64-unix/wine still link to the loader in wine.app" \
   eval '[ "$(readlink "$ENG/bin/wine")" = ../$LOADER ] && [ "$(readlink "$ENG/lib/wine/aarch64-unix/wine")" = wine.app/Contents/MacOS/wine ]'
 check "  no Game Mode bundle (the engine's loader is the Game Mode app)" [ ! -e "$AD/gamemode" ]
@@ -260,20 +287,37 @@ check "defaults: warm on, coolworkers 3, fastlocks on, ncpu 8, uiscale off, cine
   [ "$(sett warm)$(sett coolworkers)$(sett fastlocks)$(sett ncpu)$(sett uiscale)$(sett uiscale_cinema)" = on3on8offoff ]
 check "default: Steam in the background on" [ "$(sett steambg)" = on ]
 check "default: Quit Steam when the game quits on" [ "$(sett quitsteam)" = on ]
-check "settings: a state for each of the 20 keys" [ "$(g settings | grep -cE '^[a-z_]+_state=(ok|off:.+)$')" = 20 ]
-check "  off with the step that brings them: metalfx, warm (2), coolworkers, fastlocks (3), rawmouse, mousespeed (4), gamemode" \
-  [ "$(g settings | sed -n 's/^\([a-z_]*\)_state=off:.*/\1/p' | tr '\n' ' ')" = "metalfx warm coolworkers fastlocks gamemode rawmouse mousespeed " ]
+check "settings: a state for each of the 21 keys" [ "$(g settings | grep -cE '^[a-z_]+_state=(ok|off:.+)$')" = 21 ]
+check "  off with the step that brings them: coolworkers, fastlocks (3), rawmouse, mousespeed (4), gamemode" \
+  [ "$(g settings | sed -n 's/^\([a-z_]*\)_state=off:.*/\1/p' | tr '\n' ' ')" = "coolworkers fastlocks gamemode rawmouse mousespeed " ]
+check "  ok for the ones my DXMT fork brings back: metalfx, warm; dxmt=fork by default" \
+  [ "$(sett metalfx_state)/$(sett warm_state)/$(sett dxmt)/$(sett dxmt_state)" = ok/ok/fork/ok ]
 check "  the larger interface's settings and arcdps carry a note" \
   [ "$(g settings | sed -n 's/^\([a-z_]*\)_note=.*/\1/p' | tr '\n' ' ')" = "uiscale uiscale_size uiscale_sans uiscale_cinema arcdps " ]
-out=$(g set warm on 2>&1) && rc=0 || rc=$?
-check "set warm on: refused with the step 2 reason" eval '[ "$rc" = 1 ] && [ "$out" = "@error Needs my DXMT fork. Comes with step 2." ]'
-for k in coolworkers=5 fastlocks=off metalfx=on rawmouse=off mousespeed=2.5 gamemode=off; do
+out=$(g set coolworkers 5 2>&1) && rc=0 || rc=$?
+check "set coolworkers 5: refused with the step 3 reason" eval '[ "$rc" = 1 ] && [ "$out" = "@error Need my Wine changes. Come with step 3." ]'
+for k in fastlocks=off rawmouse=off mousespeed=2.5 gamemode=off; do
   check "set ${k%%=*} ${k#*=}: refused" sh -c "! '$G' set ${k%%=*} ${k#*=} >/dev/null"
 done
-sed -i '' 's/^warm=on$/warm=off/' "$AD/settings.conf"
+sed -i '' 's/^fastlocks=on$/fastlocks=off/' "$AD/settings.conf"
 g set hud on >/dev/null; g set hud off >/dev/null
-check "  a greyed key keeps what settings.conf says (warm=off by hand), and does nothing" eval '[ "$(sett warm)" = off ] && grep -qx warm=off "$AD/settings.conf"'
-sed -i '' 's/^warm=off$/warm=on/' "$AD/settings.conf"
+check "  a greyed key keeps what settings.conf says (fastlocks=off by hand), and does nothing" eval '[ "$(sett fastlocks)" = off ] && grep -qx fastlocks=off "$AD/settings.conf"'
+sed -i '' 's/^fastlocks=off$/fastlocks=on/' "$AD/settings.conf"
+check "warm on: DXMT_WARM=all; off: none" sh -c "'$G' env | grep -qx DXMT_WARM=all && '$G' set warm off >/dev/null && ! '$G' env | grep -q DXMT_WARM && '$G' set warm on >/dev/null"
+check "set metalfx on: DXMT_SUBSAMPLE_METALFX=1" sh -c "'$G' set metalfx on >/dev/null && '$G' env | grep -qx DXMT_SUBSAMPLE_METALFX=1 && '$G' set metalfx off >/dev/null && ! '$G' env | grep -q DXMT_SUBSAMPLE"
+# the engine's own DXMT, and back (nothing runs: the tree swaps at once)
+out=$(g set dxmt engine 2>&1) && rc=0 || rc=$?
+check "set dxmt engine: the engine's own tree is the active one, mine waits next to it" \
+  eval '[ "$rc" = 0 ] && dxgi_is engine && [ -f "$ENG/lib/wine/dxgi/dxmt.fork/.gw2om-dxmt" ] && [ "$(st graphics)/$(st dxmt_tree)" = yes/engine ]'
+check "  it says which" has <(echo "$out") "^DXMT: the engine's own DXMT (athei/dxmt d903db89036) draws the game"
+check "  warming and MetalFX greyed with the reason; set warm refused" \
+  eval '[ "$(sett warm_state)" = "off:Needs my DXMT fork (Graphics › DXMT)." ] && [ "$(sett metalfx_state)" = "$(sett warm_state)" ] && ! "$G" set warm off >/dev/null 2>&1'
+check "  none of the fork's variables in the environment" sh -c "! '$G' env | grep -qE 'DXMT_(CACHE_DIR|WARM|DEPENDENCY_COMPRESSION|SUBSAMPLE|STATS)'"
+check "  the game's shader cache: the engine's DXMT's own" has <(g rules) "^exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=$CACHE/dxmt-engine/Gw2-64.exe$"
+check "  wine.app untouched" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
+out=$(g set dxmt fork 2>&1) && rc=0 || rc=$?
+check "set dxmt fork: mine again, the engine's own kept as it ships" eval '[ "$rc" = 0 ] && dxgi_is fork && [ "$(st graphics)/$(st dxmt_tree)" = yes/fork ]'
+check "  wine.app untouched" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
 check "set ncpu all: no WINENCPU" sh -c "'$G' set ncpu all >/dev/null && ! '$G' env | grep -q WINENCPU"
 MAXC=$(sysctl -n hw.logicalcpu)
 # (GitHub's runners have 3 CPUs, too few for the checks of 6 and 8)
@@ -287,8 +331,8 @@ check "ncpu $((MAXC + 1)) (more than the Mac has) refused" sh -c "'$G' set ncpu 
 if [ "$MAXC" -ge 8 ]; then check "ncpu 8 again" g set ncpu 8; else echo "  skip   ncpu 8 again (this Mac has $MAXC CPUs)"; fi
 check "set fpscap 60: dxmt.conf caps at 60" sh -c "'$G' set fpscap 60 >/dev/null && grep -q 'd3d11.preferredMaxFrameRate = 60' '$AD/dxmt.conf'"
 check "set fpscap off: no cap" sh -c "'$G' set fpscap off >/dev/null && ! grep -q preferredMaxFrameRate '$AD/dxmt.conf'"
-check "set debug on: DXMT_LOG_LEVEL=debug and Wine's errors" sh -c "'$G' set debug on >/dev/null && '$G' env | grep -qx DXMT_LOG_LEVEL=debug && [ \"\$('$G' env | grep ^WINEDEBUG=)\" = WINEDEBUG=err+all,fixme-all ]"
-check "set debug off: neither" sh -c "'$G' set debug off >/dev/null && ! '$G' env | grep -q DXMT_LOG_LEVEL && [ \"\$('$G' env | grep ^WINEDEBUG=)\" = WINEDEBUG=-all ]"
+check "set debug on: DXMT_LOG_LEVEL=debug, DXMT_STATS=1 and Wine's errors" sh -c "'$G' set debug on >/dev/null && '$G' env | grep -qx DXMT_LOG_LEVEL=debug && '$G' env | grep -qx DXMT_STATS=1 && [ \"\$('$G' env | grep ^WINEDEBUG=)\" = WINEDEBUG=err+all,fixme-all ]"
+check "set debug off: none of them" sh -c "'$G' set debug off >/dev/null && ! '$G' env | grep -q -e DXMT_LOG_LEVEL -e DXMT_STATS && [ \"\$('$G' env | grep ^WINEDEBUG=)\" = WINEDEBUG=-all ]"
 g set retina off >/dev/null; check "set retina off: RetinaMode=n" reg "$ALL_MAC" RetinaMode n
 g set retina on >/dev/null; check "set retina on: RetinaMode=y" reg "$ALL_MAC" RetinaMode y
 check "  one value (not added twice)" [ "$(grep -c '^"RetinaMode"=' "$BOTTLE/user.reg")" = 1 ]
@@ -313,7 +357,7 @@ check "set launchopts -maploadinfo" g set launchopts "-maploadinfo"
 check "launchopts with a ; refused" sh -c "! '$G' set launchopts '-x; rm -rf /' >/dev/null"
 check "unknown value refused (exit 2)" sh -c "'$G' set fpscap 45 >/dev/null; [ \$? = 2 ]"
 check "unknown key refused" sh -c "! '$G' set colour red >/dev/null"
-check "settings.conf has every key" [ "$(grep -c '=' "$AD/settings.conf")" = 20 ]
+check "settings.conf has every key" [ "$(grep -c '=' "$AD/settings.conf")" = 21 ]
 
 section "The larger interface (addon)"
 GD="$STEAM/steamapps/common/Guild Wars 2"
@@ -447,6 +491,9 @@ cp "$SANDBOX/pe/nexus.dll" "$GD/d3d11.dll"
 check "  another addon's d3d11.dll (Nexus): native first as well" eval 'g rules | grep "^exe=Gw2-64.exe;metal_hud=true;dll_overrides=d3d11,dxgi=n,b;" >/dev/null'
 g set hud off >/dev/null; g set uiscale off >/dev/null; rm -f "$GD/d3d11.dll"
 check "  all off again" rules_are off
+g set dxmt engine >/dev/null
+check "the engine's own DXMT: the game's shader cache is that DXMT's own" rules_are engine-dxmt
+g set dxmt fork >/dev/null
 ODD="$SANDBOX/a%b;c$(printf '\t')d é"
 check "a home with %, ; and a tab: escaped as %XX, the é as it is" \
   eval 'GW2_ON_MAC_ROOT="$ODD" "$G" rules | sed "s|$SANDBOX/a%25b%3Bc%09d é/home|/Users/a%25b%3Bc%09d é|" | cmp -s - "$FIX/escaped.rules" && [ ! -e "$ODD" ]'
@@ -456,9 +503,9 @@ check "compatdb.local is appended as it is" eval '[ "$(g rules | tail -1)" = "ex
 cp "$AD/settings.conf" "$SANDBOX/settings.keep"
 sed -i '' -e 's/^metalfx=.*/metalfx=on/' -e 's/^hud=.*/hud=on/' -e 's/^debug=.*/debug=on/' "$AD/settings.conf"
 out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
-check "dry-run play: the environment is the engine's, the app's files and the CPUs, nothing else" \
-  eval '[ "$(echo "$out" | sed -n "s/^\[dry-run\]   //p" | grep -v ^WINENCPU= | tr "\n" "|")" = "WINEPREFIX=$BOTTLE|WINEDEBUG=err+all,fixme-all|WINEDLLOVERRIDES=winemenubuilder.exe=d|WINEMSYNC=1|DXMT_CONFIG_FILE=$AD/dxmt.conf|DXMT_LOG_PATH=$LOGS|WINE_COMPATDB_FILE=$AD/compatdb.rules|DXMT_LOG_LEVEL=debug|" ] && echo "$out" | grep -q "^\[dry-run\]   WINENCPU="'
-check "  none of 0.1.x's variables" eval '! echo "$out" | grep -qE "WINE_HEAT_|DXMT_WARM|DXMT_CACHE_DIR|DXMT_SUBSAMPLE_METALFX|ROSETTA_X87_PATH|WINEDLLPATH|WINE_COMPATDB=|MTL_HUD"'
+check "dry-run play: the engine's variables, the app's files, my DXMT fork's switches and the CPUs, nothing else" \
+  eval '[ "$(echo "$out" | sed -n "s/^\[dry-run\]   //p" | grep -v ^WINENCPU= | tr "\n" "|")" = "WINEPREFIX=$BOTTLE|WINEDEBUG=err+all,fixme-all|WINEDLLOVERRIDES=winemenubuilder.exe=d|WINEMSYNC=1|DXMT_CONFIG_FILE=$AD/dxmt.conf|DXMT_LOG_PATH=$LOGS|WINE_COMPATDB_FILE=$AD/compatdb.rules|DXMT_CACHE_DIR=$CACHE|DXMT_DEPENDENCY_COMPRESSION=1|DXMT_WARM=all|DXMT_SUBSAMPLE_METALFX=1|DXMT_LOG_LEVEL=debug|DXMT_STATS=1|" ] && echo "$out" | grep -q "^\[dry-run\]   WINENCPU="'
+check "  none of 0.1.x's Wine variables" eval '! echo "$out" | grep -qE "WINE_HEAT_|ROSETTA_X87_PATH|WINEDLLPATH|WINE_COMPATDB=|MTL_HUD"'
 cp "$SANDBOX/settings.keep" "$AD/settings.conf"
 
 section "Play"
@@ -471,6 +518,8 @@ check "  with DXMT's config file and the rules file" eval 'has "$STANDIN_LOG" "D
 check "  play wrote compatdb.rules before it: the rules and compatdb.local" eval '[ "$(cat "$AD/compatdb.rules")" = "$(g rules)" ] && grep -q FEX_HOSTFEATURES "$AD/compatdb.rules"'
 check "  session.env records the engine, its commits, the settings, the environment and the rules" \
   eval 'has "$LOGS/session.env" "^ENGINE=mach9-v0.3.1$" && has "$LOGS/session.env" "^ENGINE_FEX=" && has "$LOGS/session.env" "^SETTING_hud=off$" && has "$LOGS/session.env" "^WINE_COMPATDB_FILE=" && [ "$(sed -n "s/^RULE=//p" "$LOGS/session.env")" = "$(cat "$AD/compatdb.rules")" ]'
+check "  and which DXMT the session loads: my fork, its build" \
+  eval 'has "$LOGS/session.env" "^DXMT_TREE=fork$" && [ "$(sed -n "s/^DXMT_FORK=//p" "$LOGS/session.env")" = "$(head -1 "$COMP/dxmt/VERSION")" ] && has "$LOGS/session.env" "^SETTING_dxmt=fork$"'
 
 section "Collect Logs (redaction and the leak check)"
 mkdir -p "$STEAM/config" "$STEAM/logs" "$BOTTLE/drive_c/users/$BUSER/AppData/Roaming/Guild Wars 2"
@@ -490,6 +539,14 @@ for f in logs/install.log logs/wine.log logs/Gw2-64_d3d11.log settings.conf comp
   check "  has $f" [ -f "$Z/$f" ]
 done
 check "  the session report read DXMT's log" has "$Z/session-report.txt" "Frame rate: median 60.0"
+check "  and says which DXMT ran: my fork, its build" has "$Z/session-report.txt" "^DXMT that ran: my DXMT fork, $(head -1 "$COMP/dxmt/VERSION" | cut -c1-20)"
+cp "$LOGS/session.env" "$SANDBOX/session.env.keep"
+sed -i '' 's/^DXMT_TREE=.*/DXMT_TREE=engine/' "$LOGS/session.env"
+echo "info:  Using feature level D3D_FEATURE_LEVEL_11_1" >"$LOGS/engine-only_d3d11.log"
+out=$("$APP/Contents/Resources/session-report.sh" "$LOGS/engine-only_d3d11.log" 2>&1)
+check "the session report of the engine's DXMT: says which, and that it writes no STATS lines" \
+  eval 'echo "$out" | grep -q "^DXMT that ran: the engine.s own DXMT, athei/dxmt d903db89036$" && echo "$out" | grep -q "writes no STATS lines"'
+mv -f "$SANDBOX/session.env.keep" "$LOGS/session.env"; rm -f "$LOGS/engine-only_d3d11.log"
 check "  the Steam account name is gone" sh -c "! grep -rq zz_acct_name '$Z'"
 check "  the persona name is gone" sh -c "! grep -rqi 'Zz Persona Q' '$Z'"
 check "  the Steam ID is gone" sh -c "! grep -rqE '7656119[0-9]{10}|U:1:39734314' '$Z'"
@@ -539,9 +596,12 @@ check "uninstall refused while it runs" sh -c "! '$G' uninstall >/dev/null 2>&1"
 check "repair refused while it runs" sh -c "! '$G' repair >/dev/null 2>&1"
 check "set retina off while it runs: saved" sh -c "'$G' set retina off | grep -q 'after Steam has quit' && [ \"\$('$G' settings | sed -n 's/^retina=//p')\" = off ]"
 check "  but the registry waits (Wine reads it at the session's start)" reg "$ALL_MAC" RetinaMode y
+check "set dxmt engine while it runs: saved, and the tree waits (the session's processes have it loaded)" \
+  eval '"$G" set dxmt engine | grep -q "after Steam has quit" && [ "$(sett dxmt)" = engine ] && dxgi_is fork && [ "$(st graphics)" = switch ]'
 check "set arcdps on while it runs: refused, nothing placed" eval '! "$G" set arcdps on >"$SANDBOX/arc.txt" 2>&1 && has "$SANDBOX/arc.txt" "Quit Guild Wars 2 and Steam first" && [ ! -e "$STEAM/steamapps/common/Guild Wars 2/d3d11.dll" ]'
 kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
 mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
+check "  once it has ended, the switch goes through" eval 'g set dxmt engine >/dev/null && dxgi_is engine && g set dxmt fork >/dev/null && dxgi_is fork'
 cp "$SANDBOX/sleeper" "$ENG/bin/Gw2-64.exe"
 "$ENG/bin/Gw2-64.exe" 60 & gp=$!
 sleep 0.3
@@ -911,19 +971,30 @@ check "  no settings file: no" [ "$(ss limiter_hint)" = no ]
 section "Repair and Troubleshooting"
 T="$ENG/lib/wine/dxgi/dxmt"
 echo "something else" >"$T/aarch64-windows/d3d11.dll"
-check "graphics=other after a change in the engine's DXMT" [ "$(st graphics)" = other ]
+check "another build of my DXMT in the engine (an earlier version's): graphics=switch" [ "$(st graphics)/$(st dxmt_tree)" = switch/oldfork ]
+: >"$STANDIN_LOG"; out=$(g play 2>&1); started
+check "  Play puts this version's in before Wine starts, and says so" eval 'dxgi_is fork && echo "$out" | grep -q "^DXMT: my DXMT fork" && has "$LOGS/session.env" "^DXMT_TREE=fork$"'
+watch_done
+rm "$T/.gw2om-dxmt"; echo "something else" >"$T/aarch64-windows/d3d11.dll"
+check "graphics=other: a DXMT tree that is neither the engine's own nor mine" [ "$(st graphics)" = other ]
 : >"$STANDIN_LOG"; out=$(g play 2>&1); started
 check "  Play says Repair and leaves the engine as it is" eval 'echo "$out" | grep -q "^@warn .*Click Repair" && has "$T/aarch64-windows/d3d11.dll" "something else"'
 watch_done
 out=$(g repair 2>&1) && rc=0 || rc=$?
 check "repair exits 0, unpacking the engine again" eval '[ "$rc" = 0 ] && echo "$out" | grep -q "unpacking the engine again"'
-check "graphics=yes after repair, the engine as it ships" eval '[ "$(st graphics)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ]'
+check "graphics=yes after repair, the engine as it ships with my DXMT in its tree" eval '[ "$(st graphics)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ] && dxgi_is fork'
+check "  repair says which DXMT draws the game" eval 'echo "$out" | grep -q "^@done Repaired: .* The game draws with my DXMT fork ("'
 check "  the Retina setting saved during the session is in the registry" reg "$ALL_MAC" RetinaMode n
 g set retina on >/dev/null
-echo "something else" >"$T/aarch64-unix/winemetal.so"
-check "graphics=other with another winemetal.so" [ "$(st graphics)" = other ]
+g set dxmt engine >/dev/null
+rm "$T/aarch64-unix/winemetal.so" && echo "something else" >"$T/aarch64-unix/winemetal.so"
+check "graphics=other with another winemetal.so in the engine's own tree" [ "$(st graphics)" = other ]
+out=$(g set dxmt fork 2>&1)
+check "  set dxmt says Repair" eval 'echo "$out" | grep -q "^@warn .*Click Repair" && has "$T/aarch64-unix/winemetal.so" "something else"'
+g set dxmt engine >/dev/null
 g repair >/dev/null 2>&1
-check "  repair puts the engine's back" has "$T/aarch64-unix/winemetal.so" "engine's winemetal.so"
+check "  repair puts the engine's own back" eval 'dxgi_is engine && [ "$(st graphics)" = yes ]'
+g set dxmt fork >/dev/null
 check "the game and the settings stay" [ "$(st game)/$(sett launchopts)" = yes/-maploadinfo ]
 
 MF="$AD/install-manifest.json"
@@ -974,7 +1045,8 @@ check "an earlier version's manifest: Play brings it to this version" [ "$(pluti
 check "  the manifest names the engine's build" eval '[ "$(plutil -extract engine raw -o - "$MF")/$(plutil -extract engine_dxmt raw -o - "$MF")" = mach9-v0.3.1/d903db89036 ]'
 watch_done
 echo "shader" >"$DXMT_CACHE/shaders_320.db"
-check "reset-shaders empties DXMT's cache" sh -c "'$G' reset-shaders | grep -q '@done' && [ -d '$DXMT_CACHE' ] && [ ! -e '$DXMT_CACHE/shaders_320.db' ]"
+mkdir -p "$CACHE/dxmt-engine/Gw2-64.exe" && echo "shader" >"$CACHE/dxmt-engine/Gw2-64.exe/shaders_320.db"
+check "reset-shaders empties DXMT's caches, my fork's and the engine's DXMT's" sh -c "'$G' reset-shaders | grep -q '@done' && [ -d '$DXMT_CACHE' ] && [ ! -e '$DXMT_CACHE/shaders_320.db' ] && [ ! -e '$CACHE/dxmt-engine' ]"
 check "  and leaves the per-user cache folder's dxmt/ alone" other_dxmt_kept
 # The engine's archive from a browser, put into the downloads folder by hand: quarantined, and tar
 # copies the attribute onto every file it unpacks; the app takes it off the whole engine
@@ -985,7 +1057,8 @@ check "a quarantined archive: tar alone copies the attribute onto what it unpack
 out=$(g reinstall-engine 2>&1) && rc=0 || rc=$?
 check "reinstall-engine from it: the verified download, unpacked again" eval '[ "$rc" = 0 ] && echo "$out" | grep -q "^@done" && echo "$out" | grep -q "using the verified download"'
 check "  no file of the engine has the quarantine attribute" sh -c "! xattr -r '$ENG' | grep -q com.apple.quarantine"
-check "  graphics=yes after it, the engine as it ships" eval '[ "$(st graphics)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ]'
+check "  graphics=yes after it, the engine as it ships with my DXMT in its tree" eval '[ "$(st graphics)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ] && dxgi_is fork'
+check "  wine.app untouched through all of it" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
 rm -rf "$SANDBOX/tar-check"
 mkdir "$AD/.lock"
 check "a second operation is refused while one runs (lock)" sh -c "'$G' repair 2>&1 | grep -q 'Another $APP_NAME'"

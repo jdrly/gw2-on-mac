@@ -54,9 +54,10 @@ for u in "$BOTTLE/drive_c/users"/*; do
   BOTTLE_USER="${u##*/}"; break
 done
 GW2_APPDATA="$BOTTLE/drive_c/users/$BOTTLE_USER/AppData/Roaming/Guild Wars 2"
-# DXMT's shader cache for the game, in the app's own cache folder (the game's compatdb rule sets
-# DXMT_SHADER_CACHE_PATH to it)
+# DXMT's shader caches for the game, in the app's own cache folder (the game's compatdb rule sets
+# DXMT_SHADER_CACHE_PATH to one of them): my DXMT fork's, the engine's DXMT's
 DXMT_CACHE="$H/Library/Caches/$APP_NAME/dxmt/Gw2-64.exe"
+DXMT_CACHE_ENGINE="$H/Library/Caches/$APP_NAME/dxmt-engine/Gw2-64.exe"
 
 name="${APP_NAME// /-}-logs-$(date +%Y-%m-%d-%H%M)"
 dest="${1:-$H/Desktop}"
@@ -385,8 +386,13 @@ pin() { sed -n "s/^$1=\([^ ]*\).*/\1/p" "$RES/gw2om.sh"; }
   echo "State: $(tr '\n' ' ' <"$APPDIR/state" 2>/dev/null | sed 's|game_dir=[^ ]*|game_dir=(set)|')"
   E="$APPDIR/engine"
   echo "Engine in place: $([ -x "$E/bin/wine" ] && echo "yes, sha256 of the archive $(cut -c1-12 "$E/.gw2om-source" 2>/dev/null)" || echo none)"
-  echo "  DXMT tree: d3d11.dll $(sha12 "$E/lib/wine/dxgi/dxmt/aarch64-windows/d3d11.dll") (the engine's own $(pin ENGINE_D3D11_SHA256 | cut -c1-12))," \
-    "winemetal.so $(sha12 "$E/lib/wine/dxgi/dxmt/aarch64-unix/winemetal.so") (the engine's own $(pin ENGINE_WINEMETAL_SHA256 | cut -c1-12))"
+  # (the active tree, and the other one waiting next to it: gw2om.sh's dxmt_tree)
+  for t in dxmt dxmt.engine dxmt.fork; do
+    [ -d "$E/lib/wine/dxgi/$t" ] || continue
+    echo "  DXMT tree $t: $(cat "$E/lib/wine/dxgi/$t/.gw2om-dxmt" 2>/dev/null || echo "no mark (the engine's?)")," \
+      "d3d11.dll $(sha12 "$E/lib/wine/dxgi/$t/aarch64-windows/d3d11.dll") (the engine's own $(pin ENGINE_D3D11_SHA256 | cut -c1-12))," \
+      "winemetal.so $(sha12 "$E/lib/wine/dxgi/$t/aarch64-unix/winemetal.so") (the engine's own $(pin ENGINE_WINEMETAL_SHA256 | cut -c1-12))"
+  done
   echo "Game: $([ -n "$GAME_DIR" ] && [ -f "$GAME_DIR/Gw2-64.exe" ] && echo "installed, Gw2-64.exe $(stat -f '%z bytes, %Sm' "$GAME_DIR/Gw2-64.exe")" || echo "not found")"
   [ -z "$GAME_DIR" ] || echo "  interface addon (version.dll): $([ -f "$GAME_DIR/version.dll" ] && { grep -aq 'gw2-on-mac ui-scale' "$GAME_DIR/version.dll" && echo "$APP_NAME's" || echo "another program's"; } || echo none)"
   # d3d11.dll and dxgi.dll addons (arcdps, Nexus): which, by a quick look (gw2om.sh's arcdps_state
@@ -395,7 +401,8 @@ pin() { sed -n "s/^$1=\([^ ]*\).*/\1/p" "$RES/gw2om.sh"; }
     [ -n "$GAME_DIR" ] && [ -f "$GAME_DIR/$f" ] || continue
     echo "  $f addon: $(LC_ALL=C grep -aq addextension2 "$GAME_DIR/$f" && LC_ALL=C grep -aq arcdps "$GAME_DIR/$f" && echo arcdps || echo "another program's"), $(stat -f '%z bytes, %Sm' "$GAME_DIR/$f")"
   done
-  echo "DXMT's cache for the game: $(du -sk "$DXMT_CACHE" 2>/dev/null | awk '{ printf "%.1f MB", $1 / 1024 }' || echo none)"
+  echo "DXMT's caches for the game: my fork's $(du -sk "$DXMT_CACHE" 2>/dev/null | awk '{ printf "%.1f MB", $1 / 1024 }' || echo none)," \
+    "the engine's DXMT's $(du -sk "$DXMT_CACHE_ENGINE" 2>/dev/null | awk '{ printf "%.1f MB", $1 / 1024 }' || echo none)"
   echo "Mac: $(sysctl -n hw.model), $(sysctl -n machdep.cpu.brand_string)" \
     "($(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null)+$(sysctl -n hw.perflevel1.physicalcpu 2>/dev/null) cores)," \
     "$(($(sysctl -n hw.memsize) / 1073741824)) GB, macOS $(sw_vers -productVersion) ($(sw_vers -buildVersion))"

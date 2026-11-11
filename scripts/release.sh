@@ -167,15 +167,19 @@ package() {
   ditto "$SRC" "$APP"
   xattr -cr "$APP"
 
-  # Inside out: the process lister and the session's lock (helpers/procpaths, sessionlock),
-  # Sparkle in its documented order (Autoupdate, Updater.app, the framework, each with the hardened
-  # runtime and no --deep; build.sh removed its XPC services), then the app (app.plist: no
-  # exceptions). The app bundles no engine component: the engine is downloaded at install time,
-  # signed by its author, and never touched.
+  # Inside out: the process lister and the session's lock (helpers/procpaths, sessionlock), my
+  # DXMT fork's winemetal.so (gw2om.sh puts it into the engine's DXMT tree, where Wine loads it;
+  # every Mach-O of a notarized app is signed; the PE DLLs are not Mach-O), Sparkle in its
+  # documented order (Autoupdate, Updater.app, the framework, each with the hardened runtime and no
+  # --deep; build.sh removed its XPC services), then the app (app.plist: no exceptions). The
+  # engine is downloaded at install time, signed by its author, and nothing goes inside wine.app.
   echo "[release] signing nested code"
   local fw stage
+  ! grep -q '^stand-in' "$APP/Contents/Resources/components/dxmt/VERSION" ||
+    { echo "The app bundles the stand-in DXMT (scripts/stage-components.sh --standin); stage the real one" >&2; exit 1; }
   sign "$APP/Contents/Resources/helpers/procpaths"
   sign "$APP/Contents/Resources/helpers/sessionlock"
+  sign "$APP/Contents/Resources/components/dxmt/aarch64-unix/winemetal.so"
   fw="$APP/$FW_REL"
   sign "$fw/Versions/B/Autoupdate"
   sign "$fw/Versions/B/Updater.app"

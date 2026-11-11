@@ -1,0 +1,2 @@
+exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=/Users/me/Library/Caches/GW2 on Mac arm64/dxmt-engine/Gw2-64.exe
+exe=CefHost.exe;env=DXMT_SHADER_CACHE_PATH=

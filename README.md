@@ -3,12 +3,15 @@
 GW2 on Mac is a small macOS app I wrote to play [Guild Wars 2](https://www.guildwars2.com) on
 Apple silicon. It installs the game into a Wine engine and bottle of its own and starts it. The
 engine is athei's [Mach9](https://github.com/athei/mach9) 0.3.1, an arm64 Wine 11.21 that runs the
-game's x86_64 code with FEX, used as it ships. The game's Direct3D 11 goes to Metal through the
-engine's own DXMT. It changes nothing you already have installed.
+game's x86_64 code with FEX, used as it ships but for one part: the game's Direct3D 11 goes to
+Metal through my DXMT fork, built for this engine, which the app puts into the engine's DXMT tree.
+The engine's own DXMT stays next to it, and a setting switches back to it. It changes nothing you
+already have installed.
 
 > **This is the `arm64` branch.** It builds *GW2 on Mac arm64*, the development app for 0.2,
 > which moves the game to an arm64 Wine engine. 0.1.x runs CrossOver 26.3 under Rosetta with my
-> DXMT fork and my Wine pieces. This app puts none of them into its engine. It has its own name, bundle id
+> DXMT fork and my Wine pieces. This app puts my DXMT fork, built for the arm64 engine, into its
+> engine, and none of my Wine pieces yet. It has its own name, bundle id
 > (`cz.jandrly.gw2onmac.arm64`) and folders, so it installs next to GW2 on Mac 0.1.x and shares
 > nothing with it. The name is `APP_NAME` at the top of `src/gw2om.sh`, `collect-logs.sh` and
 > `session-report.sh`, and `appName` in `src/native/App.swift`. It has no updates, and 0.1.x stays
@@ -166,9 +169,10 @@ untested on this engine.
 |---|---|---|---|---|
 | Graphics | Retina | `retina` | on | draws at your display's full resolution, at some cost in frame rate |
 | | Frame cap | `fpscap` | off | a steady cap paced by Metal at 30, 40, 60 or 120. Use it with the game's own vsync |
-| | MetalFX for Subsample | `metalfx` | off | greyed: needs my DXMT fork, which comes with step 2 |
+| | DXMT | `dxmt` | `fork` | `fork`: my DXMT fork draws the game, and Steam's windows with it. `engine`: the engine's own, to compare. The engine's DXMT tree switches while no session runs, else at the next start after Steam has quit ([The DXMT tree](#the-dxmt-tree)) |
+| | MetalFX for Subsample | `metalfx` | off | MetalFX upscales the 3D scene of the game's Subsample render sampling. Greyed while the engine's own DXMT is chosen |
 | | Metal HUD | `hud` | off | Apple's overlay with frame rate and frame times, over the game only and not over Steam's windows |
-| Performance | Shader warming | `warm` | on | greyed: needs my DXMT fork, which comes with step 2 |
+| Performance | Shader warming | `warm` | on | builds the pipelines the last sessions used before the game asks for them. Greyed while the engine's own DXMT is chosen |
 | | Cooler job workers | `coolworkers` | 3 | greyed: needs my Wine changes, which come with step 3 |
 | | Faster locks | `fastlocks` | on | greyed: needs my Wine changes, which come with step 3 |
 | | CPUs the game sees | `ncpu` | 8 | from 2 up to your Mac's logical CPUs, or all. The game starts one job worker per CPU, minus one |
@@ -267,11 +271,12 @@ nothing in `/Applications` besides itself.
 
 | Path | What | Uninstall |
 |---|---|---|
-| `~/Library/Application Support/GW2 on Mac arm64/engine/` | the Wine engine as it ships, without its SDK, about 1 GB | removed |
+| `~/Library/Application Support/GW2 on Mac arm64/engine/` | the Wine engine as it ships, without its SDK, about 1 GB, with my DXMT fork's tree in `lib/wine/dxgi/dxmt` and the engine's own next to it | removed |
 | `…/GW2 on Mac arm64/bottle/` | the game's Wine prefix with Steam, the game's files and the game's settings. About 75 GB, or no extra space for a clone of files on the same disk | removed, with the game |
 | `…/GW2 on Mac arm64/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `compatdb.rules`, `compatdb.local`, `session`, `session.req`, `.session.lock` | settings, install state, what was installed, DXMT's options, the game's compatdb rules and my own, the current game session and its lock | removed |
 | `~/Library/Caches/GW2 on Mac arm64/downloads/` | the engine archive, `SteamSetup.exe`, a copy of `Gw2Setup-64.exe` | removed |
-| `~/Library/Caches/GW2 on Mac arm64/dxmt/Gw2-64.exe/` | DXMT's shader cache for the game. Other processes, such as the launcher's `CefHost.exe`, keep theirs where the engine's DXMT puts it by default | removed. *Reset the shader cache* in Settings empties it too |
+| `~/Library/Caches/GW2 on Mac arm64/dxmt/` | my DXMT fork's caches: `Gw2-64.exe/` holds the game's shaders, recorded pipelines and pipeline archives, and the other processes keep theirs next to it (`DXMT_CACHE_DIR`) | removed. *Reset the shader cache* in Settings empties it too |
+| `~/Library/Caches/GW2 on Mac arm64/dxmt-engine/Gw2-64.exe/` | the engine's own DXMT's shader cache for the game, apart from my fork's, which translates shaders differently | removed, and emptied by *Reset the shader cache* |
 | `~/Library/Logs/GW2 on Mac arm64/` | `install.log`, `wine.log`, DXMT's `Gw2-64_d3d11.log`, `session.env`, the heat logs, and `.lock-claim` for the install lock | kept |
 
 In the game folder, `version.dll` and `gw2-ui-scale.ini` exist only while *Larger interface* is on,
@@ -327,7 +332,7 @@ flowchart LR
     sh -->|"creates"| bottle["Bottle<br/>Steam and the game"]
     engine -->|"runs"| game["Gw2-64.exe"]
     bottle --- game
-    game -->|"Direct3D 11"| dxmt["DXMT<br/>the engine's"]
+    game -->|"Direct3D 11"| dxmt["DXMT<br/>my fork, or the engine's"]
     dxmt -->|"winemetal"| metal["Metal"]
 ```
 
@@ -353,10 +358,33 @@ it removes the SDK, which nothing reads at run time: `include/`, `lib/wine/tests
 `codesign --verify --strict` on `wine.app` with Mach9's team `WLKUUJD25W` and the identifier
 `app.mach9.loader`. That reads the signature and starts nothing.
 
-The app writes nothing into the engine afterwards, and nothing at all inside `wine.app`. The loader
-is signed with an embedded provisioning profile, and a re-signed, edited or copied loader exits.
-`status` says `graphics=yes` while the engine's DXMT tree has its own `d3d11.dll` and
-`winemetal.so`, and `other` when it doesn't. Repair then unpacks the engine again.
+The app writes nothing into the engine afterwards but its DXMT tree, and nothing at all inside
+`wine.app`. The loader is signed with an embedded provisioning profile, and a re-signed, edited or
+copied loader exits.
+
+### The DXMT tree
+
+The engine's compatdb gives every process `lib/wine/dxgi/dxmt` as its DXGI tree (the built-in
+`dxgi=dxmt` rule, and the pin on Steam's web helper), and Wine loads `winemetal.so` from that
+tree's `aarch64-unix/`. A rule can't point the game at another tree, because the `dxgi` key knows
+only `dxmt` and `wined3d`. So the app swaps the tree. The active one is always
+`lib/wine/dxgi/dxmt`, and the other waits next to it:
+
+- `dxmt.engine`: the engine's own, as it ships, moved aside and never changed
+- `dxmt.fork`: a copy of the engine's tree with the files of `components/dxmt` over it, which are
+  `d3d11`, `dxgi`, `d3d10core` and `winemetal` for `aarch64-windows` and `i386-windows`, plus
+  `winemetal.so`, `VERSION` and the licence, marked with `.gw2om-dxmt`. The engine's
+  `winemetal.so` is a link into `lib/wine/aarch64-unix`; the copy replaces the link and never
+  writes through it
+
+Steam's processes get the same DXMT as the game, as on 0.1.x. The `dxmt` setting picks the tree.
+The swap is two renames, done only while no session runs or starts, under the session's lock:
+at install, Repair, `set dxmt` and Play. While Steam runs, the change waits for the next start.
+`status` prints `dxmt` (the setting), `dxmt_tree` (`fork`, `engine`, `oldfork` for an earlier
+build of mine, `other`) and `graphics`: `yes` when the tree is the one asked for, `switch` when the
+next start puts it in (after a change during a session, or an update of the app with another build
+of my fork), and `other` when the tree is neither the engine's own nor mine. Repair then unpacks
+the engine again and puts the asked-for tree in.
 
 ## Installing, step by step
 
@@ -366,7 +394,7 @@ and an import's copied game folder with Steam's record. Other files it made can 
 cached downloads, logs and `dxmt.conf`.
 
 1. **The engine.** Check macOS, download, unpack, take the quarantine off, remove the SDK, check
-   the build, as above.
+   the build, then put my DXMT fork into its DXMT tree, as above.
 2. **The bottle.** `wineboot`, then `settings.conf`, `dxmt.conf` and three values in `user.reg`,
    the ones Mach9's own launcher writes: `RetinaMode` under `Software\Wine\Mac Driver`,
    `EmulateModeset=Y` under `Software\Wine\X11 Driver` and `ShowCrashDialog=dword:0` under
@@ -409,6 +437,13 @@ The environment is fixed while Steam runs, because Steam passes its own on to th
 `DXMT_CONFIG_FILE`, `DXMT_LOG_PATH`, `WINE_COMPATDB_FILE`, and `WINENCPU` unless the game sees every
 CPU. Debug logging adds `DXMT_LOG_LEVEL=debug` and sets `WINEDEBUG=err+all,fixme-all`.
 
+With my DXMT fork in the engine, it also gets what the fork reads (its `docs/gw2/README.md`):
+`DXMT_CACHE_DIR` set to the app's cache folder, so the fork's caches stay under
+`~/Library/Caches/GW2 on Mac arm64/dxmt/` and never in the per-user folder or 0.1.x's;
+`DXMT_DEPENDENCY_COMPRESSION=1`; `DXMT_WARM=all` with shader warming on;
+`DXMT_SUBSAMPLE_METALFX=1` with MetalFX on; and `DXMT_STATS=1` with Debug logging, which the fork
+has on by default anyway. With the engine's own DXMT none of them is set, since it reads none.
+
 `compatdb.rules` in the app's folder is the file `WINE_COMPATDB_FILE` names. Every Wine process
 reads it when it starts, so a change reaches the next game start even while Steam runs. Play
 writes it before it starts anything, to a temporary file that it then renames. The rules are in the
@@ -426,7 +461,9 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   arcdps or Nexus. `version=n,b` is there while the larger interface is on. With no such file Wine
   loads its own.
 - `DXMT_SHADER_CACHE_PATH` keeps DXMT's shader cache for the game in the app's cache folder, never
-  in the per-user one another DXMT setup may use. `CefHost.exe` gets it removed.
+  in the per-user one another DXMT setup may use: `dxmt/Gw2-64.exe` for my fork, the same place its
+  `DXMT_CACHE_DIR` gives, and `dxmt-engine/Gw2-64.exe` for the engine's own DXMT.
+  `CefHost.exe` gets it removed.
 - A `compatdb.local` that I put in the app's folder is appended as it is, for trying FEX switches
   such as `exe=Gw2-64.exe;env=FEX_HOSTFEATURES=disableavx`. Nothing in the app writes it, and
   Collect Logs includes it.
@@ -607,8 +644,10 @@ points the download elsewhere for tests.
 
 ## Engine updates
 
-The app puts nothing into the engine, so an app update has nothing to change in it. A new engine
-comes with new pins in `gw2om.sh`, and Repair or *Reinstall the engine* unpacks it.
+The app puts only my DXMT fork into the engine. An app update with another build of it finds the
+earlier one in the engine's tree (`graphics=switch`, `dxmt_tree=oldfork`), and the next Play or
+Repair puts the new one in, made again from the engine's own tree. A new engine comes with new
+pins in `gw2om.sh`, and Repair or *Reinstall the engine* unpacks it.
 
 ### The install lock
 
@@ -638,12 +677,24 @@ last session from DXMT's own log lines:
 You need Xcode 27, for the macOS 27 SDK. The app targets macOS 26.4, as the engine does.
 
 ```sh
-scripts/stage-components.sh    # copy the interface addon into prebuilt/
+scripts/stage-components.sh    # copy my DXMT fork and the interface addon into prebuilt/
 ./build.sh                     # build dist/GW2 on Mac arm64.app, ad-hoc signed
 ```
 
-On this branch the app bundles one component, the interface addon. 0.1.x's DXMT fork and Wine
-pieces stay on `main`; `build.sh` doesn't need them and `stage-components.sh` doesn't stage them.
+On this branch the app bundles two components: my DXMT fork built for the arm64 engine, and the
+interface addon. 0.1.x's Wine pieces stay on `main`; `build.sh` doesn't need them and
+`stage-components.sh` doesn't stage them.
+
+**Where DXMT comes from.** The fork's CI builds it for this engine
+([jdrly/dxmt#182](https://github.com/jdrly/dxmt/issues/182)): `aarch64-windows/` and
+`i386-windows/` with `d3d11`, `dxgi`, `d3d10core` and `winemetal.dll`, `aarch64-unix/winemetal.so`,
+and `VERSION`, `LICENSE`, `COPYING.LIB`. `VERSION`'s first line names the commit, as `git
+describe` writes it. `stage-components.sh` copies that artifact, unpacked, from
+`work/dxmt-arm64/install` in the workspace (`DXMT_BUILD` overrides it) and writes the record
+`prebuilt/dxmt/SHA256SUMS`, every file's sha256. `build.sh` refuses a `prebuilt/dxmt` with a file
+that doesn't match the record, or one the record doesn't name. Until a components archive has the
+real build, `stage-components.sh --standin` adds a stand-in in the same layout for the checks;
+`--pack` and `scripts/release.sh` refuse it.
 
 **Where the addon comes from.** `stage-components.sh` copies `version.dll` and
 `gw2-ui-scale.ini` from `GW2_ON_MAC_WORKSPACE`, by default `../gw2-on-mac` next to this checkout,
@@ -651,8 +702,8 @@ at `work/ui-scale/build`. `UISCALE_BUILD` overrides that. The DLL must carry the
 string. The script changes nothing in the workspace. Git ignores `prebuilt/`.
 
 **Without the workspace.** A checkout without my workspace, like a GitHub runner, can't copy
-anything, so `stage-components.sh` downloads 0.1.x's components archive instead and keeps only its
-`ui-scale/`. It does that when `GW2_ON_MAC_WORKSPACE` doesn't exist, or with `--fetch`. The archive
+anything, so `stage-components.sh` downloads the components archive instead and keeps its
+`ui-scale/`, and its `dxmt/` if that is the arm64 build (0.1.x's archives have an x86_64 one). It does that when `GW2_ON_MAC_WORKSPACE` doesn't exist, or with `--fetch`. The archive
 is a pre-release of this repository, tagged `components-<date>`. [`prebuilt.lock`](prebuilt.lock)
 pins its tag, file name and sha256, and the script refuses a download or cached copy with another
 sha256 before it unpacks anything. `build.sh` then checks it like any other `prebuilt/`.
@@ -661,8 +712,8 @@ sha256 before it unpacks anything. `build.sh` then checks it like any other `pre
 on `main` says how I publish one.
 
 **The engine's source** is athei's: [athei/mach9](https://github.com/athei/mach9) and the
-repositories its release page lists, each under its own licence. The app doesn't bundle or change
-any of it. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+repositories its release page lists, each under its own licence. The app doesn't bundle any of it,
+and changes only which DXMT tree is active ([The DXMT tree](#the-dxmt-tree)). See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 **The interface addon** is this repository's own code in [`addon/ui-scale`](addon/ui-scale).
 `scripts/build-addon.sh` builds `version.dll` with Homebrew's mingw-w64 (`brew install mingw-w64`)
@@ -670,11 +721,11 @@ into `work/ui-scale/build` and runs its native test. Staging still takes the wor
 the same source, which differs only in link timestamps.
 
 **What build.sh does.** It checks `prebuilt/` again, compiles `src/native/*.swift` for arm64 and the
-`procpaths` and `sessionlock` helpers, and bundles the addon, fonts, art and licences. It
+`procpaths` and `sessionlock` helpers, and bundles my DXMT fork, the addon, fonts, art and licences. It
 downloads Sparkle at a pinned version and sha256, and compiles the Icon Composer icon
 `src/AppIcon.icon` with actool into `Assets.car` and a fallback `AppIcon.icns`.
 
-- `GW2_ON_MAC_VERSION` sets the version, 0.2.0-dev.1 by default. `X.Y.Z-dev.N` makes a development build,
+- `GW2_ON_MAC_VERSION` sets the version, 0.2.0-dev.2 by default. `X.Y.Z-dev.N` makes a development build,
   as in SWTOR on Mac.
 - `GW2_ON_MAC_FEED_URL` and `GW2_ON_MAC_ED_PUBLIC_KEY` turn updates on. Without them Sparkle stays
   off, which is normal for local builds.
@@ -699,8 +750,10 @@ Mac. It has read-only access and no secrets, and its actions are pinned by commi
   suite pins with Mach9 0.3.1's `compatdb-core` (`Table::parse_strict`) and checks that it writes
   back byte for byte. It needs `cargo`, so it runs only there, never in the app's build.
 - `build`: `bash -n` (macOS's 3.2) on the scripts, `stage-components.sh --fetch`, `./build.sh`,
-  then the build's `VERSIONS` and component hashes in the run's summary. It also checks that
-  `build.sh` refuses a changed `ntdll.so` and `stage-components.sh` a changed archive.
+  then the build's `VERSIONS` and component hashes in the run's summary. Until `prebuilt.lock`
+  pins an archive with my arm64 DXMT, `stage-components.sh --standin` adds a stand-in. It also
+  checks that `build.sh` refuses a DXMT file that doesn't match its record, a file the record
+  doesn't name and a changed `version.dll`, and `stage-components.sh` a changed archive.
 - `sandbox`: `test-sandbox.sh` on that build. Without my workspace, the ArenaNet route and the real
   arcdps are skipped, and each skip shows as a notice on the run.
 - `renders`: `ui-render.sh`, with the PNGs as the run's `renders` artifact. A runner has no design
@@ -711,12 +764,16 @@ which has Sparkle's key and my Developer ID), building the components themselves
 route's and the real arcdps's checks, and playing.
 
 `scripts/test-sandbox.sh` tests the backend of a built app end to end in `work/app-sandbox/test`,
-with 414 checks. It uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and
+with 418 checks. It uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and
 ArenaNet's downloads itself, and uses a clone of the game's own ArenaNet-signed `Gw2-64.exe` as the
 installer to check. That's `SIGNED_PE`, by default the copy in my development workspace's bottle.
 Without one, those checks are skipped. It covers:
 
 - dry runs, both routes, finish, every setting and its effect, and the addon
+- my DXMT fork in the engine's tree with the engine's own next to it as it ships, its link left
+  alone, the switch to the engine's own and back, a switch waiting while a session runs, an
+  earlier build of mine replaced at Play, a foreign tree left for Repair, and `wine.app`'s files'
+  hashes unchanged through all of it
 - raw mouse-look's registry values, which go to `Gw2-64.exe` only and never set `PhysicalKeyboard`,
   and registry writes waiting while a session holds the lock
 - arcdps on and off from a stand-in deltaconnected.com, set by `GW2_ON_MAC_ARCDPS_URL` to a
