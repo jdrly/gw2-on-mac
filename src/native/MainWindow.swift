@@ -592,7 +592,7 @@ struct ChoosePanel: View {
       }
       RouteCard(selected: installer.route == .existing, icon: "hard-drive", title: "Game files I already have",
                 summary: "No download",
-                detail: "From CrossOver, Whisky or an app wrapper. No download.") {
+                detail: "From GW2 on Mac 0.1, CrossOver, Whisky or an app wrapper. No download.") {
         installer.route = .existing
       } extra: {
         ExistingGames(installer: installer)
@@ -741,7 +741,7 @@ struct ExistingGames: View {
           Text("Looking for Guild Wars 2 on this Mac…")
         } else {
           LucideIcon(name: "info", size: 14)
-          Text("None found in CrossOver, Whisky or app wrappers. Choose its folder below.")
+          Text("None found in GW2 on Mac 0.1, CrossOver, Whisky or app wrappers. Choose its folder below.")
             .fixedSize(horizontal: false, vertical: true)
         }
       }
