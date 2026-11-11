@@ -851,6 +851,8 @@ Mac. It has read-only access and no secrets, and its actions are pinned by commi
   arcdps are skipped, and each skip shows as a notice on the run.
 - `renders`: `ui-render.sh`, with the PNGs as the run's `renders` artifact. A runner has no design
   exports, so there are no `compare-*.png`.
+- `addon`: `scripts/build-addon.sh` with Homebrew's mingw-w64, so the addon compiles and its native
+  test runs. The app's build takes `version.dll` from the components archive instead.
 
 The Dev build workflow calls the same jobs with my real DXMT fork and the addon built on the
 runner instead of the archive and the stand-in ([Releasing](#releasing)).
@@ -968,8 +970,9 @@ gh release download v0.2.0-dev.4 -R jdrly/gw2-on-mac -p '*.dmg' -D ~/Downloads
   the run's own token. A commit that isn't on the branch, or whose run hasn't finished green, is
   refused.
 - The addon is built on the runner from the commit, with Homebrew's mingw-w64.
-- Checks' jobs run on that build: `lint`, `compatdb`, `build`, `sandbox` and `renders`. Then
-  `release.sh --adhoc` packages the app the `build` job made and never builds it again.
+- Checks' jobs run on that build: `lint`, `compatdb`, `build`, `sandbox` and `renders`, and
+  `addon` builds the addon a second time, as on a pull request. Then `release.sh --adhoc` packages
+  the app the `build` job made and never builds it again.
 - The notes are `release-notes/<version>.md` when the commit has one. Otherwise the run writes
   them: the app's and the fork's commits, and a link to the fork's changes since the previous dev
   build's DXMT.

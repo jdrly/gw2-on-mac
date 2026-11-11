@@ -12,7 +12,7 @@ static float g_w, g_h, g_px;
 /* sub-font names (UTF-16, nul-terminated, an empty name is one 0) and ranges */
 static const uint16_t names[] = { 'a', 'b', 0, 0, 'c', 'd', 'e', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 static const uint32_t ranges[13][2] = { { 0x20, 0x7f }, { 0x80, 0xff }, { 0x100, 0x17f } };
-static const char *ini_scale, *ini_enabled, *ini_sans, *ini_keep;
+static const char *ini_scale, *ini_enabled, *ini_sans, *ini_keep, *ini_csspin;
 static int failures, screen_w, screen_h;
 
 int test_bad_ptr(const void *p, size_t n) { (void)n; return p == NULL; }
@@ -23,8 +23,26 @@ const char *test_ini(const char *key)
   if (!strcmp(key, "enabled")) return ini_enabled;
   if (!strcmp(key, "sans")) return ini_sans;
   if (!strcmp(key, "keep")) return ini_keep;
+  if (!strcmp(key, "csspin")) return ini_csspin;
   return NULL;
 }
+
+/* The clock for the spin calibration: time runs in picoseconds, each turn of the loop (its pause)
+ * costs ps_per_turn, and QueryPerformanceCounter call number jump_at adds jump_ps once (a
+ * preemption). The counter ticks at 10 MHz, as Wine's does, so a short run measures badly. */
+static int64_t clock_ps, ps_per_turn, jump_ps;
+static int qpc_calls, jump_at, qpf_ok, protect_ok, protects;
+static DWORD cs_init_spin;
+BOOL test_qpf(LARGE_INTEGER *f) { f->QuadPart = qpf_ok ? 10000000 : 0; return qpf_ok; }
+BOOL test_qpc(LARGE_INTEGER *c)
+{
+  if (++qpc_calls == jump_at) clock_ps += jump_ps;
+  c->QuadPart = clock_ps / 100000;
+  return 1;
+}
+void test_yield(void) { clock_ps += ps_per_turn; }
+BOOL test_protect(void *a, size_t n) { (void)a; (void)n; protects++; return protect_ok; }
+BOOL test_cs_init(void *cs, DWORD spin) { (void)cs; cs_init_spin = spin; return 1; }
 
 #define CHECK(c, ...) do { if (!(c)) { failures++; printf("FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
 
@@ -82,7 +100,7 @@ static void build(int size, float inv)
   ui_w = (uintptr_t)&g_w; ui_h = (uintptr_t)&g_h; ui_px = (uintptr_t)&g_px;
   g_w = 3141; g_h = 1767; g_px = inv;  /* 3840x2160 at Larger */
   screen_w = 3840; screen_h = 2160;
-  ini_scale = ini_enabled = ini_sans = ini_keep = NULL;
+  ini_scale = ini_enabled = ini_sans = ini_keep = ini_csspin = NULL;
 }
 
 static int run(const char *name)
@@ -193,6 +211,97 @@ static void test_cinema(void)
   free(x);
 }
 
+/* ---- the critical section spin (csspin=) ---- */
+
+/* A made-up exe's import table: KERNEL32.dll imports EnterCriticalSection,
+ * InitializeCriticalSection, ordinal 5 and InitializeCriticalSectionAndSpinCount (slots 0x1c0-
+ * 0x1d8); an API set imports InitializeCriticalSection too (0x220); a third has no name table. */
+static _Alignas(16) uint8_t img[0x400];
+static uint64_t slot(int at) { uint64_t v; memcpy(&v, img + at, 8); return v; }
+static void put64(int at, uint64_t v) { memcpy(img + at, &v, 8); }
+static void build_image(void)
+{
+  memset(img, 0, sizeof img);
+  ((IMAGE_DOS_HEADER *)img)->e_lfanew = 0x40;
+  IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)(img + 0x40);
+  nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT] = (IMAGE_DATA_DIRECTORY){ 0x100, 4 * sizeof(IMAGE_IMPORT_DESCRIPTOR) };
+  IMAGE_IMPORT_DESCRIPTOR *d = (IMAGE_IMPORT_DESCRIPTOR *)(img + 0x100);
+  d[0] = (IMAGE_IMPORT_DESCRIPTOR){ .OriginalFirstThunk = 0x180, .Name = 0x380, .FirstThunk = 0x1c0 };
+  d[1] = (IMAGE_IMPORT_DESCRIPTOR){ .OriginalFirstThunk = 0x200, .Name = 0x3a0, .FirstThunk = 0x220 };
+  d[2] = (IMAGE_IMPORT_DESCRIPTOR){ .OriginalFirstThunk = 0, .Name = 0x380, .FirstThunk = 0x240 };
+  const char *fn[] = { "EnterCriticalSection", "InitializeCriticalSection", "InitializeCriticalSectionAndSpinCount" };
+  for (int i = 0; i < 3; i++) memcpy(img + 0x300 + 0x20 * i + 2, fn[i], strlen(fn[i]) + 1);
+  memcpy(img + 0x380, "KERNEL32.dll", 13);
+  memcpy(img + 0x3a0, "api-ms-win-core-synch-l1-2-0.dll", 33);
+  put64(0x180, 0x300); put64(0x188, 0x320); put64(0x190, IMAGE_ORDINAL_FLAG64 | 5); put64(0x198, 0x340);
+  put64(0x1c0, 0x1111); put64(0x1c8, 0x2222); put64(0x1d0, 0x3333); put64(0x1d8, 0x4444);
+  put64(0x200, 0x320); put64(0x220, 0x6666);
+  put64(0x240, 0x5555);
+}
+
+/* Builds the image, sets the ini and the clock, runs cs_install; 1 when the image is unchanged */
+static int cs_run(const char *name, const char *enabled, const char *csspin, int64_t ps)
+{
+  static uint8_t before[sizeof img];
+  printf("--- %s\n", name);
+  build_image();
+  memcpy(before, img, sizeof img);
+  ini_scale = ini_sans = ini_keep = NULL;
+  ini_enabled = enabled;
+  ini_csspin = csspin;
+  clock_ps = 0;
+  ps_per_turn = ps;
+  qpc_calls = protects = 0;
+  read_config();
+  cs_install((uintptr_t)img);
+  qpf_ok = protect_ok = 1;
+  jump_at = 0;
+  return !memcmp(img, before, sizeof img);
+}
+
+static void test_csspin(void)
+{
+  const int64_t rosetta = 240;  /* 2,000 turns in 0.48 us (scratch-D/pause_bench.c, 2026-11-10) */
+  qpf_ok = protect_ok = 1;
+  /* off: the import table is untouched, nothing is timed or unprotected */
+  const char *off[][3] = { { "csspin not set", NULL, NULL }, { "csspin=0", NULL, "0" },
+                           { "enabled=0, csspin=5", "0", "5" }, { "csspin=abc", NULL, "abc" }, { "csspin=-5", NULL, "-5" } };
+  for (int i = 0; i < 5; i++)
+    CHECK(cs_run(off[i][0], off[i][1], off[i][2], rosetta) && !protects && !qpc_calls, "%s: the import table changed", off[i][0]);
+
+  CHECK(!cs_run("csspin=5 at Rosetta's 0.24 ns a turn", NULL, "5", rosetta), "nothing redirected");
+  CHECK(cs_count > 20833 * 0.99 && cs_count < 20833 * 1.01, "spin count %lu, want 20833 (5 us / 0.24 ns) within 1%%",
+        (unsigned long)cs_count);
+  CHECK(slot(0x1c8) == (uintptr_t)cs_init && slot(0x220) == (uintptr_t)cs_init, "both imports of InitializeCriticalSection redirected");
+  CHECK(protects == 4, "%d VirtualProtect calls, want 2 per import", protects);
+  uint64_t got = slot(0x1c8);
+  put64(0x1c8, 0x2222);
+  put64(0x220, 0x6666);
+  uint8_t now[sizeof img];
+  memcpy(now, img, sizeof img);
+  build_image();
+  CHECK(!memcmp(now, img, sizeof img), "something besides the two InitializeCriticalSection slots changed");
+  cs_init_spin = 0;
+  CRITICAL_SECTION cs;
+  ((void (*)(CRITICAL_SECTION *))(uintptr_t)got)(&cs);
+  CHECK(cs_init_spin == cs_count, "the redirect passed spin count %lu, not %lu", (unsigned long)cs_init_spin,
+        (unsigned long)cs_count);
+
+  jump_at = 10; jump_ps = 1000000000;  /* the last of 5 runs preempted for 1 ms */
+  cs_run("csspin=5 at 1 us a turn, one run preempted", NULL, "5", 1000000);
+  CHECK(cs_count == 5, "spin count %lu, want 5 (the fastest run decides)", (unsigned long)cs_count);
+
+  cs_run("csspin=100000: the most a spin count holds", NULL, "100000", rosetta);
+  CHECK(cs_count == 0xffffff, "spin count %lx, want 0xffffff", (unsigned long)cs_count);
+
+  qpf_ok = 0;
+  CHECK(cs_run("csspin=5, no clock", NULL, "5", rosetta), "redirected without a calibration");
+  CHECK(cs_run("csspin=5, a clock that stands still", NULL, "5", 0) && qpc_calls == 30,
+        "redirected, or timed past 2^24 turns (%d clock reads, want 30)", qpc_calls);
+  protect_ok = 0;
+  CHECK(cs_run("csspin=5, VirtualProtect fails", NULL, "5", rosetta), "wrote an import it could not unprotect");
+}
+
 int main(void)
 {
   const float larger = 18.0f / 22.0f;
@@ -294,6 +403,7 @@ int main(void)
   CHECK(table_sig(&t1) != table_sig(&t2), "a reload went unnoticed");
 
   test_cinema();
+  test_csspin();
 
   printf("%s (%d failure%s)\n", failures ? "FAILED" : "ok", failures, failures == 1 ? "" : "s");
   return failures != 0;

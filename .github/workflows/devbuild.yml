@@ -10,7 +10,7 @@
 #               own token. The interface addon built here by scripts/build-addon.sh. Both staged by
 #               scripts/stage-components.sh, which refuses another commit, another engine or a
 #               winemetal.so without a valid signature; the refusals are proved on copies.
-#   checks      the Checks workflow's jobs (lint, compatdb, build, sandbox, renders) with those
+#   checks      the Checks workflow's jobs (lint, compatdb, build, sandbox, renders, addon) with those
 #               components and that version
 #   package     scripts/release.sh --adhoc on the app the build job made (it never builds again):
 #               the DMG, its app compared with build.sh's file list, the record
