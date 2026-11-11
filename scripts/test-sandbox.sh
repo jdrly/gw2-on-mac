@@ -43,7 +43,9 @@ CACHE="$H/Library/Caches/$APP_NAME"
 ENG="$AD/engine"
 BOTTLE="$AD/bottle"
 STEAM="$BOTTLE/drive_c/Program Files (x86)/Steam"
-DXMT_CACHE="$CACHE/dxmt/Gw2-64.exe"
+# DXMT's caches for the game: my fork's (the default), the engine's DXMT's
+DXMT_CACHE="$CACHE/fork/dxmt/Gw2-64.exe"
+DXMT_CACHE_ENGINE="$CACHE/dxmt/Gw2-64.exe"
 STANDIN_LOG="$SANDBOX/standin.log"
 COMP="$APP/Contents/Resources/components"
 mkdir -p "$H"
@@ -157,7 +159,7 @@ out=$(GW2_ON_MAC_DRY_RUN=1 g install steam 2>&1); rc=$?
 check "dry-run install steam exits 0" [ "$rc" = 0 ]
 check "dry-run install steam reaches phase 4" has <(echo "$out") "@phase 4"
 check "dry-run prints the game's environment" has <(echo "$out") "WINEPREFIX=$BOTTLE"
-check "  with my DXMT fork's variables (it goes into the engine)" eval 'echo "$out" | grep -qxF "[dry-run]   DXMT_CACHE_DIR=$CACHE" && echo "$out" | grep -qxF "[dry-run]   DXMT_WARM=all" && echo "$out" | grep -q "^\[dry-run\] my DXMT fork (.*) as the engine.s DXMT tree"'
+check "  with my DXMT fork's variables (it goes into the engine)" eval 'echo "$out" | grep -qxF "[dry-run]   DXMT_CACHE_DIR=$CACHE/fork" && echo "$out" | grep -qxF "[dry-run]   DXMT_WARM=all" && echo "$out" | grep -q "^\[dry-run\] my DXMT fork (.*) as the engine.s DXMT tree"'
 check "  with the rules file and no WINE_COMPATDB" eval 'echo "$out" | grep -qxF "[dry-run]   WINE_COMPATDB_FILE=$AD/compatdb.rules" && ! echo "$out" | grep -q "WINE_COMPATDB="'
 check "dry-run creates nothing" eval '[ ! -e "$AD" ] && [ ! -e "$CACHE" ]'
 check "fresh status: not installed" [ "$(st installed)" = no ]
@@ -313,7 +315,7 @@ check "  it says which" has <(echo "$out") "^DXMT: the engine's own DXMT (athei/
 check "  warming and MetalFX greyed with the reason; set warm refused" \
   eval '[ "$(sett warm_state)" = "off:Needs my DXMT fork (Graphics › DXMT)." ] && [ "$(sett metalfx_state)" = "$(sett warm_state)" ] && ! "$G" set warm off >/dev/null 2>&1'
 check "  none of the fork's variables in the environment" sh -c "! '$G' env | grep -qE 'DXMT_(CACHE_DIR|WARM|DEPENDENCY_COMPRESSION|SUBSAMPLE|STATS)'"
-check "  the game's shader cache: the engine's DXMT's own" has <(g rules) "^exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=$CACHE/dxmt-engine/Gw2-64.exe$"
+check "  the game's shader cache: the engine's DXMT's own" has <(g rules) "^exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=$DXMT_CACHE_ENGINE$"
 check "  wine.app untouched" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
 out=$(g set dxmt fork 2>&1) && rc=0 || rc=$?
 check "set dxmt fork: mine again, the engine's own kept as it ships" eval '[ "$rc" = 0 ] && dxgi_is fork && [ "$(st graphics)/$(st dxmt_tree)" = yes/fork ]'
@@ -504,7 +506,7 @@ cp "$AD/settings.conf" "$SANDBOX/settings.keep"
 sed -i '' -e 's/^metalfx=.*/metalfx=on/' -e 's/^hud=.*/hud=on/' -e 's/^debug=.*/debug=on/' "$AD/settings.conf"
 out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
 check "dry-run play: the engine's variables, the app's files, my DXMT fork's switches and the CPUs, nothing else" \
-  eval '[ "$(echo "$out" | sed -n "s/^\[dry-run\]   //p" | grep -v ^WINENCPU= | tr "\n" "|")" = "WINEPREFIX=$BOTTLE|WINEDEBUG=err+all,fixme-all|WINEDLLOVERRIDES=winemenubuilder.exe=d|WINEMSYNC=1|DXMT_CONFIG_FILE=$AD/dxmt.conf|DXMT_LOG_PATH=$LOGS|WINE_COMPATDB_FILE=$AD/compatdb.rules|DXMT_CACHE_DIR=$CACHE|DXMT_DEPENDENCY_COMPRESSION=1|DXMT_WARM=all|DXMT_SUBSAMPLE_METALFX=1|DXMT_LOG_LEVEL=debug|DXMT_STATS=1|" ] && echo "$out" | grep -q "^\[dry-run\]   WINENCPU="'
+  eval '[ "$(echo "$out" | sed -n "s/^\[dry-run\]   //p" | grep -v ^WINENCPU= | tr "\n" "|")" = "WINEPREFIX=$BOTTLE|WINEDEBUG=err+all,fixme-all|WINEDLLOVERRIDES=winemenubuilder.exe=d|WINEMSYNC=1|DXMT_CONFIG_FILE=$AD/dxmt.conf|DXMT_LOG_PATH=$LOGS|WINE_COMPATDB_FILE=$AD/compatdb.rules|DXMT_CACHE_DIR=$CACHE/fork|DXMT_DEPENDENCY_COMPRESSION=1|DXMT_WARM=all|DXMT_SUBSAMPLE_METALFX=1|DXMT_LOG_LEVEL=debug|DXMT_STATS=1|" ] && echo "$out" | grep -q "^\[dry-run\]   WINENCPU="'
 check "  none of 0.1.x's Wine variables" eval '! echo "$out" | grep -qE "WINE_HEAT_|ROSETTA_X87_PATH|WINEDLLPATH|WINE_COMPATDB=|MTL_HUD"'
 cp "$SANDBOX/settings.keep" "$AD/settings.conf"
 
@@ -1045,8 +1047,8 @@ check "an earlier version's manifest: Play brings it to this version" [ "$(pluti
 check "  the manifest names the engine's build" eval '[ "$(plutil -extract engine raw -o - "$MF")/$(plutil -extract engine_dxmt raw -o - "$MF")" = mach9-v0.3.1/d903db89036 ]'
 watch_done
 echo "shader" >"$DXMT_CACHE/shaders_320.db"
-mkdir -p "$CACHE/dxmt-engine/Gw2-64.exe" && echo "shader" >"$CACHE/dxmt-engine/Gw2-64.exe/shaders_320.db"
-check "reset-shaders empties DXMT's caches, my fork's and the engine's DXMT's" sh -c "'$G' reset-shaders | grep -q '@done' && [ -d '$DXMT_CACHE' ] && [ ! -e '$DXMT_CACHE/shaders_320.db' ] && [ ! -e '$CACHE/dxmt-engine' ]"
+mkdir -p "$DXMT_CACHE_ENGINE" && echo "shader" >"$DXMT_CACHE_ENGINE/shaders_320.db"
+check "reset-shaders empties DXMT's caches, my fork's and the engine's DXMT's" sh -c "'$G' reset-shaders | grep -q '@done' && [ -d '$DXMT_CACHE' ] && [ ! -e '$DXMT_CACHE/shaders_320.db' ] && [ ! -e '$DXMT_CACHE_ENGINE' ]"
 check "  and leaves the per-user cache folder's dxmt/ alone" other_dxmt_kept
 # The engine's archive from a browser, put into the downloads folder by hand: quarantined, and tar
 # copies the attribute onto every file it unpacks; the app takes it off the whole engine

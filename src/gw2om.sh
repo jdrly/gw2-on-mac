@@ -199,15 +199,19 @@ RULES_LOCAL="$APPDIR/compatdb.local"
 SESSION="$APPDIR/session"
 WATCH_LOCK="$APPDIR/.session.lock"
 SESSION_REQ="$APPDIR/session.req"
-# DXMT's caches for the game, in the app's own cache folder instead of the per-user one
+# DXMT's caches, in the app's own cache folder instead of the per-user one
 # ($(getconf DARWIN_USER_CACHE_DIR)dxmt/, which another DXMT setup of the game on this Mac may use
-# and this app never touches): the game's rule sets DXMT_SHADER_CACHE_PATH to dxmt_cache
-# (rules_text), and my fork's DXMT_CACHE_DIR is $CACHE (game_env), which puts its recipes and
-# pipeline archives next to it. The engine's DXMT keeps a cache of its own: the two translate
-# shaders differently, and a switch must not hand one the other's.
+# and this app never touches), one place for each DXMT: the two translate shaders differently, and
+# a switch must not hand one the other's.
+#   the engine's DXMT  $CACHE/dxmt/Gw2-64.exe, as 0.2.0-dev.1 had it: the game's rule sets
+#                      DXMT_SHADER_CACHE_PATH there (rules_text)
+#   my fork            under $FORK_CACHE_BASE: the fork takes its caches' base from
+#                      DXMT_CACHE_DIR (game_env) and doesn't read DXMT_SHADER_CACHE_PATH; the rule
+#                      names its game folder anyway, $DXMT_CACHE_FORK
 DXMT_CACHE_ROOT="$CACHE/dxmt"
 DXMT_CACHE="$DXMT_CACHE_ROOT/Gw2-64.exe"
-DXMT_CACHE_ENGINE="$CACHE/dxmt-engine/Gw2-64.exe"
+FORK_CACHE_BASE="$CACHE/fork"
+DXMT_CACHE_FORK="$FORK_CACHE_BASE/dxmt/Gw2-64.exe"
 STEAM_DIR="$BOTTLE/drive_c/Program Files (x86)/Steam"
 STEAM_EXE='C:\Program Files (x86)\Steam\steam.exe'
 # What uninstall removes in APPDIR (the folder itself goes too once empty; gamemode is what a build
@@ -701,8 +705,9 @@ write_dxmt_conf() {
 # prints. Steam passes it on to the game, so it is fixed while Steam runs. What only the game gets
 # goes into its compatdb rules instead (rules_text), which each process reads when it starts.
 # With my DXMT fork in the engine (dxmt_in_use), what it reads (jdrly/dxmt's docs/gw2/README.md):
-#   DXMT_CACHE_DIR=$CACHE           its caches under the app's own cache folder, $CACHE/dxmt/<exe>/
-#                                   (#134), never the per-user one or 0.1.x's
+#   DXMT_CACHE_DIR=$FORK_CACHE_BASE its caches under the app's own cache folder,
+#                                   $CACHE/fork/dxmt/<exe>/ (#134), never the per-user one, 0.1.x's
+#                                   or the engine's DXMT's
 #   DXMT_DEPENDENCY_COMPRESSION=1   the checkpoint chain on Metal 4 (#133; in the mix)
 #   DXMT_WARM=all                   warm=on: pipelines built ahead by recent use (#128)
 #   DXMT_SUBSAMPLE_METALFX=1        metalfx=on: MetalFX for the Subsample pass (#56)
@@ -723,7 +728,7 @@ game_env() {
     "WINE_COMPATDB_FILE=$RULES"
   )
   if [ -n "$fork" ]; then
-    E+=("DXMT_CACHE_DIR=$CACHE" "DXMT_DEPENDENCY_COMPRESSION=1")
+    E+=("DXMT_CACHE_DIR=$FORK_CACHE_BASE" "DXMT_DEPENDENCY_COMPRESSION=1")
     [ "$(setting warm)" != on ] || E+=("DXMT_WARM=all")
     [ "$(setting metalfx)" != on ] || E+=("DXMT_SUBSAMPLE_METALFX=1")
   fi
@@ -807,7 +812,10 @@ engine_matches() {
 #   dxmt.engine   the engine's own, as it ships (moved aside, never changed)
 #   dxmt.fork     the engine's tree with my fork's files over it (components/dxmt: d3d11, dxgi,
 #                 d3d10core and winemetal for aarch64-windows and i386-windows, winemetal.so,
-#                 VERSION and the licence), marked with $DXMT_MARK
+#                 VERSION and the licence), marked with $DXMT_MARK. The engine's tree has
+#                 aarch64-unix/winemetal.so as a link to lib/wine/aarch64-unix/winemetal.so, the
+#                 one .so behind its ARM64X and i386 DLLs: mine replaces the link with its own
+#                 file, so the two DXMTs never share one, and the engine's stays as it ships
 # Steam's processes get the same DXMT as the game, as on 0.1.x. The setting dxmt (fork|engine)
 # picks the tree; the swap happens only while no session runs or starts (apply_dxmt): at install,
 # repair, set dxmt and Play.
@@ -836,7 +844,7 @@ dxmt_in_use() {
   case "$(dxmt_tree "$DXGI/dxmt")" in engine) echo engine ;; none) setting dxmt ;; *) echo fork ;; esac
 }
 # dxmt_cache: the game's shader cache for that DXMT
-dxmt_cache() { if [ "$(dxmt_in_use)" = engine ]; then echo "$DXMT_CACHE_ENGINE"; else echo "$DXMT_CACHE"; fi; }
+dxmt_cache() { if [ "$(dxmt_in_use)" = engine ]; then echo "$DXMT_CACHE"; else echo "$DXMT_CACHE_FORK"; fi; }
 # dxmt_label <fork|engine>: what the window and the log call it
 dxmt_label() {
   if [ "$1" = engine ]; then echo "the engine's own DXMT (athei/dxmt $ENGINE_DXMT)"; else echo "my DXMT fork ($DXMT_VERSION)"; fi
@@ -2297,8 +2305,8 @@ cmd_reset_shaders() {
   open_log
   log "---- reset-shaders"
   case "$(busy_of "$(proc_list)")" in game) die "Quit Guild Wars 2 first." ;; esac
-  if [ -d "$DXMT_CACHE_ROOT" ] || [ -d "${DXMT_CACHE_ENGINE%/*}" ]; then
-    run rm -rf "$DXMT_CACHE_ROOT" "${DXMT_CACHE_ENGINE%/*}"
+  if [ -d "$DXMT_CACHE_ROOT" ] || [ -d "$FORK_CACHE_BASE" ]; then
+    run rm -rf "$DXMT_CACHE_ROOT" "$FORK_CACHE_BASE"
     run mkdir -p "$(dxmt_cache)"
   fi
   echo "@done DXMT's caches for the game are empty. The next sessions build them again."

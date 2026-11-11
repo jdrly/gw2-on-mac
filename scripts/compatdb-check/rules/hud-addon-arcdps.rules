@@ -1,2 +1,2 @@
-exe=Gw2-64.exe;metal_hud=true;dll_overrides=d3d11,dxgi=n,b;dll_overrides=version=n,b;env=DXMT_SHADER_CACHE_PATH=/Users/me/Library/Caches/GW2 on Mac arm64/dxmt/Gw2-64.exe
+exe=Gw2-64.exe;metal_hud=true;dll_overrides=d3d11,dxgi=n,b;dll_overrides=version=n,b;env=DXMT_SHADER_CACHE_PATH=/Users/me/Library/Caches/GW2 on Mac arm64/fork/dxmt/Gw2-64.exe
 exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=

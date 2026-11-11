@@ -57,7 +57,7 @@ GW2_APPDATA="$BOTTLE/drive_c/users/$BOTTLE_USER/AppData/Roaming/Guild Wars 2"
 # DXMT's shader caches for the game, in the app's own cache folder (the game's compatdb rule sets
 # DXMT_SHADER_CACHE_PATH to one of them): my DXMT fork's, the engine's DXMT's
 DXMT_CACHE="$H/Library/Caches/$APP_NAME/dxmt/Gw2-64.exe"
-DXMT_CACHE_ENGINE="$H/Library/Caches/$APP_NAME/dxmt-engine/Gw2-64.exe"
+DXMT_CACHE_FORK="$H/Library/Caches/$APP_NAME/fork/dxmt/Gw2-64.exe"
 
 name="${APP_NAME// /-}-logs-$(date +%Y-%m-%d-%H%M)"
 dest="${1:-$H/Desktop}"
@@ -401,8 +401,8 @@ pin() { sed -n "s/^$1=\([^ ]*\).*/\1/p" "$RES/gw2om.sh"; }
     [ -n "$GAME_DIR" ] && [ -f "$GAME_DIR/$f" ] || continue
     echo "  $f addon: $(LC_ALL=C grep -aq addextension2 "$GAME_DIR/$f" && LC_ALL=C grep -aq arcdps "$GAME_DIR/$f" && echo arcdps || echo "another program's"), $(stat -f '%z bytes, %Sm' "$GAME_DIR/$f")"
   done
-  echo "DXMT's caches for the game: my fork's $(du -sk "$DXMT_CACHE" 2>/dev/null | awk '{ printf "%.1f MB", $1 / 1024 }' || echo none)," \
-    "the engine's DXMT's $(du -sk "$DXMT_CACHE_ENGINE" 2>/dev/null | awk '{ printf "%.1f MB", $1 / 1024 }' || echo none)"
+  echo "DXMT's caches for the game: my fork's $(du -sk "$DXMT_CACHE_FORK" 2>/dev/null | awk '{ printf "%.1f MB", $1 / 1024 }' || echo none)," \
+    "the engine's DXMT's $(du -sk "$DXMT_CACHE" 2>/dev/null | awk '{ printf "%.1f MB", $1 / 1024 }' || echo none)"
   echo "Mac: $(sysctl -n hw.model), $(sysctl -n machdep.cpu.brand_string)" \
     "($(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null)+$(sysctl -n hw.perflevel1.physicalcpu 2>/dev/null) cores)," \
     "$(($(sysctl -n hw.memsize) / 1073741824)) GB, macOS $(sw_vers -productVersion) ($(sw_vers -buildVersion))"

@@ -275,8 +275,8 @@ nothing in `/Applications` besides itself.
 | `…/GW2 on Mac arm64/bottle/` | the game's Wine prefix with Steam, the game's files and the game's settings. About 75 GB, or no extra space for a clone of files on the same disk | removed, with the game |
 | `…/GW2 on Mac arm64/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `compatdb.rules`, `compatdb.local`, `session`, `session.req`, `.session.lock` | settings, install state, what was installed, DXMT's options, the game's compatdb rules and my own, the current game session and its lock | removed |
 | `~/Library/Caches/GW2 on Mac arm64/downloads/` | the engine archive, `SteamSetup.exe`, a copy of `Gw2Setup-64.exe` | removed |
-| `~/Library/Caches/GW2 on Mac arm64/dxmt/` | my DXMT fork's caches: `Gw2-64.exe/` holds the game's shaders, recorded pipelines and pipeline archives, and the other processes keep theirs next to it (`DXMT_CACHE_DIR`) | removed. *Reset the shader cache* in Settings empties it too |
-| `~/Library/Caches/GW2 on Mac arm64/dxmt-engine/Gw2-64.exe/` | the engine's own DXMT's shader cache for the game, apart from my fork's, which translates shaders differently | removed, and emptied by *Reset the shader cache* |
+| `~/Library/Caches/GW2 on Mac arm64/fork/dxmt/` | my DXMT fork's caches (`DXMT_CACHE_DIR`): `Gw2-64.exe/` holds the game's shaders, recorded pipelines and pipeline archives, and the other processes keep theirs next to it | removed. *Reset the shader cache* in Settings empties it too |
+| `~/Library/Caches/GW2 on Mac arm64/dxmt/Gw2-64.exe/` | the engine's own DXMT's shader cache for the game, where 0.2.0-dev.1 kept it, apart from my fork's, which translates shaders differently. Other processes keep theirs where the engine's DXMT puts it by default | removed, and emptied by *Reset the shader cache* |
 | `~/Library/Logs/GW2 on Mac arm64/` | `install.log`, `wine.log`, DXMT's `Gw2-64_d3d11.log`, `session.env`, the heat logs, and `.lock-claim` for the install lock | kept |
 
 In the game folder, `version.dll` and `gw2-ui-scale.ini` exist only while *Larger interface* is on,
@@ -301,6 +301,9 @@ Storage, stays where it is.
 
 ## Known limits
 
+- My DXMT fork has no vkd3d-proton swap-chain bridge, so D3D12 programs can't present through it.
+  Guild Wars 2, Steam and their CEF windows are D3D11. *Settings › Graphics › DXMT* goes back to the
+  engine's own DXMT, which has it.
 - I've installed and played through the app since 2026-11-04, on the Steam route with my existing
   game files imported, and I now play on the published 0.1.1. A fresh Steam download and
   ArenaNet's installer haven't had a real install yet, so the Steam route's `StateFlags` check and
@@ -373,11 +376,16 @@ only `dxmt` and `wined3d`. So the app swaps the tree. The active one is always
 - `dxmt.engine`: the engine's own, as it ships, moved aside and never changed
 - `dxmt.fork`: a copy of the engine's tree with the files of `components/dxmt` over it, which are
   `d3d11`, `dxgi`, `d3d10core` and `winemetal` for `aarch64-windows` and `i386-windows`, plus
-  `winemetal.so`, `VERSION` and the licence, marked with `.gw2om-dxmt`. The engine's
-  `winemetal.so` is a link into `lib/wine/aarch64-unix`; the copy replaces the link and never
-  writes through it
+  `winemetal.so`, `VERSION` and the licence, marked with `.gw2om-dxmt`. In the engine's tree
+  `aarch64-unix/winemetal.so` is a link to `lib/wine/aarch64-unix/winemetal.so`, the one
+  `winemetal.so` that serves its ARM64X and its i386 DLLs. My copy replaces the link with my
+  fork's own file and never writes through it, so the two DXMTs never share a `winemetal.so`, and
+  the engine's comes back intact, link and file, when the setting switches to it
 
-Steam's processes get the same DXMT as the game, as on 0.1.x. The `dxmt` setting picks the tree.
+Steam's processes get the same DXMT as the game, as on 0.1.x. My fork's `dxgi.dll` has no
+vkd3d-proton swap-chain bridge, so a D3D12 program in that tree can't present. Guild Wars 2,
+Steam and the CEF windows of Steam and the game's launcher are D3D11, so none of them needs it.
+The `dxmt` setting picks the tree.
 The swap is two renames, done only while no session runs or starts, under the session's lock:
 at install, Repair, `set dxmt` and Play. While Steam runs, the change waits for the next start.
 `status` prints `dxmt` (the setting), `dxmt_tree` (`fork`, `engine`, `oldfork` for an earlier
@@ -438,8 +446,8 @@ The environment is fixed while Steam runs, because Steam passes its own on to th
 CPU. Debug logging adds `DXMT_LOG_LEVEL=debug` and sets `WINEDEBUG=err+all,fixme-all`.
 
 With my DXMT fork in the engine, it also gets what the fork reads (its `docs/gw2/README.md`):
-`DXMT_CACHE_DIR` set to the app's cache folder, so the fork's caches stay under
-`~/Library/Caches/GW2 on Mac arm64/dxmt/` and never in the per-user folder or 0.1.x's;
+`DXMT_CACHE_DIR` set to `~/Library/Caches/GW2 on Mac arm64/fork`, so the fork's caches stay in
+its `dxmt/` and never in the per-user folder, 0.1.x's or the engine's DXMT's;
 `DXMT_DEPENDENCY_COMPRESSION=1`; `DXMT_WARM=all` with shader warming on;
 `DXMT_SUBSAMPLE_METALFX=1` with MetalFX on; and `DXMT_STATS=1` with Debug logging, which the fork
 has on by default anyway. With the engine's own DXMT none of them is set, since it reads none.
@@ -461,8 +469,9 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   arcdps or Nexus. `version=n,b` is there while the larger interface is on. With no such file Wine
   loads its own.
 - `DXMT_SHADER_CACHE_PATH` keeps DXMT's shader cache for the game in the app's cache folder, never
-  in the per-user one another DXMT setup may use: `dxmt/Gw2-64.exe` for my fork, the same place its
-  `DXMT_CACHE_DIR` gives, and `dxmt-engine/Gw2-64.exe` for the engine's own DXMT.
+  in the per-user one another DXMT setup may use: `dxmt/Gw2-64.exe` for the engine's own DXMT, as
+  in 0.2.0-dev.1, and `fork/dxmt/Gw2-64.exe` while my fork is active. My fork doesn't read the
+  variable; it takes the same folder from `DXMT_CACHE_DIR`.
   `CefHost.exe` gets it removed.
 - A `compatdb.local` that I put in the app's folder is appended as it is, for trying FEX switches
   such as `exe=Gw2-64.exe;env=FEX_HOSTFEATURES=disableavx`. Nothing in the app writes it, and
