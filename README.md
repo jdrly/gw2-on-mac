@@ -860,7 +860,7 @@ What still needs my Mac is signing with my Developer ID, notarizing and publishi
 real arcdps's checks, and playing.
 
 `scripts/test-sandbox.sh` tests the backend of a built app end to end in `work/app-sandbox/test`,
-with 425 checks. It uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and
+with 474 checks. It uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and
 ArenaNet's downloads itself, and uses a clone of the game's own ArenaNet-signed `Gw2-64.exe` as the
 installer to check. That's `SIGNED_PE`, by default the copy in my development workspace's bottle.
 Without one, those checks are skipped. It covers:
