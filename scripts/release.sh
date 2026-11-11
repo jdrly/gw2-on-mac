@@ -167,22 +167,15 @@ package() {
   ditto "$SRC" "$APP"
   xattr -cr "$APP"
 
-  # Inside out: the process lister and the session's lock (helpers/procpaths, sessionlock), the Mach-O pieces gw2om.sh puts into the
-  # engine (DXMT's winemetal.so, the heat ntdll.so and wineserver, winemac.so and win32u.so: Wine
-  # loads or runs them itself; every Mach-O of a notarized app is signed; DXMT's PE DLLs and
-  # winemac.drv are not Mach-O), Sparkle in its documented order (Autoupdate, Updater.app, the framework, each with
-  # the hardened runtime and no --deep; build.sh removed its XPC services), then the app
-  # (app.plist: no exceptions). Untested so far: wineserver under the hardened runtime.
+  # Inside out: the process lister and the session's lock (helpers/procpaths, sessionlock),
+  # Sparkle in its documented order (Autoupdate, Updater.app, the framework, each with the hardened
+  # runtime and no --deep; build.sh removed its XPC services), then the app (app.plist: no
+  # exceptions). The app bundles no engine component: the engine is downloaded at install time,
+  # signed by its author, and never touched.
   echo "[release] signing nested code"
-  local fw stage c
+  local fw stage
   sign "$APP/Contents/Resources/helpers/procpaths"
   sign "$APP/Contents/Resources/helpers/sessionlock"
-  c="$APP/Contents/Resources/components"
-  sign "$c/dxmt/x86_64-unix/winemetal.so"
-  sign "$c/heat/ntdll.so"
-  sign "$c/heat/wineserver"
-  sign "$c/winemac/winemac.so"
-  sign "$c/winemac/win32u.so"
   fw="$APP/$FW_REL"
   sign "$fw/Versions/B/Autoupdate"
   sign "$fw/Versions/B/Updater.app"

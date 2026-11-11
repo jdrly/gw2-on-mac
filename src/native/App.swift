@@ -70,11 +70,11 @@ final class Installer {
 
   // imported: the game's files come from the Mac (a clone or a copy) instead of a download
   static func installSteps(_ route: Route, interface: Bool, imported: Bool = false) -> [Step] {
-    let finishingDetail = interface ? "The sharper interface and the shader cache" : "Game Mode and the shader cache"
+    let finishingDetail = interface ? "The sharper interface and the shader cache" : "The shader cache"
     let finishing = Step(id: 5, title: "Finishing touches", detail: finishingDetail)
     let common = [
-      Step(id: 1, title: "The Wine engine", detail: "athei's CrossOver 26.3 · from jdrly/wine-engine"),
-      Step(id: 2, title: "The game's own bottle", detail: "Retina, Game Mode and my graphics"),
+      Step(id: 1, title: "The Wine engine", detail: "athei's Mach9 0.3.1 · as it ships"),
+      Step(id: 2, title: "The game's own bottle", detail: "Retina mode"),
     ]
     let files = "Cloned or copied; the originals stay as they are"
     if imported {
@@ -166,7 +166,7 @@ final class Installer {
   var isOperating: Bool { if case .working = phase { true } else { false } }
   var isBusy: Bool { isOperating }
   var loaded: Bool { !status.isEmpty }
-  var rosetta: Bool { status["rosetta"] == "yes" }
+  var macosOK: Bool { status["macos_ok"] != "no" }
   var appleSilicon: Bool { status["arch"].map { $0 == "arm64" } ?? true }
   // the setup (engine, bottle and graphics) is in place
   var installed: Bool { status["installed"] == "yes" }
@@ -227,7 +227,9 @@ final class Installer {
   var installBlocker: String? {
     if !loaded { return "Checking this Mac…" }
     if !appleSilicon { return "\(appName) needs a Mac with Apple silicon." }
-    if !rosetta { return "Install Rosetta first: softwareupdate --install-rosetta in Terminal." }
+    if !macosOK {
+      return "\(appName) needs macOS \(status["macos_min"] ?? "26.4") or later for its Wine engine. This Mac has macOS \(status["macos"] ?? "?")."
+    }
     if route == .arenanet {
       switch setupCheck {
       case .ok: break
@@ -608,7 +610,8 @@ enum AppActions {
     ]
   }
 
-  // "DXMT e02a4d6 · Wine cx-26.3.0-8 · Sparkle 2.10.0" from Resources/VERSIONS
+  // "Engine mach9-v0.3.1 · DXMT d903db89036 · Sparkle 2.10.0" from Resources/VERSIONS (its engine
+  // line: "engine <name> wine <commit> fex <commit> dxmt <commit>")
   static func componentVersions() -> String {
     let url = Brand.resources.appendingPathComponent("VERSIONS")
     guard let text = try? String(contentsOf: url, encoding: .utf8) else { return "" }
@@ -616,8 +619,10 @@ enum AppActions {
     for line in text.split(separator: "\n") {
       let f = line.split(separator: " ")
       guard f.count >= 2 else { continue }
-      if f[0] == "dxmt" { parts.append("DXMT \(f[1])") }
-      if f[0] == "engine" { parts.append("Wine \(f[1])") }
+      if f[0] == "engine" {
+        parts.append("Engine \(f[1])")
+        if let i = f.firstIndex(of: "dxmt"), i + 1 < f.count { parts.append("DXMT \(f[i + 1])") }
+      }
       if f[0] == "sparkle" { parts.append("Sparkle \(f[1])") }
     }
     return parts.joined(separator: " · ")

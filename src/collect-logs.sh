@@ -8,9 +8,8 @@
 # In the zip:
 #   logs/          the app's logs (the end of large ones): install.log, wine.log (and .1-4, the
 #                  game starts before the last), DXMT's Gw2-64_d3d11.log (and .1-4) and the other
-#                  processes' DXMT logs, the heat counters (heat-<pid>.log, Debug logging), the
-#                  Game Mode log, session.env (what the last session started with), the
-#                  interface addon's logs
+#                  processes' DXMT logs, the heat counters (heat-<pid>.log, Debug logging),
+#                  session.env (what the last session started with), the interface addon's logs
 #   settings.conf, state, install-manifest.json, dxmt.conf, the app's VERSIONS
 #   session-report.txt  the last game session in short (session-report.sh)
 #   game-logs/     the game's and Steam's own logs, with game_rules: ArenaNet.log (crash entries;
@@ -21,7 +20,7 @@
 #                  threads and modules, which may hold account or character names. Never Local.dat (the game's saved login), Steam's config or its
 #                  login, connection or account logs, nor anything else of the bottle.
 #   system-info.txt  macOS, chip, memory, displays, versions, the state of the install and its
-#                  engine pieces, which crash reports are in the zip, the GPU error count
+#                  engine, which crash reports are in the zip, the GPU error count
 #   gpu-errors.txt  the GPU errors of the game and Wine in macOS's unified log of the last 2 hours
 #   crash-reports/  macOS's crash, hang and spin reports of the last 7 days for the game, Wine,
 #                  Steam's Windows processes and the app
@@ -45,7 +44,15 @@ LOGS="$H/Library/Logs/$APP_NAME"
 DIAG="$H/Library/Logs/DiagnosticReports"
 BOTTLE="$APPDIR/bottle"
 STEAM="$BOTTLE/drive_c/Program Files (x86)/Steam"
-GW2_APPDATA="$BOTTLE/drive_c/users/crossover/AppData/Roaming/Guild Wars 2"
+# The bottle's Windows user, as gw2om.sh's bottle_user finds it (upstream Wine names it after the
+# Mac's user)
+BOTTLE_USER="$(id -un)"
+for u in "$BOTTLE/drive_c/users"/*; do
+  [ -d "$u" ] || continue
+  case "${u##*/}" in Public|public) continue ;; esac
+  BOTTLE_USER="${u##*/}"; break
+done
+GW2_APPDATA="$BOTTLE/drive_c/users/$BOTTLE_USER/AppData/Roaming/Guild Wars 2"
 # DXMT's caches for the game, in the app's own cache folder (gw2om.sh sets DXMT_CACHE_DIR to it)
 DXMT_CACHE="$H/Library/Caches/$APP_NAME/dxmt/Gw2-64.exe"
 
@@ -219,8 +226,8 @@ add_log() {  # file max-bytes [folder in the zip [game]]: the end of a log
 }
 
 # Crash reports: macOS's reports in ~/Library/Logs/DiagnosticReports (crashes .ips/.crash, hangs
-# .hang, spins .spin, .diag) of the last 7 days, of the game and Wine (wine, wineserver, Gw2-64.exe,
-# the Game Mode bundle's), Steam's Windows processes, this app and Metal's shader compiler when
+# .hang, spins .spin, .diag) of the last 7 days, of the game and Wine (wine, wineserver, Gw2-64.exe),
+# Steam's Windows processes, this app and Metal's shader compiler when
 # it worked for the game or Wine. The newest first, at most CRASH_MAX of them, CRASH_MAX_BYTES
 # together and CRASH_FILE_MAX each. Prints "add <path>" or "skip <name> (<why>)" per report.
 CRASH_MAX=20
@@ -366,20 +373,18 @@ gpu_errors 2>&1 | redact >"$out/gpu-errors.txt"
 
 m() { plutil -extract "$1" raw -o - "$APPDIR/install-manifest.json" 2>/dev/null || echo -; }
 sha12() { shasum -a 256 "$1" 2>/dev/null | cut -c1-12; }
+# pin <name>: a value gw2om.sh pins for the engine
+pin() { sed -n "s/^$1=\([^ ]*\).*/\1/p" "$RES/gw2om.sh"; }
 {
   echo "$APP_NAME logs, collected $(date '+%F %T %z')"
   echo "Versions: $(tr -s '\n' ' ' <"$RES/VERSIONS" 2>/dev/null)"
-  echo "Installed: $(m version), route $(m route), engine $(m engine), DXMT $(m dxmt)"
+  echo "Engine: $(pin ENGINE_NAME), Wine $(pin ENGINE_WINE), FEX $(pin ENGINE_FEX), DXMT $(pin ENGINE_DXMT)"
+  echo "Installed: $(m version), route $(m route), engine $(m engine)"
   echo "State: $(tr '\n' ' ' <"$APPDIR/state" 2>/dev/null | sed 's|game_dir=[^ ]*|game_dir=(set)|')"
   E="$APPDIR/engine"
   echo "Engine in place: $([ -x "$E/bin/wine" ] && echo "yes, sha256 of the archive $(cut -c1-12 "$E/.gw2om-source" 2>/dev/null)" || echo none)"
-  echo "  ntdll.so $(sha12 "$E/lib/wine/x86_64-unix/ntdll.so") (app's $(sha12 "$RES/components/heat/ntdll.so"))," \
-    "wineserver $(sha12 "$E/bin/wineserver") (app's $(sha12 "$RES/components/heat/wineserver"))," \
-    "winemac.so $(sha12 "$E/lib/wine/x86_64-unix/winemac.so") (app's $(sha12 "$RES/components/winemac/winemac.so"))," \
-    "winemac.drv $(sha12 "$E/lib/wine/x86_64-windows/winemac.drv") (app's $(sha12 "$RES/components/winemac/x86_64-windows/winemac.drv"))," \
-    "win32u.so $(sha12 "$E/lib/wine/x86_64-unix/win32u.so") (app's $(sha12 "$RES/components/winemac/win32u.so"))"
-  echo "  DXMT tree: $(cat "$E/lib/wine/dxgi/dxmt/VERSION" 2>/dev/null || echo "the engine's"), d3d11.dll $(sha12 "$E/lib/wine/dxgi/dxmt/x86_64-windows/d3d11.dll") (app's $(sha12 "$RES/components/dxmt/x86_64-windows/d3d11.dll"))"
-  echo "Game Mode bundle: $([ -x "$APPDIR/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe" ] && echo present || echo none)"
+  echo "  DXMT tree: d3d11.dll $(sha12 "$E/lib/wine/dxgi/dxmt/aarch64-windows/d3d11.dll") (the engine's own $(pin ENGINE_D3D11_SHA256 | cut -c1-12))," \
+    "winemetal.so $(sha12 "$E/lib/wine/dxgi/dxmt/aarch64-unix/winemetal.so") (the engine's own $(pin ENGINE_WINEMETAL_SHA256 | cut -c1-12))"
   echo "Game: $([ -n "$GAME_DIR" ] && [ -f "$GAME_DIR/Gw2-64.exe" ] && echo "installed, Gw2-64.exe $(stat -f '%z bytes, %Sm' "$GAME_DIR/Gw2-64.exe")" || echo "not found")"
   [ -z "$GAME_DIR" ] || echo "  interface addon (version.dll): $([ -f "$GAME_DIR/version.dll" ] && { grep -aq 'gw2-on-mac ui-scale' "$GAME_DIR/version.dll" && echo "$APP_NAME's" || echo "another program's"; } || echo none)"
   # d3d11.dll and dxgi.dll addons (arcdps, Nexus): which, by a quick look (gw2om.sh's arcdps_state
@@ -392,7 +397,6 @@ sha12() { shasum -a 256 "$1" 2>/dev/null | cut -c1-12; }
   echo "Mac: $(sysctl -n hw.model), $(sysctl -n machdep.cpu.brand_string)" \
     "($(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null)+$(sysctl -n hw.perflevel1.physicalcpu 2>/dev/null) cores)," \
     "$(($(sysctl -n hw.memsize) / 1073741824)) GB, macOS $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
-  echo "Rosetta: $([ -e /Library/Apple/usr/libexec/oah/libRosettaRuntime ] && echo installed || echo "not installed")"
   echo "Power: $(pmset -g ps 2>/dev/null | sed -n "1s/.*'\(.*\)'.*/\1/p")$(pmset -g 2>/dev/null | awk '$1 == "lowpowermode" && $2 == 1 { print ", Low Power Mode" }')"
   echo "Free space: $(df -h "$H" 2>/dev/null | awk 'NR == 2 { print $4 " of " $2 }')"
   system_profiler SPDisplaysDataType 2>/dev/null | awk '
@@ -420,7 +424,7 @@ sha12() { shasum -a 256 "$1" 2>/dev/null | cut -c1-12; }
   # names only, never command lines
   echo "Running game, Steam and Wine processes (name only):"
   ps -axww -o pid=,etime=,rss=,comm= 2>/dev/null |
-    awk '/[Ww]ine|[Gg]w2|[Ss]team|winetemp|GW2/ && !/awk|collect-logs/'
+    awk '/[Ww]ine|[Gg]w2|[Ss]team|GW2/ && !/awk|collect-logs/'
   echo
   system_profiler SPHardwareDataType 2>/dev/null | grep -v -i -E 'serial|uuid|udid|activation lock'
 } 2>&1 | redact >"$out/system-info.txt"

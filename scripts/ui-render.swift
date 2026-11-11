@@ -121,9 +121,10 @@ func compare(design: URL, render: NSBitmapImageRep, to url: URL) {
 func installer(_ state: String) -> Installer {
   let i = Installer()
   var st: [String: String] = [
-    "version": "0.1.2", "engine": "cx-26.3.0-8", "engine_title": "CrossOver 26.3 · Wine 11", "rosetta": "yes",
-    "arch": "arm64", "installed": "yes", "installed_version": "0.1.2", "engine_installed": "yes", "graphics": "yes",
-    "gamemode": "yes", "route": "steam", "steam": "yes", "game": "yes", "stage": "finished",
+    "version": "0.2.0-dev.1", "engine": "mach9-v0.3.1", "engine_title": "Mach9 0.3.1 · Wine 11.21",
+    "engine_dxmt": "d903db89036", "macos": "27.2", "macos_min": "26.4", "macos_ok": "yes",
+    "arch": "arm64", "installed": "yes", "installed_version": "0.2.0-dev.1", "engine_installed": "yes", "graphics": "yes",
+    "gamemode": "engine", "route": "steam", "steam": "yes", "game": "yes", "stage": "finished",
     "disk_free": "412000000000", "disk_needed": "75000000000", "busy": "none", "uiscale": "off",
   ]
   i.route = .steam
@@ -133,14 +134,19 @@ func installer(_ state: String) -> Installer {
     // disk is short
     st["game"] = "no"; st["stage"] = "none"; st["steam"] = "no"; st["route"] = ""
     st["disk_free"] = "62000000000"
-  case "ready-update":
-    // just updated from 0.1.0: the engine has 0.1.0's pieces, the next Play puts the new ones in
-    st["graphics"] = "update"; st["installed_version"] = "0.1.0"
+  case "ready-repair":
+    // an earlier version's install whose engine graphics aren't the engine's own: Repair
+    st["graphics"] = "other"; st["installed_version"] = "0.2.0-dev.0"
+  case "fresh-old-macos":
+    // a Mac below the engine's macOS: the macOS check is red and Install says why
+    st = st.merging(["installed": "no", "engine_installed": "no", "graphics": "no", "game": "no",
+                     "stage": "none", "steam": "no", "route": "", "installed_version": "",
+                     "macos": "26.3", "macos_ok": "no"]) { $1 }
   case "fresh":
-    st = st.merging(["installed": "no", "engine_installed": "no", "graphics": "no", "gamemode": "no", "game": "no",
+    st = st.merging(["installed": "no", "engine_installed": "no", "graphics": "no", "game": "no",
                      "stage": "none", "steam": "no", "route": "", "installed_version": ""]) { $1 }
   case "arenanet":
-    st = st.merging(["installed": "no", "engine_installed": "no", "graphics": "no", "gamemode": "no", "game": "no",
+    st = st.merging(["installed": "no", "engine_installed": "no", "graphics": "no", "game": "no",
                      "stage": "none", "steam": "no", "route": ""]) { $1 }
     i.route = .arenanet
     i.setupFile = URL(fileURLWithPath: "/Users/you/Downloads/Gw2Setup-64.exe")
@@ -159,11 +165,11 @@ func installer(_ state: String) -> Installer {
     i.progress = .init(label: "Guild Wars 2", done: 21_400_000_000, total: 58_900_000_000)
   case "failed":
     st["game"] = "no"; st["stage"] = "none"; st["route"] = ""; st["installed"] = "no"; st["engine_installed"] = "no"
-    st["graphics"] = "no"; st["gamemode"] = "no"
+    st["graphics"] = "no"
     i.phase = .failed(.install, "The download of the Wine engine failed (curl status 6). Check your internet connection and try again.")
   case "existing", "existing-copy", "existing-none", "importing":
     // Game files I already have: what a scan of other Wine apps found
-    st = st.merging(["installed": "no", "engine_installed": "no", "graphics": "no", "gamemode": "no", "game": "no",
+    st = st.merging(["installed": "no", "engine_installed": "no", "graphics": "no", "game": "no",
                      "stage": "none", "steam": "no", "route": "", "installed_version": ""]) { $1 }
     i.route = .existing
     i.scanned = true
@@ -264,7 +270,8 @@ func renderAll(_ dir: URL, exports: URL?) async {
     ("main-installing-light", "installing", false, "2-installing.png"),
     ("main-ready-light", "ready", false, "3-ready-to-play.png"),
     ("main-ready-dark", "ready", true, "5-ready-to-play-dark.png"),
-    ("main-ready-update-light", "ready-update", false, nil),
+    ("main-ready-repair-light", "ready-repair", false, nil),
+    ("main-fresh-old-macos-light", "fresh-old-macos", false, nil),
     ("main-choose-dark", "choose", true, nil),
     ("main-installing-dark", "installing", true, nil),
     ("main-fresh-light", "fresh", false, nil),

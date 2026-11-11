@@ -372,11 +372,13 @@ struct ThisMac: View {
   private var checks: [Check] {
     let s = installer.status
     guard installer.loaded else {
-      return ["Rosetta", "Engine", "Graphics", "Game Mode", "Guild Wars 2", "Disk space"].map {
+      return ["macOS", "Engine", "Graphics", "Game Mode", "Guild Wars 2", "Disk space"].map {
         Check(id: $0, icon: ThisMac.icons[$0]!, value: "Checking…", tone: .off)
       }
     }
-    let engine = s["engine_title"] ?? "CrossOver 26.3 · Wine 11"
+    let engine = s["engine_title"] ?? "Mach9 0.3.1 · Wine 11.21"
+    let macos = s["macos"] ?? "?"
+    let dxmt = "DXMT \((s["engine_dxmt"] ?? "").prefix(7))"
     let route = installer.installedRoute == .arenanet ? "ArenaNet" : "Steam"
     let game: Check
     if installer.gameInstalled {
@@ -393,24 +395,24 @@ struct ThisMac: View {
       : Check(id: "Disk space", icon: "hard-drive", value: free > 0 ? "\(Installer.gigabytes(free)) free" : "Unknown",
               tone: free > 0 ? .good : .off)
     return [
-      Check(id: "Rosetta", icon: "cpu", value: installer.rosetta ? "Installed" : "Not installed",
-            tone: installer.rosetta ? .good : .bad),
+      Check(id: "macOS", icon: "cpu",
+            value: installer.macosOK ? macos : "\(macos) · needs \(s["macos_min"] ?? "26.4")",
+            tone: installer.macosOK ? .good : .bad),
       Check(id: "Engine", icon: "wine", value: s["engine_installed"] == "yes" ? engine : "\(engine) · not set up",
             tone: s["engine_installed"] == "yes" ? .good : .off),
       Check(id: "Graphics", icon: "sparkles",
-            // (update: an earlier version's pieces, which the next Play replaces by itself)
-            value: s["graphics"] == "yes" ? "DXMT · Metal 4" : s["graphics"] == "update" ? "DXMT · updates at Play"
-              : s["graphics"] == "other" ? "DXMT · needs Repair" : "DXMT · not set up",
-            tone: s["graphics"] == "yes" ? .good : s["graphics"] == "update" ? .pending : s["graphics"] == "other" ? .bad : .off),
-      Check(id: "Game Mode", icon: "gamepad-2",
-            value: s["gamemode"] == "yes" ? "Ready" : s["gamemode"] == "off" ? "Off in Settings" : "Not set up",
-            tone: s["gamemode"] == "yes" ? .good : .off),
+            value: s["graphics"] == "yes" ? "\(dxmt) · engine's own"
+              : s["graphics"] == "other" ? "\(dxmt) · needs Repair" : "\(dxmt) · not set up",
+            tone: s["graphics"] == "yes" ? .good : s["graphics"] == "other" ? .bad : .off),
+      // (every Wine process runs as the engine's loader, a Game Mode app: nothing to set up)
+      Check(id: "Game Mode", icon: "gamepad-2", value: "The engine's loader",
+            tone: s["gamemode"] == "engine" ? .good : .off),
       game,
       disk,
     ]
   }
 
-  static let icons = ["Rosetta": "cpu", "Engine": "wine", "Graphics": "sparkles", "Game Mode": "gamepad-2",
+  static let icons = ["macOS": "cpu", "Engine": "wine", "Graphics": "sparkles", "Game Mode": "gamepad-2",
                       "Guild Wars 2": "swords", "Disk space": "hard-drive"]
 }
 
@@ -1044,16 +1046,12 @@ struct ReadyPanel: View {
   let installer: Installer
   let actions: PanelActions
 
-  // after an update of the app: its new engine pieces go in at the next Play (graphics=update); an
-  // engine that has them already is this version's (Play only brings the manifest along); anything
-  // else needs Repair
+  // after an update of the app: an engine with its own graphics is this version's (Play only brings
+  // the manifest along); anything else needs Repair
   private var versionChip: (warn: Bool, text: String) {
     guard installer.installedOtherVersion else { return (false, "Installed · \(installer.installedVersion)") }
-    switch installer.status["graphics"] {
-    case "update": return (true, "\(installer.installedVersion) · updates at Play")
-    case "yes": return (false, "Installed · \(installer.appVersion)")
-    default: return (true, "\(installer.installedVersion) · Repair to update")
-    }
+    return installer.status["graphics"] == "yes"
+      ? (false, "Installed · \(installer.appVersion)") : (true, "\(installer.installedVersion) · Repair to update")
   }
 
   var body: some View {

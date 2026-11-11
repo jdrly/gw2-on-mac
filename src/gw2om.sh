@@ -1,8 +1,8 @@
 #!/bin/bash
 # The install, status, play and settings logic behind the app's window. Unlike SWTOR
-# on Mac it changes no existing install: it creates its own Wine engine and bottle, puts GW2 on
-# Mac's graphics (DXMT) and Wine pieces into them, and installs the game through Steam or
-# ArenaNet's own installer.
+# on Mac it changes no existing install: it creates its own Wine engine and bottle and installs the
+# game through Steam or ArenaNet's own installer. On this line the engine is Mach9's arm64 Wine as
+# it ships: the app puts nothing into it.
 #
 #   gw2om.sh status            KEY=VALUE lines describing this Mac (what the window shows)
 #   gw2om.sh install steam     phases 1-4: engine, bottle, Steam from Valve, then Steam starts
@@ -23,11 +23,11 @@
 #                              interface addon (if on), the registry settings, the manifest
 #   gw2om.sh stop-waiting      the window stops following the game's download (the engine and
 #                              the bottle stay; Install picks up from there)
-#   gw2om.sh repair            engine, graphics, Wine pieces, bottle settings and Game Mode again;
-#                              keeps the game and the settings
+#   gw2om.sh repair            the engine (unpacked again if it isn't the expected one), the bottle's
+#                              settings; keeps the game and the settings
 #   gw2om.sh uninstall         removes everything this app created: the bottle (with the game in
-#                              it), the engine, Game Mode, the settings, its caches (DXMT's in
-#                              them); logs stay
+#                              it), the engine, the settings, its caches (DXMT's in them); logs
+#                              stay
 #   gw2om.sh play              starts the game (Steam: steam.exe -applaunch 1284210, -silent once
 #                              Steam remembers a login; ArenaNet: Gw2-64.exe) with the settings as
 #                              its environment, and the session's watcher (watch-session)
@@ -51,35 +51,30 @@
 #                              valid Authenticode signature by ArenaNet ("@done <what>")
 #   gw2om.sh reset-shaders     deletes DXMT's caches (shaders, pipelines, recipes) in the app's
 #                              own cache folder; never DXMT's in the per-user cache folder
-#   gw2om.sh reinstall-engine  unpacks the engine again and puts the app's pieces back
+#   gw2om.sh reinstall-engine  unpacks the engine again
 #   gw2om.sh end-leftovers     ends leftover Wine processes of the engine (no session running)
 #   gw2om.sh fetch-engine      downloads and verifies the engine into the cache
 #   gw2om.sh env               the game's environment as play would set it (for Terminal)
 #
 # Environment:
-#   GW2_ON_MAC_ROOT=/abs/dir   sandbox for tests: the app's files, logs, caches and the per-user
-#                              temp folder all live under it ($ROOT/home/Library/..., $ROOT/usertmp/)
+#   GW2_ON_MAC_ROOT=/abs/dir   sandbox for tests: the app's files, logs and caches all live under
+#                              it ($ROOT/home/Library/...)
 #   GW2_ON_MAC_DRY_RUN=1       print what would change and change nothing (no downloads, no Wine,
 #                              no log file)
 #   In a sandbox only, for scripts/test-sandbox.sh's stand-ins (never the real Wine there):
 #   GW2_ON_MAC_ENGINE_URL, GW2_ON_MAC_ENGINE_SHA256, GW2_ON_MAC_ENGINE_SIZE   another engine
 #                              archive (a stand-in whose bin/wine only pretends)
 #   GW2_ON_MAC_ENGINE_CHECKS=0 don't check the unpacked engine's files against the real engine's
-#   GW2_ON_MAC_WINEMAC_PE64_STOCK, GW2_ON_MAC_WINEMAC_PE32_STOCK   the sha256 of a stand-in
-#                              engine's own winemac.drv (x86_64, i386)
+#   GW2_ON_MAC_ENGINE_LOADER_SHA256, GW2_ON_MAC_ENGINE_NTDLL_SHA256, GW2_ON_MAC_ENGINE_D3D11_SHA256,
+#   GW2_ON_MAC_ENGINE_WINEMETAL_SHA256   a stand-in engine's own files (engine_matches, graphics)
+#   GW2_ON_MAC_MACOS           the macOS version preflight sees
 #   GW2_ON_MAC_STEAMSETUP_URL  another SteamSetup.exe
 #   GW2_ON_MAC_SIGNER          the signer check-setup accepts (default ArenaNet)
 #   GW2_ON_MAC_ARCDPS_URL      another place for arcdps's d3d11.dll and d3d11.dll.md5sum (a
 #                              fixture: file://...)
-#   GW2_ON_MAC_OLD_COMPONENTS  a file of "<path in the engine> <sha256>" lines: stand-ins for an
-#                              earlier version's engine pieces (graphics_state update)
 #   GW2_ON_MAC_TEST_PAUSE, GW2_ON_MAC_TEST_PAUSE_AT   wait at a point while that file is there
-#                              (test_pause: play-classified, update-<n>, locked, lock-owner-read,
-#                              lock-stale-checked)
-#   GW2_ON_MAC_UPDATE_FAIL_AFTER, GW2_ON_MAC_UPDATE_KILL_AFTER   an update fails (or is killed)
-#                              after <n> of its files
-#   GW2_ON_MAC_UPDATE_KILL_IN_BACKUP   an update is killed halfway through backing up its <n>th file
-#   GW2_ON_MAC_LOCK_WAIT       how long a contender waits for the install lock's claim (5 s)
+#                              (test_pause: locked, lock-owner-read, lock-stale-checked)
+#   GW2_ON_MAC_LOCK_WAIT      how long a contender waits for the install lock's claim (5 s)
 #   GW2_ON_MAC_ALLOW_WINE=1    let the real engine's Wine run in a sandbox (never in the tests)
 #   GW2_ON_MAC_IMPORT_COPY=1   install import copies even on the same disk (the other-disk path)
 #   GW2_ON_MAC_FREE_KB=<n>     the free space the app's disk reports (KB)
@@ -103,28 +98,34 @@ VERSION="$(sed -n 's/^version=//p' "$RES/app.properties" 2>/dev/null || true)"
 VERSION="${VERSION:-dev}"
 CHANNEL="$(sed -n 's/^channel=//p' "$RES/app.properties" 2>/dev/null || true)"
 CHANNEL="${CHANNEL:-release}"
-DXMT_VERSION="$(cat "$COMP/dxmt/VERSION" 2>/dev/null || echo unknown)"
 
-# --- The engine: athei's build of CodeWeavers' CrossOver 26.3 (Wine 11.0, x86_64 WoW64), the
-# engine of SWTOR on Mac and SWGL on Mac, downloaded at install time (never bundled). athei's
-# release of it is gone, so I host the same file, byte for byte, in jdrly/wine-engine, next to
-# the Wine source it was built from. Bump name, URL, size and sha256 together.
-ENGINE_NAME=cx-26.3.0-8
-ENGINE_TITLE="CrossOver 26.3 · Wine 11"
-ENGINE_URL=https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz
+# --- The engine: athei's Mach9 0.3.1, an arm64 Wine 11.21 that runs x86_64 Windows code with FEX,
+# with his DXMT build, downloaded at install time (never bundled) and used as it ships. Bump name,
+# URL, size, sha256 and the files' hashes together.
+ENGINE_NAME=mach9-v0.3.1
+ENGINE_TITLE="Mach9 0.3.1 · Wine 11.21"
+ENGINE_URL=https://github.com/athei/mach9/releases/download/v0.3.1/wine-v0.3.1-macos-arm64.tar.xz
 # the same file through GitHub's API (the release asset's id): the download's second way
-ENGINE_API_URL=https://api.github.com/repos/jdrly/wine-engine/releases/assets/734819803
-ENGINE_SIZE=234978748
-ENGINE_SHA256=1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d
-# The engine's own files that the app replaces (kept next to them as <file>.stock) and its
-# loader, checked after unpacking: the bundled builds are made for exactly these
-ENGINE_LOADER_SHA256=2100dea802b2c560ba5d719c20ba1fcc1c8a09daf66580a4da6dd48e552d5a05
-ENGINE_NTDLL_SHA256=f1ca0f092c9435299bb06f2e6e9c92b52b4b0ab5016a42c1a4ce01ccc18c9f4a
-ENGINE_WINEMAC_SHA256=e0ed7ac7405c21ae5644370aec778ff333c8ef6c27e45e6dd739ee83ad422001
-ENGINE_WINEMAC_PE64_SHA256=eff4337246760e5752fe4bd19d729c860e8be0763f73f8787bb6543fcee9b43d
-ENGINE_WINEMAC_PE32_SHA256=2de18f69739238fa5c6e1c4e9def2c153a7d96dd8502019d39778dc47a103054
-ENGINE_WIN32U_SHA256=3f58b3fdd196fc6e04211a5009fe3ab078b435e2915641d237c084f737e09837
-ENGINE_WINESERVER_SHA256=c65ca777e46e2f05dedf838743aeba6bd6b7f7e7cc650f6f979fa87be1f7003e
+ENGINE_API_URL=https://api.github.com/repos/athei/mach9/releases/assets/730461181
+ENGINE_SIZE=128991668
+ENGINE_SHA256=90aff9a897ed0ff9aac44d0e06f0aecd3ee985afb38037f3f915451e51fa974e
+# What it was built from (the release page's Components list): status, the manifest and Collect
+# Logs print them
+ENGINE_WINE=53def89293a   # athei/wine, wine-11.21-37
+ENGINE_FEX=9d4fa4b46b1
+ENGINE_DXMT=d903db89036   # athei/dxmt
+# Checked after unpacking (engine_matches): the loader, a signed app bundle that every Wine process
+# runs as (nothing may change inside it: a copied or re-signed loader exits), and ntdll.so. The
+# DXMT tree's d3d11.dll and winemetal.so tell status whether the graphics are the engine's own.
+ENGINE_LOADER_APP=lib/wine/aarch64-unix/wine.app
+ENGINE_LOADER_SHA256=fac8babc821737c25483679e179f2e61e9dd2c43e3122decb1a77c5870dbeb99
+ENGINE_LOADER_ID=app.mach9.loader
+ENGINE_TEAM=WLKUUJD25W
+ENGINE_NTDLL_SHA256=a0df4d34bc4918886606bcf9d04c9f853c521636fcbf3b6cce08e8c11b74e787
+ENGINE_D3D11_SHA256=49099142c39d2aa066527d0f1a573d61e3177d317e638b4f7f1457978a61b8df
+ENGINE_WINEMETAL_SHA256=c28171fd25beb364d01c097a5546e2bba9780d34641acb65ad7b63fec985c64f
+# The loader's entitlements need macOS 26.4 (wine.app's own Info.plist says so too)
+MACOS_MIN=26.4
 # Valve's Steam installer, from Valve's CDN (Valve updates it in place: not pinned, its sha256
 # goes to the log)
 STEAM_SETUP_URL=https://cdn.akamai.steamstatic.com/client/installer/SteamSetup.exe
@@ -146,15 +147,16 @@ if [ -n "$ROOT" ]; then
   case "$ROOT" in /*) ;; *) echo "@error GW2_ON_MAC_ROOT must be an absolute path"; exit 2 ;; esac
   if [ -d "$ROOT" ]; then ROOT="$(cd "$ROOT" && pwd -P)"; fi
   H="$ROOT/home"
-  USER_TMP="$ROOT/usertmp/"
   ENGINE_URL="${GW2_ON_MAC_ENGINE_URL:-$ENGINE_URL}"
   [ -z "${GW2_ON_MAC_ENGINE_URL:-}" ] || ENGINE_API_URL=""
   ENGINE_SHA256="${GW2_ON_MAC_ENGINE_SHA256:-$ENGINE_SHA256}"
   ENGINE_SIZE="${GW2_ON_MAC_ENGINE_SIZE:-$ENGINE_SIZE}"
   ENGINE_CHECKS="${GW2_ON_MAC_ENGINE_CHECKS:-1}"
-  # (a stand-in engine's own winemac.drv, which an earlier version left in place: graphics_state)
-  ENGINE_WINEMAC_PE64_SHA256="${GW2_ON_MAC_WINEMAC_PE64_STOCK:-$ENGINE_WINEMAC_PE64_SHA256}"
-  ENGINE_WINEMAC_PE32_SHA256="${GW2_ON_MAC_WINEMAC_PE32_STOCK:-$ENGINE_WINEMAC_PE32_SHA256}"
+  ENGINE_LOADER_SHA256="${GW2_ON_MAC_ENGINE_LOADER_SHA256:-$ENGINE_LOADER_SHA256}"
+  ENGINE_NTDLL_SHA256="${GW2_ON_MAC_ENGINE_NTDLL_SHA256:-$ENGINE_NTDLL_SHA256}"
+  ENGINE_D3D11_SHA256="${GW2_ON_MAC_ENGINE_D3D11_SHA256:-$ENGINE_D3D11_SHA256}"
+  ENGINE_WINEMETAL_SHA256="${GW2_ON_MAC_ENGINE_WINEMETAL_SHA256:-$ENGINE_WINEMETAL_SHA256}"
+  MACOS="${GW2_ON_MAC_MACOS:-}"
   STEAM_SETUP_URL="${GW2_ON_MAC_STEAMSETUP_URL:-$STEAM_SETUP_URL}"
   SIGNER="${GW2_ON_MAC_SIGNER:-ArenaNet}"
   SYS_APPS="$ROOT/Applications"
@@ -164,8 +166,8 @@ if [ -n "$ROOT" ]; then
   WATCH_QUITWAIT="${GW2_ON_MAC_WATCH_QUITWAIT:-$WATCH_QUITWAIT}" WATCH_POLL="${GW2_ON_MAC_WATCH_POLL:-$WATCH_POLL}"
 else
   H="$HOME"
-  USER_TMP="$(getconf DARWIN_USER_TEMP_DIR)"
   ENGINE_CHECKS=1
+  MACOS=""
   SIGNER=ArenaNet
   SYS_APPS=/Applications
   IMPORT_COPY="" FREE_KB=""
@@ -173,9 +175,8 @@ fi
 APPDIR="$H/Library/Application Support/$APP_NAME"
 LOGS="$H/Library/Logs/$APP_NAME"
 CACHE="$H/Library/Caches/$APP_NAME"
-ENG="$APPDIR/engine"                  # the unpacked engine with the app's pieces
+ENG="$APPDIR/engine"                  # the unpacked engine, as it ships
 BOTTLE="$APPDIR/bottle"               # the game's Wine prefix (Steam and the game live in it)
-GAMEMODE_APP="$APPDIR/gamemode/GW2.app"
 SETTINGS="$APPDIR/settings.conf"
 STATE="$APPDIR/state"                 # route, stage (none|waiting_game|finished), game_dir,
                                       # origin (download|import)
@@ -194,7 +195,8 @@ DXMT_CACHE_ROOT="$CACHE/dxmt"
 DXMT_CACHE="$DXMT_CACHE_ROOT/Gw2-64.exe"
 STEAM_DIR="$BOTTLE/drive_c/Program Files (x86)/Steam"
 STEAM_EXE='C:\Program Files (x86)\Steam\steam.exe'
-# What uninstall removes in APPDIR (the folder itself goes too once empty)
+# What uninstall removes in APPDIR (the folder itself goes too once empty; gamemode is what a build
+# of this line before the Mach9 engine made)
 APP_FILES="engine bottle gamemode settings.conf state install-manifest.json dxmt.conf engine.new bottle.new session session.req .session.lock"
 LOGFILE=/dev/null
 
@@ -235,7 +237,15 @@ json_get() { plutil -extract "$2" raw -o - "$1" 2>/dev/null || true; }   # <file
 mb() { echo $((($1 + 524288) / 1048576)); }
 thousands() { echo "$1" | sed -e :a -e 's/^\([0-9]\{1,\}\)\([0-9]\{3\}\)/\1,\2/;ta'; }   # 234978748 -> 234,978,748
 in_list() { local w; for w in $2; do [ "$w" = "$1" ] && return 0; done; return 1; }
-rosetta_ok() { /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null; }
+macos_version() { if [ -n "$MACOS" ]; then echo "$MACOS"; else sw_vers -productVersion 2>/dev/null || echo 0; fi; }
+# macos_ok: this Mac's macOS is MACOS_MIN or later (major and minor compared as numbers)
+macos_ok() {
+  local a b x y
+  IFS=. read -r a b _ <<<"$(macos_version)"
+  IFS=. read -r x y _ <<<"$MACOS_MIN"
+  case "${a:-0}${b:-0}" in *[!0-9]*) return 1 ;; esac
+  [ "${a:-0}" -gt "$x" ] || { [ "${a:-0}" -eq "$x" ] && [ "${b:-0}" -ge "$y" ]; }
+}
 # free_kb: free space (KB) on the volume the app's folder is (or will be) on
 free_kb() {
   local d="$APPDIR"
@@ -255,28 +265,22 @@ set_state() {
 
 # --- Processes
 #
-# Programs are told by their real executable (helpers/procpaths): Wine 11 rewrites argv[0], so ps
-# shows C:\...\name.exe for its processes, while their executable is the engine's loader, a
-# winetemp link to it or the Game Mode bundle's copy. Only this engine's processes count (another
-# Wine, another sandbox's test or my own setup never stop this one).
-winetemp_tag() {
-  local l="$ENG/lib/wine/x86_64-unix/wine"
-  if [ -f "$l" ]; then echo "/winetemp-$(stat -f '%i-%z' "$l")-"; fi
-}
+# Programs are told by their real executable (helpers/procpaths, the resolved path): Wine rewrites
+# argv[0], so ps shows C:\...\name.exe for its processes, while their executable is the engine's
+# loader in wine.app. Only this engine's processes count (another Wine, a Mach9.app elsewhere,
+# another sandbox's test or my own setup never stop this one).
 proc_list() {
   local helper="$RES/helpers/procpaths"
   { if [ -x "$helper" ]; then "$helper" 2>/dev/null | sed 's/^/P /'; fi
     ps -axww -o pid=,comm= 2>/dev/null | sed 's/^ */C /'; } |
-  awk -v e="$ENG/" -v g="$GAMEMODE_APP/" -v s="$ENG/bin/wineserver" -v t="$(winetemp_tag)" '
+  awk -v e="$ENG/" -v s="$ENG/bin/wineserver" '
     $1 == "P" { x = $0; sub(/^P [0-9]+ /, "", x); real[$2] = x; next }
     { pid = $2; prog = $0; sub(/^C [0-9]+ /, "", prog)
       exe = (pid in real) ? real[pid] : prog
-      sub(/\/lib\/wine\/\.\.\/\.\.\/bin\//, "/bin/", exe)
-      ours = index(exe, e) == 1 || index(exe, g) == 1 || (t != "" && index(exe, t))
-      if (!ours) next
+      if (index(exe, e) != 1) next
       p = tolower(prog) }
-    exe == s || exe ~ /\/bin\/wineserver(\.stock)?$/ { print "session", pid, prog; next }
-    p ~ /[\/\\]gw2-64\.exe$/ || exe ~ /\/Gw2-64\.exe$/ { print "game", pid, prog; next }
+    exe == s { print "session", pid, prog; next }
+    p ~ /[\/\\]gw2-64\.exe$/ { print "game", pid, prog; next }
     p ~ /[\/\\]gw2setup-64\.exe$/ { print "installer", pid, prog; next }
     p ~ /[\/\\](steam|steamwebhelper|steamservice|steamerrorreporter)\.exe$/ { print "steam", pid, prog; next }
     { print "engine", pid, prog }' || true
@@ -461,33 +465,32 @@ download() {
 
 # --- Wine
 
-# The real engine's Wine never runs in a sandbox (a stand-in engine's does, for the tests)
+# The real engine's Wine never runs in a sandbox (a stand-in engine's does, for the tests):
+# wine_allowed refuses it, real_wine_in_sandbox says so without stopping
+real_wine_in_sandbox() { [ -n "$ROOT" ] && [ "$ENGINE_CHECKS" != 0 ] && [ "${GW2_ON_MAC_ALLOW_WINE:-}" != 1 ]; }
 wine_allowed() {
-  [ -z "$ROOT" ] || [ "$ENGINE_CHECKS" = 0 ] || [ "${GW2_ON_MAC_ALLOW_WINE:-}" = 1 ] ||
+  ! real_wine_in_sandbox ||
     die "Refusing to run the real Wine engine in a sandbox (GW2_ON_MAC_ROOT): use a stand-in engine or GW2_ON_MAC_DRY_RUN=1."
 }
 
-# Every process of the bottle gets DXMT for Direct3D 11 (the engine's compatdb picks the tree),
-# Steam's windows and the game launcher's CefHost.exe included
-COMPATDB='v=5
-name=gw2-on-mac;exe=*;dxgi=dxmt
-name=gw2-launcher;exe=CefHost.exe;dxgi=dxmt'
+# Variables of the engine's compatdb that would change what every process of the bottle does, if
+# the app inherited them (the engine's own rules give Steam and the game what they need)
+COMPATDB_UNSET=(-u WINE_COMPATDB -u WINE_COMPATDB_FILE -u WINE_LARGE_ADDRESS_AWARE -u WINE_PROF_SERVICE)
 
 # wine_do <args...>: Wine in the bottle for the install's own steps (output to the log)
 wine_do() {
   if [ -n "$DRY" ]; then echo "[dry-run] wine $*"; return; fi
   wine_allowed
   log "+ wine $*"
-  env -u WINELOADER -u WINESERVER -u WINEDLLPATH -u DYLD_FALLBACK_LIBRARY_PATH \
-    WINEPREFIX="$BOTTLE" WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=;winemenubuilder.exe=d" \
-    WINE_COMPATDB="$COMPATDB" WINEMSYNC=1 ROSETTA_X87_PATH="" \
+  env -u WINELOADER -u WINESERVER -u WINEDLLPATH -u DYLD_FALLBACK_LIBRARY_PATH "${COMPATDB_UNSET[@]}" \
+    WINEPREFIX="$BOTTLE" WINEDEBUG=-all WINEMSYNC=1 WINEDLLOVERRIDES=winemenubuilder.exe=d \
     "$ENG/bin/wine" "$@" </dev/null >>"$LOGFILE" 2>&1
 }
 
 # End the bottle's Wine session and make sure nothing of it stays running
 stop_wine() {
   [ -n "$DRY" ] && { echo "[dry-run] wineserver -k"; return; }
-  [ -x "$ENG/bin/wineserver" ] || return 0
+  [ -x "$ENG/bin/wineserver" ] && ! real_wine_in_sandbox || return 0
   WINEPREFIX="$BOTTLE" "$ENG/bin/wineserver" -k >>"$LOGFILE" 2>&1 || true
   WINEPREFIX="$BOTTLE" "$ENG/bin/wineserver" -w >>"$LOGFILE" 2>&1 || true
   local left
@@ -503,19 +506,21 @@ stop_wine() {
 # wait_wine: the session's processes have ended (wineserver -w)
 wait_wine() {
   [ -n "$DRY" ] && { echo "[dry-run] wineserver -w"; return; }
+  ! real_wine_in_sandbox || return 0
   WINEPREFIX="$BOTTLE" "$ENG/bin/wineserver" -w >>"$LOGFILE" 2>&1 || true
 }
 
-# set_reg <key> <name> <value> / del_reg <key> <name>: a REG_SZ value in HKCU, written straight
-# into the bottle's user.reg (Wine reads it when its wineserver starts: only while no session
-# runs). <key> as in user.reg's section headers, with doubled backslashes.
+# set_reg <key> <name> <data>: a value in HKCU, written straight into the bottle's user.reg (Wine
+# reads it when its wineserver starts: only while no session runs). <key> as in user.reg's section
+# headers, with doubled backslashes; <data> as user.reg spells it ("y" with its quotes for a
+# string, dword:00000000 for a number).
 set_reg() {
   local reg="$BOTTLE/user.reg"
   if [ -n "$DRY" ]; then echo "[dry-run] $2=$3 under $1 in $reg"; return; fi
   [ -f "$reg" ] || die "The game's bottle is incomplete ($reg is missing). Click Repair."
   log "+ $2=$3 under $1 in $reg"
   K="[$1]" N="\"$2\"=" V="$3" T="$(date +%s)" awk '
-    BEGIN { k = ENVIRON["K"]; n = ENVIRON["N"]; line = n "\"" ENVIRON["V"] "\"" }
+    BEGIN { k = ENVIRON["K"]; n = ENVIRON["N"]; line = n ENVIRON["V"] }
     index($0, "[") == 1 {
       if (pending) { print line; pending = 0 }
       insec = (substr($0, 1, length(k)) == k && substr($0, length(k) + 1, 1) == " ")
@@ -532,18 +537,6 @@ set_reg() {
     }' "$reg" >"$reg.new.$$"
   mv -f "$reg.new.$$" "$reg"
 }
-del_reg() {
-  local reg="$BOTTLE/user.reg"
-  if [ -n "$DRY" ]; then echo "[dry-run] delete $2 under $1 in $reg"; return; fi
-  [ -f "$reg" ] || return 0
-  log "+ delete $2 under $1 in $reg"
-  K="[$1]" N="\"$2\"=" awk '
-    BEGIN { k = ENVIRON["K"]; n = ENVIRON["N"] }
-    index($0, "[") == 1 { insec = (substr($0, 1, length(k)) == k && substr($0, length(k) + 1, 1) == " ") }
-    insec && index($0, n) == 1 { next }
-    { print }' "$reg" >"$reg.new.$$"
-  mv -f "$reg.new.$$" "$reg"
-}
 # get_reg <key> <name>: its value, if set
 get_reg() {
   K="[$1]" N="\"$2\"=\"" awk '
@@ -552,10 +545,8 @@ get_reg() {
     insec && index($0, n) == 1 { v = substr($0, length(n) + 1); sub(/"$/, "", v); print v }' "$BOTTLE/user.reg" 2>/dev/null || true
 }
 REG_MAC='Software\\Wine\\Mac Driver'
-REG_GW2_DLLS='Software\\Wine\\AppDefaults\\Gw2-64.exe\\DllOverrides'
-# the Mac driver's options for Gw2-64.exe only (the game and its launcher; Steam's processes keep
-# Wine's behaviour)
-REG_GW2_MAC='Software\\Wine\\AppDefaults\\Gw2-64.exe\\Mac Driver'
+REG_X11='Software\\Wine\\X11 Driver'
+REG_WINEDBG='Software\\Wine\\WineDbg'
 
 # registry_lock: the session's lock (WATCH_LOCK, see watch-session) on fd 8, without waiting. A
 # Play takes it before it starts Wine and its watcher holds it for the whole session, so while the
@@ -576,10 +567,9 @@ registry_lock() {
 }
 registry_unlock() { [ -z "$DRY" ] && [ -z "${SESSION_LOCKED:-}" ] || return 0; exec 8>&-; }
 
-# The bottle's registry settings from settings.conf (Retina mode; for Gw2-64.exe only, the
-# d3d11/dxgi addon order, the addon's version.dll override, raw mouse-look and its speed): only
-# while no session runs or starts (Wine reads user.reg when its wineserver starts and writes it
-# back), else at the next game start that finds none (play)
+# The bottle's registry settings, the three values Mach9's own launcher writes: RetinaMode (from
+# settings.conf), EmulateModeset and ShowCrashDialog off. Only while no session runs or starts (Wine reads user.reg when its wineserver
+# starts and writes it back), else at the next game start that finds none (play).
 apply_registry() {
   [ -f "$BOTTLE/user.reg" ] || [ -n "$DRY" ] || return 0
   if ! registry_lock; then
@@ -591,20 +581,9 @@ apply_registry() {
     log "registry settings wait for the next start without a running session"
     return 0
   fi
-  set_reg "$REG_MAC" RetinaMode "$([ "$(setting retina)" = on ] && echo y || echo n)"
-  # Addons that install as d3d11.dll (or dxgi.dll) next to Gw2-64.exe, like arcdps and Nexus,
-  # load first, then load the system32 d3d11.dll: Wine's built-in, which the compatdb points at
-  # the app's DXMT. Without a native-first order Wine skips them. With no such file the game
-  # gets the built-in as before. Gw2-64.exe only: Steam and the launcher keep the default order.
-  set_reg "$REG_GW2_DLLS" d3d11 native,builtin
-  set_reg "$REG_GW2_DLLS" dxgi native,builtin
-  set_reg "$REG_GW2_MAC" RawMouseWhenCursorHidden "$([ "$(setting rawmouse)" = on ] && echo y || echo n)"
-  set_reg "$REG_GW2_MAC" RawMouseGameControllerScale "$(setting mousespeed)"
-  if [ "$(setting uiscale)" = on ] && [ "$(uiscale_state)" = on ]; then
-    set_reg "$REG_GW2_DLLS" version native,builtin
-  else
-    del_reg "$REG_GW2_DLLS" version
-  fi
+  set_reg "$REG_MAC" RetinaMode "\"$([ "$(setting retina)" = on ] && echo y || echo n)\""
+  set_reg "$REG_X11" EmulateModeset '"Y"'
+  set_reg "$REG_WINEDBG" ShowCrashDialog dword:00000000
   registry_unlock
 }
 
@@ -698,10 +677,6 @@ game_env() {
     "WINEDEBUG=-all"
     "WINEDLLOVERRIDES=winemenubuilder.exe=d"
     "WINEMSYNC=1"
-    "WINE_COMPATDB=$COMPATDB"
-    # the engine's compatdb turns on x87sidecar for every process: GW2 is x86_64 with hardly any
-    # x87 code, so it's off (as scripts/common.zsh)
-    "ROSETTA_X87_PATH="
     # the heat ntdll.so (components/heat) applies these to Gw2-64.exe only
     "WINE_HEAT_EVPOOL=1"
     "WINE_HEAT_WAKE=one,skip"
@@ -736,165 +711,32 @@ game_env() {
 
 # --- Engine
 
-# install_file <src> <dst> <mode> [<stock sha256>]: puts <src> in the engine's place, keeping the
-# engine's own as <dst>.stock (checked against the known build when given)
-install_file() {
-  local src=$1 dst=$2 mode=$3 want=${4:-}
-  if [ -n "$DRY" ]; then echo "[dry-run] engine's ${dst#"$ENG/"}: $(basename "$src") from the app"; return; fi
-  if [ ! -f "$dst.stock" ] && [ -f "$dst" ] && ! cmp -s "$src" "$dst"; then
-    if [ -n "$want" ] && [ "$ENGINE_CHECKS" = 1 ] && [ "$(sha256 "$dst")" != "$want" ]; then
-      die "The engine's ${dst#"$ENG/"} is not the expected build. Click Repair (or reinstall the engine in Settings › Troubleshooting)."
-    fi
-    run cp -p "$dst" "$dst.stock"
-  fi
-  run rm -f "$dst"
-  run install -m "$mode" "$src" "$dst"
-}
-
-# The app's pieces in the engine: DXMT as the dxmt DXGI tree (the PE DLLs and winemetal.so of
-# one build always together); the heat ntdll.so (the msync fix, the heat probes) and wineserver
-# (msync unregister fix); Wine's Mac driver, winemac.so and its PE sides (the launcher fix, game
-# keys by keyboard position, inert, and raw mouse-look; the PE sides start raw mouse-look's input thread
-# and go with this winemac.so only) and win32u.so (its drawing at -O2)
-install_components() {
-  local u="$ENG/lib/wine/x86_64-unix" t="$ENG/lib/wine/dxgi/dxmt" f a
-  say "Installing DXMT $DXMT_VERSION as the game's Direct3D 11 (the engine's dxmt tree)"
-  if [ -z "$DRY" ]; then
-    [ -d "$t" ] || die "The engine has no dxmt tree ($t). Reinstall the engine (Settings › Troubleshooting)."
-    for a in x86_64-windows i386-windows x86_64-unix; do
-      run mkdir -p "$t/$a"
-      for f in "$COMP/dxmt/$a"/*; do
-        [ -f "$f" ] || continue
-        run rm -f "$t/$a/$(basename "$f")"
-        run install -m 644 "$f" "$t/$a/$(basename "$f")"
-      done
-    done
-    run chmod 755 "$t/x86_64-unix/winemetal.so"
-    run cp "$COMP/dxmt/VERSION" "$COMP/dxmt/LICENSE" "$COMP/dxmt/COPYING.LIB" "$t/"
-  else
-    echo "[dry-run] DXMT files into $t"
-  fi
-  say "Installing the tuned Wine pieces: ntdll.so and wineserver (heat), the Mac driver (the launcher fix, raw mouse-look) and win32u.so"
-  install_file "$COMP/heat/ntdll.so" "$u/ntdll.so" 755 "$ENGINE_NTDLL_SHA256"
-  install_file "$COMP/heat/wineserver" "$ENG/bin/wineserver" 755 "$ENGINE_WINESERVER_SHA256"
-  install_file "$COMP/winemac/x86_64-windows/winemac.drv" "$ENG/lib/wine/x86_64-windows/winemac.drv" 644 "$ENGINE_WINEMAC_PE64_SHA256"
-  install_file "$COMP/winemac/i386-windows/winemac.drv" "$ENG/lib/wine/i386-windows/winemac.drv" 644 "$ENGINE_WINEMAC_PE32_SHA256"
-  install_file "$COMP/winemac/winemac.so" "$u/winemac.so" 755 "$ENGINE_WINEMAC_SHA256"
-  install_file "$COMP/winemac/win32u.so" "$u/win32u.so" 755 "$ENGINE_WIN32U_SHA256"
-  record_components
-  [ -n "$DRY" ] || rm -rf "$UPD"
-  log "engine components: dxmt $DXMT_VERSION, ntdll $(sha256 "$COMP/heat/ntdll.so"), wineserver $(sha256 "$COMP/heat/wineserver"), winemac $(sha256 "$COMP/winemac/winemac.so") (PE $(sha256 "$COMP/winemac/x86_64-windows/winemac.drv"), $(sha256 "$COMP/winemac/i386-windows/winemac.drv")), win32u $(sha256 "$COMP/winemac/win32u.so")"
-}
-
 engine_ok() { [ -x "$ENG/bin/wine" ] && [ "$(cat "$ENG/.gw2om-source" 2>/dev/null || true)" = "$ENGINE_SHA256" ]; }
 
-# --- The app's pieces in the engine, and an update of the app
-#
-# component_list: every file install_components puts into the engine, one
-# "<path in components/>\t<path in the engine>\t<mode>" a line (an update's whole inventory)
-component_list() {
-  local a f m
-  for a in x86_64-windows i386-windows x86_64-unix; do
-    m=644; [ "$a" != x86_64-unix ] || m=755
-    for f in "$COMP/dxmt/$a"/*; do
-      [ -f "$f" ] || continue
-      printf 'dxmt/%s/%s\tlib/wine/dxgi/dxmt/%s/%s\t%s\n' "$a" "${f##*/}" "$a" "${f##*/}" "$m"
-    done
-  done
-  for f in VERSION LICENSE COPYING.LIB; do printf 'dxmt/%s\tlib/wine/dxgi/dxmt/%s\t644\n' "$f" "$f"; done
-  printf '%s\t%s\t%s\n' heat/ntdll.so lib/wine/x86_64-unix/ntdll.so 755 heat/wineserver bin/wineserver 755 \
-    winemac/x86_64-windows/winemac.drv lib/wine/x86_64-windows/winemac.drv 644 \
-    winemac/i386-windows/winemac.drv lib/wine/i386-windows/winemac.drv 644 \
-    winemac/winemac.so lib/wine/x86_64-unix/winemac.so 755 winemac/win32u.so lib/wine/x86_64-unix/win32u.so 755
+# engine_matches <dir>: the unpacked engine is the expected build: its loader's and ntdll.so's
+# sha256, and wine.app's signature (codesign reads it and starts nothing): valid, by Mach9's team,
+# with the loader's identifier
+engine_matches() {
+  local app="$1/$ENGINE_LOADER_APP" info
+  [ "$(sha256 "$app/Contents/MacOS/wine" 2>/dev/null)" = "$ENGINE_LOADER_SHA256" ] &&
+    [ "$(sha256 "$1/lib/wine/aarch64-unix/ntdll.so" 2>/dev/null)" = "$ENGINE_NTDLL_SHA256" ] &&
+    codesign --verify --strict "$app" >>"$LOGFILE" 2>&1 || return 1
+  info=$(codesign -dv "$app" 2>&1) || return 1
+  printf '%s\n' "$info" | grep -qx "Identifier=$ENGINE_LOADER_ID" &&
+    printf '%s\n' "$info" | grep -qx "TeamIdentifier=$ENGINE_TEAM"
 }
 
-# What 0.1.0 put into the engine: "<path in the engine> <sha256>" for each file it installed, its
-# Mach-O files twice (as staged, unsigned, and as the notarized DMG has them, signed). The Mac
-# driver's PE sides were the engine's own then (stock_sha256). From 0.1.1 on the engine records
-# what install_components put in (COMP_RECORD), so a later update needs no table of its own.
-OLD_COMPONENTS='lib/wine/dxgi/dxmt/i386-windows/d3d10core.dll dc9bcf8d749e94e1936ad3ff7480f8d56fa5600010abe1e4c238069751664a13
-lib/wine/dxgi/dxmt/i386-windows/d3d11.dll abec265a1422bf8941f8df223d152f475c68ab2f1745ea0d38a119cb10d2201f
-lib/wine/dxgi/dxmt/i386-windows/dxgi.dll 278bfe4828c7e5de091302bfa3f2959513af01b9c02fca63be569c8a8a5bd3c9
-lib/wine/dxgi/dxmt/i386-windows/winemetal.dll 5ffc2d419bdaff9bf2a8e6e448830404623349c42fb79ced4d658c24ef85909c
-lib/wine/dxgi/dxmt/x86_64-windows/d3d10core.dll f72e41075eb692269cf26a9e86aea382725b25029ffa7313e72e309fec3cfcc5
-lib/wine/dxgi/dxmt/x86_64-windows/d3d11.dll 45ec7333e54614137e30d499afc6f1af4f6dfec387405145edc5375bc75390b7
-lib/wine/dxgi/dxmt/x86_64-windows/dxgi.dll 4459675cd67c06e42fe16c00c399ec4e00e325d60fdbb811503d1c4f8bc810c2
-lib/wine/dxgi/dxmt/x86_64-windows/winemetal.dll bf93b2166c775bf8b8f38dfa322a57ade240f56e8cfb09d6c0f430a6cb96e3e8
-lib/wine/dxgi/dxmt/x86_64-unix/winemetal.so 88ae565d38da0053ba611f8b905f90213723e891a5ba1b31b382ab2c6bad539b
-lib/wine/dxgi/dxmt/x86_64-unix/winemetal.so 447c72cee0cc15ee76360a7e985e4ee613c1649f6e5355f1f6bc7781f8033ca5
-lib/wine/dxgi/dxmt/VERSION 6fb25be51cd23bd25cf68fed39a5e1ac4487ccaf4bad91facb3c4627ceb84b38
-lib/wine/dxgi/dxmt/LICENSE b87c35aef7b2cf14de854118ca55ce5c4b284c85b5f002421fb8d46d868c2d17
-lib/wine/dxgi/dxmt/COPYING.LIB e237fa56668030e928551ddd60f05df5fe957f75eab874bbd017e085ed722e7c
-lib/wine/x86_64-unix/ntdll.so 4ab02782a803e303a3abe03ef295eaec7c1479f84d1a5a33a2faffb82c2dcbbf
-lib/wine/x86_64-unix/ntdll.so a37ad28b49bca84a40dcc3eb0a43d183bcb167f359b545227a9f0606e70d465c
-bin/wineserver 5eb11f77bfcbdfa19b32e843fef5a18d015ce298c6bb91fb01036a47f48c2d78
-bin/wineserver e48ff5e1630d1208e3ed097e138cc1193f1c9ab5bd99d6dfb94c6cad3b0c88c7
-lib/wine/x86_64-unix/winemac.so 2647959551bb467d69c048ab0f606a69289b304146d596d27db267bbd1c66d9b
-lib/wine/x86_64-unix/winemac.so f7ddd72443775b2d9192b1babae850ddc7c11dd306d645fb4ead414708cdb1da
-lib/wine/x86_64-unix/win32u.so b607c7602f6de0f4a6784d765ed4451dbc42cef7072648ebfd73fcf9606fd13c
-lib/wine/x86_64-unix/win32u.so 8aed31c9fe9c343af99330d419e81f61fd9340d30b2d7021fb7ad305cd9524d9'
-# (a sandbox: the tests' stand-ins for earlier versions' files, the same format)
-[ -z "$ROOT" ] || [ -z "${GW2_ON_MAC_OLD_COMPONENTS:-}" ] || OLD_COMPONENTS="$OLD_COMPONENTS
-$(cat "$GW2_ON_MAC_OLD_COMPONENTS")"
-# stock_sha256 <path in the engine>: the engine's own file there, for the paths the app replaces
-stock_sha256() {
-  case "$1" in
-    lib/wine/x86_64-unix/ntdll.so) echo "$ENGINE_NTDLL_SHA256" ;;
-    bin/wineserver) echo "$ENGINE_WINESERVER_SHA256" ;;
-    lib/wine/x86_64-unix/winemac.so) echo "$ENGINE_WINEMAC_SHA256" ;;
-    lib/wine/x86_64-unix/win32u.so) echo "$ENGINE_WIN32U_SHA256" ;;
-    lib/wine/x86_64-windows/winemac.drv) echo "$ENGINE_WINEMAC_PE64_SHA256" ;;
-    lib/wine/i386-windows/winemac.drv) echo "$ENGINE_WINEMAC_PE32_SHA256" ;;
-  esac
-}
-COMP_RECORD="$ENG/.gw2om-components"   # "<sha256> <path in the engine>" of what install_components put in
-UPD="$ENG/.gw2om-update"               # an update under way (update_components): its journal
-
-# comp_state <path in components/> <path in the engine>: same (this version's: the app's file, or
-# its build as staged, unsigned: components/INVENTORY, as a notarized app's are signed), old (what
-# an earlier version put there: OLD_COMPONENTS, the engine's record, or for the Mac driver's PE
-# sides the engine's own), other (missing, or anything else: never overwritten without Repair)
-comp_state() {
-  local h
-  [ -f "$ENG/$2" ] || { echo other; return; }
-  if cmp -s "$COMP/$1" "$ENG/$2"; then echo same; return; fi
-  h=$(sha256 "$ENG/$2")
-  if grep -qx "$h  $1" "$COMP/INVENTORY" 2>/dev/null; then echo same; return; fi
-  if printf '%s\n' "$OLD_COMPONENTS" | grep -qx "$2 $h" || grep -qx "$h $2" "$COMP_RECORD" 2>/dev/null; then echo old; return; fi
-  case "$2" in *winemac.drv) [ "$h" != "$(stock_sha256 "$2")" ] || { echo old; return; } ;; esac
-  echo other
-}
-
-# Graphics in the engine: yes (this version's DXMT and Wine pieces: every file of component_list),
-# update (each one this version's or an earlier version's, at least one earlier: Play puts this
-# version's in, update_components; or an update was interrupted, which Play finishes), other
-# (something else: Repair), no (no engine). components_missing: the files of the list that aren't
-# there at all (Play doesn't start the game then).
+# Graphics in the engine: yes (its DXMT tree's d3d11.dll and winemetal.so are the engine's own),
+# other (something else: Repair unpacks the engine again), no (no engine)
 graphics_state() {
-  local r=yes src dst mode
+  local t="$ENG/lib/wine/dxgi/dxmt"
   [ -x "$ENG/bin/wine" ] || { echo no; return; }
-  [ ! -d "$UPD" ] || { echo update; return; }
-  while IFS='	' read -r src dst mode; do
-    case "$(comp_state "$src" "$dst")" in other) echo other; return ;; old) r=update ;; esac
-  done <<LIST
-$(component_list)
-LIST
-  echo "$r"
-}
-components_missing() {
-  local src dst mode
-  while IFS='	' read -r src dst mode; do [ -f "$ENG/$dst" ] || echo "$dst"; done <<LIST
-$(component_list)
-LIST
-}
-# record_components: COMP_RECORD of what is now in the engine (this version's files)
-record_components() {
-  local src dst mode
-  [ -z "$DRY" ] || return 0
-  while IFS='	' read -r src dst mode; do echo "$(sha256 "$COMP/$src") $dst"; done >"$COMP_RECORD.new" <<LIST
-$(component_list)
-LIST
-  mv -f "$COMP_RECORD.new" "$COMP_RECORD"
+  if [ "$(sha256 "$t/aarch64-windows/d3d11.dll" 2>/dev/null)" = "$ENGINE_D3D11_SHA256" ] &&
+    [ "$(sha256 "$t/aarch64-unix/winemetal.so" 2>/dev/null)" = "$ENGINE_WINEMETAL_SHA256" ]; then
+    echo yes
+  else
+    echo other
+  fi
 }
 
 # test_pause <point>: the tests' interleavings (a sandbox only): waits at <point> while the file
@@ -907,191 +749,34 @@ test_pause() {
   while [ -e "$GW2_ON_MAC_TEST_PAUSE" ] && [ $i -lt 600 ]; do sleep 0.1; i=$((i + 1)); done
 }
 
-# update_components: after an update of the app (graphics_state update), from Play while it holds
-# the session's lock (no session can start or run) and the install lock (no install, repair or
-# uninstall): this version's pieces into the engine without Repair, as one transaction in UPD:
-#   1. every file of component_list staged in new/ and compared with the app's
-#   2. the live files backed up in old/ (an interrupted earlier run's backups stay: the originals);
-#      .stock kept for an engine's own file, as install_file does
-#   3. "committing", then each staged file renamed into place (one rename each, the same disk)
-#   4. every file compared again; the record, the manifest; the journal removed
-# A failure rolls back from old/ (update_exit). An interruption (power, a kill) leaves the
-# journal: graphics_state says update, and the next Play runs it again to the end.
-update_components() {
-  local src dst mode i h moved=0
-  lock
-  trap update_exit EXIT
-  say "$APP_NAME $VERSION has new pieces for the engine; putting them in"
-  if [ -f "$UPD/committing" ]; then log "update: finishing an interrupted update"; fi
-  mkdir -p "$UPD/new" "$UPD/old"
-  component_list >"$UPD/list"
-  i=0
-  while IFS='	' read -r src dst mode; do
-    i=$((i + 1))
-    { cp "$COMP/$src" "$UPD/new/$i" && chmod "$mode" "$UPD/new/$i" && cmp -s "$COMP/$src" "$UPD/new/$i"; } ||
-      die "Could not prepare $APP_NAME's new pieces for the engine ($dst). Free some disk space and try again, or click Repair."
-  done <"$UPD/list"
-  i=0
-  while IFS='	' read -r src dst mode; do
-    i=$((i + 1))
-    rm -f "$UPD/old/$i.part"
-    # (a backup slot is complete once renamed into place; before any commit the live file is
-    # untouched, so a backup that isn't the same as it is made again)
-    if [ -e "$UPD/old/$i.none" ] || { [ -f "$UPD/old/$i" ] && { [ -f "$UPD/committing" ] || cmp -s "$UPD/old/$i" "$ENG/$dst"; }; }; then continue; fi
-    if [ -f "$ENG/$dst" ]; then
-      if [ -n "$ROOT" ] && [ "${GW2_ON_MAC_UPDATE_KILL_IN_BACKUP:-}" = "$i" ]; then
-        head -c 5 "$ENG/$dst" >"$UPD/old/$i.part"; kill -9 $$
-      fi
-      { cp -p "$ENG/$dst" "$UPD/old/$i.part" && cmp -s "$ENG/$dst" "$UPD/old/$i.part" && mv -f "$UPD/old/$i.part" "$UPD/old/$i"; } ||
-        die "Could not back up the engine's $dst. Free some disk space and try again."
-      h=$(stock_sha256 "$dst")
-      if [ -n "$h" ] && [ ! -f "$ENG/$dst.stock" ] && [ "$(sha256 "$ENG/$dst")" = "$h" ]; then cp -p "$ENG/$dst" "$ENG/$dst.stock"; fi
-    else
-      : >"$UPD/old/$i.none"
-    fi
-  done <"$UPD/list"
-  date +%s >"$UPD/committing"
-  i=0
-  while IFS='	' read -r src dst mode; do
-    i=$((i + 1))
-    mkdir -p "$(dirname "$ENG/$dst")"
-    mv -f "$UPD/new/$i" "$ENG/$dst" || die "Could not put $APP_NAME's $dst into the engine."
-    moved=$((moved + 1))
-    if [ -n "$ROOT" ]; then
-      [ "${GW2_ON_MAC_UPDATE_FAIL_AFTER:-}" != "$moved" ] || die "test: the update fails after $moved files"
-      [ "${GW2_ON_MAC_UPDATE_KILL_AFTER:-}" != "$moved" ] || kill -9 $$
-      test_pause "update-$moved"
-    fi
-  done <"$UPD/list"
-  while IFS='	' read -r src dst mode; do
-    cmp -s "$COMP/$src" "$ENG/$dst" || die "$APP_NAME's $dst did not arrive in the engine as it should."
-  done <"$UPD/list"
-  record_components
-  write_manifest
-  rm -rf "$UPD"
-  log "update: done, the engine has $VERSION's pieces"
-  trap - EXIT
-  unlock
-}
-# update_exit: a failed update puts the live files back from old/ (if any had moved) and drops the
-# journal; if that fails too, the journal stays and the next Play finishes the update
-update_exit() {
-  local st=$? src dst mode i=0 ok=1
-  if [ $st -ne 0 ] && [ -d "$UPD" ]; then
-    if [ -f "$UPD/committing" ]; then
-      while IFS='	' read -r src dst mode; do
-        i=$((i + 1))
-        if [ -f "$UPD/old/$i" ]; then mv -f "$UPD/old/$i" "$ENG/$dst" || ok=""
-        elif [ -e "$UPD/old/$i.none" ]; then rm -f "$ENG/$dst" || ok=""
-        fi
-      done <"$UPD/list"
-    fi
-    if [ -n "$ok" ]; then rm -rf "$UPD"; log "update failed (status $st): the engine's pieces are as they were"
-    else log "update failed (status $st) and could not be rolled back: the next Play finishes it"; fi
-  fi
-  unlock
-}
-
-# install_engine [force]: the verified engine unpacked into $ENG (unless it's there already),
-# then the app's pieces
+# install_engine [force]: the verified engine unpacked into $ENG (unless it's there already). The
+# app writes nothing into it afterwards, and nothing at all inside wine.app.
 install_engine() {
   local dst="$ENG"
   if engine_ok && [ "${1:-}" != force ]; then
-    say "The Wine engine ($ENGINE_TITLE, $ENGINE_NAME) is already in place"
-  else
-    fetch "$ENGINE_URL" "$ENGINE_SHA256" "$ENGINE_SIZE" "Wine engine" "$ENGINE_API_URL"
-    say "Unpacking the Wine engine ($ENGINE_TITLE)"
-    run rm -rf "$dst.new"
-    run mkdir -p "$dst.new"
-    run tar -xJf "$FETCHED" -C "$dst.new" --strip-components 1
-    if [ -z "$DRY" ]; then
-      chmod -R u+w "$dst.new"
-      if [ "$ENGINE_CHECKS" = 1 ]; then
-        [ "$(sha256 "$dst.new/lib/wine/x86_64-unix/wine")" = "$ENGINE_LOADER_SHA256" ] &&
-          [ "$(sha256 "$dst.new/lib/wine/x86_64-unix/ntdll.so")" = "$ENGINE_NTDLL_SHA256" ] ||
-          die "The unpacked Wine engine does not match the expected build."
-      fi
-      # its SDK (headers, Wine's conformance tests, man pages) is not needed to run it
-      rm -rf "$dst.new/include" "$dst.new/lib/wine/tests" "$dst.new/share/man"
-      echo "$ENGINE_SHA256" >"$dst.new/.gw2om-source"
-    fi
-    remove_gamemode_links   # they name the old engine's loader
-    run rm -rf "$dst"
-    run mv "$dst.new" "$dst"
-    CREATED="$CREATED engine"
+    say "The Wine engine ($ENGINE_TITLE) is already in place"
+    return
   fi
-  install_components
-}
-
-# --- Game Mode
-#
-# macOS turns Game Mode on only for a full-screen process whose executable belongs to a bundle
-# with LSSupportsGameMode, and every Wine process runs Wine's loader. As SWGL on Mac and
-# scripts/common.zsh do it: while WINEDLLPATH is set, CrossOver's ntdll starts each process from
-# a link in $TMPDIR/winetemp-<loader ino>-<size>-<mtime s>-<mtime ns>/ named after its exe, and
-# reuses what is there. Steam starts the game, so the link is Gw2-64.exe (APFS is case-
-# insensitive) and points at a bundle with an unsigned copy of the loader under that name and an
-# ntdll.so link back to the engine.
-install_gamemode() {
-  local app="$GAMEMODE_APP" new loader="$ENG/lib/wine/x86_64-unix/wine"
-  say "Creating the Game Mode bundle"
-  new="$APPDIR/gamemode/.GW2.app.new.$$"
-  run rm -rf "$new"
-  run mkdir -p "$new/Contents/MacOS"
-  put "$new/Contents/Info.plist" 644 <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>CFBundleExecutable</key><string>Gw2-64.exe</string>
-	<key>CFBundleIdentifier</key><string>cz.jandrly.gw2onmac.game</string>
-	<key>CFBundleName</key><string>Guild Wars 2</string>
-	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-	<key>CFBundleShortVersionString</key><string>$VERSION</string>
-	<key>CFBundleVersion</key><string>$VERSION</string>
-	<key>LSApplicationCategoryType</key><string>public.app-category.role-playing-games</string>
-	<key>LSSupportsGameMode</key><true/>
-	<key>GCSupportsGameMode</key><true/>
-</dict>
-</plist>
-EOF
-  run cp -c "$loader" "$new/Contents/MacOS/Gw2-64.exe"
-  if [ -z "$DRY" ]; then codesign --remove-signature "$new/Contents/MacOS/Gw2-64.exe" 2>/dev/null || true; fi
-  # (relative: Contents/MacOS -> APPDIR/engine/lib/wine/x86_64-unix/ntdll.so)
-  run ln -s "../../../../engine/lib/wine/x86_64-unix/ntdll.so" "$new/Contents/MacOS/ntdll.so"
-  if [ -z "$DRY" ]; then stat -f '%i-%z-%m' "$loader" >"$new/Contents/.source"; fi
-  run rm -rf "$app"
-  run mv "$new" "$app"
-}
-gamemode_current() {
-  [ -x "$GAMEMODE_APP/Contents/MacOS/Gw2-64.exe" ] &&
-    [ "$(cat "$GAMEMODE_APP/Contents/.source" 2>/dev/null || true)" = "$(stat -f '%i-%z-%m' "$ENG/lib/wine/x86_64-unix/wine" 2>/dev/null || echo none)" ]
-}
-winetemp_dir() {
-  local l="$ENG/lib/wine/x86_64-unix/wine" m
-  m=$(stat -f '%Fm' "$l")
-  echo "${USER_TMP}winetemp-$(stat -f '%i-%z' "$l")-${m%.*}-$((10#${m#*.}))"
-}
-# The link for this start (play), and WINEDLLPATH in E
-gamemode_link() {
-  local dir
-  [ "$(setting gamemode)" = on ] || return 0
-  E+=("WINEDLLPATH=$ENG/lib/wine")
-  if [ -n "$DRY" ]; then echo "[dry-run] link <winetemp of the engine's loader>/Gw2-64.exe -> $GAMEMODE_APP/Contents/MacOS/Gw2-64.exe"; return; fi
-  gamemode_current || install_gamemode >/dev/null
-  dir=$(winetemp_dir)
-  # shellcheck disable=SC2174 # (only the winetemp folder is new: its parent, USER_TMP, exists)
-  mkdir -p -m 700 "$dir" && ln -sfn "$GAMEMODE_APP/Contents/MacOS/Gw2-64.exe" "$dir/Gw2-64.exe" || return 0
-  # steam.exe, the command's first process, must not run from the game's bundle
-  [ -L "$dir/wine" ] && rm -f "$dir/wine"
-  echo "$(date '+%F %T') game mode: $dir/Gw2-64.exe -> $GAMEMODE_APP/Contents/MacOS/Gw2-64.exe" >>"$LOGS/gamemode.log"
-}
-remove_gamemode_links() {
-  local l="$ENG/lib/wine/x86_64-unix/wine" dir
-  [ -f "$l" ] || return 0
-  dir=$(winetemp_dir)
-  if [ -L "$dir/Gw2-64.exe" ]; then run rm -f "$dir/Gw2-64.exe"; say "Removed the Game Mode link $dir/Gw2-64.exe"; fi
+  fetch "$ENGINE_URL" "$ENGINE_SHA256" "$ENGINE_SIZE" "Wine engine" "$ENGINE_API_URL"
+  say "Unpacking the Wine engine ($ENGINE_TITLE)"
+  run rm -rf "$dst.new"
+  run mkdir -p "$dst.new"
+  run tar -xJf "$FETCHED" -C "$dst.new" --strip-components 1
+  if [ -z "$DRY" ]; then
+    # An archive downloaded in a browser carries the quarantine attribute and tar copies it onto
+    # every file: the loader is notarized and would pass, the engine's ad hoc signed libraries not
+    run xattr -dr com.apple.quarantine "$dst.new"
+    # its SDK (headers, link libraries, Wine's conformance tests, man pages) is not needed to run it
+    rm -rf "$dst.new/include" "$dst.new/lib/wine/tests" "$dst.new/lib/wine/x86_64-windows" "$dst.new/share/man"
+    if [ "$ENGINE_CHECKS" = 1 ]; then
+      engine_matches "$dst.new" || die "The unpacked Wine engine does not match the expected build."
+    fi
+    echo "$ENGINE_SHA256" >"$dst.new/.gw2om-source"
+  fi
+  run rm -rf "$dst"
+  run mv "$dst.new" "$dst"
+  CREATED="$CREATED engine"
+  log "engine: $ENGINE_NAME (Wine $ENGINE_WINE, FEX $ENGINE_FEX, DXMT $ENGINE_DXMT)"
 }
 
 # --- The game
@@ -1174,7 +859,8 @@ write_uiscale_ini() {
     "$COMP/ui-scale/gw2-ui-scale.ini" | put "$1" 644
 }
 # The addon in or out of the game folder, as the setting says (another program's version.dll is
-# never touched); the registry override follows (apply_registry)
+# never touched). On this line nothing sets the native-first order version.dll needs yet: that
+# comes with the game's compatdb rules.
 sync_uiscale() {
   local dll
   game_state
@@ -1199,8 +885,8 @@ sync_uiscale() {
 
 # --- arcdps (deltaconnected's addon; Settings › Interface): downloaded on request from
 # deltaconnected.com (never hosted or changed by the app) into the game folder as d3d11.dll,
-# where it loads first (the d3d11/dxgi order for Gw2-64.exe, apply_registry) and passes the game's
-# Direct3D 11 on to DXMT. It updates itself, so it is recognised by what it is, not by a hash: a PE
+# where it loads first once Gw2-64.exe has a native-first d3d11/dxgi order (on this line that comes
+# with the game's compatdb rules) and passes the game's Direct3D 11 on to DXMT. It updates itself, so it is recognised by what it is, not by a hash: a PE
 # whose export table has arcdps's extension API (addextension2) and that names arcdps. As dxgi.dll
 # it counts too. Its settings (addons/arcdps/) stay when it goes. Another d3d11.dll or dxgi.dll
 # (Nexus, ReShade...) is never touched: state foreign.
@@ -1493,7 +1179,8 @@ import_game() {
   log "game files $IMPORT_HOW: $src -> $dst ($total bytes)"
 }
 
-# The bottle's Windows user (CrossOver's engine: crossover)
+# The bottle's Windows user (upstream Wine names it after the Mac's user; CrossOver's engine said
+# crossover)
 bottle_user() {
   local u
   for u in "$BOTTLE/drive_c/users"/*; do
@@ -1501,7 +1188,7 @@ bottle_user() {
     case "$(basename "$u")" in Public|public) continue ;; esac
     basename "$u"; return
   done
-  echo crossover
+  id -un
 }
 
 # import_settings <source game dir>: the game's settings (Local.dat: options and the remembered
@@ -1666,19 +1353,22 @@ status() {
   echo "version=$VERSION"
   echo "engine=$ENGINE_NAME"
   echo "engine_title=$ENGINE_TITLE"
-  echo "dxmt=$DXMT_VERSION"
+  echo "engine_wine=$ENGINE_WINE"
+  echo "engine_fex=$ENGINE_FEX"
+  echo "engine_dxmt=$ENGINE_DXMT"
   echo "root=${ROOT:-/}"
   echo "app_dir=$APPDIR"
-  echo "rosetta=$(rosetta_ok && echo yes || echo no)"
   echo "arch=$(uname -m)"
-  echo "macos=$(sw_vers -productVersion 2>/dev/null || echo unknown)"
+  echo "macos=$(macos_version)"
+  echo "macos_min=$MACOS_MIN"
+  echo "macos_ok=$(macos_ok && echo yes || echo no)"
   [ -f "$MANIFEST" ] && engine_ok && [ -f "$BOTTLE/system.reg" ] && installed=yes
   echo "installed=$installed"
   echo "installed_version=$(json_get "$MANIFEST" version)"
   echo "engine_installed=$(engine_ok && echo yes || echo no)"
   echo "graphics=$(graphics_state)"
-  if [ "$(setting gamemode)" != on ]; then echo "gamemode=off"
-  elif gamemode_current; then echo "gamemode=yes"; else echo "gamemode=no"; fi
+  # (the engine's loader is a Game Mode app: nothing for the app to set up or switch)
+  echo "gamemode=engine"
   echo "route=$(state route)"
   echo "origin=$(state origin)"
   echo "steam=$([ -f "$STEAM_DIR/steam.exe" ] && echo yes || echo no)"
@@ -1732,9 +1422,8 @@ cmd_set() {
   write_settings "$key" "$value"
   case "$key" in
     fpscap) write_dxmt_conf ;;
-    uiscale|uiscale_size|uiscale_sans|uiscale_cinema) sync_uiscale; apply_registry ;;
-    retina|rawmouse|mousespeed) apply_registry ;;
-    gamemode) [ "$value" = off ] || gamemode_current || install_gamemode ;;
+    uiscale|uiscale_size|uiscale_sans|uiscale_cinema) sync_uiscale ;;
+    retina) apply_registry ;;
   esac
   if session_running; then
     echo "@done $key=$value. It takes effect the next time the game starts after Steam has quit."
@@ -1814,15 +1503,13 @@ write_manifest() {
   "route": "$(state route)",
   "engine": "$ENGINE_NAME",
   "engine_sha256": "$ENGINE_SHA256",
-  "dxmt": "$DXMT_VERSION",
-  "dxmt_d3d11_sha256": "$(sha256 "$COMP/dxmt/x86_64-windows/d3d11.dll")",
-  "winemetal_sha256": "$(sha256 "$COMP/dxmt/x86_64-unix/winemetal.so")",
-  "ntdll_sha256": "$(sha256 "$COMP/heat/ntdll.so")",
-  "wineserver_sha256": "$(sha256 "$COMP/heat/wineserver")",
-  "winemac_sha256": "$(sha256 "$COMP/winemac/winemac.so")",
-  "winemac_pe64_sha256": "$(sha256 "$COMP/winemac/x86_64-windows/winemac.drv")",
-  "winemac_pe32_sha256": "$(sha256 "$COMP/winemac/i386-windows/winemac.drv")",
-  "win32u_sha256": "$(sha256 "$COMP/winemac/win32u.so")",
+  "engine_wine": "$ENGINE_WINE",
+  "engine_fex": "$ENGINE_FEX",
+  "engine_dxmt": "$ENGINE_DXMT",
+  "loader_sha256": "$ENGINE_LOADER_SHA256",
+  "ntdll_sha256": "$ENGINE_NTDLL_SHA256",
+  "dxmt_d3d11_sha256": "$ENGINE_D3D11_SHA256",
+  "winemetal_sha256": "$ENGINE_WINEMETAL_SHA256",
   "app_files": ["$(echo $APP_FILES | sed 's/ /", "/g')"],
   "logs": "$LOGS",
   "caches": ["$CACHE"]
@@ -1845,7 +1532,7 @@ on_install_exit() {
     if [ -n "${FETCH_PID:-}" ]; then wait "$FETCH_PID" 2>/dev/null || true; fi
     if [ -n "${IMPORT_DST:-}" ] && [ -e "$IMPORT_DST" ]; then rm -rf "$IMPORT_DST"; log "removed $IMPORT_DST (install failed)"; fi
     if [ -n "${IMPORT_ACF:-}" ] && [ -e "$IMPORT_ACF" ]; then rm -f "$IMPORT_ACF"; fi
-    rm -rf "$APPDIR"/*.new "$APPDIR/gamemode"/.GW2.app.new.* 2>/dev/null || true
+    rm -rf "$APPDIR"/*.new 2>/dev/null || true
     log "install failed (status $st)"
   fi
   unlock
@@ -1854,7 +1541,7 @@ on_install_exit() {
 # preflight [import]: (an import checks the space its copy needs itself)
 preflight() {
   [ "$(uname -m)" = arm64 ] || die "$APP_NAME needs a Mac with Apple silicon."
-  rosetta_ok || die "Rosetta is not installed. Install it (softwareupdate --install-rosetta in Terminal), then try again."
+  macos_ok || die "$APP_NAME needs macOS $MACOS_MIN or later for its Wine engine. This Mac has macOS $(macos_version). Update macOS in System Settings › General › Software Update, then try again."
   check_not_running
   local avail
   avail=$(free_kb)
@@ -1862,14 +1549,14 @@ preflight() {
   [ "${1:-}" = import ] || [ "$((${avail:-0} * 1024))" -ge "$DISK_NEEDED" ] || warn "Only $(( ${avail:-0} / 1000000 )) GB free: Guild Wars 2 needs about 75 GB."
 }
 
-# The bottle: created once (wineboot), then its settings (registry, dxmt.conf) and Game Mode
+# The bottle: created once (wineboot), then its settings (registry, dxmt.conf)
 install_bottle() {
   if [ ! -f "$BOTTLE/system.reg" ]; then
     say "Creating the game's bottle (wineboot, about a minute)"
     run rm -rf "$BOTTLE"
     run mkdir -p "$BOTTLE"
     CREATED="$CREATED bottle"
-    # no Mono or Gecko: Steam and the game need neither
+    # (no Mono or Gecko: the engine's built-in rules leave both out for every process)
     wine_do wineboot --init || { stop_wine; die "Wine could not create the bottle (details in $LOGS/install.log)."; }
     stop_wine
     [ -n "$DRY" ] || [ -f "$BOTTLE/user.reg" ] || die "Wine did not create the bottle (details in $LOGS/install.log)."
@@ -1881,7 +1568,6 @@ install_bottle() {
   write_dxmt_conf
   say "Bottle settings: Retina mode $(setting retina)"
   apply_registry
-  install_gamemode
 }
 
 install_steam() {
@@ -1914,7 +1600,6 @@ rotate_logs() {
 launch() {
   local e
   game_env
-  gamemode_link
   if [ -n "$DRY" ]; then
     echo "[dry-run] environment:"; for e in "${E[@]}"; do printf '[dry-run]   %s\n' "$e"; done
     echo "[dry-run] wine $*"
@@ -1924,13 +1609,14 @@ launch() {
   mkdir -p "$LOGS"
   if ! session_running; then
     rotate_logs
-    { echo "STARTED=$(date '+%F %T')"; echo "APP=$VERSION"; echo "ROUTE=$(state route)"; echo "DXMT=$DXMT_VERSION"
+    { echo "STARTED=$(date '+%F %T')"; echo "APP=$VERSION"; echo "ROUTE=$(state route)"
+      echo "ENGINE=$ENGINE_NAME"; echo "ENGINE_WINE=$ENGINE_WINE"; echo "ENGINE_FEX=$ENGINE_FEX"; echo "ENGINE_DXMT=$ENGINE_DXMT"
       for k in $SETTING_KEYS; do echo "SETTING_$k=$(setting "$k")"; done
-      printf '%s\n' "${E[@]}" | grep -v '^WINE_COMPATDB='; } >"$LOGS/session.env"
+      printf '%s\n' "${E[@]}"; } >"$LOGS/session.env"
     printf '%s\n' "${E[@]}" | shasum | cut -c1-12 >"$LOGS/session.key"
   fi
   echo "=== $(date '+%F %T') $*" >>"$LOGS/wine.log"
-  ( cd "$BOTTLE" && env -u WINELOADER -u WINESERVER -u DYLD_FALLBACK_LIBRARY_PATH "${E[@]}" \
+  ( cd "$BOTTLE" && env -u WINELOADER -u WINESERVER -u WINEDLLPATH -u DYLD_FALLBACK_LIBRARY_PATH "${COMPATDB_UNSET[@]}" "${E[@]}" \
       nohup "$ENG/bin/wine" "$@" </dev/null >>"$LOGS/wine.log" 2>&1 9>&- & )
   log "started: $*"
 }
@@ -2222,7 +1908,7 @@ cmd_watch_session() {
   game_env
   log "session: asking Steam to quit (steam.exe -shutdown)"
   echo "=== $(date '+%F %T') $STEAM_EXE -shutdown (the game quit)" >>"$LOGS/wine.log"
-  ( cd "$BOTTLE" && env -u WINELOADER -u WINESERVER -u DYLD_FALLBACK_LIBRARY_PATH "${E[@]}" \
+  ( cd "$BOTTLE" && env -u WINELOADER -u WINESERVER -u DYLD_FALLBACK_LIBRARY_PATH "${COMPATDB_UNSET[@]}" "${E[@]}" \
       nohup "$ENG/bin/wine" "$STEAM_EXE" -shutdown </dev/null >>"$LOGS/wine.log" 2>&1 9>&- & )
   now=$(date +%s)
   while :; do
@@ -2264,7 +1950,7 @@ cmd_install() {
     case "$want" in "@done "*) ;; *) echo "$want"; exit 1 ;; esac
   fi
   open_log
-  log "---- install $route${src:+ import $src} $VERSION (dxmt $DXMT_VERSION, engine $ENGINE_NAME) root=${ROOT:-/} dry=${DRY:-0}"
+  log "---- install $route${src:+ import $src} $VERSION (engine $ENGINE_NAME) root=${ROOT:-/} dry=${DRY:-0}"
   phase 1
   step "Checking your Mac"
   preflight ${src:+import}
@@ -2309,13 +1995,12 @@ cmd_install() {
 }
 
 # The finishing touches, once the game is there (game_state): the shader cache's folder, the
-# interface addon, the registry settings, Game Mode, stage=finished
+# interface addon, the registry settings, stage=finished
 finish_touches() {
   say "The shader cache: $DXMT_CACHE (DXMT fills it while you play; warming builds ahead)"
   run mkdir -p "$DXMT_CACHE"
   sync_uiscale
   apply_registry
-  gamemode_current || [ "$(setting gamemode)" != on ] || install_gamemode
   [ -n "$DRY" ] || { set_state stage finished; set_state game_dir "$GAME_DIR"; }
   write_manifest
 }
@@ -2342,8 +2027,8 @@ cmd_stop_waiting() {
   echo "@done Stopped following the game's download. Install picks up from there."
 }
 
-# Repair: the engine (unpacked again if it isn't the expected one), the app's pieces in it,
-# the bottle's settings and Game Mode; Steam again if it is gone; the game and settings stay
+# Repair: the engine (unpacked again if it isn't the expected one), the bottle's settings; Steam
+# again if it is gone; the game and settings stay
 cmd_repair() {
   CREATED="" FETCH_PID=""
   open_log
@@ -2356,9 +2041,8 @@ cmd_repair() {
   trap on_install_exit EXIT
   trap 'exit 143' TERM INT HUP
   step "The Wine engine"
-  if engine_ok && [ "$ENGINE_CHECKS" = 1 ] && [ -f "$ENG/lib/wine/x86_64-unix/wine" ] &&
-    [ "$(sha256 "$ENG/lib/wine/x86_64-unix/wine")" != "$ENGINE_LOADER_SHA256" ]; then
-    warn "The engine's loader changed; unpacking the engine again"
+  if engine_ok && { [ "$(graphics_state)" != yes ] || { [ "$ENGINE_CHECKS" = 1 ] && ! engine_matches "$ENG"; }; }; then
+    warn "The engine's files changed; unpacking the engine again"
     install_engine force
   else
     install_engine
@@ -2375,7 +2059,7 @@ cmd_repair() {
   apply_registry
   write_manifest
   log "repair complete"
-  echo "@done Repaired: the engine, the graphics, the bottle's settings and Game Mode are set up again."
+  echo "@done Repaired: the engine and the bottle's settings are set up again."
 }
 
 cmd_reinstall_engine() {
@@ -2387,8 +2071,7 @@ cmd_reinstall_engine() {
   lock
   trap on_install_exit EXIT
   install_engine force
-  install_gamemode
-  echo "@done The engine was unpacked again with $APP_NAME's pieces."
+  echo "@done The engine was unpacked again."
 }
 
 cmd_reset_shaders() {
@@ -2439,44 +2122,23 @@ cmd_play() {
       case "$rc" in
         0) joined=yes; break ;;
         1) die "Steam is quitting after your last session. Try again in a few seconds." ;;
-        3) [ ! -d "$UPD" ] && [ ! -d "$APPDIR/.lock" ] || die "$APP_NAME is busy putting its new pieces into the engine. Try again in a moment."
-           die "$APP_NAME's last session did not answer. Try again in a few seconds." ;;
+        3) die "$APP_NAME's last session did not answer. Try again in a few seconds." ;;
       esac
       # (2: the lock is free again: the last watcher has ended, this Play takes the session)
     done
     [ "$fresh" = yes ] || [ "$joined" = yes ] || die "$APP_NAME is still busy with the last session. Try again in a few seconds."
   fi
   # This Play's own session (it holds the session's lock: no other Play, session or registry write
-  # until its watcher takes over), with no Wine of the bottle running: an update's new engine
-  # pieces go in (update_components; the manifest follows this version, it names the pieces a later
-  # update counts as its own), then the registry and DXMT's options. A Play that joined a session
-  # changes nothing; without the session helper the registry waits and so does an update.
+  # until its watcher takes over), with no Wine of the bottle running: the manifest follows this
+  # version, then the registry and DXMT's options. A Play that joined a session changes nothing;
+  # without the session helper the registry waits.
   if [ "$fresh" = yes ] && [ -z "$DRY" ]; then SESSION_LOCKED=yes; fi
   if { [ "$fresh" = yes ] || [ -n "$DRY" ] || [ ! -x "$LOCKER" ]; } && ! session_running; then
-    GRAPHICS=$(graphics_state)
-    test_pause play-classified
-    case "$GRAPHICS" in
-      update)
-        if [ -n "$DRY" ]; then echo "[dry-run] the app's new pieces into the engine"
-        elif [ "$fresh" = yes ]; then update_components
-        fi ;;
-      yes) [ "$(json_get "$MANIFEST" version)" = "$VERSION" ] || [ -n "$DRY" ] || write_manifest ;;
-    esac
+    [ "$(json_get "$MANIFEST" version)" = "$VERSION" ] || [ -n "$DRY" ] || write_manifest
     apply_registry
     write_dxmt_conf
   fi
-  # the game starts only on a whole set of the app's pieces (no file missing, no update half done)
-  if [ -z "$DRY" ]; then
-    MISSING=$(components_missing | head -1)
-    [ -z "$MISSING" ] || die "The engine is missing $APP_NAME's $MISSING. Click Repair (with the game and Steam closed)."
-    case "$(graphics_state)" in
-      yes) ;;
-      update)
-        [ ! -d "$UPD" ] || die "$APP_NAME's update of the engine's pieces is not finished. Quit the game and Steam, then click Play again (or Repair)."
-        warn "$APP_NAME's new pieces for the engine go in at the next Play without a running session." ;;
-      *) warn "The engine's graphics are not $APP_NAME's. Click Repair." ;;
-    esac
-  fi
+  [ -n "$DRY" ] || [ "$(graphics_state)" = yes ] || warn "The engine's graphics are not its own. Click Repair."
   # A running session keeps the settings it started with: Steam passes its own environment on
   if session_running && [ -f "$LOGS/session.key" ]; then
     game_env
@@ -2765,7 +2427,6 @@ cmd_show_steam() {
 
 cmd_env() {
   game_env
-  gamemode_link >/dev/null 2>&1 || true
   printf '%s\n' "${E[@]}"
 }
 
@@ -2781,12 +2442,11 @@ cmd_uninstall() {
   trap 'unlock; rmdir "$APPDIR" 2>/dev/null || true' EXIT
   stop_watcher
   [ -n "$DRY" ] || stop_wine
-  remove_gamemode_links
   phase 2
   step "Removing the bottle (Steam and the game in it)"
   if [ -d "$BOTTLE" ]; then run rm -rf "$BOTTLE"; fi
   phase 3
-  step "Removing the engine, Game Mode, the settings and caches"
+  step "Removing the engine, the settings and caches"
   for c in $APP_FILES; do
     if [ -e "$APPDIR/$c" ]; then run rm -rf "${APPDIR:?}/$c"; fi
   done

@@ -46,7 +46,7 @@ STEAM="$BOTTLE/drive_c/Program Files (x86)/Steam"
 DXMT_CACHE="$CACHE/dxmt/Gw2-64.exe"
 STANDIN_LOG="$SANDBOX/standin.log"
 COMP="$APP/Contents/Resources/components"
-mkdir -p "$H" "$SANDBOX/usertmp"
+mkdir -p "$H"
 # Another DXMT setup's caches in the per-user cache folder, which the app must never touch: a
 # stand-in getconf on PATH points DARWIN_USER_CACHE_DIR at the sandbox's usercache/
 USERCACHE="$SANDBOX/usercache/"
@@ -78,7 +78,6 @@ reg() {
     index($0, "[") == 1 { insec = (substr($0, 1, length(k)) == k && substr($0, length(k) + 1, 1) == " ") }
     insec && $0 == n { found = 1 } END { exit !found }' "$BOTTLE/user.reg" 2>/dev/null
 }
-GW2_MAC='Software\\\\Wine\\\\AppDefaults\\\\Gw2-64.exe\\\\Mac Driver'
 ALL_MAC='Software\\\\Wine\\\\Mac Driver'
 same() { cmp -s "$1" "$2"; }
 # the session's file, and waits (up to 10 s) for its watcher to reach a stage or end
@@ -87,30 +86,34 @@ wait_stage() { local i=0; while [ "$(sess stage)" != "$1" ] && [ $i -lt 100 ]; d
 watcher_runs() { local p; p=$(sess watcher_pid); [ -n "$p" ] && kill -0 "$p" 2>/dev/null; }
 watch_done() { local i=0; while { watcher_runs || [ "$(sess stage)" != "done" ]; } && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; ! watcher_runs && [ "$(sess stage)" = "done" ]; }
 
-# --- The stand-in engine: the real engine's layout, files that only pretend
+# --- The stand-in engine: the real engine's layout (Mach9's: the loader in an app bundle, bin/wine
+# and lib/wine/aarch64-unix/wine links to it, the dxmt tree for arm64), files that only pretend
 section "Stand-in engine and downloads"
 S="$SANDBOX/standin/wine"
-mkdir -p "$S/bin" "$S/lib/wine/x86_64-unix" "$S/include" "$S/share/man"
-for a in x86_64-windows i386-windows x86_64-unix; do
+LOADER=lib/wine/aarch64-unix/wine.app/Contents/MacOS/wine
+mkdir -p "$S/bin" "$S/lib/wine/aarch64-unix/wine.app/Contents/MacOS" "$S/include" "$S/share/man" "$S/lib/wine/tests" "$S/lib/wine/x86_64-windows"
+echo "Wine's tests" >"$S/lib/wine/tests/VERSION" && echo "SDK" >"$S/lib/wine/x86_64-windows/libntdll.a"
+for a in aarch64-windows i386-windows aarch64-unix; do
   mkdir -p "$S/lib/wine/dxgi/dxmt/$a"
-  for f in d3d11.dll dxgi.dll d3d10core.dll winemetal.dll d3d10.dll; do echo "engine's $f" >"$S/lib/wine/dxgi/dxmt/$a/$f"; done
+  for f in d3d11.dll dxgi.dll d3d10core.dll winemetal.dll d3d10.dll; do echo "engine's $a $f" >"$S/lib/wine/dxgi/dxmt/$a/$f"; done
 done
-rm -f "$S/lib/wine/dxgi/dxmt/x86_64-unix/"*.dll && echo "engine's winemetal.so" >"$S/lib/wine/dxgi/dxmt/x86_64-unix/winemetal.so"
-for f in ntdll.so winemac.so win32u.so; do echo "engine's $f" >"$S/lib/wine/x86_64-unix/$f"; done
-for a in x86_64-windows i386-windows; do mkdir -p "$S/lib/wine/$a" && echo "engine's $a winemac.drv" >"$S/lib/wine/$a/winemac.drv"; done
-cp /usr/bin/true "$S/lib/wine/x86_64-unix/wine"
+rm -f "$S/lib/wine/dxgi/dxmt/aarch64-unix/"*.dll && echo "engine's winemetal.so" >"$S/lib/wine/dxgi/dxmt/aarch64-unix/winemetal.so"
+echo "engine's ntdll.so" >"$S/lib/wine/aarch64-unix/ntdll.so"
+echo "<plist/>" >"$S/lib/wine/aarch64-unix/wine.app/Contents/Info.plist"
+ln -s ../lib/wine/aarch64-unix/wine.app/Contents/MacOS/wine "$S/bin/wine"
+ln -s wine.app/Contents/MacOS/wine "$S/lib/wine/aarch64-unix/wine"
 cat >"$S/bin/wineserver" <<'EOF'
 #!/bin/bash
 # stand-in wineserver: nothing runs, so -k and -w have nothing to do
 echo "wineserver $*" >>"$STANDIN_LOG"
 EOF
-cat >"$S/bin/wine" <<'EOF'
+cat >"$S/$LOADER" <<'EOF'
 #!/bin/bash
 # stand-in wine: pretends, and logs each start with the environment the game would get
-{ echo "wine $*"; env | grep -E '^(WINE|DXMT_|MTL_|ROSETTA_)' | grep -v '^WINE_COMPATDB' | sort | sed 's/^/  /'; } >>"$STANDIN_LOG"
+{ echo "wine $*"; env | grep -E '^(WINE|DXMT_|MTL_)' | sort | sed 's/^/  /'; } >>"$STANDIN_LOG"
 case "${1:-}" in
   wineboot)
-    mkdir -p "$WINEPREFIX/drive_c/windows/system32" "$WINEPREFIX/drive_c/users/crossover"
+    mkdir -p "$WINEPREFIX/drive_c/windows/system32" "$WINEPREFIX/drive_c/users/$(id -un)"
     printf 'WINE REGISTRY Version 2\n;; All keys relative to \\\\Machine\n' >"$WINEPREFIX/system.reg"
     printf 'WINE REGISTRY Version 2\n;; All keys relative to \\\\User\\\\S-1-5-21\n\n[Software\\\\Wine] 1700000000\n#time=1\n' >"$WINEPREFIX/user.reg"
     cp "$WINEPREFIX/system.reg" "$WINEPREFIX/userdef.reg" ;;
@@ -123,8 +126,10 @@ case "${1:-}" in
     if [ "${2:-}" = -shutdown ] && [ ! -e "$d/steam.stubborn" ] && [ -f "$d/steam.pid" ]; then kill "$(cat "$d/steam.pid")" 2>/dev/null || true; fi ;;
 esac
 EOF
-chmod 755 "$S/bin/wine" "$S/bin/wineserver"
+chmod 755 "$S/$LOADER" "$S/bin/wineserver"
 export STANDIN_LOG
+# (the bottle's Windows user, named after the Mac's user as upstream Wine does)
+BUSER="$(id -un)"
 ( cd "$SANDBOX/standin" && tar -cJf ../engine.tar.xz wine )
 echo "stand-in SteamSetup.exe" >"$SANDBOX/SteamSetup.exe"
 export GW2_ON_MAC_ROOT="$SANDBOX"
@@ -133,15 +138,12 @@ GW2_ON_MAC_ENGINE_SHA256="$(shasum -a 256 "$SANDBOX/engine.tar.xz" | cut -d' ' -
 GW2_ON_MAC_ENGINE_SIZE="$(stat -f %z "$SANDBOX/engine.tar.xz")"
 export GW2_ON_MAC_ENGINE_SHA256 GW2_ON_MAC_ENGINE_SIZE
 export GW2_ON_MAC_ENGINE_CHECKS=0
-# (the stand-in engine's own winemac.drv, below)
-GW2_ON_MAC_WINEMAC_PE64_STOCK="$(echo "engine's x86_64-windows winemac.drv" | shasum -a 256 | cut -d' ' -f1)"
-GW2_ON_MAC_WINEMAC_PE32_STOCK="$(echo "engine's i386-windows winemac.drv" | shasum -a 256 | cut -d' ' -f1)"
-export GW2_ON_MAC_WINEMAC_PE64_STOCK GW2_ON_MAC_WINEMAC_PE32_STOCK
-# (stand-ins for an earlier version's files, see "An update of the app")
-export GW2_ON_MAC_OLD_COMPONENTS="$SANDBOX/old-components" OLDC="$SANDBOX/old-components"
-: >"$OLDC"
+# (the stand-in engine's own DXMT: graphics=yes)
+GW2_ON_MAC_ENGINE_D3D11_SHA256="$(shasum -a 256 "$S/lib/wine/dxgi/dxmt/aarch64-windows/d3d11.dll" | cut -d' ' -f1)"
+GW2_ON_MAC_ENGINE_WINEMETAL_SHA256="$(shasum -a 256 "$S/lib/wine/dxgi/dxmt/aarch64-unix/winemetal.so" | cut -d' ' -f1)"
+export GW2_ON_MAC_ENGINE_D3D11_SHA256 GW2_ON_MAC_ENGINE_WINEMETAL_SHA256
 export GW2_ON_MAC_STEAMSETUP_URL="file://$SANDBOX/SteamSetup.exe"
-unset GW2_ON_MAC_DRY_RUN GW2_ON_MAC_ALLOW_WINE GW2_ON_MAC_SIGNER
+unset GW2_ON_MAC_DRY_RUN GW2_ON_MAC_ALLOW_WINE GW2_ON_MAC_SIGNER GW2_ON_MAC_MACOS GW2_ON_MAC_ENGINE_LOADER_SHA256 GW2_ON_MAC_ENGINE_NTDLL_SHA256
 # the session's watcher (play starts it), with its times shortened: a 2 s grace, 2 s for Steam to
 # quit, a look every 0.2 s (the 15 minutes for the game to appear only in the timeout check)
 export GW2_ON_MAC_WATCH_GRACE=2 GW2_ON_MAC_WATCH_QUITWAIT=2 GW2_ON_MAC_WATCH_POLL=0.2 GW2_ON_MAC_WATCH_TIMEOUT=60
@@ -152,16 +154,42 @@ section "Dry runs"
 out=$(GW2_ON_MAC_DRY_RUN=1 g install steam 2>&1); rc=$?
 check "dry-run install steam exits 0" [ "$rc" = 0 ]
 check "dry-run install steam reaches phase 4" has <(echo "$out") "@phase 4"
-check "dry-run prints the game's environment" has <(echo "$out") "WINE_HEAT_EVPOOL=1"
+check "dry-run prints the game's environment" has <(echo "$out") "WINEPREFIX=$BOTTLE"
+check "  with no WINE_COMPATDB" eval '! echo "$out" | grep -q WINE_COMPATDB'
 check "dry-run creates nothing" eval '[ ! -e "$AD" ] && [ ! -e "$CACHE" ]'
 check "fresh status: not installed" [ "$(st installed)" = no ]
 check "fresh status: no engine" [ "$(st engine_installed)" = no ]
-check "fresh status: rosetta answered" [ -n "$(st rosetta)" ]
+check "fresh status: the engine's pins (Mach9 0.3.1: Wine, FEX, DXMT commits)" \
+  [ "$(st engine)/$(st engine_wine)/$(st engine_fex)/$(st engine_dxmt)" = mach9-v0.3.1/53def89293a/9d4fa4b46b1/d903db89036 ]
+check "fresh status: gamemode=engine (the engine's loader)" [ "$(st gamemode)" = engine ]
 check "fresh status: disk_free is a number" [ "$(st disk_free)" -gt 0 ]
 out=$(env -u GW2_ON_MAC_ENGINE_URL -u GW2_ON_MAC_ENGINE_SHA256 -u GW2_ON_MAC_ENGINE_SIZE GW2_ON_MAC_DRY_RUN=1 "$G" install steam 2>&1)
-check "dry-run without the stand-in: the real engine from jdrly/wine-engine" \
-  has <(echo "$out") "^\[dry-run\] download https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz (234978748 bytes"
+check "dry-run without the stand-in: the real engine, Mach9 0.3.1 from athei/mach9" \
+  has <(echo "$out") "^\[dry-run\] download https://github.com/athei/mach9/releases/download/v0.3.1/wine-v0.3.1-macos-arm64.tar.xz (128991668 bytes, sha256 90aff9a897ed0ff9aac44d0e06f0aecd3ee985afb38037f3f915451e51fa974e)"
+check "  no WINE_COMPATDB, no WINEDLLPATH" eval '! echo "$out" | grep -q -e WINE_COMPATDB -e WINEDLLPATH'
 check "  and still nothing created" eval '[ ! -e "$AD" ] && [ ! -e "$CACHE" ]'
+
+section "macOS and the engine's checks (nothing is left behind)"
+check "status: macOS 26.3 is below the engine's 26.4" [ "$(GW2_ON_MAC_MACOS=26.3 "$G" status | sed -n 's/^macos_ok=//p')/$(st macos_min)" = no/26.4 ]
+check "  26.4 and 27.0 are not" [ "$(GW2_ON_MAC_MACOS=26.4 "$G" status | sed -n 's/^macos_ok=//p')/$(GW2_ON_MAC_MACOS=27.0 "$G" status | sed -n 's/^macos_ok=//p')" = yes/yes ]
+out=$(GW2_ON_MAC_MACOS=26.3 g install steam 2>&1) && rc=0 || rc=$?
+check "install on macOS 26.3: refused, naming both versions, nothing created" \
+  eval '[ "$rc" != 0 ] && echo "$out" | grep -qxF "@error $APP_NAME needs macOS 26.4 or later for its Wine engine. This Mac has macOS 26.3. Update macOS in System Settings › General › Software Update, then try again." && [ ! -e "$ENG" ] && [ ! -e "$AD/state" ]'
+# With the checks on (as outside a sandbox), against the stand-in's own files: the real engine's
+# Wine never runs in a sandbox, and these installs stop at the engine
+LOADER_SHA=$(shasum -a 256 "$S/$LOADER" | cut -d' ' -f1)
+NTDLL_SHA=$(shasum -a 256 "$S/lib/wine/aarch64-unix/ntdll.so" | cut -d' ' -f1)
+: >"$STANDIN_LOG"
+out=$(GW2_ON_MAC_ENGINE_CHECKS=1 GW2_ON_MAC_ENGINE_LOADER_SHA256=$(echo "another loader" | shasum -a 256 | cut -d' ' -f1) \
+  GW2_ON_MAC_ENGINE_NTDLL_SHA256="$NTDLL_SHA" "$G" install steam 2>&1) && rc=0 || rc=$?
+check "a loader that isn't the expected one: refused, no engine, no Wine started" \
+  eval '[ "$rc" != 0 ] && echo "$out" | grep -qxF "@error The unpacked Wine engine does not match the expected build." && [ ! -e "$ENG" ] && [ ! -e "$ENG.new" ] && [ ! -s "$STANDIN_LOG" ]'
+out=$(GW2_ON_MAC_ENGINE_CHECKS=1 GW2_ON_MAC_ENGINE_LOADER_SHA256="$LOADER_SHA" GW2_ON_MAC_ENGINE_NTDLL_SHA256="$NTDLL_SHA" "$G" install steam 2>&1) && rc=0 || rc=$?
+check "the expected hashes, but wine.app isn't signed by Mach9's team: refused the same way" \
+  eval '[ "$rc" != 0 ] && echo "$out" | grep -qxF "@error The unpacked Wine engine does not match the expected build." && [ ! -e "$ENG" ] && [ ! -s "$STANDIN_LOG" ]'
+check "  nothing left of those installs but the verified download and the log" \
+  eval '[ -z "$(ls -A "$AD" 2>/dev/null)" ] && [ "$(ls "$CACHE/downloads")" = engine.tar.xz ]'
+rm -rf "$CACHE"
 
 # --- Steam route
 section "Install through Steam"
@@ -170,7 +198,8 @@ section "Install through Steam"
 mkdir -p "$CACHE/downloads" && echo "not the engine" >"$CACHE/downloads/engine.tar.xz"
 WRONG_SHA=$(shasum -a 256 "$CACHE/downloads/engine.tar.xz" | cut -d' ' -f1)
 ENGINE_BYTES=$(echo "$GW2_ON_MAC_ENGINE_SIZE" | sed -e :a -e 's/^\([0-9]\{1,\}\)\([0-9]\{3\}\)/\1,\2/;ta')   # (with thousands commas)
-out=$(g install steam 2>&1) && rc=0 || rc=$?
+# (and compatdb variables the app may have inherited, which the install's Wine calls drop)
+out=$(WINE_COMPATDB='exe=*;dxgi=wined3d' WINE_COMPATDB_FILE=/tmp/x WINE_LARGE_ADDRESS_AWARE=1 WINE_PROF_SERVICE=1 g install steam 2>&1) && rc=0 || rc=$?
 check "install steam exits 0" [ "$rc" = 0 ]
 check "the wrong file in the downloads: the window names it, its size and sha256 against the engine's" eval 'echo "$out" | grep -qxF "@warn engine.tar.xz in $CACHE/downloads is not the Wine engine. It has 15 bytes and a sha256 starting ${WRONG_SHA:0:12}, the Wine engine has $ENGINE_BYTES bytes and a sha256 starting ${GW2_ON_MAC_ENGINE_SHA256:0:12}. $APP_NAME renamed your file to engine.tar.xz.wrong and downloads the Wine engine itself."'
 check "  moved aside as engine.tar.xz.wrong, then the engine downloaded" eval 'has "$CACHE/downloads/engine.tar.xz.wrong" "not the engine" && echo "$out" | grep -q "^Downloading Wine engine from"'
@@ -178,37 +207,29 @@ check "the phases 1-4 in order" [ "$(echo "$out" | grep '^@phase' | tr '\n' ' ')
 check "@progress lines for the engine" has <(echo "$out") "@progress Wine engine"
 check "installed=yes" [ "$(st installed)" = yes ]
 check "engine_installed=yes" [ "$(st engine_installed)" = yes ]
-check "graphics=yes (DXMT and the Wine pieces in place)" [ "$(st graphics)" = yes ]
-check "gamemode=yes" [ "$(st gamemode)" = yes ]
+check "graphics=yes (the engine's own DXMT)" [ "$(st graphics)" = yes ]
+check "gamemode=engine" [ "$(st gamemode)" = engine ]
 check "steam=yes" [ "$(st steam)" = yes ]
 check "stage=waiting_game" [ "$(st stage)" = waiting_game ]
 check "route=steam" [ "$(st route)" = steam ]
 check "game=no yet" [ "$(st game)" = no ]
-check "DXMT's d3d11.dll in the engine's dxmt tree" same "$COMP/dxmt/x86_64-windows/d3d11.dll" "$ENG/lib/wine/dxgi/dxmt/x86_64-windows/d3d11.dll"
-check "DXMT's winemetal.so in the tree" same "$COMP/dxmt/x86_64-unix/winemetal.so" "$ENG/lib/wine/dxgi/dxmt/x86_64-unix/winemetal.so"
-check "the engine's own d3d10.dll stays in the tree" has "$ENG/lib/wine/dxgi/dxmt/x86_64-windows/d3d10.dll" "engine's"
-check "heat ntdll.so in, the engine's kept as .stock" eval 'same "$COMP/heat/ntdll.so" "$ENG/lib/wine/x86_64-unix/ntdll.so" && has "$ENG/lib/wine/x86_64-unix/ntdll.so.stock" "engine"'
-check "wineserver in, the stand-in kept as .stock" eval 'same "$COMP/heat/wineserver" "$ENG/bin/wineserver" && [ -f "$ENG/bin/wineserver.stock" ]'
-check "winemac.so and win32u.so in" eval 'same "$COMP/winemac/winemac.so" "$ENG/lib/wine/x86_64-unix/winemac.so" && same "$COMP/winemac/win32u.so" "$ENG/lib/wine/x86_64-unix/win32u.so"'
-for a in x86_64-windows i386-windows; do
-  check "the Mac driver's $a/winemac.drv in (goes with that winemac.so), the engine's kept as .stock" \
-    eval 'same "$COMP/winemac/$a/winemac.drv" "$ENG/lib/wine/$a/winemac.drv" && has "$ENG/lib/wine/$a/winemac.drv.stock" "engine"'
-done
-check "the engine's SDK removed" eval '[ ! -e "$ENG/include" ] && [ ! -e "$ENG/share/man" ]'
-check "RetinaMode=y in the bottle" reg 'Software\\\\Wine\\\\Mac Driver' RetinaMode y
-check "Gw2-64.exe's Mac driver: RawMouseWhenCursorHidden=y (raw mouse-look on)" reg "$GW2_MAC" RawMouseWhenCursorHidden y
-check "  RawMouseGameControllerScale=1 (mouse-look speed 1x)" reg "$GW2_MAC" RawMouseGameControllerScale 1
-check "  no PhysicalKeyboard (the driver's game keys by keyboard position stay inert)" noreg "$GW2_MAC" PhysicalKeyboard
-check "  none of them for every program (Wine's Mac Driver key)" eval 'noreg "$ALL_MAC" RawMouseWhenCursorHidden && noreg "$ALL_MAC" RawMouseGameControllerScale && noreg "$ALL_MAC" PhysicalKeyboard'
-check "Game Mode bundle with LSSupportsGameMode" has "$AD/gamemode/GW2.app/Contents/Info.plist" LSSupportsGameMode
-check "Game Mode bundle's ntdll.so link resolves" [ -f "$AD/gamemode/GW2.app/Contents/MacOS/ntdll.so" ]
+# (the engine as it ships: every file the stand-in's, minus the SDK, plus the app's record of the
+# archive; nothing of the app's in it)
+engine_diff() { diff -rq "$S" "$ENG" 2>&1 | sed -e "s|$S|S|g" -e "s|$ENG|E|g" | LC_ALL=C sort | tr '\n' '|'; }
+SDK_DIFF="Only in E: .gw2om-source|Only in S/lib/wine: tests|Only in S/lib/wine: x86_64-windows|Only in S/share: man|Only in S: include|"
+check "the engine is the stand-in as it ships, without its SDK (include, tests, x86_64-windows, man)" [ "$(engine_diff)" = "$SDK_DIFF" ]
+check "  bin/wine and lib/wine/aarch64-unix/wine still link to the loader in wine.app" \
+  eval '[ "$(readlink "$ENG/bin/wine")" = ../$LOADER ] && [ "$(readlink "$ENG/lib/wine/aarch64-unix/wine")" = wine.app/Contents/MacOS/wine ]'
+check "  no Game Mode bundle (the engine's loader is the Game Mode app)" [ ! -e "$AD/gamemode" ]
+check "RetinaMode=y in the bottle" reg "$ALL_MAC" RetinaMode y
+check "EmulateModeset=Y" reg 'Software\\\\Wine\\\\X11 Driver' EmulateModeset Y
+check "ShowCrashDialog=dword:0" eval 'regsec "Software\\\\\\\\Wine\\\\\\\\WineDbg" | grep -qx "\"ShowCrashDialog\"=dword:00000000"'
+check "  nothing for Gw2-64.exe (AppDefaults) and no raw mouse-look values" sh -c "! grep -q -e AppDefaults -e RawMouse '$BOTTLE/user.reg'"
+check "wineboot with WINEMSYNC=1 and winemenubuilder off, nothing else of the app's" \
+  eval '[ "$(awk "/^wine wineboot/ { f = 1; next } /^[^ ]/ { f = 0 } f" "$STANDIN_LOG" | sed "s/^  //" | tr "\n" "|")" = "WINEDEBUG=-all|WINEDLLOVERRIDES=winemenubuilder.exe=d|WINEMSYNC=1|WINEPREFIX=$BOTTLE|" ]'
+check "  no inherited compatdb variable reached any of the install's Wine starts" sh -c "! grep -q -e WINE_COMPATDB -e WINE_LARGE_ADDRESS_AWARE -e WINE_PROF_SERVICE '$STANDIN_LOG'"
 check "Steam started with the install page" has "$STANDIN_LOG" 'wine C:\\Program Files (x86)\\Steam\\steam.exe steam://install/1284210'
-check "  with the heat event pool" has "$STANDIN_LOG" "WINE_HEAT_EVPOOL=1"
-check "  with shader warming by use" has "$STANDIN_LOG" "DXMT_WARM=all"
-check "  with 3 cooler workers" has "$STANDIN_LOG" "WINE_HEAT_QOS=1=utility:3"
-check "  with WINEDLLPATH (Game Mode)" has "$STANDIN_LOG" "WINEDLLPATH=$ENG/lib/wine"
-check "  with x87sidecar off" has "$STANDIN_LOG" "ROSETTA_X87_PATH="
-check "the Game Mode link in the sandbox's temp folder" sh -c "ls '$SANDBOX/usertmp/'winetemp-*/Gw2-64.exe >/dev/null 2>&1"
+check "  without WINEDLLPATH" sh -c "! grep -q WINEDLLPATH '$STANDIN_LOG'"
 check "logs/session.env written" has "$LOGS/session.env" "SETTING_warm=on"
 check "the manifest" has "$AD/install-manifest.json" '"route": "steam"'
 check "install.log" has "$LOGS/install.log" "install steam"
@@ -260,36 +281,32 @@ check "set metalfx on: DXMT_SUBSAMPLE_METALFX=1" sh -c "'$G' set metalfx on >/de
 check "set hud on: WINE_HEAT_METAL_HUD=1, no MTL_HUD_ENABLED in Steam's environment" sh -c "'$G' set hud on >/dev/null && '$G' env | grep -qx WINE_HEAT_METAL_HUD=1 && ! '$G' env | grep -q MTL_HUD_ENABLED"
 check "set hud off: no WINE_HEAT_METAL_HUD" sh -c "'$G' set hud off >/dev/null && ! '$G' env | grep -q WINE_HEAT_METAL_HUD"
 check "set debug on: DXMT_LOG_LEVEL=debug and the heat counters" sh -c "'$G' set debug on >/dev/null && '$G' env | grep -qx DXMT_LOG_LEVEL=debug && '$G' env | grep -qx WINE_HEAT_COUNT=1"
-g set retina off >/dev/null; check "set retina off: RetinaMode=n" reg 'Software\\\\Wine\\\\Mac Driver' RetinaMode n
-g set retina on >/dev/null; check "set retina on: RetinaMode=y" reg 'Software\\\\Wine\\\\Mac Driver' RetinaMode y
-check "  d3d11 addons (arcdps) load first for Gw2-64.exe" reg 'Software\\\\Wine\\\\AppDefaults\\\\Gw2-64.exe\\\\DllOverrides' d3d11 native,builtin
-check "  so do dxgi.dll addons" reg 'Software\\\\Wine\\\\AppDefaults\\\\Gw2-64.exe\\\\DllOverrides' dxgi native,builtin
-check "  the default order for every other program" noreg 'Software\\\\Wine\\\\DllOverrides' d3d11
-check "set gamemode off: no WINEDLLPATH" sh -c "'$G' set gamemode off >/dev/null && ! '$G' env | grep -q WINEDLLPATH && [ \"\$('$G' status | sed -n 's/^gamemode=//p')\" = off ]"
+g set retina off >/dev/null; check "set retina off: RetinaMode=n" reg "$ALL_MAC" RetinaMode n
+g set retina on >/dev/null; check "set retina on: RetinaMode=y" reg "$ALL_MAC" RetinaMode y
+check "  one value (not added twice)" [ "$(grep -c '^"RetinaMode"=' "$BOTTLE/user.reg")" = 1 ]
+check "set gamemode off: still gamemode=engine, no WINEDLLPATH (nothing to switch)" sh -c "'$G' set gamemode off >/dev/null && ! '$G' env | grep -q WINEDLLPATH && [ \"\$('$G' status | sed -n 's/^gamemode=//p')\" = engine ]"
 g set gamemode on >/dev/null
 check "settings: rawmouse=on, mousespeed=1 by default" [ "$(sett rawmouse)/$(sett mousespeed)" = on/1 ]
 check "  no physkeys setting (refused, exit 2; not in the settings)" sh -c "'$G' set physkeys on >/dev/null; [ \$? = 2 ] && ! '$G' settings | grep -q '^physkeys='"
-g set rawmouse off >/dev/null; check "set rawmouse off: RawMouseWhenCursorHidden=n" reg "$GW2_MAC" RawMouseWhenCursorHidden n
-g set mousespeed 2.5 >/dev/null; check "set mousespeed 2.5: RawMouseGameControllerScale=2.5" reg "$GW2_MAC" RawMouseGameControllerScale 2.5
-check "  one value each (not added twice)" [ "$(grep -c '^"RawMouseWhenCursorHidden"=' "$BOTTLE/user.reg")/$(grep -c '^"RawMouseGameControllerScale"=' "$BOTTLE/user.reg")" = 1/1 ]
+g set rawmouse off >/dev/null; g set mousespeed 2.5 >/dev/null
+check "set rawmouse off, mousespeed 2.5: saved, and nothing in the registry (this engine reads the mouse itself)" \
+  eval '[ "$(sett rawmouse)/$(sett mousespeed)" = off/2.5 ] && ! grep -q RawMouse "$BOTTLE/user.reg"'
 check "mousespeed 4 refused (exit 2)" sh -c "'$G' set mousespeed 4 >/dev/null; [ \$? = 2 ]"
 check "rawmouse maybe refused (exit 2)" sh -c "'$G' set rawmouse maybe >/dev/null; [ \$? = 2 ]"
-check "  the registry keeps 2.5" reg "$GW2_MAC" RawMouseGameControllerScale 2.5
 check "the mouse settings are not in the game's environment" sh -c "! '$G' env | grep -qiE 'physical|rawmouse|mousespeed'"
 g set rawmouse on >/dev/null; g set mousespeed 1 >/dev/null
-check "  back to on, 1, and still no PhysicalKeyboard" eval 'reg "$GW2_MAC" RawMouseWhenCursorHidden y && reg "$GW2_MAC" RawMouseGameControllerScale 1 && noreg "$GW2_MAC" PhysicalKeyboard'
 # A Play holds the session's lock from before it starts Wine (and its watcher for the session): a
 # setting saved meanwhile leaves user.reg alone, and a Play can't start while a registry write
 # holds the lock (the same flock, one holder at a time)
 "$APP/Contents/Resources/helpers/sessionlock" hold "$AD/.session.lock" 30 & hp=$!
 i=0; until "$APP/Contents/Resources/helpers/sessionlock" held "$AD/.session.lock" || [ $i -ge 50 ]; do sleep 0.1; i=$((i + 1)); done
-check "set rawmouse off while a Play holds the session's lock: saved" sh -c "'$G' set rawmouse off | grep -q '@done' && [ \"\$('$G' settings | sed -n 's/^rawmouse=//p')\" = off ]"
-check "  but the registry is left alone" reg "$GW2_MAC" RawMouseWhenCursorHidden y
+check "set retina off while a Play holds the session's lock: saved" sh -c "'$G' set retina off | grep -q '@done' && [ \"\$('$G' settings | sed -n 's/^retina=//p')\" = off ]"
+check "  but the registry is left alone" reg "$ALL_MAC" RetinaMode y
 check "  and the lock is still the Play's" "$APP/Contents/Resources/helpers/sessionlock" held "$AD/.session.lock"
 kill $hp 2>/dev/null; wait $hp 2>/dev/null
-check "  once it's free, a setting writes the registry and lets the lock go" sh -c "'$G' set mousespeed 1 >/dev/null && ! '$APP/Contents/Resources/helpers/sessionlock' held '$AD/.session.lock'"
-check "  RawMouseWhenCursorHidden=n" reg "$GW2_MAC" RawMouseWhenCursorHidden n
-g set rawmouse on >/dev/null
+check "  once it's free, a setting writes the registry and lets the lock go" sh -c "'$G' set retina off >/dev/null && ! '$APP/Contents/Resources/helpers/sessionlock' held '$AD/.session.lock'"
+check "  RetinaMode=n" reg "$ALL_MAC" RetinaMode n
+g set retina on >/dev/null
 check "set launchopts -maploadinfo" g set launchopts "-maploadinfo"
 check "launchopts with a ; refused" sh -c "! '$G' set launchopts '-x; rm -rf /' >/dev/null"
 check "unknown value refused (exit 2)" sh -c "'$G' set fpscap 45 >/dev/null; [ \$? = 2 ]"
@@ -302,13 +319,11 @@ check "uiscale_state=off by default" [ "$(sett uiscale_state)" = off ]
 check "set uiscale on" g set uiscale on
 check "  version.dll in the game folder" same "$COMP/ui-scale/version.dll" "$GD/version.dll"
 check "  the ini: scale 1.75, sans cronos, cinema 1" sh -c "grep -qx 'scale=1.75' '$GD/gw2-ui-scale.ini' && grep -qx 'sans=cronos' '$GD/gw2-ui-scale.ini' && grep -qx 'cinema=1' '$GD/gw2-ui-scale.ini'"
-check "  the override for Gw2-64.exe" reg 'Software\\\\Wine\\\\AppDefaults\\\\Gw2-64.exe\\\\DllOverrides' version native,builtin
+check "  no registry override for it (the game's compatdb rules carry that on this line)" sh -c "! grep -q AppDefaults '$BOTTLE/user.reg'"
 check "  uiscale_state=on" [ "$(sett uiscale_state)" = on ]
 check "set uiscale_size 2.0 and sans off: the ini follows" sh -c "'$G' set uiscale_size 2.0 >/dev/null && '$G' set uiscale_sans off >/dev/null && grep -qx 'scale=2.0' '$GD/gw2-ui-scale.ini' && grep -qx 'sans=keep' '$GD/gw2-ui-scale.ini'"
 echo "addon log" >"$GD/gw2-ui-scale.log"
-check "set uiscale off: dll, ini and override gone, the log moved to Logs" sh -c "'$G' set uiscale off >/dev/null && [ ! -e '$GD/version.dll' ] && [ ! -e '$GD/gw2-ui-scale.ini' ] && [ ! -e '$GD/gw2-ui-scale.log' ] && ls '$LOGS'/gw2-ui-scale-*.log >/dev/null"
-check "  the override removed" sh -c "! grep -q '^\"version\"=' '$BOTTLE/user.reg'"
-check "  the d3d11 addon order stays" reg 'Software\\\\Wine\\\\AppDefaults\\\\Gw2-64.exe\\\\DllOverrides' d3d11 native,builtin
+check "set uiscale off: dll and ini gone, the log moved to Logs" sh -c "'$G' set uiscale off >/dev/null && [ ! -e '$GD/version.dll' ] && [ ! -e '$GD/gw2-ui-scale.ini' ] && [ ! -e '$GD/gw2-ui-scale.log' ] && ls '$LOGS'/gw2-ui-scale-*.log >/dev/null"
 echo "another addon" >"$GD/version.dll"
 check "another version.dll: uiscale_state=foreign" [ "$(sett uiscale_state)" = foreign ]
 g set uiscale on >/dev/null 2>&1 || true
@@ -356,7 +371,6 @@ check "set arcdps on: downloads it (with progress) and says so" eval '[ "$rc" = 
 check "  d3d11.dll next to Gw2-64.exe is the published file" same "$ARCSRV/d3d11.dll" "$GD/d3d11.dll"
 check "  arcdps=on, arcdps_state=on" [ "$(st arcdps)/$(arcst)" = on/on ]
 check "  nothing left in the downloads, no temporary file in the game folder" eval '[ ! -e "$CACHE/downloads/arcdps" ] && ! ls -a "$GD" | grep -q gw2om-new'
-check "  the d3d11 addon order is set for Gw2-64.exe" reg 'Software\\\\Wine\\\\AppDefaults\\\\Gw2-64.exe\\\\DllOverrides' d3d11 native,builtin
 check "set arcdps on again: already there" sh -c "'$G' set arcdps on | grep -q 'already in the game folder'"
 # arcdps updates itself: a newer arcdps (another hash) still counts as arcdps
 printf 'self-updated\n' >>"$GD/d3d11.dll"
@@ -381,9 +395,9 @@ check "  set arcdps off leaves it alone too" sh -c "'$G' set arcdps off | grep -
 mv "$GD/d3d11.dll" "$GD/dxgi.dll"
 check "  another addon's dxgi.dll: foreign as well" eval '[ "$(arcst)" = foreign ] && ! "$G" set arcdps on >/dev/null 2>&1 && same "$SANDBOX/pe/nexus.dll" "$GD/dxgi.dll"'
 rm -f "$GD/dxgi.dll"
-# DXMT's own d3d11.dll (a real PE, other exports) is not arcdps either
-cp "$COMP/dxmt/x86_64-windows/d3d11.dll" "$GD/d3d11.dll"
-check "a real d3d11.dll that isn't arcdps (DXMT's): foreign" [ "$(arcst)" = foreign ]
+# a real PE DLL with other exports (the app's own interface addon) is not arcdps either
+cp "$COMP/ui-scale/version.dll" "$GD/d3d11.dll"
+check "a real d3d11.dll that isn't arcdps (the interface addon): foreign" [ "$(arcst)" = foreign ]
 rm -f "$GD/d3d11.dll"
 # the real arcdps, if my development workspace has a copy (only read)
 ARCDPS_REAL="${ARCDPS_REAL:-$WS/work/arcdps/2026-11-08/d3d11.dll}"
@@ -424,10 +438,10 @@ check "  with DXMT's caches in the app's cache folder (DXMT_CACHE_DIR)" grep -qx
 check "  env has DXMT_CACHE_DIR too" sh -c "'$G' env | grep -qxF 'DXMT_CACHE_DIR=$CACHE'"
 
 section "Collect Logs (redaction and the leak check)"
-mkdir -p "$STEAM/config" "$STEAM/logs" "$BOTTLE/drive_c/users/crossover/AppData/Roaming/Guild Wars 2"
+mkdir -p "$STEAM/config" "$STEAM/logs" "$BOTTLE/drive_c/users/$BUSER/AppData/Roaming/Guild Wars 2"
 printf '"users"\n{\n\t"76561198000000042"\n\t{\n\t\t"AccountName"\t\t"zz_acct_name"\n\t\t"PersonaName"\t\t"Zz Persona Q"\n\t}\n}\n' >"$STEAM/config/loginusers.vdf"
 printf '[2026-11-04] AppID 1284210 update started : download 0/58900000000\nUser zz_acct_name (76561198000000042) [U:1:39734314] logged in, path %s\n' "$HOME/Library" >"$STEAM/logs/content_log.txt"
-printf 'Crash\nName: ZZ-MACHINE\nIpAddr: 192.168.77.5\nLogin: zz.person@example.com\nException: c0000005\n' >"$BOTTLE/drive_c/users/crossover/AppData/Roaming/Guild Wars 2/ArenaNet.log"
+printf 'Crash\nName: ZZ-MACHINE\nIpAddr: 192.168.77.5\nLogin: zz.person@example.com\nException: c0000005\n' >"$BOTTLE/drive_c/users/$BUSER/AppData/Roaming/Guild Wars 2/ArenaNet.log"
 printf 'started by %s from %s/Library, mail zz.person@example.com, token=abcDEF123secret\n' "$(id -un)" "$HOME" >>"$LOGS/wine.log"
 printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60\ninfo:  STATS fps=60.0 ms=16.7/24.8 cb=1.1 rp=31.7(+0.0 merged) encode=0.23+1.03/10.3\ninfo:  HITCH frame=52 ms=120.0 dxmt(ms/calls): create=4.0/37 flush=3.5/1\n' >"$LOGS/Gw2-64_d3d11.log"
 mkdir -p "$GD/addons/arcdps" && printf 'crash\nself: Zz Charname Q, zz_arc_acct.1234\n' >"$GD/addons/arcdps/arcdps_lastcrash.log"
@@ -488,20 +502,19 @@ sleep 0.3
 check "busy=session with the engine's wineserver" [ "$(st busy)" = session ]
 check "uninstall refused while it runs" sh -c "! '$G' uninstall >/dev/null 2>&1"
 check "repair refused while it runs" sh -c "! '$G' repair >/dev/null 2>&1"
-check "set rawmouse off while it runs: saved" sh -c "'$G' set rawmouse off | grep -q 'after Steam has quit' && [ \"\$('$G' settings | sed -n 's/^rawmouse=//p')\" = off ]"
-check "  but the registry waits (Wine reads it at the session's start)" reg "$GW2_MAC" RawMouseWhenCursorHidden y
+check "set retina off while it runs: saved" sh -c "'$G' set retina off | grep -q 'after Steam has quit' && [ \"\$('$G' settings | sed -n 's/^retina=//p')\" = off ]"
+check "  but the registry waits (Wine reads it at the session's start)" reg "$ALL_MAC" RetinaMode y
 check "set arcdps on while it runs: refused, nothing placed" eval '! "$G" set arcdps on >"$SANDBOX/arc.txt" 2>&1 && has "$SANDBOX/arc.txt" "Quit Guild Wars 2 and Steam first" && [ ! -e "$STEAM/steamapps/common/Guild Wars 2/d3d11.dll" ]'
 kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
 mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
-mv "$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe" "$SANDBOX/gw2-loader-copy"
-cp "$SANDBOX/sleeper" "$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe"
-"$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe" 60 & gp=$!
+cp "$SANDBOX/sleeper" "$ENG/bin/Gw2-64.exe"
+"$ENG/bin/Gw2-64.exe" 60 & gp=$!
 sleep 0.3
-check "busy=game with the Game Mode bundle's Gw2-64.exe running" [ "$(st busy)" = game ]
+check "busy=game with a Gw2-64.exe of the engine running" [ "$(st busy)" = game ]
 check "play brings it up instead of starting another" sh -c "'$G' play | grep -q 'already running'"
 check "reset-shaders refused while the game runs" sh -c "! '$G' reset-shaders >/dev/null 2>&1"
 kill $gp 2>/dev/null || true; wait $gp 2>/dev/null || true
-mv -f "$SANDBOX/gw2-loader-copy" "$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe"
+rm -f "$ENG/bin/Gw2-64.exe"
 check "busy=none again" [ "$(st busy)" = none ]
 
 section "Steam quits after the game (watch-session)"
@@ -653,16 +666,16 @@ kill $hp 2>/dev/null; wait $hp 2>/dev/null
 LK="$APP/Contents/Resources/helpers/sessionlock"
 check "helpers/sessionlock is bundled and signed" eval '[ -x "$LK" ] && codesign --verify "$LK" 2>/dev/null'
 watch_done
-g set rawmouse on >/dev/null   # (off since the Busy checks; back off below)
+g set retina on >/dev/null   # (off since the Busy checks; back off below)
 mv "$LK" "$SANDBOX/sessionlock.aside"
 : >"$STANDIN_LOG"; wp=$(sess watcher_pid)
 "$G" play >"$SANDBOX/nolock.txt" 2>&1; started
 check "  without it: Play warns, starts the game, no watcher" eval 'has "$SANDBOX/nolock.txt" "^@warn .*session helper is missing" && has "$SANDBOX/nolock.txt" "^@done" && has "$STANDIN_LOG" "^wine " && [ "$(sess watcher_pid)" = "$wp" ] && [ "$(watchers)" = 0 ]'
 # (that Play starts Wine without the lock, so registry writes can't be kept apart from it: they wait)
-"$G" set rawmouse off >"$SANDBOX/nolock-set.txt" 2>&1
-check "  a setting is saved, its registry write waits for the helper" eval 'has "$SANDBOX/nolock-set.txt" "^@done" && [ "$(sett rawmouse)" = off ] && reg "$GW2_MAC" RawMouseWhenCursorHidden y && has "$SANDBOX/nolock-set.txt" "registry settings wait for it"'
+"$G" set retina off >"$SANDBOX/nolock-set.txt" 2>&1
+check "  a setting is saved, its registry write waits for the helper" eval 'has "$SANDBOX/nolock-set.txt" "^@done" && [ "$(sett retina)" = off ] && reg "$ALL_MAC" RetinaMode y && has "$SANDBOX/nolock-set.txt" "registry settings wait for it"'
 mv "$SANDBOX/sessionlock.aside" "$LK"
-check "  with it back, the next write applies it" eval '"$G" set mousespeed 1 >/dev/null && reg "$GW2_MAC" RawMouseWhenCursorHidden n'
+check "  with it back, the next write applies it" eval '"$G" set retina off >/dev/null && reg "$ALL_MAC" RetinaMode n'
 
 # a Steam that ignores -shutdown: wineserver -k (a stand-in wineserver that ends it)
 touch "$SANDBOX/steam.stubborn"
@@ -770,9 +783,8 @@ echo "$NEW AppID 1284210 finished update (BytesDownloaded=1000, BytesStaged=0)" 
 check "  update finished: starting_game" [ "$(ss stage)" = starting_game ]
 out=$(g session-status)
 check "no account name, Steam ID or log line in the output" eval '! printf "%s" "$out" | grep -qE "zz_acct_name|7656119|U:1:|Logged|AppID|steamapps"'
-mv "$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe" "$SANDBOX/gw2-loader-copy"
-cp "$SANDBOX/sleeper" "$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe"
-"$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe" 120 & gp=$!
+cp "$SANDBOX/sleeper" "$ENG/bin/Gw2-64.exe"
+"$ENG/bin/Gw2-64.exe" 120 & gp=$!
 sleep 0.3
 check "Gw2-64.exe up, no DXMT log yet: starting_game, game=yes" eval '[ "$(ss stage)/$(ss game)" = starting_game/yes ]'
 printf 'info:  Found config file: x\ninfo:  Using feature level D3D_FEATURE_LEVEL_11_1\n' >"$LOGS/Gw2-64_d3d11.log"
@@ -787,7 +799,6 @@ GS=$(($(date +%s) - 72)) session_file playing
 check "  game_elapsed from the watcher's game_started" eval 'e=$(ss game_elapsed); [ "$e" -ge 72 ] && [ "$e" -le 75 ]'
 check "  quit_steam=yes from the watcher, closing=no while the game runs" eval '[ "$(ss quit_steam)/$(ss closing)" = yes/no ]'
 kill $gp 2>/dev/null; wait $gp 2>/dev/null
-mv -f "$SANDBOX/gw2-loader-copy" "$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe"
 session_file grace
 check "the game quit, the watcher's grace: stage=none, closing=yes" eval '[ "$(ss stage)/$(ss closing)/$(ss game)" = none/yes/no ]'
 check "  status: session=live while Steam runs" [ "$(st session)" = live ]
@@ -797,13 +808,11 @@ QS=no session_file closing_steam
 check "  quit_steam=no (Steam's window, or the setting off): closing=no" [ "$(ss closing)" = no ]
 QS=no session_file grace
 check "a restart's grace with Steam staying: stage=none, closing=no, but watching=yes" eval '[ "$(ss stage)/$(ss closing)/$(ss watching)" = none/no/yes ]'
-cp "$SANDBOX/sleeper" "$SANDBOX/gw2-loader-tmp" && mv "$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe" "$SANDBOX/gw2-loader-copy"
-mv "$SANDBOX/gw2-loader-tmp" "$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe"
-"$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe" 120 & gp=$!
+"$ENG/bin/Gw2-64.exe" 120 & gp=$!
 sleep 0.3
 check "  the game back within the grace: playing again" eval '[ "$(ss stage)/$(ss game)" = playing/yes ]'
 kill $gp 2>/dev/null; wait $gp 2>/dev/null
-mv -f "$SANDBOX/gw2-loader-copy" "$AD/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe"
+rm -f "$ENG/bin/Gw2-64.exe"
 session_file closing_steam
 check "show-steam while the watcher quits Steam: refused, no request, nothing started" eval ': >"$STANDIN_LOG"; ! g show-steam >/dev/null 2>&1 && ! has "$STANDIN_LOG" "steam://open/main" && [ ! -s "$AD/session.req" ]'
 session_file waiting_game
@@ -840,7 +849,7 @@ check "show-steam without Steam: refused" eval '! g show-steam >/dev/null 2>&1 &
 rm -rf "$AD/session" "$AD/session.req" "$AD/.session.lock" "$ENG/bin/steam.exe" "$ENG/bin/steamwebhelper.exe" "$LOGS/Gw2-64_d3d11.log"
 
 section "The frame-limiter hint (the game's GFXSettings, only read)"
-GFX="$BOTTLE/drive_c/users/crossover/AppData/Roaming/Guild Wars 2/GFXSettings.Gw2-64.exe.xml"
+GFX="$BOTTLE/drive_c/users/$BUSER/AppData/Roaming/Guild Wars 2/GFXSettings.Gw2-64.exe.xml"
 mkdir -p "$(dirname "$GFX")"
 gfx() { printf '<?xml version="1.0" encoding="UTF-8"?>\n<GSA_SDK Version="2.1.18431650.0">\n    <GAMESETTINGS>\n        <OPTION Name="frameLimit" Registered="True" Type="Enum" Value="%s">\n            <ENUM EnumValue="unlimited"/>\n            <ENUM EnumValue="60"/>\n        </OPTION>\n        <OPTION Name="charModelLimit" Registered="True" Type="Enum" Value="highest">\n        </OPTION>\n        <OPTION Name="verticalSync" Registered="True" Type="Bool" Value="%s"/>\n    </GAMESETTINGS>\n</GSA_SDK>\n' "$1" "$2" >"$GFX"; }
 gfx 60 true
@@ -858,110 +867,26 @@ rm -f "$GFX"
 check "  no settings file: no" [ "$(ss limiter_hint)" = no ]
 
 section "Repair and Troubleshooting"
-echo "something else" >"$ENG/lib/wine/dxgi/dxmt/x86_64-windows/d3d11.dll"
-check "graphics=other after a change in the engine" [ "$(st graphics)" = other ]
+T="$ENG/lib/wine/dxgi/dxmt"
+echo "something else" >"$T/aarch64-windows/d3d11.dll"
+check "graphics=other after a change in the engine's DXMT" [ "$(st graphics)" = other ]
+: >"$STANDIN_LOG"; out=$(g play 2>&1); started
+check "  Play says Repair and leaves the engine as it is" eval 'echo "$out" | grep -q "^@warn .*Click Repair" && has "$T/aarch64-windows/d3d11.dll" "something else"'
+watch_done
 out=$(g repair 2>&1) && rc=0 || rc=$?
-check "repair exits 0" [ "$rc" = 0 ]
-check "graphics=yes after repair" [ "$(st graphics)" = yes ]
-check "  the mouse setting saved during the session is in the registry now" reg "$GW2_MAC" RawMouseWhenCursorHidden n
-g set rawmouse on >/dev/null
-echo "something else" >"$ENG/lib/wine/i386-windows/winemac.drv"
-check "graphics=other with another i386 winemac.drv" [ "$(st graphics)" = other ]
+check "repair exits 0, unpacking the engine again" eval '[ "$rc" = 0 ] && echo "$out" | grep -q "unpacking the engine again"'
+check "graphics=yes after repair, the engine as it ships" eval '[ "$(st graphics)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ]'
+check "  the Retina setting saved during the session is in the registry" reg "$ALL_MAC" RetinaMode n
+g set retina on >/dev/null
+echo "something else" >"$T/aarch64-unix/winemetal.so"
+check "graphics=other with another winemetal.so" [ "$(st graphics)" = other ]
 g repair >/dev/null 2>&1
-check "  repair puts the app's back" same "$COMP/winemac/i386-windows/winemac.drv" "$ENG/lib/wine/i386-windows/winemac.drv"
+check "  repair puts the engine's back" has "$T/aarch64-unix/winemetal.so" "engine's winemetal.so"
 check "the game and the settings stay" [ "$(st game)/$(sett launchopts)" = yes/-maploadinfo ]
 
-# An update of the app (0.1.0 to this one): the engine has 0.1.0's pieces (stand-ins, listed as an
-# earlier version's in $OLDC: GW2_ON_MAC_OLD_COMPONENTS, a sandbox's addition to the app's table of
-# 0.1.0's real hashes) and the Mac driver's PE sides as the engine's own; the next Play puts this
-# version's in, without Repair, as one transaction under the session's lock
-MF="$AD/install-manifest.json" U="$ENG/lib/wine/x86_64-unix" T="$ENG/lib/wine/dxgi/dxmt"
-echo "0.1.0's winemac.so" >"$SANDBOX/winemac-0.1.0.so"
-echo "0.1.0's i386 dxgi.dll" >"$SANDBOX/dxgi32-0.1.0.dll"
-printf 'lib/wine/x86_64-unix/winemac.so %s\nlib/wine/dxgi/dxmt/i386-windows/dxgi.dll %s\n' \
-  "$(shasum -a 256 "$SANDBOX/winemac-0.1.0.so" | cut -d' ' -f1)" "$(shasum -a 256 "$SANDBOX/dxgi32-0.1.0.dll" | cut -d' ' -f1)" >"$OLDC"
-as_010() {   # the engine and the manifest as 0.1.0 left them (no record of the pieces)
-  cp "$SANDBOX/winemac-0.1.0.so" "$U/winemac.so"; cp "$SANDBOX/dxgi32-0.1.0.dll" "$T/i386-windows/dxgi.dll"
-  for a in x86_64-windows i386-windows; do cp "$ENG/lib/wine/$a/winemac.drv.stock" "$ENG/lib/wine/$a/winemac.drv"; done
-  rm -f "$ENG/.gw2om-components"
-  sed -i '' -e 's/"version": "[^"]*"/"version": "0.1.0"/' -e '/"winemac_pe64_sha256"/d' -e '/"winemac_pe32_sha256"/d' "$MF"
-}
-is_010() { same "$SANDBOX/winemac-0.1.0.so" "$U/winemac.so" && same "$SANDBOX/dxgi32-0.1.0.dll" "$T/i386-windows/dxgi.dll" && has "$ENG/lib/wine/i386-windows/winemac.drv" "engine's"; }
-is_new() {   # every file of this version in the engine
-  same "$COMP/winemac/winemac.so" "$U/winemac.so" && same "$COMP/winemac/x86_64-windows/winemac.drv" "$ENG/lib/wine/x86_64-windows/winemac.drv" &&
-    same "$COMP/winemac/i386-windows/winemac.drv" "$ENG/lib/wine/i386-windows/winemac.drv" && same "$COMP/dxmt/i386-windows/dxgi.dll" "$T/i386-windows/dxgi.dll"
-}
-nolaunch() { ! grep -q '^wine ' "$STANDIN_LOG"; }
+MF="$AD/install-manifest.json"
 PAUSE="$SANDBOX/pause"
 wait_at() { local i=0; until [ -e "$PAUSE.at" ] || [ $i -ge 100 ]; do sleep 0.1; i=$((i + 1)); done; [ -e "$PAUSE.at" ]; }
-watch_done
-as_010
-check "after an update from 0.1.0: graphics=update (0.1.0's winemac.so and i386 dxgi.dll, the engine's own winemac.drv)" [ "$(st graphics)" = update ]
-# damaged or someone else's files are never overwritten by the update: Repair
-cp "$T/x86_64-windows/d3d11.dll" "$SANDBOX/d3d11.keep"; echo "damaged" >"$T/x86_64-windows/d3d11.dll"
-check "  a damaged DXMT d3d11.dll (its VERSION as 0.1.0's): graphics=other" [ "$(st graphics)" = other ]
-: >"$STANDIN_LOG"; out=$(g play 2>&1); started
-check "    Play doesn't touch the engine and says Repair" eval 'echo "$out" | grep -q "Click Repair" && has "$T/x86_64-windows/d3d11.dll" damaged && is_010'
-watch_done; cp "$SANDBOX/d3d11.keep" "$T/x86_64-windows/d3d11.dll"
-echo "someone's d3d10core" >"$T/i386-windows/d3d10core.dll"
-check "  another program's i386 d3d10core.dll (a sibling the update replaces): graphics=other" [ "$(st graphics)" = other ]
-cp "$COMP/dxmt/i386-windows/d3d10core.dll" "$T/i386-windows/d3d10core.dll"
-echo "someone's ntdll.so" >"$SANDBOX/ntdll.keep.x"; cp "$U/ntdll.so" "$SANDBOX/ntdll.keep"; cp "$SANDBOX/ntdll.keep.x" "$U/ntdll.so"
-check "  an ntdll.so of someone else's: graphics=other" [ "$(st graphics)" = other ]
-cp "$SANDBOX/ntdll.keep" "$U/ntdll.so"
-check "  back to 0.1.0's: graphics=update" [ "$(st graphics)" = update ]
-# two Plays: the first one classifies under the session's lock and pauses; the second can't start
-# anything or change the engine meanwhile
-touch "$PAUSE"; rm -f "$PAUSE.at"; : >"$STANDIN_LOG"
-GW2_ON_MAC_TEST_PAUSE="$PAUSE" GW2_ON_MAC_TEST_PAUSE_AT=play-classified "$G" play >"$SANDBOX/playA.txt" 2>&1 & pa=$!
-check "two Plays: the first one pauses after classifying, holding the session's lock" eval 'wait_at && "$APP/Contents/Resources/helpers/sessionlock" held "$AD/.session.lock"'
-out=$(g play 2>&1) && rc=0 || rc=$?
-check "  the second one is refused, starts nothing and leaves the engine alone" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "^@error" && nolaunch && is_010'
-rm -f "$PAUSE"; wait $pa; rc=$?; started
-check "  the first one then updates the engine and starts the game" eval '[ "$rc" = 0 ] && has "$SANDBOX/playA.txt" "has new pieces for the engine" && is_new && [ "$(st graphics)" = yes ] && [ "$(grep -c "^wine " "$STANDIN_LOG")" = 1 ]'
-check "  the engine's own winemac.drv kept as .stock" has "$ENG/lib/wine/i386-windows/winemac.drv.stock" "engine's"
-check "  the manifest is this version's, with the Mac driver's PE sides" eval '[ "$(plutil -extract version raw -o - "$MF")" = "$(st version)" ] && [ "$(plutil -extract winemac_pe32_sha256 raw -o - "$MF")" = "$(shasum -a 256 "$COMP/winemac/i386-windows/winemac.drv" | cut -d" " -f1)" ]'
-check "  the engine records the pieces it got; no journal left" eval 'grep -qx "$(shasum -a 256 "$COMP/winemac/winemac.so" | cut -d" " -f1) lib/wine/x86_64-unix/winemac.so" "$ENG/.gw2om-components" && [ ! -e "$ENG/.gw2om-update" ] && [ ! -e "$AD/.lock" ]'
-watch_done
-# a Play paused halfway through the replacement: the engine counts as an update under way, and a
-# second Play neither starts the game on the half-replaced set nor touches it
-inv() { ( eval "$(sed -n '/^component_list() {/,/^}/p' "$G")"; component_list ); }
-check "the update's inventory: 18 files, the Mac driver's PE sides 15th and 16th, winemac.so 17th" eval '[ "$(inv | wc -l | tr -d " ")" = 18 ] && [ "$(inv | sed -n 15,17p | cut -f2 | tr "\n" " ")" = "lib/wine/x86_64-windows/winemac.drv lib/wine/i386-windows/winemac.drv lib/wine/x86_64-unix/winemac.so " ]'
-as_010
-touch "$PAUSE"; rm -f "$PAUSE.at"; : >"$STANDIN_LOG"
-GW2_ON_MAC_TEST_PAUSE="$PAUSE" GW2_ON_MAC_TEST_PAUSE_AT=update-16 "$G" play >"$SANDBOX/playA.txt" 2>&1 & pa=$!
-check "a Play paused after 16 of the update's 18 files (the new winemac.drv in, the old winemac.so still): graphics=update (its journal)" eval 'wait_at && [ -d "$ENG/.gw2om-update" ] && same "$COMP/winemac/i386-windows/winemac.drv" "$ENG/lib/wine/i386-windows/winemac.drv" && same "$SANDBOX/winemac-0.1.0.so" "$U/winemac.so" && [ "$(st graphics)" = update ]'
-out=$(g play 2>&1) && rc=0 || rc=$?
-check "  a second Play is refused (busy with the update) and starts nothing" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "busy putting its new pieces" && nolaunch'
-rm -f "$PAUSE"; wait $pa; rc=$?; started
-check "  the first one finishes and starts the game once" eval '[ "$rc" = 0 ] && is_new && [ "$(st graphics)" = yes ] && [ "$(grep -c "^wine " "$STANDIN_LOG")" = 1 ]'
-watch_done
-# a failure halfway: the engine's files back as they were, the game not started
-as_010; : >"$STANDIN_LOG"
-out=$(GW2_ON_MAC_UPDATE_FAIL_AFTER=16 "$G" play 2>&1) && rc=0 || rc=$?
-check "an update failing after 16 files (between the Mac driver's pieces): Play fails and starts nothing" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "^@error test: the update fails" && nolaunch'
-check "  the engine is 0.1.0's again (rolled back), no journal, no lock left: graphics=update" eval 'is_010 && [ ! -e "$ENG/.gw2om-update" ] && [ ! -e "$AD/.lock" ] && [ "$(st graphics)" = update ]'
-# killed halfway (power, kill -9): the journal stays, nothing starts on the half-replaced set, and
-# the next Play finishes the update
-as_010; : >"$STANDIN_LOG"
-GW2_ON_MAC_UPDATE_KILL_AFTER=16 "$G" play >"$SANDBOX/killed.txt" 2>&1; rc=$?
-check "an update killed after 16 files (new winemac.drv, old winemac.so): the journal stays, graphics=update, nothing started" eval '[ "$rc" != 0 ] && [ -f "$ENG/.gw2om-update/committing" ] && same "$SANDBOX/winemac-0.1.0.so" "$U/winemac.so" && [ "$(st graphics)" = update ] && nolaunch'
-out=$(g play 2>&1) && rc=0 || rc=$?; started
-check "  the next Play takes over the lock it left, finishes the update and starts the game" eval '[ "$rc" = 0 ] && is_new && [ ! -e "$ENG/.gw2om-update" ] && [ "$(st graphics)" = yes ] && has "$LOGS/install.log" "finishing an interrupted update" && has "$STANDIN_LOG" "^wine "'
-watch_done
-# killed while backing up (a partial copy of winemac.so's backup, nothing committed), then the
-# retry fails between the Mac driver's pieces: the rollback puts the intact originals back
-as_010; : >"$STANDIN_LOG"
-GW2_ON_MAC_UPDATE_KILL_IN_BACKUP=17 "$G" play >"$SANDBOX/killed.txt" 2>&1
-check "an update killed while backing up winemac.so: a partial backup (.part), nothing committed, the engine untouched" eval '[ -f "$ENG/.gw2om-update/old/17.part" ] && [ ! -e "$ENG/.gw2om-update/old/17" ] && [ ! -e "$ENG/.gw2om-update/committing" ] && is_010 && nolaunch'
-out=$(GW2_ON_MAC_UPDATE_FAIL_AFTER=16 "$G" play 2>&1) && rc=0 || rc=$?
-check "  the retry backs it up again; failing after 16 files, it rolls back to the intact originals" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "test: the update fails" && is_010 && [ ! -e "$ENG/.gw2om-update" ] && nolaunch'
-# a backup slot that isn't the untouched live file (before any commit) is never trusted
-mkdir -p "$ENG/.gw2om-update/old" && head -c 5 "$U/winemac.so" >"$ENG/.gw2om-update/old/17"
-out=$(GW2_ON_MAC_UPDATE_FAIL_AFTER=16 "$G" play 2>&1) && rc=0 || rc=$?
-check "a truncated backup slot from before any commit is made again: the rollback is intact" eval '[ "$rc" != 0 ] && is_010 && [ ! -e "$ENG/.gw2om-update" ]'
-out=$(g play 2>&1) && rc=0 || rc=$?; started
-check "  a Play without a failure then updates the engine" eval '[ "$rc" = 0 ] && is_new && [ "$(st graphics)" = yes ]'
 watch_done
 # the install lock: one left by a process that is gone is taken over by exactly one contender (the
 # claim, a kernel lock), and a live owner's lock is never removed by anyone else
@@ -1000,28 +925,26 @@ check "  a fresh acquisition (C) waits for the claim and is refused: the lock st
 rm -f "$P2"; wait $ob; rb=$?; wait $oa; ra=$?
 check "  B, resumed, finds A still there and is refused; A unlocks and ends: its setting, no lock left" eval '[ "$rb" != 0 ] && has "$SANDBOX/contB.txt" "Another $APP_NAME" && [ "$ra" = 0 ] && [ "$(sett launchopts)" = -ownerA ] && [ ! -e "$AD/.lock" ]'
 g set launchopts -maploadinfo >/dev/null
-# a later version's update: what this version put in (its record) counts as an earlier version's
-echo "this version's winemac.so, as a later version sees it" >"$SANDBOX/winemac-rec.so"
-cp "$SANDBOX/winemac-rec.so" "$U/winemac.so"
-check "a file the engine's record names (from an install of an earlier version): graphics=update" eval 'sed -i "" "s|^[0-9a-f]* lib/wine/x86_64-unix/winemac.so\$|$(shasum -a 256 "$SANDBOX/winemac-rec.so" | cut -d" " -f1) lib/wine/x86_64-unix/winemac.so|" "$ENG/.gw2om-components" && [ "$(st graphics)" = update ]'
-cp "$COMP/winemac/winemac.so" "$U/winemac.so"
-# an engine that already has this version's pieces under 0.1.0's manifest (as mine has): set up
-sed -i '' -e 's/"version": "[^"]*"/"version": "0.1.0"/' "$MF"; rm -f "$ENG/.gw2om-components"
-check "this version's pieces under 0.1.0's manifest, no record: graphics=yes" [ "$(st graphics)" = yes ]
+# an earlier version's manifest: the next Play brings it to this version
+sed -i '' -e 's/"version": "[^"]*"/"version": "0.2.0-dev.0"/' "$MF"
 out=$(g play 2>&1); started
-check "  Play changes no piece and brings the manifest to this version" eval '! echo "$out" | grep -q "new pieces" && [ "$(plutil -extract version raw -o - "$MF")" = "$(st version)" ]'
+check "an earlier version's manifest: Play brings it to this version" [ "$(plutil -extract version raw -o - "$MF")" = "$(st version)" ]
+check "  the manifest names the engine's build" eval '[ "$(plutil -extract engine raw -o - "$MF")/$(plutil -extract engine_dxmt raw -o - "$MF")" = mach9-v0.3.1/d903db89036 ]'
 watch_done
-# a piece missing altogether: no game on an incomplete set
-mv "$ENG/lib/wine/i386-windows/winemac.drv" "$SANDBOX/winemac32.keep"; : >"$STANDIN_LOG"
-out=$(g play 2>&1) && rc=0 || rc=$?
-check "a missing i386 winemac.drv: Play refuses (Repair) and starts nothing" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "missing $APP_NAME.s lib/wine/i386-windows/winemac.drv" && nolaunch'
-g repair >/dev/null 2>&1
-check "  repair: graphics=yes" [ "$(st graphics)" = yes ]
 echo "shader" >"$DXMT_CACHE/shaders_320.db"
 check "reset-shaders empties DXMT's cache" sh -c "'$G' reset-shaders | grep -q '@done' && [ -d '$DXMT_CACHE' ] && [ ! -e '$DXMT_CACHE/shaders_320.db' ]"
 check "  and leaves the per-user cache folder's dxmt/ alone" other_dxmt_kept
-check "reinstall-engine" sh -c "'$G' reinstall-engine | grep -q '@done'"
-check "  graphics=yes after it" [ "$(st graphics)" = yes ]
+# The engine's archive from a browser, put into the downloads folder by hand: quarantined, and tar
+# copies the attribute onto every file it unpacks; the app takes it off the whole engine
+QA="$CACHE/downloads/engine.tar.xz"
+xattr -w com.apple.quarantine "0083;6731f0a1;Safari;" "$QA"
+mkdir -p "$SANDBOX/tar-check" && tar -xJf "$QA" -C "$SANDBOX/tar-check"
+check "a quarantined archive: tar alone copies the attribute onto what it unpacks" sh -c "xattr -r '$SANDBOX/tar-check' | grep -q com.apple.quarantine"
+out=$(g reinstall-engine 2>&1) && rc=0 || rc=$?
+check "reinstall-engine from it: the verified download, unpacked again" eval '[ "$rc" = 0 ] && echo "$out" | grep -q "^@done" && echo "$out" | grep -q "using the verified download"'
+check "  no file of the engine has the quarantine attribute" sh -c "! xattr -r '$ENG' | grep -q com.apple.quarantine"
+check "  graphics=yes after it, the engine as it ships" eval '[ "$(st graphics)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ]'
+rm -rf "$SANDBOX/tar-check"
 mkdir "$AD/.lock"
 check "a second operation is refused while one runs (lock)" sh -c "'$G' repair 2>&1 | grep -q 'Another $APP_NAME'"
 rmdir "$AD/.lock"
@@ -1036,11 +959,10 @@ mkdir -p "$CACHE/downloads" && echo x >"$CACHE/downloads/x"
 out=$(g uninstall 2>&1) && rc=0 || rc=$?
 check "uninstall exits 0" [ "$rc" = 0 ]
 check "the phases 1-3" [ "$(echo "$out" | grep '^@phase' | tr '\n' ' ')" = "@phase 1 @phase 2 @phase 3 " ]
-check "the app's folder is gone (engine, bottle with the game, Game Mode, settings, the session)" [ ! -e "$AD" ]
+check "the app's folder is gone (engine, bottle with the game, settings, the session)" [ ! -e "$AD" ]
 check "  the session's watcher stopped" sh -c "! kill -0 $wp 2>/dev/null"
 check "its caches are gone" eval '[ ! -e "$CACHE" ] && [ ! -e "$DXMT_CACHE" ]'
 check "the per-user cache folder's dxmt/ stays (another setup's)" other_dxmt_kept
-check "the Game Mode link is gone" sh -c "! ls '$SANDBOX/usertmp/'winetemp-*/Gw2-64.exe >/dev/null 2>&1"
 check "the logs stay" [ -f "$LOGS/install.log" ]
 check "status: not installed" [ "$(st installed)/$(st engine_installed)" = no/no ]
 
@@ -1113,7 +1035,7 @@ mkdir -p "$BR" && echo "stand-in game" >"$BR/Gw2-64.exe" && mkfile -n 10m "$BR/G
 snap() { find "$H/Library/Application Support/CrossOver" "$H/Library/Containers" "$H/Applications" -exec stat -f '%N %z %m %p' {} + | sort; }
 snap >"$SANDBOX/sources-before.txt"
 sources_unchanged() { snap | cmp -s - "$SANDBOX/sources-before.txt"; }
-BS="$BOTTLE/drive_c/users/crossover/AppData/Roaming/Guild Wars 2"
+BS="$BOTTLE/drive_c/users/$BUSER/AppData/Roaming/Guild Wars 2"
 
 out=$(g scan)
 line_of() { echo "$out" | awk -F'\t' -v s="$1" '$2 == s'; }
