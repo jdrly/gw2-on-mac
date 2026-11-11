@@ -1,22 +1,37 @@
 # Checks every pull request and every push to main on GitHub's runners, so none of it runs on my
 # Mac: the scripts and workflows lint clean, the app builds, the sandbox suite passes on the built
-# app and the windows render. No secrets and read-only access. Signing, notarizing and releasing
-# stay on my Mac (scripts/release.sh).
+# app and the windows render. No secrets and read-only access. Signing with my Developer ID,
+# notarizing and releasing stay on my Mac (scripts/release.sh); dev builds are devbuild.yml.
 #
 # A runner has no development workspace, so scripts/stage-components.sh fetches prebuilt/ as the
 # archive pinned in prebuilt.lock and checks its sha256 (README.md, Building).
+#
+# The Dev build workflow (devbuild.yml) calls the same jobs with the components it staged
+# (components: the name of an artifact of its run with prebuilt.tar) and the version to build.
 name: Checks
 
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_call:
+    inputs:
+      components:
+        description: An artifact of the calling run with prebuilt.tar; empty fetches prebuilt.lock's archive
+        type: string
+        default: ""
+      version:
+        description: GW2_ON_MAC_VERSION for build.sh; empty is build.sh's own
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
+# (github.workflow is the caller's name when called, so a dev build's Checks don't cancel the pull
+# request's own)
 concurrency:
-  group: checks-${{ github.ref }}
+  group: checks-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 defaults:
@@ -80,14 +95,28 @@ jobs:
           git ls-files -z '*.sh' | xargs -0 grep -l --null -m1 '^#!/bin/zsh' | xargs -0 -n 1 /bin/zsh -n
 
       - name: Fetch the components
+        if: inputs.components == ''
         run: scripts/stage-components.sh --fetch
 
       # Until prebuilt.lock pins an archive with my arm64 DXMT (jdrly/dxmt#182), a stand-in in its
       # layout: what the sandbox needs, never a release (scripts/release.sh refuses it)
       - name: Stand-in DXMT, if the archive has none
+        if: inputs.components == ''
         run: if [ ! -d prebuilt/dxmt ]; then scripts/stage-components.sh --standin; fi
 
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: inputs.components != ''
+        with:
+          name: ${{ inputs.components }}
+          path: ${{ runner.temp }}/components
+
+      - name: The dev build's components
+        if: inputs.components != ''
+        run: tar -xf "$RUNNER_TEMP/components/prebuilt.tar" && cat prebuilt/STAGED
+
       - name: Build
+        env:
+          GW2_ON_MAC_VERSION: ${{ inputs.version }}
         run: ./build.sh
 
       # What to compare with a build of the same commit on my Mac
@@ -96,6 +125,7 @@ jobs:
           apps=(dist/*.app); r="${apps[0]}/Contents/Resources"
           { echo '```'; cat "$r/VERSIONS"; echo; (cd "$r" && find components -type f | LC_ALL=C sort | xargs shasum -a 256); echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # dist/ has the app and its file list (dist/<name>.files), which a dev build's DMG must match
       - name: Pack the app for the next jobs
         run: tar -cf "$RUNNER_TEMP/app.tar" dist .cache/sparkle-2.10.0
 
@@ -105,8 +135,10 @@ jobs:
           path: ${{ runner.temp }}/app.tar
           retention-days: 7
 
-      # The refusals change the files this job has finished with.
+      # The refusals change the files this job has finished with. A dev build has no archive.
       - name: build.sh refuses a changed component, stage-components.sh a changed archive
+        env:
+          ARCHIVE: ${{ inputs.components == '' }}
         run: |
           cp prebuilt/dxmt/aarch64-windows/d3d11.dll "$RUNNER_TEMP/d3d11.dll"
           printf x >>prebuilt/dxmt/aarch64-windows/d3d11.dll
@@ -120,6 +152,7 @@ jobs:
           printf 'not the addon' >prebuilt/ui-scale/version.dll
           if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took a changed version.dll"; exit 1; fi
           grep 'version.dll is not the addon' "$RUNNER_TEMP/build.txt"
+          [ "$ARCHIVE" = true ] || exit 0
           archive=".cache/$(sed -n 's/^sha256=//p' prebuilt.lock)/$(sed -n 's/^file=//p' prebuilt.lock)"
           printf x >>"$archive"
           if scripts/stage-components.sh --fetch >"$RUNNER_TEMP/stage.txt" 2>&1; then echo "stage-components.sh took a changed archive"; exit 1; fi

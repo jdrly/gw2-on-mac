@@ -35,7 +35,7 @@ cd "$(dirname "$0")"
 ROOT="$PWD"
 
 # GW2_ON_MAC_VERSION overrides the version for test builds.
-APP_VERSION=${GW2_ON_MAC_VERSION:-0.2.0-dev.2}
+APP_VERSION=${GW2_ON_MAC_VERSION:-0.2.0-dev.4}
 
 # Development builds: X.Y.Z-dev.N, as SWTOR on Mac's. CFBundleShortVersionString is the version as
 # is; CFBundleVersion (what Sparkle compares) is numeric and sorts above the previous release and
@@ -244,4 +244,6 @@ codesign --force --sign - "$R/helpers/procpaths"
 codesign --force --sign - "$R/helpers/sessionlock"
 codesign --force --sign - "$APP"
 codesign --verify --strict "$APP"
+# Every file's sha256, what scripts/release.sh --adhoc compares the app in its DMG with
+scripts/app-files.sh "$APP" >"$ROOT/dist/$APP_NAME.files"
 echo "Built $APP ($(du -sh "$APP" | cut -f1))"
