@@ -444,7 +444,7 @@ check "the HUD and the larger interface on, arcdps in the game folder: d3d11 and
 rm -f "$GD/version.dll"
 check "  the addon's version.dll missing: the override stays (n,b loads Wine's own)" rules_are hud-addon-arcdps
 cp "$SANDBOX/pe/nexus.dll" "$GD/d3d11.dll"
-check "  another addon's d3d11.dll (Nexus): native first as well" eval 'g rules | grep -q "^exe=Gw2-64.exe;metal_hud=true;dll_overrides=d3d11,dxgi=n,b;"'
+check "  another addon's d3d11.dll (Nexus): native first as well" eval 'g rules | grep "^exe=Gw2-64.exe;metal_hud=true;dll_overrides=d3d11,dxgi=n,b;" >/dev/null'
 g set hud off >/dev/null; g set uiscale off >/dev/null; rm -f "$GD/d3d11.dll"
 check "  all off again" rules_are off
 ODD="$SANDBOX/a%b;c$(printf '\t')d é"
