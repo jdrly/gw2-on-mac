@@ -70,9 +70,12 @@ signature over this exact file. Then the engine and bottle go in and the install
 installer leaves no record of when it's done, so the app treats the game as installed once
 `Gw2.dat` is larger than 1 GB and neither the installer nor `Gw2-64.exe` is running.
 
-**Game files I already have.** If you already play in CrossOver, Whisky or an app wrapper, the
-app can take that copy of the game instead of downloading 75 GB again. It looks in these places:
+**Game files I already have.** If you already play in GW2 on Mac 0.1, CrossOver, Whisky or an app
+wrapper, the app can take that copy of the game instead of downloading 75 GB again. It looks in
+these places:
 
+- GW2 on Mac 0.1's bottle in `~/Library/Application Support/GW2 on Mac/bottle`, listed as
+  `GW2 on Mac 0.1`
 - CrossOver's bottles in `~/Library/Application Support/CrossOver/Bottles`
 - Whisky's bottles in `~/Library/Containers/com.isaacmarovitz.Whisky/Bottles` and
   `…/Data/Bottles`, named from each bottle's `Metadata.plist`
@@ -90,9 +93,11 @@ game folder works, and so does a bottle or wrapper app with the game in it.
 
 On the same disk the app clones the files with APFS. That takes a moment and no extra space until
 one of the copies changes. From another disk it copies them, after checking there's room for their
-size plus 1 GB. Either way it only reads your original. My own addon files are left behind. Any
-other addon, such as an arcdps `d3d11.dll` or an `addons` folder, comes along as it is, and the
-summary names it. *Also bring my game settings* is on by default and brings `GFXSettings.Gw2-64.exe.xml`
+size plus 1 GB. Either way it only reads your original. My own addon files are left behind. So is
+arcdps, as `d3d11.dll` or `dxgi.dll`, because addons aren't cleared for this engine yet, and any
+other program's `d3d11.dll`; the summary says what stayed behind. Any other addon, such as an
+`addons` folder, comes along as it is, and the summary names it. DXMT's caches stay behind too:
+they live in the other app's cache folder, never in the game's. *Also bring my game settings* is on by default and brings `GFXSettings.Gw2-64.exe.xml`
 and `Local.dat`, which holds your options and remembered login. If the new bottle already had
 those files, the old ones move to a `GW2 on Mac backup <date>` folder next to them. The import
 refuses to run while Guild Wars 2 runs anywhere on the Mac, since its files could change during the
@@ -701,11 +706,12 @@ Without one, those checks are skipped. It covers:
   game, Steam restarting itself, a `shown` request, Play in the grace, Play while Steam quits, one
   watcher per session including two Plays at once, a stale lock file and a held lock that doesn't
   answer, the `wineserver -k` fallback, and Uninstall stopping the watcher.
-- existing game files: stand-in CrossOver, Whisky and wrapper bottles with a sparse `Gw2.dat`, the
-  scan, check-game, the clone on both routes, the settings and their backup, a real copy from an
-  attached disk image when `hdiutil` can attach one, a forced copy (`GW2_ON_MAC_IMPORT_COPY`), the
-  free-space refusal (`GW2_ON_MAC_FREE_KB`), the refusal while the game runs, and that the sources
-  never change
+- existing game files: stand-in GW2 on Mac 0.1, CrossOver, Whisky and wrapper bottles with a
+  sparse `Gw2.dat`, the scan, arcdps and another `d3d11.dll` left behind, a checksum of 0.1's
+  folders before and after, check-game, the clone on both routes, the settings and their backup,
+  a real copy from an attached disk image when `hdiutil` can attach one, a forced copy
+  (`GW2_ON_MAC_IMPORT_COPY`), the free-space refusal (`GW2_ON_MAC_FREE_KB`), the refusal while the
+  game runs, and that the sources never change
 
 `scripts/ui-render.sh` renders every window state, light and dark, headlessly into
 `work/app-renders/`. Nothing shows on screen and the app never activates. With the exports of

@@ -15,8 +15,9 @@
 #                              2): engine, bottle (and Steam, if the folder is Steam's), then the
 #                              folder cloned into the bottle (same disk) or copied, the game's
 #                              settings with it, and the finishing touches; the source is only read
-#   gw2om.sh scan              the Guild Wars 2 installs of other Wine apps on this Mac (CrossOver,
-#                              Whisky, app wrappers, Heroic, GameHub, ~/.wine), one "game" line each
+#   gw2om.sh scan              the Guild Wars 2 installs of other Wine apps on this Mac (GW2 on Mac
+#                              0.1, CrossOver, Whisky, app wrappers, Heroic, GameHub, ~/.wine), one
+#                              "game" line each
 #   gw2om.sh check-game DIR    is DIR (or a game folder in it) a Guild Wars 2 install: its "game"
 #                              line, or "@error <why>"
 #   gw2om.sh finish            phase 5 once the game is there: the shader cache's folder, the
@@ -1011,13 +1012,15 @@ set_arcdps() {
 GAME_RELS=("Program Files (x86)/Steam/steamapps/common/Guild Wars 2" "Program Files/Steam/steamapps/common/Guild Wars 2"
   "Program Files/Guild Wars 2" "Program Files (x86)/Guild Wars 2")
 
-# The drive_c of every bottle other Wine apps keep in their known places: CrossOver's bottles,
-# Whisky's, app wrappers (Sikarugir, Kegworks, Wineskin, Porting Kit: <app>/Contents/...),
-# Heroic's prefixes, ~/.wine; GameHub doesn't document where it keeps its bottles, so its folders
-# are looked through (a few levels). Anything else: Choose folder… (check-game).
+# The drive_c of every bottle other Wine apps keep in their known places: GW2 on Mac 0.1's own
+# bottle (the stable line, in its own folder), CrossOver's bottles, Whisky's, app wrappers
+# (Sikarugir, Kegworks, Wineskin, Porting Kit: <app>/Contents/...), Heroic's prefixes, ~/.wine;
+# GameHub doesn't document where it keeps its bottles, so its folders are looked through (a few
+# levels). Anything else: Choose folder… (check-game).
 wine_places() {
   local d a
-  for d in "$H/Library/Application Support/CrossOver/Bottles"/*/drive_c \
+  for d in "$H/Library/Application Support/GW2 on Mac/bottle/drive_c" \
+    "$H/Library/Application Support/CrossOver/Bottles"/*/drive_c \
     "$H/Library/Containers/com.isaacmarovitz.Whisky/Bottles"/*/drive_c \
     "$H/Library/Containers/com.isaacmarovitz.Whisky/Data/Bottles"/*/drive_c \
     "$H/Games/Heroic/Prefixes"/*/drive_c "$H/Games/Heroic/Prefixes"/*/*/drive_c "$H/.wine/drive_c"; do
@@ -1038,6 +1041,7 @@ wine_places() {
 source_label() {
   local p=$1 r n
   case "$p" in
+    "$H/Library/Application Support/GW2 on Mac/"*) echo "GW2 on Mac 0.1" ;;
     "$H/Library/Application Support/CrossOver/Bottles/"*)
       r=${p#"$H/Library/Application Support/CrossOver/Bottles/"}; echo "CrossOver · ${r%%/*}" ;;
     "$H/Library/Containers/com.isaacmarovitz.Whisky/"*)
@@ -1126,11 +1130,25 @@ game_runs_anywhere() {
 }
 
 # import_game <source dir> <bottle's game dir>: the folder cloned (same disk) or copied (with a
-# free-space check and progress); my own addon's files (version.dll with its mark,
-# gw2-ui-scale.*) are left out; any other addon comes along as it is (ADDONS names them)
+# free-space check and progress). Left out, and named in LEFT: my own addon's files (version.dll
+# with its mark, gw2-ui-scale.*), arcdps (d3d11.dll or dxgi.dll; addons are not cleared for this
+# engine yet) and another program's d3d11.dll. Any other addon comes along as it is (ADDONS names
+# them).
 import_game() {
-  local src=$1 dst=$2 total pid
+  local src=$1 dst=$2 total pid n out="" arc="" other=""
   total=$(folder_bytes "$src")
+  LEFT=""
+  if [ -f "$src/version.dll" ] && grep -aq "$UI_MARK" "$src/version.dll"; then
+    out=" version.dll" LEFT=" The larger interface's version.dll stayed behind: this app has its own."
+  fi
+  for n in $ARCDPS_DLLS; do
+    [ -f "$src/$n" ] || continue
+    if is_arcdps "$src/$n"; then out="$out $n" arc=yes
+    elif [ "$n" = d3d11.dll ]; then out="$out $n" other=yes
+    fi
+  done
+  [ -z "$arc" ] || LEFT="$LEFT arcdps stayed behind. Turn it on in Settings once it is cleared for this engine."
+  [ -z "$other" ] || LEFT="$LEFT Another program's d3d11.dll stayed behind."
   if [ -e "$dst" ]; then
     [ -z "$(ls -A "$dst" 2>/dev/null)" ] ||
       die "The game's bottle already has a Guild Wars 2 folder ($dst). Uninstall $APP_NAME first to use your own game files."
@@ -1171,12 +1189,12 @@ import_game() {
     IMPORT_HOW=copied
   fi
   echo "@progress Guild Wars 2 $total $total"
-  if [ -f "$dst/version.dll" ] && grep -aq "$UI_MARK" "$dst/version.dll"; then run rm -f "$dst/version.dll"; fi
+  for n in $out; do run rm -f "$dst/$n"; done
   run rm -f "$dst/gw2-ui-scale.ini" "$dst/gw2-ui-scale.log"
   chmod -R u+w "$dst"
   ADDONS=$( (cd "$dst" && ls -d ./*.dll addons bin64/d3d9.dll 2>/dev/null || true) | sed 's|^\./||' | tr '\n' ',' | sed 's/,$//; s/,/, /g')
   [ -z "$ADDONS" ] || say "Addons that came along with the game's files: $ADDONS ($APP_NAME leaves them as they are)"
-  log "game files $IMPORT_HOW: $src -> $dst ($total bytes)"
+  log "game files $IMPORT_HOW: $src -> $dst ($total bytes)${out:+; left out:$out}"
 }
 
 # The bottle's Windows user (upstream Wine names it after the Mac's user; CrossOver's engine said
@@ -1252,14 +1270,14 @@ install_imported() {
     finish_touches
     IMPORT_DST="" IMPORT_ACF=""
     log "install import complete"
-    echo "@done Guild Wars 2 is ready: its files were $how$([ "$SETTINGS_IMPORTED" = yes ] && echo ", with your game settings").$([ -z "$ADDONS" ] || echo " Addons that came along: $ADDONS; $APP_NAME leaves them as they are.")$([ "$route" = steam ] && echo " Steam may check the files at the first Play.") Press Play."
+    echo "@done Guild Wars 2 is ready: its files were $how$([ "$SETTINGS_IMPORTED" = yes ] && echo ", with your game settings").$([ -z "$ADDONS" ] || echo " Addons that came along: $ADDONS; $APP_NAME leaves them as they are.")$LEFT$([ "$route" = steam ] && echo " Steam may check the files at the first Play.") Press Play."
   else
     step "Steam opens: sign in, and it brings Guild Wars 2 up to date"
     launch "$STEAM_EXE" "steam://install/$GW2_APPID"
     set_state stage waiting_game
     IMPORT_DST="" IMPORT_ACF=""
     log "install import: Steam's record of the game is not complete; waiting for Steam"
-    echo "@done Your game files were $how. Steam is starting: sign in, and it brings the game up to date; this window follows it."
+    echo "@done Your game files were $how.$LEFT Steam is starting: sign in, and it brings the game up to date; this window follows it."
   fi
 }
 

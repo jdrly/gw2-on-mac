@@ -1007,14 +1007,33 @@ check "  stage=none, engine and bottle stay" [ "$(st stage)/$(st installed)" = n
 g uninstall >/dev/null 2>&1
 
 section "Use existing game files (other Wine apps' installs)"
-# CrossOver (a Steam install, with my own addon, another addon and the game's settings), Whisky
-# and a Sikarugir wrapper (ArenaNet installs), a broken one (Gw2.dat too small). Gw2.dat is sparse.
+# GW2 on Mac 0.1's own bottle (a Steam install with arcdps, my own addon and the game's settings;
+# DXMT's caches in its cache folder), CrossOver (a Steam install, with my own addon, another
+# program's d3d11.dll, another addon and the game's settings), Whisky and a Sikarugir wrapper
+# (ArenaNet installs), a broken one (Gw2.dat too small). Gw2.dat is sparse.
+O1="$H/Library/Application Support/GW2 on Mac"
+O1C="$O1/bottle/drive_c"
+O1G="$O1C/Program Files (x86)/Steam/steamapps/common/Guild Wars 2"
+O1S="$O1C/users/$BUSER/AppData/Roaming/Guild Wars 2"
+O1X="$H/Library/Caches/GW2 on Mac/dxmt/Gw2-64.exe"
+mkdir -p "$O1G/addons/arcdps" "$O1S" "$O1X"
+echo "stand-in game" >"$O1G/Gw2-64.exe" && mkfile -n 1100m "$O1G/Gw2.dat"
+cp "$SANDBOX/pe/arcdps.dll" "$O1G/d3d11.dll" && echo "[session]" >"$O1G/addons/arcdps/arcdps.ini"
+cp "$COMP/ui-scale/version.dll" "$O1G/version.dll" && echo "scale=1.5" >"$O1G/gw2-ui-scale.ini"
+printf '"AppState"\n{\n\t"appid"\t\t"1284210"\n\t"installdir"\t\t"Guild Wars 2"\n\t"StateFlags"\t\t"4"\n}\n' >"$O1C/Program Files (x86)/Steam/steamapps/appmanifest_1284210.acf"
+echo "stand-in steam" >"$O1C/Program Files (x86)/Steam/steam.exe"
+echo "0.1 local.dat" >"$O1S/Local.dat" && echo "<GSA_SDK 0.1/>" >"$O1S/GFXSettings.Gw2-64.exe.xml"
+echo "shaders" >"$O1X/shaders.bin"
+# a checksum of every file of 0.1's folders, by content
+o1sum() { (cd "$H/Library" && find "Application Support/GW2 on Mac" "Caches/GW2 on Mac" -type f -print0 | sort -z | xargs -0 shasum -a 256) | shasum -a 256; }
+O1SUM=$(o1sum)
 CX="$H/Library/Application Support/CrossOver/Bottles/Steam GW2/drive_c"
 CXG="$CX/Program Files (x86)/Steam/steamapps/common/Guild Wars 2"
 CXS="$CX/users/crossover/AppData/Roaming/Guild Wars 2"
 mkdir -p "$CXG/bin64" "$CXS"
 echo "stand-in game" >"$CXG/Gw2-64.exe" && mkfile -n 2g "$CXG/Gw2.dat" && echo "bin" >"$CXG/bin64/CoherentUI64.dll"
 cp "$COMP/ui-scale/version.dll" "$CXG/version.dll" && echo "scale=1.75" >"$CXG/gw2-ui-scale.ini" && echo "arcdps" >"$CXG/d3d11.dll"
+cp "$SANDBOX/pe/nexus.dll" "$CXG/dxgi.dll"
 printf '"AppState"\n{\n\t"appid"\t\t"1284210"\n\t"installdir"\t\t"Guild Wars 2"\n\t"StateFlags"\t\t"4"\n}\n' >"$CX/Program Files (x86)/Steam/steamapps/appmanifest_1284210.acf"
 echo "cx local.dat" >"$CXS/Local.dat" && echo "<GSA_SDK cx/>" >"$CXS/GFXSettings.Gw2-64.exe.xml"
 WB="$H/Library/Containers/com.isaacmarovitz.Whisky/Bottles/5F0C2A9E-0000-4000-8000-00000000AA01"
@@ -1032,7 +1051,7 @@ echo "wrapper local.dat" >"$WRS/Local.dat"
 BR="$H/Library/Application Support/CrossOver/Bottles/Broken/drive_c/Program Files/Guild Wars 2"
 mkdir -p "$BR" && echo "stand-in game" >"$BR/Gw2-64.exe" && mkfile -n 10m "$BR/Gw2.dat"
 # every file and folder of the sources (size, mtime, mode): they must never change
-snap() { find "$H/Library/Application Support/CrossOver" "$H/Library/Containers" "$H/Applications" -exec stat -f '%N %z %m %p' {} + | sort; }
+snap() { find "$O1" "$H/Library/Caches/GW2 on Mac" "$H/Library/Application Support/CrossOver" "$H/Library/Containers" "$H/Applications" -exec stat -f '%N %z %m %p' {} + | sort; }
 snap >"$SANDBOX/sources-before.txt"
 sources_unchanged() { snap | cmp -s - "$SANDBOX/sources-before.txt"; }
 BS="$BOTTLE/drive_c/users/$BUSER/AppData/Roaming/Guild Wars 2"
@@ -1040,7 +1059,8 @@ BS="$BOTTLE/drive_c/users/$BUSER/AppData/Roaming/Guild Wars 2"
 out=$(g scan)
 line_of() { echo "$out" | awk -F'\t' -v s="$1" '$2 == s'; }
 fields() { line_of "$1" | cut -f3,5,6 | tr '\t' ' '; }
-check "scan finds CrossOver's, Whisky's and the wrapper's, not the broken one" [ "$(echo "$out" | grep -c '^game')" = 3 ]
+check "scan finds 0.1's, CrossOver's, Whisky's and the wrapper's, not the broken one" [ "$(echo "$out" | grep -c '^game')" = 4 ]
+check "  0.1's: GW2 on Mac 0.1, the Steam route, the same disk, settings" [ "$(fields 'GW2 on Mac 0.1')" = "steam yes yes" ]
 check "  CrossOver's: the Steam route, the same disk, settings" [ "$(fields 'CrossOver · Steam GW2')" = "steam yes yes" ]
 check "  its size: the folder's files (over 2 GB)" [ "$(line_of 'CrossOver · Steam GW2' | cut -f4)" -gt 2147483648 ]
 check "  its path" [ "$(line_of 'CrossOver · Steam GW2' | cut -f7)" = "$CXG" ]
@@ -1057,6 +1077,8 @@ mkdir -p "$SANDBOX/elsewhere" && cp "$SANDBOX/sleeper" "$SANDBOX/elsewhere/Gw2-6
 sleep 0.3
 out=$(g install import "$CXG" 2>&1) && rc=0 || rc=$?
 check "install import refused while Guild Wars 2 runs elsewhere, nothing created" eval '[ "$rc" != 0 ] && has <(echo "$out") "@error Guild Wars 2 is running" && [ ! -e "$AD/engine" ]'
+out=$(g install import "$O1G" 2>&1) && rc=0 || rc=$?
+check "  0.1's too" eval '[ "$rc" != 0 ] && has <(echo "$out") "@error Guild Wars 2 is running" && [ ! -e "$AD/engine" ]'
 kill $ep 2>/dev/null || true; wait $ep 2>/dev/null || true
 
 out=$(GW2_ON_MAC_DRY_RUN=1 g install import "$CXG" 2>&1) && rc=0 || rc=$?
@@ -1073,13 +1095,24 @@ check "  the game's files in the bottle's Steam library" eval '[ -f "$GDI/Gw2-64
 check "  Steam's record of them, as it was" same "$CX/Program Files (x86)/Steam/steamapps/appmanifest_1284210.acf" "$STEAM/steamapps/appmanifest_1284210.acf"
 check "  Steam installed, not started for an install" eval '[ "$(st steam)" = yes ] && ! grep -q "steam://install" "$STANDIN_LOG"'
 check "  our own addon left out (version.dll, gw2-ui-scale.ini)" eval '[ ! -e "$GDI/version.dll" ] && [ ! -e "$GDI/gw2-ui-scale.ini" ]'
-check "  another addon came along, and the summary names it" eval 'has "$GDI/d3d11.dll" arcdps && has <(echo "$out") "^@done .*Addons that came along: d3d11.dll"'
+check "  another program's d3d11.dll left out, and the summary says so" eval '[ ! -e "$GDI/d3d11.dll" ] && has <(echo "$out") "^@done .*Another program.s d3d11.dll stayed behind\."'
+check "  another addon (not arcdps) came along, and the summary names it" eval 'same "$CXG/dxgi.dll" "$GDI/dxgi.dll" && has <(echo "$out") "^@done .*Addons that came along: dxgi.dll"'
 check "  the game's settings in the bottle" eval 'same "$CXS/Local.dat" "$BS/Local.dat" && same "$CXS/GFXSettings.Gw2-64.exe.xml" "$BS/GFXSettings.Gw2-64.exe.xml"'
 check "  the summary: cloned, with the settings" has <(echo "$out") "^@done Guild Wars 2 is ready: its files were cloned from CrossOver · Steam GW2 (no extra space), with your game settings"
 check "  the source is unchanged" sources_unchanged
 c=$(play_cmd); check "  Play: Steam (no login in this bottle yet: its window)" eval '[[ "$c" == *"steam.exe -applaunch 1284210"* && "$c" != *-silent* ]]'
 check "  uninstall" sh -c "'$G' uninstall | grep -q '@done'"
 check "  the source is still unchanged" sources_unchanged
+
+# GW2 on Mac 0.1's: arcdps stays behind (addons aren't cleared for this engine yet), DXMT's caches too
+out=$(g install import "$O1G" 2>&1) && rc=0 || rc=$?
+check "install import (GW2 on Mac 0.1's Steam install) exits 0, cloned" eval '[ "$rc" = 0 ] && has <(echo "$out") "Cloning the game" && [ "$(st route) $(st game)" = "steam yes" ]'
+check "  arcdps, version.dll and gw2-ui-scale.ini left out; arcdps's settings came along" eval '[ ! -e "$GDI/d3d11.dll" ] && [ ! -e "$GDI/version.dll" ] && [ ! -e "$GDI/gw2-ui-scale.ini" ] && has "$GDI/addons/arcdps/arcdps.ini" session'
+check "  the summary names what stayed behind" has <(echo "$out") "^@done Guild Wars 2 is ready: its files were cloned from GW2 on Mac 0.1 (no extra space), with your game settings\..* The larger interface's version.dll stayed behind: this app has its own\. arcdps stayed behind\. Turn it on in Settings once it is cleared for this engine\. Steam may"
+check "  the game's settings in the bottle" eval 'same "$O1S/Local.dat" "$BS/Local.dat" && same "$O1S/GFXSettings.Gw2-64.exe.xml" "$BS/GFXSettings.Gw2-64.exe.xml"'
+check "  no DXMT cache came along" eval '[ -z "$(find "$CACHE" -type f -path "*dxmt*" 2>/dev/null)" ]'
+check "  0.1's folders: the same checksum" [ "$(o1sum)" = "$O1SUM" ]
+g uninstall >/dev/null 2>&1
 
 # into an earlier run's bottle, whose own settings go to a backup folder
 g install steam >/dev/null 2>&1; g stop-waiting >/dev/null
@@ -1126,6 +1159,7 @@ out=$(GW2_ON_MAC_IMPORT_COPY=1 GW2_ON_MAC_FREE_KB=3020000 g install import "$CXG
 check "a copy without the free space is refused" eval '[ "$rc" != 0 ] && has <(echo "$out") "@error Not enough free disk space to copy the game"'
 check "  and leaves nothing behind" eval '[ ! -e "$AD/engine" ] && [ ! -e "$AD/bottle" ] && [ ! -e "$AD/state" ] && [ ! -e "$AD/.lock" ]'
 check "the sources never changed" sources_unchanged
+check "0.1's folders: still the same checksum" [ "$(o1sum)" = "$O1SUM" ]
 
 echo
 echo "$pass passed, $fail failed"
