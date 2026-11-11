@@ -377,9 +377,10 @@ struct ThisMac: View {
       }
     }
     let engine = s["engine_title"] ?? "Mach9 0.3.1 · Wine 11.21"
-    // the ntdll.so in the engine (gw2om.sh status wine_*): mine with its commit, or the engine's own
+    // the ntdll.so in the engine (gw2om.sh status wine_*): mine with its commit, another, or the engine's own
     let short = engine.components(separatedBy: " · ").first ?? engine
-    let wine = s["wine_file"] == "mine" ? "\(short) · my ntdll \((s["wine_commit"] ?? "").prefix(7))" : engine
+    let wine = s["wine_file"] == "mine" ? "\(short) · my ntdll \((s["wine_commit"] ?? "").prefix(7))"
+      : s["wine_file"] == "other" ? "\(short) · another ntdll" : engine
     let macos = s["macos"] ?? "?"
     // the DXMT Settings asks for: my fork (its commit) or the engine's own (athei/dxmt's)
     let dxmt = s["dxmt"] == "engine" ? "DXMT \((s["engine_dxmt"] ?? "").prefix(7)) · the engine's"

@@ -792,7 +792,7 @@ rules_text() {
   case "$ARC" in on|foreign) game="$game;dll_overrides=d3d11,dxgi=n,b" ;; esac
   [ "$(setting uiscale)" != on ] || game="$game;dll_overrides=version=n,b"
   while IFS= read -r e; do
-    if [ -n "$e" ]; then entries="$entries;env=$(cdb_value "$e")" removed="$removed;env=${e%%=*}="; fi
+    if [ -n "$e" ]; then entries="$entries;env=$e" removed="$removed;env=${e%%=*}="; fi
   done <<EOF
 $(heat_entries)
 EOF
@@ -807,16 +807,17 @@ HEAT_SWITCHES="
 jobwakes WINE_HEAT_WAKE=one,skip
 "
 heat_keys() { printf '%s\n' "$HEAT_SWITCHES" | awk 'NF { print $1 }'; }
-# heat_entries: the entries for the game's rule, one a line: the switches that are on and, with
+# heat_entries: the entries for the game's rule, one a line and already through cdb_value (a
+# newline in the logs folder's path can't split one): the switches that are on and, with
 # Debug logging, the counters (WINE_HEAT_COUNT), which my ntdll.so writes to the logs folder as
 # heat-<pid>.log every 5 s. None while the engine's own ntdll.so is in place.
 heat_entries() {
   local k e
   [ "$(lib_in_use wine)" = mine ] || return 0
   printf '%s\n' "$HEAT_SWITCHES" | while read -r k e; do
-    if [ -n "$k" ] && [ "$(setting "$k")" != off ]; then echo "$e"; fi
+    if [ -n "$k" ] && [ "$(setting "$k")" != off ]; then cdb_value "$e"; echo; fi
   done
-  if [ "$(setting debug)" = on ]; then echo WINE_HEAT_COUNT=1; echo "WINE_HEAT_LOG=$LOGS"; fi
+  if [ "$(setting debug)" = on ]; then echo WINE_HEAT_COUNT=1; echo "WINE_HEAT_LOG=$(cdb_value "$LOGS")"; fi
 }
 # write_rules: compatdb.rules from the settings, then compatdb.local as it is (a temporary file
 # and a rename, so a process that starts meanwhile reads the old rules or the new, never half)
