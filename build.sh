@@ -180,7 +180,7 @@ chmod 755 "$C/dxmt/x86_64-unix/winemetal.so" "$C/heat/ntdll.so" "$C/heat/wineser
 # The components as staged, before scripts/release.sh signs their Mach-O files: gw2om.sh counts an
 # engine file with one of these hashes as this version's too (graphics_state), so an engine set up
 # from the same build unsigned (a development install) needs no update
-(cd "$C" && find . -type f ! -name INVENTORY | sed 's|^\./||' | sort | while read -r f; do
+(cd "$C" && find . -type f ! -name INVENTORY | sed 's|^\./||' | LC_ALL=C sort | while read -r f; do
   echo "$(shasum -a 256 "$f" | cut -d' ' -f1)  $f"
 done) >"$C/INVENTORY"
 
