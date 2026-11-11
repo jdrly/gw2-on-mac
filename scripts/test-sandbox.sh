@@ -861,10 +861,17 @@ check "my DXMT at its real size (44 MB): Play compares the engine's tree with it
 game_session; watch_done
 check "  status once" [ "$(compared status)" = "$once" ]
 
-# two Plays at once: one watcher, the other joins
+# two Plays at once: one watcher, the other joins. The Play that joins compares the engine's tree
+# with my DXMT after its join, while the watcher's grace for Steam already runs: on the dev build's
+# runner, with my real build and the file above (88 MB), it returned 2 s after its join. Here a cmp
+# on PATH, only for these two Plays, makes the joined Play's comparison (replay=1 in the session)
+# take 4 s longer on any runner.
+mkdir -p "$SANDBOX/slow-bin"
+printf '#!/bin/bash\ncase "$3" in */real-size.bin) ! grep -qx replay=1 "%s/session" || sleep 4 ;; esac\nexec /usr/bin/cmp "$@"\n' "$AD" >"$SANDBOX/slow-bin/cmp"
+chmod 755 "$SANDBOX/slow-bin/cmp"
 : >"$STANDIN_LOG"
-"$G" play >/dev/null 2>&1 & p1=$!
-"$G" play >/dev/null 2>&1 & p2=$!
+PATH="$SANDBOX/slow-bin:$PATH" "$G" play >/dev/null 2>&1 & p1=$!
+PATH="$SANDBOX/slow-bin:$PATH" "$G" play >/dev/null 2>&1 & p2=$!
 wait $p1 $p2; started; watcher_up; steam_up
 check "two Plays at once: one watcher, the other joined" eval '[ "$(watchers)" = 1 ] && watcher_runs && [ "$(sess replay)" = 1 ]'
 game_session
