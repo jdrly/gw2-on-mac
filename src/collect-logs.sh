@@ -54,7 +54,8 @@ for u in "$BOTTLE/drive_c/users"/*; do
   BOTTLE_USER="${u##*/}"; break
 done
 GW2_APPDATA="$BOTTLE/drive_c/users/$BOTTLE_USER/AppData/Roaming/Guild Wars 2"
-# DXMT's caches for the game, in the app's own cache folder (gw2om.sh sets DXMT_CACHE_DIR to it)
+# DXMT's shader cache for the game, in the app's own cache folder (the game's compatdb rule sets
+# DXMT_SHADER_CACHE_PATH to it)
 DXMT_CACHE="$H/Library/Caches/$APP_NAME/dxmt/Gw2-64.exe"
 
 name="${APP_NAME// /-}-logs-$(date +%Y-%m-%d-%H%M)"
