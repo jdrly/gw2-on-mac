@@ -1849,7 +1849,7 @@ launch() {
       printf '%s\n' "${E[@]}"
       sed 's/^/RULE=/' "$RULES"; } >"$LOGS/session.env"
     printf '%s\n' "${E[@]}" | shasum | cut -c1-12 >"$LOGS/session.key"
-  elif [ -f "$LOGS/session.env" ] && { [ "$1" = "$GAME_EXE" ] || in_list -applaunch "$*"; }; then
+  elif [ -f "$LOGS/session.env" ] && { [ "$1" = "${GAME_EXE:-}" ] || in_list -applaunch "$*"; }; then
     # (a game start in a running session, with Steam still open: this start's rules, the rest as
     # the session started)
     { sed '/^RULE=/d' "$LOGS/session.env"; sed 's/^/RULE=/' "$RULES"; } >"$LOGS/session.env.new.$$"
