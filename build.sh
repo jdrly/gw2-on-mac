@@ -37,7 +37,7 @@ cd "$(dirname "$0")"
 ROOT="$PWD"
 
 # GW2_ON_MAC_VERSION overrides the version for test builds.
-APP_VERSION=${GW2_ON_MAC_VERSION:-0.2.0-dev.4}
+APP_VERSION=${GW2_ON_MAC_VERSION:-0.2.0-dev.5}
 
 # Development builds: X.Y.Z-dev.N, as SWTOR on Mac's. CFBundleShortVersionString is the version as
 # is; CFBundleVersion (what Sparkle compares) is numeric and sorts above the previous release and

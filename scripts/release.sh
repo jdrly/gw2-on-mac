@@ -47,7 +47,9 @@
 #                                    The app in the DMG must match the file list build.sh wrote
 #                                    (APP_FILES, default dist/<name>.files). BUILD_RECORD is the
 #                                    workflow's record of the build; the DMG's sha256 is added to it.
-#                                    DXMT_COMMIT, if set, must be the commit the bundled DXMT names.
+#                                    DXMT_COMMIT, if set, must be the commit the bundled DXMT names,
+#                                    and WINE_COMMIT, if set, the commit the bundled ntdll.so's
+#                                    VERSION names, with the file's sha256.
 #   scripts/release.sh --adhoc --no-release the same without the pre-release
 #
 # Releases from GitHub Actions (SWTOR on Mac's .github/workflows/release.yml; this repository has no
@@ -252,9 +254,10 @@ package() {
 }
 
 # --adhoc: the app in the finished DMG is the one build.sh made, file for file, with a valid
-# signature, and it is a dev build of this app: its bundle id, the dev channel, no feed.
+# signature, and it is a dev build of this app: its bundle id, the dev channel, no feed. With
+# DXMT_COMMIT and WINE_COMMIT, it bundles those commits' DXMT and ntdll.so.
 check_dmg() {
-  local mnt a err=""
+  local mnt a n err=""
   echo "[release] checking the app in the disk image"
   mnt="$(mktemp -d)"
   attach "$DMG" "$mnt"
@@ -268,6 +271,11 @@ check_dmg() {
   [ -n "$err" ] || ! plutil -extract SUPublicEDKey raw "$a/Contents/Info.plist" >/dev/null 2>&1 || err="The DMG's app has an SUPublicEDKey"
   [ -n "$err" ] || [ -z "${DXMT_COMMIT:-}" ] || grep -qx "commit: $DXMT_COMMIT" "$a/Contents/Resources/components/dxmt/VERSION" ||
     err="The DMG's app bundles another DXMT than commit $DXMT_COMMIT"
+  n="$a/Contents/Resources/components/ntdll"
+  [ -n "$err" ] || [ -z "${WINE_COMMIT:-}" ] ||
+    { grep -qx "commit: $WINE_COMMIT" "$n/VERSION" 2>/dev/null && [ -f "$n/ntdll.so" ] &&
+      grep -qx "ntdll.so: sha256 $(shasum -a 256 "$n/ntdll.so" | cut -d' ' -f1)" "$n/VERSION"; } ||
+    err="The DMG's app bundles no ntdll.so of commit $WINE_COMMIT with the sha256 its VERSION names"
   detach "$mnt"
   rmdir "$mnt"
   [ -z "$err" ] || { echo "$err" >&2; exit 1; }
