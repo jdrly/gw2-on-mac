@@ -146,6 +146,7 @@ export GW2_ON_MAC_WATCH_GRACE=2 GW2_ON_MAC_WATCH_QUITWAIT=2 GW2_ON_MAC_WATCH_POL
 ok "stand-in engine ($GW2_ON_MAC_ENGINE_SIZE bytes) and SteamSetup.exe"
 
 # --- Dry runs change nothing
+check "a deliberately failing check (#20, not for merging)" false
 section "Dry runs"
 out=$(GW2_ON_MAC_DRY_RUN=1 g install steam 2>&1); rc=$?
 check "dry-run install steam exits 0" [ "$rc" = 0 ]
