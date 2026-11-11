@@ -320,6 +320,20 @@ check "  wine.app untouched" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")"
 out=$(g set dxmt fork 2>&1) && rc=0 || rc=$?
 check "set dxmt fork: mine again, the engine's own kept as it ships" eval '[ "$rc" = 0 ] && dxgi_is fork && [ "$(st graphics)/$(st dxmt_tree)" = yes/fork ]'
 check "  wine.app untouched" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
+# A swap cut short (the Mac off, a kill): between its two renames there is no active tree, and
+# during the copy an unfinished dxmt.fork.new; the next call puts the asked-for tree in
+DX="$ENG/lib/wine/dxgi"
+mv "$DX/dxmt" "$DX/dxmt.fork" && sed -i '' 's/^dxmt=.*/dxmt=engine/' "$AD/settings.conf"
+check "cut short on the way to the engine's own (no active tree): graphics=switch" [ "$(st graphics)/$(st dxmt_tree)" = switch/none ]
+check "  the next set dxmt engine puts it in" eval 'g set dxmt engine >/dev/null && dxgi_is engine && [ "$(st graphics)" = yes ]'
+mv "$DX/dxmt" "$DX/dxmt.engine" && sed -i '' 's/^dxmt=.*/dxmt=fork/' "$AD/settings.conf"
+check "cut short on the way to mine (no active tree): graphics=switch" [ "$(st graphics)/$(st dxmt_tree)" = switch/none ]
+check "  the next set dxmt fork puts it in" eval 'g set dxmt fork >/dev/null && dxgi_is fork && [ "$(st graphics)" = yes ]'
+g set dxmt engine >/dev/null && rm -rf "$DX/dxmt.fork" && mkdir -p "$DX/dxmt.fork.new/aarch64-windows" && echo half >"$DX/dxmt.fork.new/aarch64-windows/d3d11.dll"
+check "cut short while making my tree (an unfinished dxmt.fork.new): set dxmt fork makes it again" \
+  eval 'g set dxmt fork >/dev/null && dxgi_is fork && [ ! -e "$DX/dxmt.fork.new" ] && [ "$(st graphics)" = yes ]'
+check "  the engine's own tree, its link's target and wine.app as they ship through all of it" \
+  eval 'diff -r "$S/lib/wine/dxgi/dxmt" "$DX/dxmt.engine" >/dev/null && [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]'
 check "set ncpu all: no WINENCPU" sh -c "'$G' set ncpu all >/dev/null && ! '$G' env | grep -q WINENCPU"
 MAXC=$(sysctl -n hw.logicalcpu)
 # (GitHub's runners have 3 CPUs, too few for the checks of 6 and 8)

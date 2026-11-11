@@ -773,7 +773,7 @@ which has Sparkle's key and my Developer ID), building the components themselves
 route's and the real arcdps's checks, and playing.
 
 `scripts/test-sandbox.sh` tests the backend of a built app end to end in `work/app-sandbox/test`,
-with 418 checks. It uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and
+with 425 checks. It uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and
 ArenaNet's downloads itself, and uses a clone of the game's own ArenaNet-signed `Gw2-64.exe` as the
 installer to check. That's `SIGNED_PE`, by default the copy in my development workspace's bottle.
 Without one, those checks are skipped. It covers:
@@ -781,7 +781,8 @@ Without one, those checks are skipped. It covers:
 - dry runs, both routes, finish, every setting and its effect, and the addon
 - my DXMT fork in the engine's tree with the engine's own next to it as it ships, its link left
   alone, the switch to the engine's own and back, a switch waiting while a session runs, an
-  earlier build of mine replaced at Play, a foreign tree left for Repair, and `wine.app`'s files'
+  earlier build of mine replaced at Play, a swap cut short between its renames or during its copy,
+  a foreign tree left for Repair, and `wine.app`'s files'
   hashes unchanged through all of it
 - raw mouse-look's registry values, which go to `Gw2-64.exe` only and never set `PhysicalKeyboard`,
   and registry writes waiting while a session holds the lock
