@@ -892,7 +892,12 @@ dxmt_switch() {
       run rm -f "$DXGI/dxmt.fork.new/$f"
       run cp -p "$COMP/dxmt/$f" "$DXGI/dxmt.fork.new/$f"
     done
-    if [ -z "$DRY" ]; then echo "$DXMT_VERSION" >"$DXGI/dxmt.fork.new/$DXMT_MARK"; fi
+    if [ -z "$DRY" ]; then
+      echo "$DXMT_VERSION" >"$DXGI/dxmt.fork.new/$DXMT_MARK"
+      # cp -p copies the quarantine attribute of an app copied out of a browser's download (a dev
+      # build is ad hoc signed, not notarized), and the engine's tree has none (install_engine)
+      run xattr -dr com.apple.quarantine "$DXGI/dxmt.fork.new"
+    fi
     run mv "$DXGI/dxmt.fork.new" "$DXGI/dxmt.fork"
   fi
   case "$cur" in
@@ -1055,6 +1060,8 @@ sync_uiscale() {
   if [ "$(setting uiscale)" = on ]; then
     say "The larger interface: version.dll and gw2-ui-scale.ini in the game folder"
     run install -m 644 "$COMP/ui-scale/version.dll" "$dll"
+    # (install copies the quarantine attribute too, as cp -p does in dxmt_switch)
+    if [ -z "$DRY" ] && xattr "$dll" | grep -qx com.apple.quarantine; then run xattr -d com.apple.quarantine "$dll"; fi
     write_uiscale_ini "$GAME_DIR/gw2-ui-scale.ini"
   else
     if [ -f "$dll" ]; then run rm -f "$dll"; say "Removed the larger interface's version.dll"; fi
