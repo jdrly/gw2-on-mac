@@ -205,6 +205,7 @@ check "  with my DXMT fork's variables (it goes into the engine)" eval 'echo "$o
 check "  with the rules file and no WINE_COMPATDB" eval 'echo "$out" | grep -qxF "[dry-run]   WINE_COMPATDB_FILE=$AD/compatdb.rules" && ! echo "$out" | grep -q "WINE_COMPATDB="'
 check "dry-run creates nothing" eval '[ ! -e "$AD" ] && [ ! -e "$CACHE" ]'
 check "fresh status: not installed" [ "$(st installed)" = no ]
+check "scratch for #66: a deliberately failing check (play before install)" eval 'g play; false'
 check "fresh status: no engine" [ "$(st engine_installed)" = no ]
 check "fresh status: the engine's pins (Mach9 0.3.1: Wine, FEX, DXMT commits)" \
   [ "$(st engine)/$(st engine_wine)/$(st engine_fex)/$(st engine_dxmt)" = mach9-v0.3.1/53def89293a/9d4fa4b46b1/d903db89036 ]
