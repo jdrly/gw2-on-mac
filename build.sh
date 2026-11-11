@@ -20,9 +20,10 @@
 #                                      src/helpers/sessionlock.c)
 #   Contents/Resources/Fonts/, Art/    the design's typefaces (SIL OFL) and artwork
 #   Contents/Resources/Licenses/       licences of the app and everything bundled
-# The Wine engine is not bundled: gw2om.sh downloads it at install time from athei's wine-build
-# release (CrossOver 26.3, the engine SWTOR on Mac uses; pinned URL, size and sha256 in
-# src/gw2om.sh). Steam and the game come from Valve or ArenaNet.
+# The Wine engine is not bundled: gw2om.sh downloads it at install time from my jdrly/wine-engine
+# release, the same file athei built and published before (CrossOver 26.3, the engine SWTOR on
+# Mac uses; pinned URL, size and sha256 in src/gw2om.sh). Steam and the game come from Valve or
+# ArenaNet.
 #
 # Built with the macOS 27 SDK (Xcode 27) for macOS 26.0 and later.
 #
@@ -36,7 +37,7 @@ cd "$(dirname "$0")"
 ROOT="$PWD"
 
 # GW2_ON_MAC_VERSION overrides the version for test builds.
-APP_VERSION=${GW2_ON_MAC_VERSION:-0.1.2}
+APP_VERSION=${GW2_ON_MAC_VERSION:-0.1.3}
 
 # Development builds: X.Y.Z-dev.N, as SWTOR on Mac's. CFBundleShortVersionString is the version as
 # is; CFBundleVersion (what Sparkle compares) is numeric and sorts above the previous release and
@@ -221,10 +222,11 @@ components/heat, components/winemac: Wine's ntdll.so, wineserver, winemac.so and
 (x86_64 unix sides) and winemac.drv (the Mac driver's x86_64 and i386 PE sides) from the sources of the app's Wine engine (CodeWeavers' CrossOver 26.3 with
 athei's patches, athei/wine $WINE_COMMIT), with the patches in wine/ (applied as their records,
 wine/*-VERSION.txt, say): LGPL-2.1-or-later, see wine/COPYING.LIB and wine/LICENSE. Their
-complete source is https://github.com/athei/wine/tree/$WINE_COMMIT (CodeWeavers' CrossOver
-sources: https://www.codeweavers.com/crossover/source) plus those patches, which are also in
-$REPO_URL/tree/v$APP_VERSION/patches. They are configured as the engine (athei/wine-build's
-build-wine.sh) and built at the optimisation the records name.
+complete source is https://github.com/athei/wine/tree/$WINE_COMMIT, also as an archive in
+https://github.com/jdrly/wine-engine/releases/tag/$(sed -n 's/^ENGINE_NAME=//p' src/gw2om.sh)
+(CodeWeavers' CrossOver sources: https://www.codeweavers.com/crossover/source), plus those
+patches, which are also in $REPO_URL/tree/v$APP_VERSION/patches. They are configured as the
+engine (athei/wine-build's build-wine.sh) and built at the optimisation the records name.
 
 Sparkle $SPARKLE_VERSION (app updates), https://sparkle-project.org: MIT-style licence, see
 sparkle/LICENSE.
@@ -236,8 +238,9 @@ Icons: Lucide (lucide-static 0.460.0, https://lucide.dev), drawn from their path
 licence, see lucide/LICENSE.txt.
 
 Not included in this app: the Wine engine (CodeWeavers' CrossOver 26.3 sources with athei's
-patches, Wine 11.0, LGPL-2.1-or-later; built by athei/wine-build) is downloaded at install time
-from https://github.com/athei/wine-build/releases/tag/$(sed -n 's/^ENGINE_NAME=//p' src/gw2om.sh).
+patches, Wine 11.0, LGPL-2.1-or-later; built by athei) is downloaded at install time from
+https://github.com/jdrly/wine-engine/releases/tag/$(sed -n 's/^ENGINE_NAME=//p' src/gw2om.sh),
+with its source.
 Steam comes from Valve, Guild Wars 2 from Valve (Steam) or ArenaNet.
 EOF
 

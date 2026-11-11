@@ -321,10 +321,12 @@ bash 3.2. The window calls it for everything: `status`, `install`, `play`, `sett
 `repair`, `uninstall` and a few more, listed at the top of [`src/gw2om.sh`](src/gw2om.sh). The
 script reports back in lines that start with `@`, such as `@phase`, `@progress` and `@error`.
 
-The Wine engine is not in the app. The script downloads it at install time from athei's
-[wine-build](https://github.com/athei/wine-build/releases/tag/cx-26.3.0-8) release `cx-26.3.0-8`,
-pinned by size and sha256. The download resumes, retries and has a second address through
-GitHub's API. Then my pieces go into the engine:
+The Wine engine is not in the app. athei built it from CodeWeavers' CrossOver 26.3 sources and
+athei's own patches, and that release is gone now, so I host the same file in
+[jdrly/wine-engine](https://github.com/jdrly/wine-engine/releases/tag/cx-26.3.0-8), release
+`cx-26.3.0-8`, next to the Wine source it was built from. The script downloads it from there at
+install time, pinned by size and sha256. The download resumes, retries and has a second address
+through GitHub's API. Then my pieces go into the engine:
 
 - DXMT `e02a4d6` over the engine's `dxgi/dxmt` tree
 - my `ntdll.so` and `wineserver`, which I call the heat build, tuned for the game's threads
@@ -641,7 +643,8 @@ checks differs per component:
 
 **Their source.** The complete corresponding source is public, under LGPL-2.1-or-later. DXMT is
 [jdrly/dxmt at `e02a4d6`](https://github.com/jdrly/dxmt/tree/e02a4d6). The Wine pieces are
-[athei/wine `d23b397`](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0),
+[athei/wine `d23b397`](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0)
+(also as an [archive in jdrly/wine-engine](https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-d23b39774528237cafe49f9a073286f854b779c0-source.tar.gz)),
 which is CodeWeavers' CrossOver 26.3 source with athei's patches and the engine's own source, plus
 these patches:
 
