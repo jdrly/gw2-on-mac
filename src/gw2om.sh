@@ -1825,7 +1825,7 @@ rotate_logs() {
 
 # launch <program> <args...>: a program in the bottle with the game's environment and its compatdb
 # rules (written first), detached; the session's environment and rules go to logs/session.env
-# (Collect Logs, the session report)
+# (Collect Logs, the session report), and each later start in the session updates the rules there
 launch() {
   local e
   game_env
@@ -1848,6 +1848,11 @@ launch() {
       printf '%s\n' "${E[@]}"
       sed 's/^/RULE=/' "$RULES"; } >"$LOGS/session.env"
     printf '%s\n' "${E[@]}" | shasum | cut -c1-12 >"$LOGS/session.key"
+  elif [ -f "$LOGS/session.env" ]; then
+    # (a game start in a running session, with Steam still open: this start's rules, the rest as
+    # the session started)
+    { sed '/^RULE=/d' "$LOGS/session.env"; sed 's/^/RULE=/' "$RULES"; } >"$LOGS/session.env.new"
+    mv -f "$LOGS/session.env.new" "$LOGS/session.env"
   fi
   echo "=== $(date '+%F %T') $*" >>"$LOGS/wine.log"
   ( cd "$BOTTLE" && env -u WINELOADER -u WINESERVER -u WINEDLLPATH -u DYLD_FALLBACK_LIBRARY_PATH "${COMPATDB_UNSET[@]}" "${E[@]}" \

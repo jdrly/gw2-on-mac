@@ -737,6 +737,22 @@ game_session
 check "  Steam quits once" eval 'watch_done && [ "$(sess result)" = quit ] && [ "$(grep -c "steam.exe -shutdown" "$STANDIN_LOG")" = 1 ]'
 check "watch-session by hand with no session: nothing to follow" sh -c "'$G' watch-session | grep -q '@done No session to follow'"
 
+# Raw mouse-look switched between two game starts with Steam still open: the Play that joins the
+# session records its own rules in session.env (the session report names the mouse from them), and
+# keeps the rest of the session's record
+rules_recorded() { [ "$(sed -n 's/^RULE=//p' "$LOGS/session.env")" = "$(cat "$AD/compatdb.rules")" ]; }
+splay; steam_up
+t0=$(sed -n 's/^STARTED=//p' "$LOGS/session.env")
+g set rawmouse off >/dev/null; splay
+check "rawmouse off, then a Play that joins the session: its rule with gcmouse=false in session.env" \
+  eval '[ "$(sess replay)" = 1 ] && rules_recorded && has "$LOGS/session.env" "^RULE=exe=Gw2-64.exe;gcmouse=false;"'
+check "  the rest as the session started (STARTED, SETTING_rawmouse=on)" \
+  eval '[ "$(sed -n "s/^STARTED=//p" "$LOGS/session.env")" = "$t0" ] && has "$LOGS/session.env" "^SETTING_rawmouse=on$"'
+g set rawmouse on >/dev/null; splay
+check "  rawmouse on again, another Play: the rule without it" eval 'rules_recorded && ! grep -q gcmouse "$LOGS/session.env"'
+game_session
+check "  Steam quits once" eval 'watch_done && [ "$(sess result)" = quit ] && ! steam_runs'
+
 # Steam restarts itself while it starts (an update): a new steam.exe without a request stays the
 # session's (the bottle's Steam starts only through Play)
 splay; steam_up
