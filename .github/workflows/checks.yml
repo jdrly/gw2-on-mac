@@ -75,7 +75,7 @@ jobs:
       # What to compare with a build of the same commit on my Mac
       - name: VERSIONS and the component hashes
         run: |
-          r="dist/GW2 on Mac.app/Contents/Resources"
+          apps=(dist/*.app); r="${apps[0]}/Contents/Resources"
           { echo '```'; cat "$r/VERSIONS"; echo; shasum -a 256 "$r/components/INVENTORY"; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Pack the app for the next jobs

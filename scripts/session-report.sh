@@ -1,6 +1,6 @@
 #!/bin/bash
 # Summary of one game session from DXMT's log (the jdrly/dxmt fork writes it for Gw2-64.exe into
-# ~/Library/Logs/GW2 on Mac/Gw2-64_d3d11.log; gw2om.sh keeps the 4 before as .1-.4): frame rate,
+# the app's logs folder, Gw2-64_d3d11.log; gw2om.sh keeps the 4 before as .1-.4): frame rate,
 # hitches (and DXMT's share of them), shader and pipeline compile waits, shader warming,
 # presentation, Metal 4. As SWTOR on Mac's session report, for DXMT's lines.
 #
@@ -8,7 +8,7 @@
 #                                                   last session in it)
 #   session-report.sh --compare A.log B.log          two sessions side by side (before/after)
 #
-#   --keep  also save the log as ~/Library/Logs/GW2 on Mac/sessions/Gw2-64_d3d11-<date>.log: the
+#   --keep  also save the log as the logs folder's sessions/Gw2-64_d3d11-<date>.log: the
 #           log is rotated at every game start, so keep the sessions to compare
 #
 # Sources, all from the fork's own lines (DXMT_STATS is on by default):
@@ -22,6 +22,8 @@
 #   METAL4   Metal 4 commits and errors
 # Also in Collect Logs (session-report.txt). Runs under macOS's /bin/bash 3.2 and awk.
 set -euo pipefail
+# The app's name and its logs folder's (as gw2om.sh's)
+APP_NAME="GW2 on Mac arm64"
 
 usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
@@ -38,7 +40,7 @@ done
 ROOT="${GW2_ON_MAC_ROOT:-}"
 H="${ROOT:+$ROOT/home}"
 H="${H:-$HOME}"
-LOGS="$H/Library/Logs/GW2 on Mac"
+LOGS="$H/Library/Logs/$APP_NAME"
 
 # summary <log>: KEY=VALUE lines of its last session
 summary() {

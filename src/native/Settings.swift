@@ -1,4 +1,4 @@
-// The Settings window (GW2 on Mac > Settings…, ⌘,; the main window's Settings), as the design's
+// The Settings window (the app menu > Settings…, ⌘,; the main window's Settings), as the design's
 // "Settings — Performance" draws it: a parchment sidebar of panes with an ink accent, and the
 // selected pane's settings in raised groups. Reads and changes the settings through
 // Resources/gw2om.sh (`settings`, `set <key> <value>`), which keeps them in settings.conf and
@@ -275,10 +275,10 @@ struct SettingsView: View {
       Button("Cancel", role: .cancel) { confirmAction = nil }
     } message: {
       Text(confirmAction == "reset-shaders"
-           ? "This clears GW2 on Mac's DXMT shader cache for the game (in ~/Library/Caches/GW2 on Mac/dxmt): "
+           ? "This clears \(appName)'s DXMT shader cache for the game (in ~/Library/Caches/\(appName)/dxmt): "
              + "its compiled shaders, pipeline archives and recorded pipelines. The next sessions build "
              + "them again, with more hitches at first."
-           : "The Wine engine is unpacked again from the verified download and GW2 on Mac's graphics and "
+           : "The Wine engine is unpacked again from the verified download and \(appName)'s graphics and "
              + "Wine pieces go back in. The bottle, the game and your settings stay.")
     }
   }
@@ -322,7 +322,7 @@ struct SettingsView: View {
       if let error = settings.error {
         note("triangle-alert", error, Brand.accent)
       } else if notInstalled {
-        note("info", "Install GW2 on Mac first.", Brand.fg3)
+        note("info", "Install \(appName) first.", Brand.fg3)
       }
       if selectedPane.appliesAtNextGameStart {
         note("info", "Changes take effect the next time the game starts.", Brand.fg3)
@@ -445,7 +445,7 @@ struct SettingsView: View {
         SettingRow("Launch options", "Extra arguments for Gw2-64.exe, for example -maploadinfo.") {
           LaunchOptionsField(settings: settings)
         }
-        SettingRow("Quit GW2 on Mac after launching", "It doesn't need to stay open while you play.") {
+        SettingRow("Quit \(appName) after launching", "It doesn't need to stay open while you play.") {
           InkSwitch(isOn: $quitAfterLaunch)
         }
       }
@@ -464,8 +464,8 @@ struct SettingsView: View {
     case .updates:
       SettingsGroup {
         SettingRow("Check for updates automatically", settings.updates?.available == true
-                   ? "GW2 on Mac looks for a new version once a day. Updates install only when you choose to."
-                   : "Not yet: GW2 on Mac has no update feed so far. Check for Updates… turns on with the first public release.") {
+                   ? "\(appName) looks for a new version once a day. Updates install only when you choose to."
+                   : "Not yet: \(appName) has no update feed so far. Check for Updates… turns on with the first public release.") {
           InkSwitch(isOn: settings.toggle("updates"))
             .disabled(settings.updates?.available != true)
         }
@@ -478,7 +478,7 @@ struct SettingsView: View {
         }
       }
       SettingsGroup {
-        SettingRow("Collect Logs", "A zip of GW2 on Mac's, Wine's, DXMT's and the game's logs for a bug report, without account names or passwords. Also in the GW2 on Mac menu.") {
+        SettingRow("Collect Logs", "A zip of \(appName)'s, Wine's, DXMT's and the game's logs for a bug report, without account names or passwords. Also in the \(appName) menu.") {
           SmallButton("Collect…", icon: "file-text") {
             NotificationCenter.default.post(name: .collectLogs, object: nil)
           }
@@ -489,7 +489,7 @@ struct SettingsView: View {
           }
           .disabled(settings.action != nil || settings.running)
         }
-        SettingRow("Reinstall the engine", "Unpacks the Wine engine again and puts GW2 on Mac's pieces back in. The bottle, the game and your settings stay.") {
+        SettingRow("Reinstall the engine", "Unpacks the Wine engine again and puts \(appName)'s pieces back in. The bottle, the game and your settings stay.") {
           SmallButton(settings.action == "reinstall-engine" ? "Reinstalling…" : "Reinstall…", icon: "rotate-ccw") {
             confirmAction = "reinstall-engine"
           }
@@ -498,7 +498,7 @@ struct SettingsView: View {
       }
       if let result = settings.actionResult { note("info", result, Brand.fg3) }
       SettingsGroup {
-        SettingRow("Get help", "Ask Pharaphobia on Discord or open a GitHub issue, with the zip from Collect Logs. Never ArenaNet's support: GW2 on Mac is unofficial.") {
+        SettingRow("Get help", "Ask Pharaphobia on Discord or open a GitHub issue, with the zip from Collect Logs. Never ArenaNet's support: \(appName) is unofficial.") {
           HStack(spacing: 8) {
             Link(destination: Support.discord) { Text("Discord ↗").font(.body(13, .bold)).foregroundStyle(Brand.accent) }
             Link(destination: Support.issues) { Text("GitHub ↗").font(.body(13, .bold)).foregroundStyle(Brand.accent) }
@@ -543,7 +543,7 @@ struct SettingsView: View {
     let foreign = settings.values["arcdps_foreign"].flatMap { $0.isEmpty ? nil : $0 } ?? "d3d11.dll"
     switch settings.values["arcdps_state"] {
     case "foreign":
-      return "The game folder has another \(foreign.replacingOccurrences(of: " ", with: " and ")) (Nexus or another addon?). GW2 on Mac leaves it alone, so it doesn't add arcdps."
+      return "The game folder has another \(foreign.replacingOccurrences(of: " ", with: " and ")) (Nexus or another addon?). \(appName) leaves it alone, so it doesn't add arcdps."
     case "nogame":
       return "The game is not installed yet: arcdps can go in once it is."
     default:
@@ -553,7 +553,7 @@ struct SettingsView: View {
 
   private func interfaceStateNote(_ state: String) -> String {
     switch state {
-    case "foreign": return "The game folder has another version.dll (another addon?). GW2 on Mac leaves it alone, so the larger interface is off."
+    case "foreign": return "The game folder has another version.dll (another addon?). \(appName) leaves it alone, so the larger interface is off."
     case "missing": return "The addon is not in the game folder (a game update or repair may have removed it). Turn it off and on again."
     case "nogame": return "The game is not installed yet: the addon goes in when it is."
     default: return state
@@ -637,9 +637,9 @@ struct ArcdpsWarning: View {
         Text("Turn on arcdps?").font(.head(19)).foregroundStyle(Brand.fg)
       }
       VStack(alignment: .leading, spacing: 8) {
-        bullet("arcdps is a third-party addon by deltaconnected. It is not made or supported by ArenaNet, NCSOFT or GW2 on Mac.")
-        bullet("It reads the game's memory while it runs. Use it at your own risk: there is no help or warranty for it from GW2 on Mac.")
-        bullet("GW2 on Mac downloads it from deltaconnected.com and puts it into the game folder as d3d11.dll. From then on arcdps updates itself.")
+        bullet("arcdps is a third-party addon by deltaconnected. It is not made or supported by ArenaNet, NCSOFT or \(appName).")
+        bullet("It reads the game's memory while it runs. Use it at your own risk: there is no help or warranty for it from \(appName).")
+        bullet("\(appName) downloads it from deltaconnected.com and puts it into the game folder as d3d11.dll. From then on arcdps updates itself.")
         bullet("Turning it off removes d3d11.dll and keeps arcdps's settings (addons/arcdps).")
       }
       HStack {
@@ -775,7 +775,7 @@ struct SidebarVersion: View {
     Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
   }
   var body: some View {
-    let parts = [version.isEmpty ? "" : "GW2 on Mac \(version)",
+    let parts = [version.isEmpty ? "" : "\(appName) \(version)",
                  AppActions.componentVersions().components(separatedBy: " · ").first ?? ""].filter { !$0.isEmpty }
     Text(parts.joined(separator: " · "))
       .font(.body(11)).bodyBox(11)

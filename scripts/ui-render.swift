@@ -1,4 +1,4 @@
-// Headless renders of GW2 on Mac's windows, for reviews and the comparison with the approved
+// Headless renders of the app's windows, for reviews and the comparison with the approved
 // design (its exports, when given). Compiled with the app's sources (-D GW2_RENDER, which drops the
 // app's own entry point) by scripts/ui-render.sh. No window is ever shown: each view is hosted
 // in an NSHostingView inside a borderless window that is never ordered on screen, and drawn with
@@ -399,6 +399,13 @@ func renderAll(_ dir: URL, exports: URL?) async {
     write(await render(SettingsView(settings: s), size: SettingsView.designSize, dark: dark),
           dir.appendingPathComponent("settings-interface-arcdps-\(name)-\(dark ? "dark" : "light").png"))
   }
+  // the About panel's content as AppKit's standard panel lays it out: the icon, the name, the
+  // version and the credits (AppActions.aboutOptions, what the menu's About item shows)
+  for dark in [false, true] {
+    let about = AboutRender(options: AppActions.aboutOptions(credits: Installer().credits))
+    write(await render(about, size: CGSize(width: 300, height: 470), dark: dark),
+          dir.appendingPathComponent("about-\(dark ? "dark" : "light").png"))
+  }
   for dark in [false, true] {
     let sheet = InterfaceWarning(isPresented: .constant(true)) {}
     write(await render(sheet, size: CGSize(width: 460, height: 300), dark: dark, chrome: false),
@@ -406,5 +413,38 @@ func renderAll(_ dir: URL, exports: URL?) async {
     let arcSheet = ArcdpsWarning(isPresented: .constant(true)) {}
     write(await render(arcSheet, size: CGSize(width: 460, height: 248), dark: dark, chrome: false),
           dir.appendingPathComponent("sheet-arcdps-warning-\(dark ? "dark" : "light").png"))
+  }
+}
+
+// MARK: - The About panel
+
+struct AboutRender: View {
+  let options: [NSApplication.AboutPanelOptionKey: Any]
+  var body: some View {
+    VStack(spacing: 6) {
+      Image(nsImage: NSImage(contentsOf: Brand.resources.appendingPathComponent("AppIcon.icns")) ?? NSImage())
+        .resizable().frame(width: 64, height: 64)
+        .padding(.top, 34)
+      Text(options[.applicationName] as? String ?? "?").font(.system(size: 14, weight: .bold))
+      Text("Version \(options[.applicationVersion] as? String ?? "?")").font(.system(size: 10))
+        .foregroundStyle(.secondary)
+      Credits(text: options[.credits] as? NSAttributedString ?? NSAttributedString())
+        .frame(width: 260)
+        .padding(.top, 8)
+      Spacer(minLength: 0)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(Color(nsColor: .windowBackgroundColor))
+  }
+
+  struct Credits: NSViewRepresentable {
+    let text: NSAttributedString
+    func makeNSView(context: Context) -> NSTextField {
+      let field = NSTextField(labelWithAttributedString: text)
+      field.maximumNumberOfLines = 0
+      field.preferredMaxLayoutWidth = 260
+      return field
+    }
+    func updateNSView(_ field: NSTextField, context: Context) {}
   }
 }

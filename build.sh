@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds "dist/GW2 on Mac.app": a small SwiftUI app that sets up Guild Wars 2 on its own Wine
+# Builds "dist/<the app's name>.app": a small SwiftUI app that sets up Guild Wars 2 on its own Wine
 # engine with DXMT (see README.md). Unlike SWTOR on Mac it changes no existing install: it
 # creates its own engine and bottle and installs the game into them, through Steam or ArenaNet's
 # own installer. The app bundles only its own pieces:
@@ -37,7 +37,7 @@ cd "$(dirname "$0")"
 ROOT="$PWD"
 
 # GW2_ON_MAC_VERSION overrides the version for test builds.
-APP_VERSION=${GW2_ON_MAC_VERSION:-0.1.3}
+APP_VERSION=${GW2_ON_MAC_VERSION:-0.2.0-dev.1}
 
 # Development builds: X.Y.Z-dev.N, as SWTOR on Mac's. CFBundleShortVersionString is the version as
 # is; CFBundleVersion (what Sparkle compares) is numeric and sorts above the previous release and
@@ -63,7 +63,12 @@ GITHUB_URL=https://github.com/jdrly
 REPO_URL=https://github.com/jdrly/gw2-on-mac
 MACOS_MIN=26.0
 CACHE="$ROOT/.cache"
-APP="$ROOT/dist/GW2 on Mac.app"
+# The app's name (gw2om.sh has the one definition) and bundle id: the 0.2 development build
+# has its own, so it installs next to 0.1.x and keeps its own defaults
+APP_NAME="$(sed -n 's/^APP_NAME="\(.*\)"$/\1/p' src/gw2om.sh)"
+[ -n "$APP_NAME" ] || { echo "No APP_NAME=\"…\" line in src/gw2om.sh" >&2; exit 1; }
+APP_ID=cz.jandrly.gw2onmac.arm64
+APP="$ROOT/dist/$APP_NAME.app"
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 
 # Pinned dependencies. Bump the version and sha256 together.
@@ -143,7 +148,7 @@ echo "Assembling $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 R="$APP/Contents/Resources"
-sed -e "s/@VERSION@/$APP_VERSION/g" -e "s/@BUILD@/$BUNDLE_VERSION/g" -e "s/@CHANNEL@/$CHANNEL/g" \
+sed -e "s/@NAME@/$APP_NAME/g" -e "s/@BUNDLE_ID@/$APP_ID/g" -e "s/@VERSION@/$APP_VERSION/g" -e "s/@BUILD@/$BUNDLE_VERSION/g" -e "s/@CHANNEL@/$CHANNEL/g" \
   src/Info.plist >"$APP/Contents/Info.plist"
 # Updates: off without a feed. GW2_ON_MAC_FEED_URL and GW2_ON_MAC_ED_PUBLIC_KEY (Sparkle's
 # EdDSA public key, generate_keys) turn them on for a release build (scripts/release.sh).
@@ -208,7 +213,7 @@ cp "$SPARKLE/LICENSE" "$L/sparkle/LICENSE"
 cp src/fonts/*-OFL.txt "$L/fonts/"
 cp src/icons/LICENSE.txt "$L/lucide/LICENSE.txt"
 cat >"$L/README.txt" <<EOF
-GW2 on Mac $APP_VERSION - licences
+$APP_NAME $APP_VERSION - licences
 
 GW2 on Mac's own code (the app, gw2om.sh, collect-logs.sh, session-report.sh, the interface
 addon in components/ui-scale): zlib licence, see GW2-on-Mac-LICENSE.txt. What the app bundles and

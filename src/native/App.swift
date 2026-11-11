@@ -1,19 +1,26 @@
-// GW2 on Mac: the app (SwiftUI). The main window (MainWindow.swift) shows this Mac's state and
+// The app (SwiftUI). The main window (MainWindow.swift) shows this Mac's state and
 // the launch panel, and runs Resources/gw2om.sh (status, install, finish, repair, uninstall,
 // play), which does the actual work and streams its progress back as "@" lines (see the header
 // of src/gw2om.sh). Also here: the app menu (About, Check for Updates…, Settings…, Collect
 // Logs…, Quit), with Settings.swift (the Settings window) and Updates.swift (Sparkle, off until
 // there is a feed).
 //
-// Unlike SWTOR on Mac, GW2 on Mac changes no existing install: it creates its own engine, bottle
+// Unlike SWTOR on Mac, the app changes no existing install: it creates its own engine, bottle
 // and graphics, and installs the game into them through Steam or ArenaNet's own installer.
 //
 // GW2_ON_MAC_ROOT and GW2_ON_MAC_DRY_RUN in the app's environment are passed on to gw2om.sh (and
 // collect-logs.sh), so the window can be tried against a sandbox:
-//   GW2_ON_MAC_ROOT=/tmp/gw2om-sandbox "GW2 on Mac.app/Contents/MacOS/GW2onMac"
+//   GW2_ON_MAC_ROOT=/tmp/gw2om-sandbox "<the app>.app/Contents/MacOS/GW2onMac"
 
 import AppKit
 import SwiftUI
+
+// The app's name in its window, menus, About panel and texts, and in the three folders gw2om.sh
+// keeps in ~/Library (its APP_NAME, which Info.plist gets from build.sh). The 0.2 development
+// build has its own, so it installs next to 0.1.x and shares nothing with it.
+// appEdition also goes under the header's wordmark.
+let appEdition = "arm64"
+let appName = "GW2 on Mac \(appEdition)"
 
 // MARK: - Model
 
@@ -100,7 +107,7 @@ final class Installer {
   static let uninstallSteps = [
     Step(id: 1, title: "Stop the game's Wine", detail: "Steam, the game and their Wine session"),
     Step(id: 2, title: "Remove the bottle", detail: "With the game's files in it"),
-    Step(id: 3, title: "Remove the engine and caches", detail: "And GW2 on Mac's settings; the logs stay"),
+    Step(id: 3, title: "Remove the engine and caches", detail: "And \(appName)'s settings; the logs stay"),
   ]
 
   var status: [String: String] = [:]
@@ -219,7 +226,7 @@ final class Installer {
   // Why Install can't go ahead, or nil
   var installBlocker: String? {
     if !loaded { return "Checking this Mac…" }
-    if !appleSilicon { return "GW2 on Mac needs a Mac with Apple silicon." }
+    if !appleSilicon { return "\(appName) needs a Mac with Apple silicon." }
     if !rosetta { return "Install Rosetta first: softwareupdate --install-rosetta in Terminal." }
     if route == .arenanet {
       switch setupCheck {
@@ -555,6 +562,12 @@ let disclaimer = "Unofficial. Not made, endorsed or supported by ArenaNet or NCS
 @MainActor
 enum AppActions {
   static func showAbout(credits: [String: String]) {
+    NSApp.activate()
+    NSApp.orderFrontStandardAboutPanel(options: aboutOptions(credits: credits))
+  }
+
+  // What the About panel shows (scripts/ui-render.swift draws the same)
+  static func aboutOptions(credits: [String: String]) -> [NSApplication.AboutPanelOptionKey: Any] {
     let centered = NSMutableParagraphStyle()
     centered.alignment = .center
     let body: [NSAttributedString.Key: Any] = [
@@ -587,13 +600,12 @@ enum AppActions {
     small[.font] = NSFont.systemFont(ofSize: NSFont.labelFontSize - 1)
     small[.foregroundColor] = NSColor.secondaryLabelColor
     text.append(NSAttributedString(string: "\n\n" + componentVersions(), attributes: small))
-    NSApp.activate()
-    NSApp.orderFrontStandardAboutPanel(options: [
-      .applicationName: "GW2 on Mac",
+    return [
+      .applicationName: appName,
       .applicationVersion: (credits["version"] ?? "?") + devSuffix,
       .version: "",
       .credits: text,
-    ])
+    ]
   }
 
   // "DXMT e02a4d6 · Wine cx-26.3.0-8 · Sparkle 2.10.0" from Resources/VERSIONS
@@ -662,14 +674,14 @@ final class LogCollector {
       alert.informativeText = "\((zip as NSString).lastPathComponent) is in your \(folder) folder. Send it with a "
         + "short description of the problem to Pharaphobia on Discord or attach it to a GitHub issue, "
         + "not to ArenaNet's support. It includes "
-        + "the crash reports of the game, Wine and GW2 on Mac from the last 7 days, and contains no "
+        + "the crash reports of the game, Wine and \(appName) from the last 7 days, and contains no "
         + "account names or passwords."
       alert.addButton(withTitle: "Show in Finder")
     } else {
       alert.alertStyle = .warning
       alert.messageText = "Could not collect the logs"
       alert.informativeText = "\(problem?.isEmpty == false ? problem! : "collect-logs.sh failed.")\n\n"
-        + "The logs are in ~/Library/Logs/GW2 on Mac."
+        + "The logs are in ~/Library/Logs/\(appName)."
     }
     NSApp.activate()
     alert.runModal()
@@ -686,7 +698,7 @@ struct AppCommands: Commands {
 
   var body: some Commands {
     CommandGroup(replacing: .appInfo) {
-      Button("About GW2 on Mac") { AppActions.showAbout(credits: installer.credits) }
+      Button("About \(appName)") { AppActions.showAbout(credits: installer.credits) }
       Button("Check for Updates…") { updates.checkForUpdates() }
         .disabled(!updates.available)
     }
@@ -720,7 +732,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   @MainActor func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     guard let installer, installer.isBusy else { return .terminateNow }
     let alert = NSAlert()
-    alert.messageText = "GW2 on Mac is still working"
+    alert.messageText = "\(appName) is still working"
     alert.informativeText = "Wait until it has finished, or press Cancel in the window first."
     alert.runModal()
     return .terminateCancel
@@ -744,7 +756,7 @@ struct GW2onMacApp: App {
   }
 
   var body: some Scene {
-    Window("GW2 on Mac", id: "main") {
+    Window(appName, id: "main") {
       MainView(installer: installer, settings: settings)
         .onAppear {
           delegate.installer = installer
@@ -770,8 +782,8 @@ struct GW2onMacApp: App {
     .restorationBehavior(.disabled)
     .commands { AppCommands(installer: installer, updates: updates, settings: settings, logs: logs) }
 
-    // A window, not a Settings scene: its menu item can then be disabled until GW2 on Mac is set up
-    Window("GW2 on Mac Settings", id: "settings") {
+    // A window, not a Settings scene: its menu item can then be disabled until the app is set up
+    Window("\(appName) Settings", id: "settings") {
       SettingsView(settings: settings)
     }
     .windowStyle(.hiddenTitleBar)

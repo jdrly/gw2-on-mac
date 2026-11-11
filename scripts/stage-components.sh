@@ -1,5 +1,5 @@
 #!/bin/bash
-# Stages the components GW2 on Mac's app bundles into prebuilt/ (ignored by git: Wine and DXMT
+# Stages the components the app bundles into prebuilt/ (ignored by git: Wine and DXMT
 # binaries stay out of the repository), copied from the builds in my development workspace's
 # work/, the ones the live engine runs. Nothing in the workspace is changed. build.sh checks
 # prebuilt/ against the records copied here, the way SWTOR on Mac's build.sh checks its prebuilt/.
@@ -21,7 +21,7 @@
 #                       winemac-swgl-relative-mouse, winemac-swgl-input-thread, winemac-swtor-mouse),
 #                       its PE sides x86_64-windows/ and i386-windows/winemac.drv (the same build),
 #                       and win32u.so with its layered-window drawing at -O2 (LGPL)
-#   prebuilt/ui-scale/  the interface-scale addon, version.dll and gw2-ui-scale.ini (GW2 on Mac's
+#   prebuilt/ui-scale/  the interface-scale addon, version.dll and gw2-ui-scale.ini (the app's
 #                       own code, addon/ui-scale; scripts/build-addon.sh builds the same thing)
 #
 # Sources: GW2_ON_MAC_WORKSPACE (default ../gw2-on-mac, next to this repository) and in it

@@ -1,6 +1,6 @@
 // The main window, as the approved design draws it (its Main — … frames): the
 // ink-stroke header with the GW2 / ON MAC wordmark, the tagline and the Unofficial badge; on the
-// left this Mac's six checks and what GW2 on Mac does; on the right the painting and one panel:
+// left this Mac's six checks and what the app does; on the right the painting and one panel:
 // choose the install route (Steam or ArenaNet's installer), the install's steps with progress and
 // Cancel, Ready (Play, Repair, Settings, Uninstall…), or, after Play, Starting and Playing
 // (Session.swift); the disclaimer in the footer.
@@ -63,11 +63,11 @@ struct MainView: View {
     .onChange(of: showLogSheet || confirmUninstall || blocked != nil) { _, open in
       installer.sheetOpen = open
     }
-    .alert("Uninstall GW2 on Mac?", isPresented: $confirmUninstall) {
+    .alert("Uninstall \(appName)?", isPresented: $confirmUninstall) {
       Button("Uninstall", role: .destructive) { installer.start(.uninstall) }
       Button("Cancel", role: .cancel) {}
     } message: {
-      Text("This removes everything GW2 on Mac created: the Wine engine and the game's bottle. The "
+      Text("This removes everything \(appName) created: the Wine engine and the game's bottle. The "
            + "game's files are in the bottle, so they go with it: Guild Wars 2 has to download again if "
            + "you install it later. Its caches go too, DXMT's shader cache with them. Your account, "
            + "characters and Steam library are not affected. The logs are kept.")
@@ -217,7 +217,7 @@ struct Header: View {
         #if GW2_DEV
         DevBuildBadge()
         #endif
-        // I answer GW2 on Mac and addon questions on Discord. You can report bugs there too.
+        // I answer questions about the app and addons on Discord. You can report bugs there too.
         // The icon is Lucide's chat bubble, as on gw2onmac.com, not Discord's logo.
         Button { openURL(Support.discord) } label: {
           HeaderChip(icon: "message-circle", label: "Discord")
@@ -236,7 +236,7 @@ struct Header: View {
         .accessibilityLabel("Unofficial fan project")
         .accessibilityHint("Shows the notice")
         .popover(isPresented: $showNotice, arrowEdge: .bottom) {
-          Text("GW2 on Mac is an unofficial fan project. " + disclaimer + " It installs nothing of the "
+          Text("\(appName) is an unofficial fan project. " + disclaimer + " It installs nothing of the "
                + "game itself: Steam or ArenaNet's own installer downloads it.")
             .font(.body(13)).bodyBox(13)
             .fixedSize(horizontal: false, vertical: true)
@@ -285,10 +285,18 @@ struct Wordmark: View {
           .shadow(color: Brand.headerShadow.opacity(0.9), radius: 2.5, y: 1)
       }
       .frame(height: 20)
+      // which build this is, so 0.1.x and this one look different side by side
+      Text(appEdition.uppercased())
+        .font(.display(12))
+        .tracking(5)
+        .foregroundStyle(Brand.headerText)
+        .shadow(color: Brand.headerShadow.opacity(0.9), radius: 2.5, y: 1)
+        .padding(.leading, 38)
+        .frame(height: 16)
     }
     .fixedSize()
     .accessibilityElement(children: .ignore)
-    .accessibilityLabel("GW2 on Mac")
+    .accessibilityLabel(appName)
     .accessibilityAddTraits(.isHeader)
   }
 }
@@ -590,7 +598,7 @@ struct ChoosePanel: View {
       Button(action: actions.install) {
         HStack(spacing: 10) {
           LucideIcon(name: "download", size: 18)
-          Text("Install GW2 on Mac")
+          Text("Install \(appName)")
         }
       }
       .buttonStyle(.crimson)
@@ -599,8 +607,8 @@ struct ChoosePanel: View {
       HStack(alignment: .top, spacing: 7) {
         LucideIcon(name: "info", size: 13).foregroundStyle(Brand.fg3)
         Text(installer.route == .existing
-             ? "Cloned or copied into GW2 on Mac's bottle. The originals stay as they are."
-             : "Every download comes from Valve or ArenaNet. GW2 on Mac hosts nothing of the game.")
+             ? "Cloned or copied into \(appName)'s bottle. The originals stay as they are."
+             : "Every download comes from Valve or ArenaNet. \(appName) hosts nothing of the game.")
           .font(.body(12)).bodyBox(12, 1.3).foregroundStyle(Brand.fg3)
           .fixedSize(horizontal: false, vertical: true)
       }
@@ -1104,7 +1112,7 @@ struct LogSheet: View {
       .padding(10)
       .background(Brand.bgRaised, in: .rect(cornerRadius: 8))
       HStack {
-        Text("The full log is in ~/Library/Logs/GW2 on Mac.").font(.body(12)).bodyBox(12).foregroundStyle(Brand.fg3)
+        Text("The full log is in ~/Library/Logs/\(appName).").font(.body(12)).bodyBox(12).foregroundStyle(Brand.fg3)
         Spacer()
         Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
       }

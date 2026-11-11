@@ -1,5 +1,5 @@
 #!/bin/bash
-# Renders GW2 on Mac's windows headlessly (scripts/ui-render.swift: no window is shown, the app
+# Renders the app's windows headlessly (scripts/ui-render.swift: no window is shown, the app
 # never activates) into work/app-renders/, with compare-*.png next to the approved design's
 # exports when there are any (DESIGN_EXPORTS, default the development workspace's
 # docs/design/exports; the design file is not in this repository).
@@ -10,7 +10,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="${1:-$PWD/work/app-renders}"
 DESIGN_EXPORTS="${DESIGN_EXPORTS:-${GW2_ON_MAC_WORKSPACE:-$PWD/../gw2-on-mac}/docs/design/exports}"
-APP="$PWD/dist/GW2 on Mac.app"
+APP_NAME="$(sed -n 's/^APP_NAME="\(.*\)"$/\1/p' src/gw2om.sh)"
+[ -n "$APP_NAME" ] || { echo "No APP_NAME=\"…\" line in src/gw2om.sh" >&2; exit 1; }
+APP="$PWD/dist/$APP_NAME.app"
 [ -d "$APP" ] || { echo "No $APP; run ./build.sh" >&2; exit 1; }
 SPARKLE="$PWD/.cache/sparkle-2.10.0"
 BIN="$PWD/.cache/ui-render"

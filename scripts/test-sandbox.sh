@@ -9,7 +9,7 @@
 # default the game's own Gw2-64.exe from my development workspace's bottle, only read; without
 # one, those checks are skipped).
 #
-#   scripts/test-sandbox.sh [path/to/GW2 on Mac.app]
+#   scripts/test-sandbox.sh [path/to/the app]
 #
 # Env: SANDBOX (default work/app-sandbox/test in this repository, removed first), KEEP=1 (leave it
 #      for a look), SIGNED_PE (an x86_64 PE signed by ArenaNet; default the game's Gw2-64.exe in
@@ -20,8 +20,10 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 ROOT="$PWD"
+APP_NAME="$(sed -n 's/^APP_NAME="\(.*\)"$/\1/p' src/gw2om.sh)"
+[ -n "$APP_NAME" ] || { echo "No APP_NAME=\"…\" line in src/gw2om.sh" >&2; exit 1; }
 WS="${GW2_ON_MAC_WORKSPACE:-$ROOT/../gw2-on-mac}"
-APP="$(cd "${1:-dist/GW2 on Mac.app}" && pwd)"
+APP="$(cd "${1:-dist/$APP_NAME.app}" && pwd)"
 G="$APP/Contents/Resources/gw2om.sh"
 [ -f "$G" ] || { echo "no $G; run ./build.sh" >&2; exit 1; }
 SANDBOX="${SANDBOX:-$ROOT/work/app-sandbox/test}"
@@ -35,9 +37,9 @@ rm -rf "$SANDBOX"
 mkdir -p "$SANDBOX"
 SANDBOX="$(cd "$SANDBOX" && pwd -P)"
 H="$SANDBOX/home"
-AD="$H/Library/Application Support/GW2 on Mac"
-LOGS="$H/Library/Logs/GW2 on Mac"
-CACHE="$H/Library/Caches/GW2 on Mac"
+AD="$H/Library/Application Support/$APP_NAME"
+LOGS="$H/Library/Logs/$APP_NAME"
+CACHE="$H/Library/Caches/$APP_NAME"
 ENG="$AD/engine"
 BOTTLE="$AD/bottle"
 STEAM="$BOTTLE/drive_c/Program Files (x86)/Steam"
@@ -170,7 +172,7 @@ WRONG_SHA=$(shasum -a 256 "$CACHE/downloads/engine.tar.xz" | cut -d' ' -f1)
 ENGINE_BYTES=$(echo "$GW2_ON_MAC_ENGINE_SIZE" | sed -e :a -e 's/^\([0-9]\{1,\}\)\([0-9]\{3\}\)/\1,\2/;ta')   # (with thousands commas)
 out=$(g install steam 2>&1) && rc=0 || rc=$?
 check "install steam exits 0" [ "$rc" = 0 ]
-check "the wrong file in the downloads: the window names it, its size and sha256 against the engine's" eval 'echo "$out" | grep -qxF "@warn engine.tar.xz in $CACHE/downloads is not the Wine engine. It has 15 bytes and a sha256 starting ${WRONG_SHA:0:12}, the Wine engine has $ENGINE_BYTES bytes and a sha256 starting ${GW2_ON_MAC_ENGINE_SHA256:0:12}. GW2 on Mac renamed your file to engine.tar.xz.wrong and downloads the Wine engine itself."'
+check "the wrong file in the downloads: the window names it, its size and sha256 against the engine's" eval 'echo "$out" | grep -qxF "@warn engine.tar.xz in $CACHE/downloads is not the Wine engine. It has 15 bytes and a sha256 starting ${WRONG_SHA:0:12}, the Wine engine has $ENGINE_BYTES bytes and a sha256 starting ${GW2_ON_MAC_ENGINE_SHA256:0:12}. $APP_NAME renamed your file to engine.tar.xz.wrong and downloads the Wine engine itself."'
 check "  moved aside as engine.tar.xz.wrong, then the engine downloaded" eval 'has "$CACHE/downloads/engine.tar.xz.wrong" "not the engine" && echo "$out" | grep -q "^Downloading Wine engine from"'
 check "the phases 1-4 in order" [ "$(echo "$out" | grep '^@phase' | tr '\n' ' ')" = "@phase 1 @phase 2 @phase 3 @phase 4 " ]
 check "@progress lines for the engine" has <(echo "$out") "@progress Wine engine"
@@ -210,6 +212,9 @@ check "the Game Mode link in the sandbox's temp folder" sh -c "ls '$SANDBOX/user
 check "logs/session.env written" has "$LOGS/session.env" "SETTING_warm=on"
 check "the manifest" has "$AD/install-manifest.json" '"route": "steam"'
 check "install.log" has "$LOGS/install.log" "install steam"
+# (the app's own three folders and nothing else in Library, so it never shares one with another
+# build of the app, such as 0.1.x)
+check "only the app's folders in Library: $APP_NAME" eval '[ "$(cd "$H/Library" && ls -d */* | tr "\n" "|")" = "Application Support/$APP_NAME|Caches/$APP_NAME|Logs/$APP_NAME|" ]'
 
 section "Steam downloads the game (played by the test)"
 m="$STEAM/steamapps/appmanifest_1284210.acf"
@@ -641,7 +646,7 @@ watch_done
 sleep 0.3
 : >"$STANDIN_LOG"
 "$G" play >"$SANDBOX/stuck.txt" 2>&1 && rc=0 || rc=$?
-check "the session's lock held without an answer: Play refuses and starts nothing" eval '[ "$rc" != 0 ] && has "$SANDBOX/stuck.txt" "@error GW2 on Mac.s last session did not answer" && ! has "$STANDIN_LOG" "^wine "'
+check "the session's lock held without an answer: Play refuses and starts nothing" eval '[ "$rc" != 0 ] && has "$SANDBOX/stuck.txt" "@error $APP_NAME.s last session did not answer" && ! has "$STANDIN_LOG" "^wine "'
 kill $hp 2>/dev/null; wait $hp 2>/dev/null
 
 # the lock's helper: bundled and signed; without it, the game starts, with no watcher (Steam stays open)
@@ -966,7 +971,7 @@ touch "$PAUSE"; rm -f "$PAUSE.at"
 GW2_ON_MAC_TEST_PAUSE="$PAUSE" GW2_ON_MAC_TEST_PAUSE_AT=lock-stale-checked "$G" set launchopts -contenderA >"$SANDBOX/contA.txt" 2>&1 & ca=$!
 check "a lock left by a gone process: the first contender has the claim (paused after its check)" eval 'wait_at && "$APP/Contents/Resources/helpers/sessionlock" held "$LOGS/.lock-claim"'
 out=$(GW2_ON_MAC_LOCK_WAIT=1 "$G" repair 2>&1) && rc=0 || rc=$?
-check "  a second contender is refused meanwhile and leaves the lock alone" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "Another GW2 on Mac" && [ "$(cat "$AD/.lock/pid")" = "$dp" ]'
+check "  a second contender is refused meanwhile and leaves the lock alone" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "Another $APP_NAME" && [ "$(cat "$AD/.lock/pid")" = "$dp" ]'
 out=$(GW2_ON_MAC_LOCK_WAIT=1 "$G" set launchopts -contenderB 2>&1) && rc=0 || rc=$?
 check "  so does a third (a settings change)" eval '[ "$rc" != 0 ] && [ "$(cat "$AD/.lock/pid")" = "$dp" ]'
 rm -f "$PAUSE"; wait $ca; rc=$?
@@ -991,9 +996,9 @@ check "owner A holds the lock; contender B has read A's pid under the claim (pau
 rm -f "$P1"; sleep 0.5
 check "  A, done, waits for the claim to unlock: the lock is still A's" eval 'kill -0 $oa 2>/dev/null && [ "$(cat "$AD/.lock/pid")" = "$oa" ]'
 out=$(GW2_ON_MAC_LOCK_WAIT=1 "$G" set launchopts -freshC 2>&1) && rc=0 || rc=$?
-check "  a fresh acquisition (C) waits for the claim and is refused: the lock still A's, nothing of C's" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "Another GW2 on Mac" && [ "$(cat "$AD/.lock/pid")" = "$oa" ] && [ "$(sett launchopts)" != -freshC ]'
+check "  a fresh acquisition (C) waits for the claim and is refused: the lock still A's, nothing of C's" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "Another $APP_NAME" && [ "$(cat "$AD/.lock/pid")" = "$oa" ] && [ "$(sett launchopts)" != -freshC ]'
 rm -f "$P2"; wait $ob; rb=$?; wait $oa; ra=$?
-check "  B, resumed, finds A still there and is refused; A unlocks and ends: its setting, no lock left" eval '[ "$rb" != 0 ] && has "$SANDBOX/contB.txt" "Another GW2 on Mac" && [ "$ra" = 0 ] && [ "$(sett launchopts)" = -ownerA ] && [ ! -e "$AD/.lock" ]'
+check "  B, resumed, finds A still there and is refused; A unlocks and ends: its setting, no lock left" eval '[ "$rb" != 0 ] && has "$SANDBOX/contB.txt" "Another $APP_NAME" && [ "$ra" = 0 ] && [ "$(sett launchopts)" = -ownerA ] && [ ! -e "$AD/.lock" ]'
 g set launchopts -maploadinfo >/dev/null
 # a later version's update: what this version put in (its record) counts as an earlier version's
 echo "this version's winemac.so, as a later version sees it" >"$SANDBOX/winemac-rec.so"
@@ -1009,7 +1014,7 @@ watch_done
 # a piece missing altogether: no game on an incomplete set
 mv "$ENG/lib/wine/i386-windows/winemac.drv" "$SANDBOX/winemac32.keep"; : >"$STANDIN_LOG"
 out=$(g play 2>&1) && rc=0 || rc=$?
-check "a missing i386 winemac.drv: Play refuses (Repair) and starts nothing" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "missing GW2 on Mac.s lib/wine/i386-windows/winemac.drv" && nolaunch'
+check "a missing i386 winemac.drv: Play refuses (Repair) and starts nothing" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "missing $APP_NAME.s lib/wine/i386-windows/winemac.drv" && nolaunch'
 g repair >/dev/null 2>&1
 check "  repair: graphics=yes" [ "$(st graphics)" = yes ]
 echo "shader" >"$DXMT_CACHE/shaders_320.db"
@@ -1018,7 +1023,7 @@ check "  and leaves the per-user cache folder's dxmt/ alone" other_dxmt_kept
 check "reinstall-engine" sh -c "'$G' reinstall-engine | grep -q '@done'"
 check "  graphics=yes after it" [ "$(st graphics)" = yes ]
 mkdir "$AD/.lock"
-check "a second operation is refused while one runs (lock)" sh -c "'$G' repair 2>&1 | grep -q 'Another GW2 on Mac'"
+check "a second operation is refused while one runs (lock)" sh -c "'$G' repair 2>&1 | grep -q 'Another $APP_NAME'"
 rmdir "$AD/.lock"
 GW2_ON_MAC_ENGINE_CHECKS=1 "$G" play >"$SANDBOX/realwine.txt" 2>&1 || true
 check "the real engine's Wine never runs in a sandbox" has "$SANDBOX/realwine.txt" "Refusing to run the real Wine"
@@ -1157,7 +1162,7 @@ check "  the source is still unchanged" sources_unchanged
 # into an earlier run's bottle, whose own settings go to a backup folder
 g install steam >/dev/null 2>&1; g stop-waiting >/dev/null
 mkdir -p "$BS" && echo "the bottle's own" >"$BS/Local.dat"
-backup_kept() { local f; for f in "$BS"/"GW2 on Mac backup "*/Local.dat; do has "$f" "the bottle's own" && return 0; done; return 1; }
+backup_kept() { local f; for f in "$BS"/"$APP_NAME backup "*/Local.dat; do has "$f" "the bottle's own" && return 0; done; return 1; }
 : >"$STANDIN_LOG"
 out=$(g install import "$WRAP" 2>&1) && rc=0 || rc=$?
 check "install import of the wrapper's (ArenaNet) into the earlier bottle exits 0" [ "$rc" = 0 ]
