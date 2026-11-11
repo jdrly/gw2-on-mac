@@ -66,7 +66,7 @@ final class Installer {
     let finishingDetail = interface ? "The sharper interface and the shader cache" : "Game Mode and the shader cache"
     let finishing = Step(id: 5, title: "Finishing touches", detail: finishingDetail)
     let common = [
-      Step(id: 1, title: "The Wine engine", detail: "CrossOver 26.3 · from athei/wine-build"),
+      Step(id: 1, title: "The Wine engine", detail: "athei's CrossOver 26.3 · from jdrly/wine-engine"),
       Step(id: 2, title: "The game's own bottle", detail: "Retina, Game Mode and my graphics"),
     ]
     let files = "Cloned or copied; the originals stay as they are"

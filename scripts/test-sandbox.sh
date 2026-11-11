@@ -152,11 +152,22 @@ check "fresh status: not installed" [ "$(st installed)" = no ]
 check "fresh status: no engine" [ "$(st engine_installed)" = no ]
 check "fresh status: rosetta answered" [ -n "$(st rosetta)" ]
 check "fresh status: disk_free is a number" [ "$(st disk_free)" -gt 0 ]
+out=$(env -u GW2_ON_MAC_ENGINE_URL -u GW2_ON_MAC_ENGINE_SHA256 -u GW2_ON_MAC_ENGINE_SIZE GW2_ON_MAC_DRY_RUN=1 "$G" install steam 2>&1)
+check "dry-run without the stand-in: the real engine from jdrly/wine-engine" \
+  has <(echo "$out") "^\[dry-run\] download https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz (234978748 bytes"
+check "  and still nothing created" eval '[ ! -e "$AD" ] && [ ! -e "$CACHE" ]'
 
 # --- Steam route
 section "Install through Steam"
+# (a file in the downloads folder under the engine's name that isn't the engine, as a player may
+# put there by hand: named in the window, moved aside, and the engine downloaded)
+mkdir -p "$CACHE/downloads" && echo "not the engine" >"$CACHE/downloads/engine.tar.xz"
+WRONG_SHA=$(shasum -a 256 "$CACHE/downloads/engine.tar.xz" | cut -d' ' -f1)
+ENGINE_BYTES=$(echo "$GW2_ON_MAC_ENGINE_SIZE" | sed -e :a -e 's/^\([0-9]\{1,\}\)\([0-9]\{3\}\)/\1,\2/;ta')   # (with thousands commas)
 out=$(g install steam 2>&1) && rc=0 || rc=$?
 check "install steam exits 0" [ "$rc" = 0 ]
+check "the wrong file in the downloads: the window names it, its size and sha256 against the engine's" eval 'echo "$out" | grep -qxF "@warn engine.tar.xz in $CACHE/downloads is not the Wine engine. It has 15 bytes and a sha256 starting ${WRONG_SHA:0:12}, the Wine engine has $ENGINE_BYTES bytes and a sha256 starting ${GW2_ON_MAC_ENGINE_SHA256:0:12}. GW2 on Mac renamed your file to engine.tar.xz.wrong and downloads the Wine engine itself."'
+check "  moved aside as engine.tar.xz.wrong, then the engine downloaded" eval 'has "$CACHE/downloads/engine.tar.xz.wrong" "not the engine" && echo "$out" | grep -q "^Downloading Wine engine from"'
 check "the phases 1-4 in order" [ "$(echo "$out" | grep '^@phase' | tr '\n' ' ')" = "@phase 1 @phase 2 @phase 3 @phase 4 " ]
 check "@progress lines for the engine" has <(echo "$out") "@progress Wine engine"
 check "installed=yes" [ "$(st installed)" = yes ]

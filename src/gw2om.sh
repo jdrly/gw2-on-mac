@@ -102,13 +102,14 @@ CHANNEL="${CHANNEL:-release}"
 DXMT_VERSION="$(cat "$COMP/dxmt/VERSION" 2>/dev/null || echo unknown)"
 
 # --- The engine: athei's build of CodeWeavers' CrossOver 26.3 (Wine 11.0, x86_64 WoW64), the
-# engine of SWTOR on Mac and SWGL on Mac, downloaded at install time from its release (never
-# bundled or mirrored). Bump name, URL, size and sha256 together.
+# engine of SWTOR on Mac and SWGL on Mac, downloaded at install time (never bundled). athei's
+# release of it is gone, so I host the same file, byte for byte, in jdrly/wine-engine, next to
+# the Wine source it was built from. Bump name, URL, size and sha256 together.
 ENGINE_NAME=cx-26.3.0-8
 ENGINE_TITLE="CrossOver 26.3 · Wine 11"
-ENGINE_URL=https://github.com/athei/wine-build/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz
+ENGINE_URL=https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz
 # the same file through GitHub's API (the release asset's id): the download's second way
-ENGINE_API_URL=https://api.github.com/repos/athei/wine-build/releases/assets/627976236
+ENGINE_API_URL=https://api.github.com/repos/jdrly/wine-engine/releases/assets/734819803
 ENGINE_SIZE=234978748
 ENGINE_SHA256=1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d
 # The engine's own files that GW2 on Mac replaces (kept next to them as <file>.stock) and its
@@ -228,6 +229,7 @@ put() {
 sha256() { shasum -a 256 "$1" | cut -d' ' -f1; }
 json_get() { plutil -extract "$2" raw -o - "$1" 2>/dev/null || true; }   # <file> <keypath>
 mb() { echo $((($1 + 524288) / 1048576)); }
+thousands() { echo "$1" | sed -e :a -e 's/^\([0-9]\{1,\}\)\([0-9]\{3\}\)/\1,\2/;ta'; }   # 234978748 -> 234,978,748
 in_list() { local w; for w in $2; do [ "$w" = "$1" ] && return 0; done; return 1; }
 rosetta_ok() { /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null; }
 # free_kb: free space (KB) on the volume the app's folder is (or will be) on
@@ -392,10 +394,11 @@ fetch_source() {
 # fetch <url> <sha256> <size> <label> [<second url>]: the verified download in $CACHE/downloads
 # (FETCHED), resumed and retried; a second address of the same file if the first fails
 fetch() {
-  local url=$1 sha=$2 size=$3 label=$4 second=${5:-} dir="$CACHE/downloads" f manual
+  local url=$1 sha=$2 size=$3 label=$4 second=${5:-} dir="$CACHE/downloads" f manual have=""
   f="$dir/$(basename "$url")"
   FETCHED=$f
-  if [ -f "$f" ] && [ "$(sha256 "$f")" = "$sha" ]; then
+  [ ! -f "$f" ] || have=$(sha256 "$f")
+  if [ "$have" = "$sha" ]; then
     say "$label: using the verified download in the cache"
     return
   fi
@@ -404,7 +407,13 @@ fetch() {
     return
   fi
   mkdir -p "$dir"
-  if [ -f "$f" ]; then log "$f in the cache is not the expected file (sha256 $(sha256 "$f")); downloading it again"; rm -f "$f"; fi
+  # A file that isn't the one expected, often one the player put here by hand: moved aside under
+  # .wrong (replacing an earlier one) instead of deleted, and named in the window
+  if [ -n "$have" ]; then
+    log "$f in the cache is not the expected file ($(stat -f %z "$f") bytes, sha256 $have); moved to $f.wrong"
+    warn "$(basename "$f") in $dir is not the $label. It has $(thousands "$(stat -f %z "$f")") bytes and a sha256 starting ${have:0:12}, the $label has $(thousands "$size") bytes and a sha256 starting ${sha:0:12}. GW2 on Mac renamed your file to $(basename "$f").wrong and downloads the $label itself."
+    mv -f "$f" "$f.wrong"
+  fi
   say "Downloading $label from $url"
   fetch_source "$url" "$FETCH_TRIES"
   if [ "$OUT" != ok ] && [ -n "$second" ]; then
@@ -412,7 +421,7 @@ fetch() {
     fetch_source "$second" "$FETCH_SECOND_TRIES" "Accept: application/octet-stream"
   fi
   echo "@progress $label $GOT $size"
-  manual="Or download $url in your browser, put the file into $dir and click Install again."
+  manual="Or download $url in your browser, put the file into $dir and click Install again. It must be that exact file: $(thousands "$size") bytes, with the sha256 $sha."
   case "$OUT" in
     ok) mv -f "$f.part" "$f"; log "verified $f (sha256 $sha)"; return ;;
     empty) die "The download of the $label failed (curl status $CURL_RC). Check your internet connection and try again. $manual" ;;
