@@ -936,3 +936,4 @@ scripts/                   stage-components, build-addon, test-sandbox, ui-rende
 release-notes/             the notes of each release
 prebuilt/, dist/, release/, work/, .cache/   build and test output, ignored by git
 ```
+
