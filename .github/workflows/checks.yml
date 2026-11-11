@@ -34,7 +34,7 @@ jobs:
 
       # (scripts/build-addon.sh is zsh, which shellcheck can't read)
       - name: shellcheck
-        run: git ls-files -z '*.sh' | xargs -0 grep -lZ -m1 '^#!/bin/bash' | xargs -0 shellcheck -S warning
+        run: git ls-files -z '*.sh' | xargs -0 grep -l --null -m1 '^#!/bin/bash' | xargs -0 shellcheck -S warning
 
       - name: actionlint
         run: |
@@ -60,8 +60,8 @@ jobs:
       # The scripts run under macOS's /bin/bash 3.2, so check their syntax with that one.
       - name: Syntax (bash 3.2, zsh)
         run: |
-          git ls-files -z '*.sh' | xargs -0 grep -lZ -m1 '^#!/bin/bash' | xargs -0 -n 1 /bin/bash -n
-          git ls-files -z '*.sh' | xargs -0 grep -lZ -m1 '^#!/bin/zsh' | xargs -0 -n 1 /bin/zsh -n
+          git ls-files -z '*.sh' | xargs -0 grep -l --null -m1 '^#!/bin/bash' | xargs -0 -n 1 /bin/bash -n
+          git ls-files -z '*.sh' | xargs -0 grep -l --null -m1 '^#!/bin/zsh' | xargs -0 -n 1 /bin/zsh -n
 
       - name: Fetch the components
         run: scripts/stage-components.sh --fetch
