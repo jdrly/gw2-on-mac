@@ -469,8 +469,8 @@ struct CheckCell: View {
 
 struct WhatItDoes: View {
   private let features: [(String, String, String)] = [
-    ("zap", "Direct3D 11 straight to Metal", "My DXMT build draws through Metal 4, tuned for busy maps."),
-    ("flame", "Tuned for crowds", "A tuned Wine for better performance in busy scenes."),
+    ("zap", "Direct3D 11 straight to Metal", "Mach9's DXMT draws the game through Metal."),
+    ("cpu", "Wine for Apple silicon", "Wine runs natively. FEX translates only the game's own x86 code."),
     ("type", "Sharp text at 4K", "A larger interface drawn from the game's own crisp fonts."),
     ("undo-2", "Yours, and reversible", "Your own Steam or ArenaNet install. Uninstall removes everything."),
   ]
@@ -1079,7 +1079,7 @@ struct ReadyPanel: View {
                    ? "Starts ArenaNet's launcher, then the game. Your login stays in it."
                    : "Starts Steam, then the game. After your first sign-in, Steam stays in the background.")
       }
-      PanelTip(icon: "sparkles", text: "The first visit to a busy map may hitch once while its shaders build. Later sessions build them ahead.")
+      PanelTip(icon: "sparkles", text: "The first minutes on each map may hitch while shaders compile and FEX translates the game's code.")
     }
     .padding(.top, 14)
     .padding(.horizontal, 16)

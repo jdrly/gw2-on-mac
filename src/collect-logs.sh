@@ -10,7 +10,8 @@
 #                  game starts before the last), DXMT's Gw2-64_d3d11.log (and .1-4) and the other
 #                  processes' DXMT logs, the heat counters (heat-<pid>.log, Debug logging),
 #                  session.env (what the last session started with), the interface addon's logs
-#   settings.conf, state, install-manifest.json, dxmt.conf, the app's VERSIONS
+#   settings.conf, state, install-manifest.json, dxmt.conf, compatdb.rules and compatdb.local, the
+#                  app's VERSIONS
 #   session-report.txt  the last game session in short (session-report.sh)
 #   game-logs/     the game's and Steam's own logs, with game_rules: ArenaNet.log (crash entries;
 #                  their computer, account and address fields taken out), the game's graphics
@@ -53,7 +54,8 @@ for u in "$BOTTLE/drive_c/users"/*; do
   BOTTLE_USER="${u##*/}"; break
 done
 GW2_APPDATA="$BOTTLE/drive_c/users/$BOTTLE_USER/AppData/Roaming/Guild Wars 2"
-# DXMT's caches for the game, in the app's own cache folder (gw2om.sh sets DXMT_CACHE_DIR to it)
+# DXMT's shader cache for the game, in the app's own cache folder (the game's compatdb rule sets
+# DXMT_SHADER_CACHE_PATH to it)
 DXMT_CACHE="$H/Library/Caches/$APP_NAME/dxmt/Gw2-64.exe"
 
 name="${APP_NAME// /-}-logs-$(date +%Y-%m-%d-%H%M)"
@@ -348,7 +350,7 @@ for f in "$LOGS"/*; do
   esac
 done
 for f in $(ls -t "$LOGS"/heat-[0-9]*.log 2>/dev/null | head -3); do add_log "$f" 5000000; done
-for f in settings.conf state install-manifest.json dxmt.conf; do add "$APPDIR/$f"; done
+for f in settings.conf state install-manifest.json dxmt.conf compatdb.rules compatdb.local; do add "$APPDIR/$f"; done
 add "$RES/VERSIONS"
 # the game's and Steam's own logs (game_rules)
 add_log "$GW2_APPDATA/ArenaNet.log" 5000000 game-logs game

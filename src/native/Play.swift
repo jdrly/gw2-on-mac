@@ -4,18 +4,30 @@
 // game already runs, the button brings it to the front instead. While the game starts and runs,
 // the panel follows its session (Session.swift).
 //
-// The game runs from the Game Mode bundle (gw2om.sh: <app dir>/gamemode/GW2.app, bundle id
-// cz.jandrly.gw2onmac.game), so NSWorkspace sees it as that app.
+// Every Wine process of this engine runs as its loader (bundle id app.mach9.loader), Steam's too,
+// and so does a player's own Mach9.app: the game is found by its pid, which gw2om.sh status and
+// session-status print (game_pid).
 
 import AppKit
 
 extension Installer {
-  nonisolated static let gameBundleID = "cz.jandrly.gw2onmac.game"
+  nonisolated static let loaderBundleID = "app.mach9.loader"
+
+  // The game's process, if it runs: the pid of the last session-status, else of the last status,
+  // still the engine's loader (a pid the game no longer has is no app or another app)
+  var gameApp: NSRunningApplication? {
+    for value in [session?.values["game_pid"], status["game_pid"]] {
+      guard let pid = value.flatMap({ pid_t($0) }), let app = NSRunningApplication(processIdentifier: pid),
+            !app.isTerminated, app.bundleIdentifier == Installer.loaderBundleID else { continue }
+      return app
+    }
+    return nil
+  }
 
   // Starts the game (or brings it to the front); then: a message to show (an error, or a notice
   // when it started), or nil
   func play(then: @escaping (_ message: String?, _ started: Bool) -> Void) {
-    if let game = NSRunningApplication.runningApplications(withBundleIdentifier: Installer.gameBundleID).first {
+    if let game = gameApp {
       game.activate()
       then(nil, true)
       return
@@ -35,7 +47,8 @@ extension Installer {
       let error = output.contains("@done ") ? notice
         : output.split(separator: "\n").first { $0.hasPrefix("@error ") }.map { String($0.dropFirst(7)) }
           ?? "The game could not be started. Details are in ~/Library/Logs/\(appName)/wine.log."
-      refresh()
+      // (a game the last status didn't know yet: up once status has its pid)
+      refresh { if output.contains("already running") { self.gameApp?.activate() } }
       then(error, output.contains("@done "))
       if output.contains("@done "), UserDefaults.standard.bool(forKey: Installer.quitAfterLaunchKey) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { NSApp.terminate(nil) }

@@ -46,6 +46,19 @@ jobs:
           tar -xzf "$RUNNER_TEMP/actionlint.tgz" -C "$RUNNER_TEMP" actionlint
           "$RUNNER_TEMP/actionlint" -color
 
+  # The game's compatdb rules as gw2om.sh writes them (scripts/compatdb-check/rules, which
+  # test-sandbox.sh pins), read strictly with the crate Mach9 0.3.1's compatdb.so is built from
+  compatdb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: compatdb-core reads each rules text and writes it back byte for byte
+        run: cargo run --locked --manifest-path scripts/compatdb-check/Cargo.toml -- scripts/compatdb-check/rules/*.rules
+
   build:
     # build.sh needs the macOS 27 SDK. GitHub has no macos-27 label; its macOS 27 image with
     # Xcode 27 is xcode-27, a public preview (actions/runner-images#14404;

@@ -5,10 +5,9 @@
 // makes the game's environment from them at each start (gw2om.sh play). They take effect the next
 // time the game starts.
 //
-// Mouse is SWTOR on Mac's raw mouse-look: an option of the app's build of Wine's Mac driver, which
-// gw2om.sh turns on for Gw2-64.exe in the bottle's registry (only while no session runs, like
-// Retina). The driver also has SWTOR on Mac's game keys by keyboard position; there is no Keyboard
-// pane, and nothing turns it on.
+// On this line some settings need pieces of mine that come in later steps. gw2om.sh settings says
+// which (<key>_state=off:<reason>): their rows are greyed with the reason under them. A setting
+// that works but is untested here has a note instead (<key>_note).
 
 import AppKit
 import SwiftUI
@@ -340,6 +339,17 @@ struct SettingsView: View {
 
   // MARK: Panes
 
+  // the reason a setting is off on this engine (gw2om.sh settings: <key>_state=off:<reason>)
+  private func off(_ key: String) -> String? {
+    guard let state = settings.values["\(key)_state"], state.hasPrefix("off:") else { return nil }
+    return String(state.dropFirst(4))
+  }
+
+  // a setting that works but is untested on this engine (<key>_note)
+  private func untested(_ key: String) -> String? {
+    settings.values["\(key)_note"].flatMap { $0.isEmpty ? nil : $0 }
+  }
+
   private var workers: Int {
     let n = settings.values["ncpu"] ?? "8"
     return max(1, (Int(n) ?? ProcessInfo.processInfo.activeProcessorCount) - 1)
@@ -357,7 +367,7 @@ struct SettingsView: View {
         }
       }
       SettingsGroup {
-        SettingRow("MetalFX for Subsample", "With the game's Render Sampling set to Subsample, MetalFX upscales the 3D scene and the interface stays sharp. Experimental.") {
+        SettingRow("MetalFX for Subsample", "With the game's Render Sampling set to Subsample, MetalFX upscales the 3D scene and the interface stays sharp. Experimental.", off: off("metalfx")) {
           InkSwitch(isOn: settings.toggle("metalfx"))
         }
         SettingRow("Metal HUD", "Apple's overlay with the frame rate and frame times, over the game.") {
@@ -367,16 +377,16 @@ struct SettingsView: View {
 
     case .performance:
       SettingsGroup {
-        SettingRow("Shader warming", "Builds the pipelines your last sessions used before the game asks for them: fewer hitches on busy maps. Up to 8,192, about 300 MB.") {
+        SettingRow("Shader warming", "Builds the pipelines your last sessions used before the game asks for them: fewer hitches on busy maps. Up to 8,192, about 300 MB.", off: off("warm")) {
           InkSwitch(isOn: settings.toggle("warm"))
         }
-        SettingRow("Cooler job workers", "Moves some of the game's job workers to the efficiency cores. Saves power; all of them can cost frames in big crowds.") {
+        SettingRow("Cooler job workers", "Moves some of the game's job workers to the efficiency cores. Saves power; all of them can cost frames in big crowds.", off: off("coolworkers")) {
           InkPopup(selection: settings.choice("coolworkers", "off"),
                    options: [("off", "Off")] + (1...workers).map { ("\($0)", "\($0) of \(workers)") })
         }
       }
       SettingsGroup {
-        SettingRow("Faster locks", "Short waits before the game thread sleeps on a busy lock or job group.") {
+        SettingRow("Faster locks", "Short waits before the game thread sleeps on a busy lock or job group.", off: off("fastlocks")) {
           InkSwitch(isOn: settings.toggle("fastlocks"))
         }
         SettingRow("CPUs the game sees", "The game starts one job worker per CPU, minus one.") {
@@ -386,19 +396,19 @@ struct SettingsView: View {
 
     case .interface:
       SettingsGroup {
-        SettingRow("Larger interface", interfaceDescription) {
+        SettingRow("Larger interface", interfaceDescription, note: untested("uiscale")) {
           InkSwitch(isOn: Binding(get: { settings.values["uiscale"] == "on" }, set: { on in
             if on { confirmInterface = true } else { settings.set("uiscale", "off") }
           }))
         }
-        SettingRow("arcdps", arcdpsDescription, progress: arcdpsFraction) {
+        SettingRow("arcdps", arcdpsDescription, progress: arcdpsFraction, note: untested("arcdps")) {
           InkSwitch(isOn: Binding(get: { settings.values["arcdps"] == "on" }, set: { on in
             if on { confirmArcdps = true } else { settings.setArcdps(false) }
           }))
           .disabled(!arcdpsCanSwitch)
         }
       }
-      if let state = settings.values["uiscale_state"], state != "off", state != "on" {
+      if let state = settings.values["uiscale_addon"], state != "off", state != "on" {
         note("triangle-alert", interfaceStateNote(state), Brand.accent)
       }
       if let text = arcdpsStateNote {
@@ -407,13 +417,13 @@ struct SettingsView: View {
         note("info", result, Brand.fg3)
       }
       SettingsGroup {
-        SettingRow("Interface Size \"Larger\"", "How large the game's Larger size draws, from the game's own pre-rendered fonts.") {
+        SettingRow("Interface Size \"Larger\"", "How large the game's Larger size draws, from the game's own pre-rendered fonts.", note: untested("uiscale_size")) {
           InkPopup(selection: settings.choice("uiscale_size", "1.75"), options: GameSettings.interfaceScales)
         }
-        SettingRow("Small text in Cronos", "Chat, the tracker and labels have no larger font of their own: draws them in the game's Cronos face at the larger size, sharp.") {
+        SettingRow("Small text in Cronos", "Chat, the tracker and labels have no larger font of their own: draws them in the game's Cronos face at the larger size, sharp.", note: untested("uiscale_sans")) {
           InkSwitch(isOn: settings.toggle("uiscale_sans"))
         }
-        SettingRow("Cinematic dialogue", "Story cinematics' dialogue sizes itself apart from the interface. Draws it at the same size as the rest (a small code patch).") {
+        SettingRow("Cinematic dialogue", "Story cinematics' dialogue sizes itself apart from the interface. Draws it at the same size as the rest (a small code patch).", note: untested("uiscale_cinema")) {
           InkSwitch(isOn: settings.toggle("uiscale_cinema"))
         }
       }
@@ -437,8 +447,9 @@ struct SettingsView: View {
             InkSwitch(isOn: settings.toggle("quitsteam"))
           }
         }
-        SettingRow("Game Mode", "While the game is in full screen, macOS gives it priority on the CPU and GPU and lowers the latency of Bluetooth controllers and headphones.") {
-          InkSwitch(isOn: settings.toggle("gamemode"))
+        // (on this line always on: every Wine process runs as the engine's loader, a Game Mode app)
+        SettingRow("Game Mode", "While the game is in full screen, macOS gives it priority on the CPU and GPU and lowers the latency of Bluetooth controllers and headphones.", off: off("gamemode")) {
+          InkSwitch(isOn: off("gamemode") == nil ? settings.toggle("gamemode") : .constant(true))
         }
       }
       SettingsGroup {
@@ -452,10 +463,10 @@ struct SettingsView: View {
 
     case .mouse:
       SettingsGroup {
-        SettingRow("Raw mouse-look", "While you hold a mouse button to turn the camera, the game gets every movement straight from the mouse as it happens, not once per screen refresh, and the pointer stays put. Turn it off for Wine's usual mouse-look.") {
+        SettingRow("Raw mouse-look", "While you hold a mouse button to turn the camera, the game gets every movement straight from the mouse as it happens, not once per screen refresh, and the pointer stays put. Turn it off for Wine's usual mouse-look.", off: off("rawmouse")) {
           InkSwitch(isOn: settings.toggle("rawmouse"))
         }
-        SettingRow("Mouse-look speed", "How fast the camera turns with raw mouse-look, compared with your pointer speed in System Settings. The game's own camera settings apply on top.") {
+        SettingRow("Mouse-look speed", "How fast the camera turns with raw mouse-look, compared with your pointer speed in System Settings. The game's own camera settings apply on top.", off: off("mousespeed")) {
           InkPopup(selection: settings.choice("mousespeed", "1"), options: GameSettings.mouseSpeeds)
         }
         .disabled(settings.values["rawmouse"] != "on")
@@ -473,7 +484,7 @@ struct SettingsView: View {
 
     case .troubleshooting:
       SettingsGroup {
-        SettingRow("Debug logging", "Detailed DXMT and Wine logs and the heat counters, for bug reports, at some cost in performance. Turn it on only when asked to.") {
+        SettingRow("Debug logging", "Detailed DXMT logs and Wine's errors, for bug reports, at some cost in performance. Turn it on only when asked to.") {
           InkSwitch(isOn: settings.toggle("debug"))
         }
       }
@@ -683,12 +694,19 @@ struct SettingRow<Control: View>: View {
   let detail: String
   // a bar under the detail while something runs (0 to 1), as the install's steps draw theirs
   var progress: Double?
+  // why the setting is off on this engine: the control is greyed and this shows under the detail
+  var off: String?
+  // a warning that shows under the detail, the control staying as it is (untested on this engine)
+  var note: String?
   @ViewBuilder var control: Control
 
-  init(_ title: String, _ detail: String, progress: Double? = nil, @ViewBuilder control: () -> Control) {
+  init(_ title: String, _ detail: String, progress: Double? = nil, off: String? = nil, note: String? = nil,
+       @ViewBuilder control: () -> Control) {
     self.title = title
     self.detail = detail
     self.progress = progress
+    self.off = off
+    self.note = note
     self.control = control()
   }
 
@@ -698,6 +716,14 @@ struct SettingRow<Control: View>: View {
         Text(title).font(.body(14, .bold)).bodyBox(14).foregroundStyle(Brand.fg)
         Text(detail).font(.body(12.5)).bodyBox(12.5, 1.3).foregroundStyle(Brand.fg2)
           .fixedSize(horizontal: false, vertical: true)
+        if let line = off ?? note {
+          HStack(alignment: .top, spacing: 6) {
+            LucideIcon(name: off != nil ? "info" : "triangle-alert", size: 12).padding(.top, 1)
+            Text(line).font(.body(12.5, .semibold)).bodyBox(12.5, 1.3).fixedSize(horizontal: false, vertical: true)
+          }
+          .foregroundStyle(off != nil ? Brand.fg3 : Brand.accent)
+          .padding(.top, 3)
+        }
         if let progress {
           GeometryReader { geo in
             ZStack(alignment: .leading) {
@@ -710,7 +736,7 @@ struct SettingRow<Control: View>: View {
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
-      control.labelsHidden().accessibilityLabel(Text(title))
+      control.labelsHidden().accessibilityLabel(Text(title)).disabled(off != nil)
     }
     .padding(.vertical, 11)
     .padding(.horizontal, 14)
