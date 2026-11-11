@@ -641,6 +641,27 @@ checks differs per component:
 - The addon's `version.dll` and `gw2-ui-scale.ini` must be there, and the DLL must carry the
   addon's marker string.
 
+**Without the workspace.** A checkout without my workspace, like a GitHub runner, can't copy
+anything, so `stage-components.sh` downloads the same `prebuilt/` as one archive instead. It does
+that when `GW2_ON_MAC_WORKSPACE` doesn't exist, or with `--fetch`. The archive is a pre-release of
+this repository, tagged `components-<date>`. [`prebuilt.lock`](prebuilt.lock) pins its tag, file
+name and sha256, and the script refuses a download or cached copy with another sha256 before it
+unpacks anything. The archive holds only what the app already ships, the binaries and their
+records and licences. `build.sh` then checks it like any other `prebuilt/`.
+
+When the components change, I stage from the workspace, build and test as usual, then publish a
+new archive:
+
+```sh
+scripts/stage-components.sh --pack components-2026-11-11   # release/<tag>/…tar.xz, and a new prebuilt.lock
+gh release create components-2026-11-11 --prerelease --latest=false --target main \
+  --title "Components 2026-11-11 (for CI, not an app release)" --notes "prebuilt/ for the Checks workflow" \
+  release/components-2026-11-11/gw2-on-mac-components-2026-11-11.tar.xz
+```
+
+and commit `prebuilt.lock` with the change. It has to stay a pre-release: installed apps read
+`releases/latest`, and a pre-release never becomes that. `site.yml` skips pre-releases too.
+
 **Their source.** The complete corresponding source is public, under LGPL-2.1-or-later. DXMT is
 [jdrly/dxmt at `e02a4d6`](https://github.com/jdrly/dxmt/tree/e02a4d6). The Wine pieces are
 [athei/wine `d23b397`](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0)
@@ -685,6 +706,23 @@ renders a review sheet of every appearance and size.
 ## Testing
 
 Tests never touch a real install, and never run while Wine, Steam or the game is open on my screen.
+
+**On GitHub.** The Checks workflow ([`.github/workflows/checks.yml`](.github/workflows/checks.yml))
+runs on every pull request and every push to `main`, on GitHub's runners, so none of it needs my
+Mac. It has read-only access and no secrets, and its actions are pinned by commit.
+
+- `lint`: `shellcheck -S warning` on the bash scripts and `actionlint` on the workflows
+- `build`: `bash -n` (macOS's 3.2) on the scripts, `stage-components.sh --fetch`, `./build.sh`,
+  then the build's `VERSIONS` and component hashes in the run's summary. It also checks that
+  `build.sh` refuses a changed `ntdll.so` and `stage-components.sh` a changed archive.
+- `sandbox`: `test-sandbox.sh` on that build. Without my workspace, the ArenaNet route and the real
+  arcdps are skipped, and each skip shows as a notice on the run.
+- `renders`: `ui-render.sh`, with the PNGs as the run's `renders` artifact. A runner has no design
+  exports, so there are no `compare-*.png`.
+
+What still needs my Mac is signing, notarizing and publishing a release (`scripts/release.sh`,
+which has Sparkle's key and my Developer ID), building the components themselves, the ArenaNet
+route's and the real arcdps's checks, and playing.
 
 `scripts/test-sandbox.sh` tests the backend of a built app end to end in `work/app-sandbox/test`,
 with 413 checks. It uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and

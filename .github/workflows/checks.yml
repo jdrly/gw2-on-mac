@@ -1,0 +1,155 @@
+# Checks every pull request and every push to main on GitHub's runners, so none of it runs on my
+# Mac: the scripts and workflows lint clean, the app builds, the sandbox suite passes on the built
+# app and the windows render. No secrets and read-only access. Signing, notarizing and releasing
+# stay on my Mac (scripts/release.sh).
+#
+# A runner has no development workspace, so scripts/stage-components.sh fetches prebuilt/ as the
+# archive pinned in prebuilt.lock and checks its sha256 (README.md, Building).
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # (scripts/build-addon.sh is zsh, which shellcheck can't read)
+      - name: shellcheck
+        run: git ls-files -z '*.sh' | xargs -0 grep -l --null -m1 '^#!/bin/bash' | xargs -0 shellcheck -S warning
+
+      - name: actionlint
+        run: |
+          v=1.7.12
+          sha=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+          curl -fsSL -o "$RUNNER_TEMP/actionlint.tgz" \
+            "https://github.com/rhysd/actionlint/releases/download/v$v/actionlint_${v}_linux_amd64.tar.gz"
+          echo "$sha  $RUNNER_TEMP/actionlint.tgz" | sha256sum -c --quiet
+          tar -xzf "$RUNNER_TEMP/actionlint.tgz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color
+
+  build:
+    # build.sh needs the macOS 27 SDK. GitHub has no macos-27 label; its macOS 27 image with
+    # Xcode 27 is xcode-27, a public preview (actions/runner-images#14404;
+    # .github/actionlint.yaml lists it). Its default Xcode is 27.1; DEVELOPER_DIR picks 27.2,
+    # the one I build releases with, so the runner's app is the same as mine.
+    runs-on: xcode-27
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The scripts run under macOS's /bin/bash 3.2, so check their syntax with that one.
+      - name: Syntax (bash 3.2, zsh)
+        run: |
+          git ls-files -z '*.sh' | xargs -0 grep -l --null -m1 '^#!/bin/bash' | xargs -0 -n 1 /bin/bash -n
+          git ls-files -z '*.sh' | xargs -0 grep -l --null -m1 '^#!/bin/zsh' | xargs -0 -n 1 /bin/zsh -n
+
+      - name: Fetch the components
+        run: scripts/stage-components.sh --fetch
+
+      - name: Build
+        run: ./build.sh
+
+      # What to compare with a build of the same commit on my Mac
+      - name: VERSIONS and the component hashes
+        run: |
+          r="dist/GW2 on Mac.app/Contents/Resources"
+          { echo '```'; cat "$r/VERSIONS"; echo; shasum -a 256 "$r/components/INVENTORY"; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Pack the app for the next jobs
+        run: tar -cf "$RUNNER_TEMP/app.tar" dist .cache/sparkle-2.10.0
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: app
+          path: ${{ runner.temp }}/app.tar
+          retention-days: 7
+
+      # Both refusals change the files this job has finished with.
+      - name: build.sh refuses a changed component, stage-components.sh a changed archive
+        run: |
+          printf x >>prebuilt/heat/ntdll.so
+          if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took a changed ntdll.so"; exit 1; fi
+          grep 'ntdll.so does not match its VERSION' "$RUNNER_TEMP/build.txt"
+          archive=".cache/$(sed -n 's/^sha256=//p' prebuilt.lock)/$(sed -n 's/^file=//p' prebuilt.lock)"
+          printf x >>"$archive"
+          if scripts/stage-components.sh --fetch >"$RUNNER_TEMP/stage.txt" 2>&1; then echo "stage-components.sh took a changed archive"; exit 1; fi
+          grep 'does not match the sha256 in prebuilt.lock' "$RUNNER_TEMP/stage.txt"
+
+  sandbox:
+    needs: build
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: app
+          path: ${{ runner.temp }}
+
+      - name: Unpack the app
+        run: tar -xf "$RUNNER_TEMP/app.tar"
+
+      # The checks that need files from my development workspace (the ArenaNet-signed installer,
+      # the real arcdps) or more CPUs than the runner's 3 (ncpu 6 and 8) say "skip" and pass;
+      # each skip is a notice on the run.
+      - name: test-sandbox.sh
+        run: |
+          rc=0
+          scripts/test-sandbox.sh 2>&1 | tee "$RUNNER_TEMP/sandbox.txt" || rc=$?
+          grep -E '^ +skip' "$RUNNER_TEMP/sandbox.txt" | sed 's/^ *skip */::notice title=sandbox skip::/' || true
+          exit "$rc"
+
+  renders:
+    needs: build
+    runs-on: xcode-27
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: app
+          path: ${{ runner.temp }}
+
+      - name: Unpack the app
+        run: tar -xf "$RUNNER_TEMP/app.tar"
+
+      - name: ui-render.sh
+        run: scripts/ui-render.sh "$RUNNER_TEMP/renders"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: renders
+          path: ${{ runner.temp }}/renders/*.png
+          if-no-files-found: error
+          retention-days: 14

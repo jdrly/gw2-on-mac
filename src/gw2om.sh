@@ -1077,6 +1077,7 @@ gamemode_link() {
   if [ -n "$DRY" ]; then echo "[dry-run] link <winetemp of the engine's loader>/Gw2-64.exe -> $GAMEMODE_APP/Contents/MacOS/Gw2-64.exe"; return; fi
   gamemode_current || install_gamemode >/dev/null
   dir=$(winetemp_dir)
+  # shellcheck disable=SC2174 # (only the winetemp folder is new: its parent, USER_TMP, exists)
   mkdir -p -m 700 "$dir" && ln -sfn "$GAMEMODE_APP/Contents/MacOS/Gw2-64.exe" "$dir/Gw2-64.exe" || return 0
   # steam.exe, the command's first process, must not run from the game's bundle
   [ -L "$dir/wine" ] && rm -f "$dir/wine"
@@ -1610,6 +1611,7 @@ cmd_check_setup() {
   # the SpcIndirectDataContent: its digest algorithm and the PE hash it carries
   line=$(grep -n ':1.3.6.1.4.1.311.2.1.4$' "$t/asn1.txt" | head -1 | cut -d: -f1)
   [ -n "$line" ] || setup_bad "This is not an Authenticode signature."
+  # shellcheck disable=SC2046 # (pos prints three numbers, split on purpose)
   set -- $(pos "$(sed -n "$((line + 2))p" "$t/asn1.txt")"); o=$1 hl=$2 l=$3
   bytes "$t/sig.der" $((o + hl)) "$l" >"$t/spc.bin"
   alg=$(sed -n "$((line + 2)),\$p" "$t/asn1.txt" | grep -m1 -oE ':(sha1|sha256|sha384|sha512)$' | tr -d :)
@@ -1626,12 +1628,14 @@ cmd_check_setup() {
     /cont \[ 0 \]/ { c[d] = $0 }
     /:messageDigest$/ { print c[d - 2]; exit }' "$t/asn1.txt")
   [ -n "$attrs" ] || setup_bad "The signature has no signed attributes."
+  # shellcheck disable=SC2046
   set -- $(pos "$attrs"); o=$1 hl=$2 l=$3
   { printf '\061'; bytes "$t/sig.der" $((o + 1)) $((hl + l - 1)); } >"$t/attrs.der"
   md=$(grep -A2 ':messageDigest$' "$t/asn1.txt" | grep -m1 'OCTET STRING' | sed 's/.*\[HEX DUMP\]://' | tr 'A-F' 'a-f')
   [ "$md" = "$(shasum -a "${alg#sha}" "$t/spc.bin" | cut -d' ' -f1)" ] || setup_bad "The signature of this file is not valid."
   # the signature: the OCTET STRING after the signed attributes' end
   sigline=$(awk -v end=$((o + hl + l)) '{ split($1, a, ":"); if (a[1] + 0 >= end && /OCTET STRING/) { print; exit } }' "$t/asn1.txt")
+  # shellcheck disable=SC2046
   set -- $(pos "$sigline"); bytes "$t/sig.der" $(($1 + $2)) "$3" >"$t/sig.bin"
   # the certificate whose key made it, and its organisation
   /usr/bin/openssl pkcs7 -inform DER -in "$t/sig.der" -print_certs >"$t/certs.pem" 2>/dev/null || true
@@ -2036,7 +2040,7 @@ join_session() {
   lim=$(awk -v p="$WATCH_POLL" 'BEGIN { print int((p * 3 + 3) * 10) }')
   # the session's watcher must run (a Play that has just taken the lock is still writing the
   # session and emptying the requests; a watcher that is done is about to release it)
-  until watcher_proc "$(session_get watcher_pid)" && [ "$(session_get stage)" != done ]; do
+  until watcher_proc "$(session_get watcher_pid)" && [ "$(session_get stage)" != "done" ]; do
     lock_held || return 2
     i=$((i + 1))
     [ $i -lt "$lim" ] || return 3
@@ -2095,7 +2099,7 @@ apply_requests() {
 # watch_exit: the watcher's end, however it ends (it holds the lock until it has exited)
 watch_exit() {
   # (after an uninstall it writes nothing: the app's folder is going)
-  [ "$STAGE" = done ] || [ "${WATCH_RESULT:-}" = uninstalled ] || watch_stage done result "${WATCH_RESULT:-ended}"
+  [ "$STAGE" = "done" ] || [ "${WATCH_RESULT:-}" = uninstalled ] || watch_stage "done" result "${WATCH_RESULT:-ended}"
   log "session: done (${WATCH_RESULT:-ended})"
 }
 
@@ -2477,12 +2481,12 @@ cmd_play() {
       echo "@notice Steam is still running with the settings it started with; quit Steam for the new ones."
   fi
   if [ "$route" = arenanet ]; then
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2046
     launch "$GAME_EXE" $(setting launchopts)
   else
     # Once Steam remembers a login, it starts without its window (-silent, above): it signs in by
     # itself and starts the game. Before the first sign-in its window shows, as at the install.
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2046
     launch "$STEAM_EXE" ${silent:+"$silent"} -applaunch "$GW2_APPID" $(setting launchopts)
   fi
   if [ -n "$DRY" ]; then
@@ -2633,7 +2637,7 @@ cmd_session_status() {
     pending=yes
   fi
   if printf '%s\n' "$l" | grep -q '^steam '; then
-    steam=bg
+    steam="bg"
     case "$(session_get steam_window)" in
       shown) steam=window ;;
       hidden) ;;
@@ -2725,7 +2729,7 @@ cmd_show_steam() {
     # session and emptying the requests.)
     lim=$(awk -v p="$WATCH_POLL" 'BEGIN { print int((p * 3 + 3) * 10) }')
     ask=yes
-    until watcher_proc "$(session_get watcher_pid)" && [ "$(session_get stage)" != done ]; do
+    until watcher_proc "$(session_get watcher_pid)" && [ "$(session_get stage)" != "done" ]; do
       lock_held || { ask=no; break; }
       i=$((i + 1))
       [ $i -lt "$lim" ] || die "GW2 on Mac is still handing the session over. Try Show Steam again in a moment."

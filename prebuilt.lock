@@ -1,0 +1,6 @@
+# The components build.sh bundles (prebuilt/), for a checkout without my development workspace:
+# https://github.com/jdrly/gw2-on-mac/releases/download/<tag>/<file>, a pre-release, made by
+# scripts/stage-components.sh --pack and fetched and checked by scripts/stage-components.sh.
+tag=components-2026-11-11
+file=gw2-on-mac-components-2026-11-11.tar.xz
+sha256=1efff2530176f6e24bc77a06eb416c6fcfebfccce7cafc54c9a2c76fda59fa6d
