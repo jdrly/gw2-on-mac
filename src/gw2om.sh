@@ -1054,8 +1054,9 @@ lib_switch() {
     return 0
   fi
   run rm -f "$f.new"
-  # (-X: without the quarantine attribute of an app copied out of a browser's download)
-  run cp -pX "$LIB_COMP/$LIB" "$f.new"
+  run cp -p "$LIB_COMP/$LIB" "$f.new"
+  # (cp -p copies the quarantine attribute of an app copied out of a browser's download)
+  [ -n "$DRY" ] || xattr -d com.apple.quarantine "$f.new" 2>/dev/null || true
   [ "$cur" != engine ] || run mv -f "$f" "$f.engine"
   run mv -f "$f.new" "$f"
   say "$LIB: $(lib_label "$1" mine) is in the engine, the engine's own kept next to it as $LIB.engine"

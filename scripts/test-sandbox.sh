@@ -54,6 +54,9 @@ COMP="$APP/Contents/Resources/components"
 # The ntdll.so the app puts into the engine by default: mine when the app has a build of it (the
 # checks' stand-in), else the engine's own (a dev build without one: the app leaves it in place)
 if [ -f "$COMP/ntdll/ntdll.so" ]; then MYWINE=mine; else MYWINE=engine; fi
+# the commit of the app's build (its VERSION's commit: line), and the engine's Wine's
+MYWINE_COMMIT="$(sed -n 's/^commit: //p' "$COMP/ntdll/VERSION" 2>/dev/null || true)"
+ENGINE_WINE=53def89293a
 # (MYWINE=mine only: the checks of my file say "skip" without it)
 mine() { [ "$MYWINE" = mine ]; }
 skip() { echo "  skip   $* (this app has no ntdll.so of mine)"; }
@@ -283,9 +286,6 @@ ntdll_is() {
   fi
   same "$COMP/ntdll/ntdll.so" "$NT/ntdll.so" && same "$S/lib/wine/aarch64-unix/ntdll.so" "$NT/ntdll.so.engine"
 }
-# the commit of the app's build (its VERSION's commit: line), and the engine's Wine's
-MYWINE_COMMIT="$(sed -n 's/^commit: //p' "$COMP/ntdll/VERSION" 2>/dev/null || true)"
-ENGINE_WINE=53def89293a
 
 # --- Steam route
 section "Install through Steam"
@@ -405,7 +405,7 @@ check "  it says which" has <(echo "$out") "^DXMT: the engine's own DXMT (athei/
 check "  warming and MetalFX greyed with the reason; set warm refused" \
   eval '[ "$(sett warm_state)" = "off:Needs my DXMT fork (Graphics › DXMT)." ] && [ "$(sett metalfx_state)" = "$(sett warm_state)" ] && ! "$G" set warm off >/dev/null 2>&1'
 check "  none of the fork's variables in the environment" sh -c "! '$G' env | grep -qE 'DXMT_(CACHE_DIR|WARM|DEPENDENCY_COMPRESSION|SUBSAMPLE|STATS)'"
-check "  the game's shader cache: the engine's DXMT's own" has <(g rules) "^exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=$DXMT_CACHE_ENGINE$"
+check "  the game's shader cache: the engine's DXMT's own" has <(g rules) "^exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=$DXMT_CACHE_ENGINE\(;env=WINE_HEAT_[^;]*\)*$"
 check "  wine.app untouched" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
 out=$(g set dxmt fork 2>&1) && rc=0 || rc=$?
 check "set dxmt fork: mine again, the engine's own kept as it ships" eval '[ "$rc" = 0 ] && dxgi_is fork && [ "$(st graphics)/$(st dxmt_tree)" = yes/fork ] && ! echo "$out" | grep -q Repair'
