@@ -153,3 +153,27 @@ jobs:
           path: ${{ runner.temp }}/renders/*.png
           if-no-files-found: error
           retention-days: 14
+
+  # The jobs above take the addon's version.dll prebuilt from the components archive, so this is
+  # the one place on GitHub that compiles addon/ui-scale and runs its native test
+  # (addon/ui-scale/test/test.c), with Homebrew's mingw-w64, the toolchain the shipped addon is
+  # built with.
+  addon:
+    runs-on: xcode-27
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mingw-w64
+        run: |
+          brew install mingw-w64
+          brew list --versions mingw-w64
+          x86_64-w64-mingw32-gcc --version
+
+      - name: build-addon.sh
+        run: OUT="$RUNNER_TEMP/addon" scripts/build-addon.sh
+
+      - name: The native test's log
+        run: cat "$RUNNER_TEMP/addon/test.log"
