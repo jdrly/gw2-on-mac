@@ -380,7 +380,11 @@ only `dxmt` and `wined3d`. So the app swaps the tree. The active one is always
   `aarch64-unix/winemetal.so` is a link to `lib/wine/aarch64-unix/winemetal.so`, the one
   `winemetal.so` that serves its ARM64X and its i386 DLLs. My copy replaces the link with my
   fork's own file and never writes through it, so the two DXMTs never share a `winemetal.so`, and
-  the engine's comes back intact, link and file, when the setting switches to it
+  the engine's comes back intact, link and file, when the setting switches to it. The copy has no
+  quarantine attribute: a dev build downloaded in a browser carries it on every file of the app,
+  `cp -p` copies it, and the script takes it off before the tree goes into place. A tree made
+  quarantined by an earlier build keeps it until *Reinstall the engine* or an update with another
+  build of my fork
 
 Steam's processes get the same DXMT as the game, as on 0.1.x. My fork's `dxgi.dll` has no
 vkd3d-proton swap-chain bridge, so a D3D12 program in that tree can't present. Guild Wars 2,
