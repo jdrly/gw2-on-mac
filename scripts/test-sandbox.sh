@@ -73,16 +73,18 @@ G="$SANDBOX/bin/gw2om"
 mkdir -p "$CHECKS" "$SANDBOX/bin"
 cat >"$G" <<'EOF'
 #!/bin/bash
-# the app's gw2om.sh as this process (its pid is the caller's $!), with what it prints appended to
-# the current check's file as well: its stdout and stderr through a tee each, by FIFOs the tees
-# remove once open. gw2om.sh gets them as fds 1 and 2 and nothing else, so its detached processes,
-# which redirect those, hold no tee open.
+# the app's gw2om.sh, with what it prints appended to the current check's file as well: its stdout
+# and stderr through a tee each, by FIFOs the tees remove once open. gw2om.sh gets them as fds 1
+# and 2 and nothing else, so its detached processes, which redirect those, hold no tee open. This
+# exits with gw2om.sh's status once both tees are done, so its output is all there when it ends.
 f="$CHECK_OUT.$$"
 mkfifo "$f.1" "$f.2" || exec "$GW2OM" "$@"
 echo "\$ gw2om.sh $*" >>"$CHECK_OUT"
-{ rm -f "$f.1"; exec tee -a "$CHECK_OUT"; } <"$f.1" &
-{ rm -f "$f.2"; exec tee -a "$CHECK_OUT" >&2; } <"$f.2" &
-exec "$GW2OM" "$@" >"$f.1" 2>"$f.2"
+{ rm -f "$f.1"; exec tee -a "$CHECK_OUT"; } <"$f.1" & t1=$!
+{ rm -f "$f.2"; exec tee -a "$CHECK_OUT" >&2; } <"$f.2" & t2=$!
+"$GW2OM" "$@" >"$f.1" 2>"$f.2"; rc=$?
+wait "$t1" "$t2"
+exit "$rc"
 EOF
 chmod 755 "$G"
 # end_check <ok|FAIL> <what>: its line in checks.txt, the state files after a failure, and the next
@@ -824,8 +826,8 @@ check "  its game quits: that Steam quits" eval 'watch_done && [ "$(sess result)
 
 # Play in the grace, and its game only after the grace: the watcher waits for that Play's game
 # instead of quitting Steam. The grace is 6 s, at least 5 s as the watcher counts whole seconds.
-# The Play starts as soon as the grace does and returns once the watcher has its join; two Plays
-# took 4.7 s on the slowest runner I've seen.
+# The Play starts as soon as the grace does and returns once the watcher has its join. On my
+# runners, a settings change and a joining Play with its checks took 1.9 s at most.
 : >"$STANDIN_LOG"; GW2_ON_MAC_WATCH_GRACE=6 "$G" play >/dev/null 2>&1; started; watcher_up; steam_up
 game_session
 check "Play in the grace: joins (replay=1)" eval 'g play >/dev/null 2>&1 && [ "$(sess replay)" = 1 ]'
@@ -1123,7 +1125,8 @@ g set launchopts -maploadinfo >/dev/null
 wait_file() { local i=0; until [ -e "$1" ] || [ $i -ge 100 ]; do sleep 0.1; i=$((i + 1)); done; [ -e "$1" ]; }
 P1="$SANDBOX/pauseA" P2="$SANDBOX/pauseB"
 touch "$P1" "$P2"; rm -f "$P1.at" "$P2.at"
-GW2_ON_MAC_TEST_PAUSE="$P1" GW2_ON_MAC_TEST_PAUSE_AT=locked "$G" set launchopts -ownerA >"$SANDBOX/ownA.txt" 2>&1 & oa=$!
+# (A's pid is the lock's: the app's gw2om.sh itself, not the wrapper)
+GW2_ON_MAC_TEST_PAUSE="$P1" GW2_ON_MAC_TEST_PAUSE_AT=locked "$GW2OM" set launchopts -ownerA >"$SANDBOX/ownA.txt" 2>&1 & oa=$!
 wait_file "$P1.at"
 GW2_ON_MAC_TEST_PAUSE="$P2" GW2_ON_MAC_TEST_PAUSE_AT=lock-owner-read "$G" set launchopts -contenderB >"$SANDBOX/contB.txt" 2>&1 & ob=$!
 check "owner A holds the lock; contender B has read A's pid under the claim (paused)" eval 'wait_file "$P2.at" && [ "$(cat "$AD/.lock/pid")" = "$oa" ] && "$APP/Contents/Resources/helpers/sessionlock" held "$LOGS/.lock-claim"'
