@@ -51,6 +51,15 @@ DXMT_CACHE="$CACHE/fork/dxmt/Gw2-64.exe"
 DXMT_CACHE_ENGINE="$CACHE/dxmt/Gw2-64.exe"
 STANDIN_LOG="$SANDBOX/standin.log"
 COMP="$APP/Contents/Resources/components"
+# The ntdll.so the app puts into the engine by default: mine when the app has a build of it (the
+# checks' stand-in), else the engine's own (a dev build without one: the app leaves it in place)
+if [ -f "$COMP/ntdll/ntdll.so" ]; then MYWINE=mine; else MYWINE=engine; fi
+# the commit of the app's build (its VERSION's commit: line), and the engine's Wine's
+MYWINE_COMMIT="$(sed -n 's/^commit: //p' "$COMP/ntdll/VERSION" 2>/dev/null || true)"
+ENGINE_WINE=53def89293a
+# (MYWINE=mine only: the checks of my file say "skip" without it)
+mine() { [ "$MYWINE" = mine ]; }
+skip() { echo "  skip   $* (this app has no ntdll.so of mine)"; }
 mkdir -p "$H"
 # Another DXMT setup's caches in the per-user cache folder, which the app must never touch: a
 # stand-in getconf on PATH points DARWIN_USER_CACHE_DIR at the sandbox's usercache/
@@ -188,8 +197,11 @@ export GW2_ON_MAC_ENGINE_CHECKS=0
 GW2_ON_MAC_ENGINE_D3D11_SHA256="$(shasum -a 256 "$S/lib/wine/dxgi/dxmt/aarch64-windows/d3d11.dll" | cut -d' ' -f1)"
 GW2_ON_MAC_ENGINE_WINEMETAL_SHA256="$(shasum -a 256 "$S/lib/wine/dxgi/dxmt/aarch64-unix/winemetal.so" | cut -d' ' -f1)"
 export GW2_ON_MAC_ENGINE_D3D11_SHA256 GW2_ON_MAC_ENGINE_WINEMETAL_SHA256
+# (and its ntdll.so: what the app moves aside for mine, unix_lib)
+GW2_ON_MAC_ENGINE_NTDLL_SHA256="$(shasum -a 256 "$S/lib/wine/aarch64-unix/ntdll.so" | cut -d' ' -f1)"
+export GW2_ON_MAC_ENGINE_NTDLL_SHA256
 export GW2_ON_MAC_STEAMSETUP_URL="file://$SANDBOX/SteamSetup.exe"
-unset GW2_ON_MAC_DRY_RUN GW2_ON_MAC_ALLOW_WINE GW2_ON_MAC_SIGNER GW2_ON_MAC_MACOS GW2_ON_MAC_ENGINE_LOADER_SHA256 GW2_ON_MAC_ENGINE_NTDLL_SHA256
+unset GW2_ON_MAC_DRY_RUN GW2_ON_MAC_ALLOW_WINE GW2_ON_MAC_SIGNER GW2_ON_MAC_MACOS GW2_ON_MAC_ENGINE_LOADER_SHA256
 # the session's watcher (play starts it), with its times shortened: a 2 s grace, 2 s for Steam to
 # quit, a look every 0.2 s (the 15 minutes for the game to appear only in the timeout check)
 export GW2_ON_MAC_WATCH_GRACE=2 GW2_ON_MAC_WATCH_QUITWAIT=2 GW2_ON_MAC_WATCH_POLL=0.2 GW2_ON_MAC_WATCH_TIMEOUT=60
@@ -202,6 +214,11 @@ check "dry-run install steam exits 0" [ "$rc" = 0 ]
 check "dry-run install steam reaches phase 4" has <(echo "$out") "@phase 4"
 check "dry-run prints the game's environment" has <(echo "$out") "WINEPREFIX=$BOTTLE"
 check "  with my DXMT fork's variables (it goes into the engine)" eval 'echo "$out" | grep -qxF "[dry-run]   DXMT_CACHE_DIR=$CACHE/fork" && echo "$out" | grep -qxF "[dry-run]   DXMT_WARM=all" && echo "$out" | grep -q "^\[dry-run\] my DXMT fork (.*) as the engine.s DXMT tree"'
+if mine; then
+  check "  with my ntdll.so for the engine" has <(echo "$out") "^\[dry-run\] my ntdll.so (jdrly/wine ${MYWINE_COMMIT:0:11}) in the engine$"
+else
+  check "  with the engine's own ntdll.so (this app has none of mine)" has <(echo "$out") "^\[dry-run\] the engine's own ntdll.so (athei/wine $ENGINE_WINE) in the engine$"
+fi
 check "  with the rules file and no WINE_COMPATDB" eval 'echo "$out" | grep -qxF "[dry-run]   WINE_COMPATDB_FILE=$AD/compatdb.rules" && ! echo "$out" | grep -q "WINE_COMPATDB="'
 check "dry-run creates nothing" eval '[ ! -e "$AD" ] && [ ! -e "$CACHE" ]'
 check "fresh status: not installed" [ "$(st installed)" = no ]
@@ -257,6 +274,18 @@ dxgi_is() {
 }
 # wineapp_sums <engine>: every file in wine.app with its sha256
 wineapp_sums() { (cd "$1/lib/wine/aarch64-unix/wine.app" && find . -type f -exec shasum -a 256 {} + | LC_ALL=C sort); }
+# ntdll_is mine|engine: the engine's ntdll.so as the app leaves it. mine: the app's
+# components/ntdll/ntdll.so, the engine's own next to it as ntdll.so.engine. engine: the engine's
+# own, nothing next to it. Never an unfinished ntdll.so.new.
+NT="$ENG/lib/wine/aarch64-unix"
+ntdll_is() {
+  [ ! -e "$NT/ntdll.so.new" ] || return 1
+  if [ "$1" = engine ]; then
+    same "$S/lib/wine/aarch64-unix/ntdll.so" "$NT/ntdll.so" && [ ! -e "$NT/ntdll.so.engine" ]
+    return
+  fi
+  same "$COMP/ntdll/ntdll.so" "$NT/ntdll.so" && same "$S/lib/wine/aarch64-unix/ntdll.so" "$NT/ntdll.so.engine"
+}
 
 # --- Steam route
 section "Install through Steam"
@@ -278,14 +307,23 @@ check "graphics=yes: my DXMT fork, as Settings asks by default" [ "$(st graphics
 check "  status names the fork's build" eval '[ "$(st dxmt_version)" = "$(head -1 "$COMP/dxmt/VERSION")" ] && [ -n "$(st dxmt_commit)" ]'
 check "  the install says so" has <(echo "$out") "^DXMT: my DXMT fork ($(head -1 "$COMP/dxmt/VERSION")) draws the game"
 check "  the engine's DXMT tree is mine, the engine's own next to it as it ships" dxgi_is fork
+if mine; then
+  check "my ntdll.so in the engine, the engine's own next to it as ntdll.so.engine" ntdll_is mine
+  check "  status names it and its commit" [ "$(st wine)/$(st wine_ready)/$(st wine_file)/$(st wine_commit)/$(st wine_build)" = "mine/yes/mine/$MYWINE_COMMIT/$MYWINE_COMMIT" ]
+  check "  the install says so" has <(echo "$out") "^ntdll.so: my ntdll.so (jdrly/wine ${MYWINE_COMMIT:0:11}) is in the engine, the engine's own kept next to it as ntdll.so.engine$"
+else
+  check "no ntdll.so of mine in this app: the engine's own stays in place" ntdll_is engine
+  check "  status names it and the engine's Wine" [ "$(st wine_ready)/$(st wine_file)/$(st wine_commit)/$(st wine_build)" = "yes/engine/$ENGINE_WINE/" ]
+fi
 check "gamemode=engine" [ "$(st gamemode)" = engine ]
 check "steam=yes" [ "$(st steam)" = yes ]
 check "stage=waiting_game" [ "$(st stage)" = waiting_game ]
 check "route=steam" [ "$(st route)" = steam ]
 check "game=no yet" [ "$(st game)" = no ]
 # (the engine as it ships: every file the stand-in's, minus the SDK, plus the app's record of the
-# archive; nothing of the app's in it but its DXMT trees, which dxgi_is checks)
-engine_diff() { diff -rq -x dxgi "$S" "$ENG" 2>&1 | sed -e "s|$S|S|g" -e "s|$ENG|E|g" | LC_ALL=C sort | tr '\n' '|'; }
+# archive; nothing of the app's in it but its DXMT trees and ntdll.so, which dxgi_is and ntdll_is
+# check)
+engine_diff() { diff -rq -x dxgi -x 'ntdll.so*' "$S" "$ENG" 2>&1 | sed -e "s|$S|S|g" -e "s|$ENG|E|g" | LC_ALL=C sort | tr '\n' '|'; }
 SDK_DIFF="Only in E: .gw2om-source|Only in S/lib/wine: tests|Only in S/lib/wine: x86_64-windows|Only in S/share: man|Only in S: include|"
 check "the engine is the stand-in as it ships, without its SDK (include, tests, x86_64-windows, man)" [ "$(engine_diff)" = "$SDK_DIFF" ]
 check "  wine.app's files have the stand-in's hashes" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
@@ -331,9 +369,17 @@ check "defaults: warm on, coolworkers 3, fastlocks on, ncpu 8, uiscale off, cine
   [ "$(sett warm)$(sett coolworkers)$(sett fastlocks)$(sett ncpu)$(sett uiscale)$(sett uiscale_cinema)" = on3on8offoff ]
 check "default: Steam in the background on" [ "$(sett steambg)" = on ]
 check "default: Quit Steam when the game quits on" [ "$(sett quitsteam)" = on ]
-check "settings: a state for each of the 21 keys" [ "$(g settings | grep -cE '^[a-z_]+_state=(ok|off:.+)$')" = 21 ]
-check "  off with the step that brings them: coolworkers, fastlocks (3), mousespeed (#59), gamemode" \
-  [ "$(g settings | sed -n 's/^\([a-z_]*\)_state=off:.*/\1/p' | tr '\n' ' ')" = "coolworkers fastlocks gamemode mousespeed " ]
+check "settings: a state for each of the 23 keys" [ "$(g settings | grep -cE '^[a-z_]+_state=(ok|off:.+)$')" = 23 ]
+if mine; then
+  check "  off with the step that brings them: coolworkers, fastlocks (3), mousespeed (#59), gamemode" \
+    [ "$(g settings | sed -n 's/^\([a-z_]*\)_state=off:.*/\1/p' | tr '\n' ' ')" = "coolworkers fastlocks gamemode mousespeed " ]
+  check "  wine=mine and jobwakes=on by default, both ok" [ "$(sett wine)/$(sett wine_state)/$(sett jobwakes)/$(sett jobwakes_state)" = mine/ok/on/ok ]
+else
+  check "  off: coolworkers, fastlocks (3), mousespeed (#59), gamemode, and wine and jobwakes (no ntdll.so of mine)" \
+    [ "$(g settings | sed -n 's/^\([a-z_]*\)_state=off:.*/\1/p' | tr '\n' ' ')" = "coolworkers fastlocks gamemode mousespeed wine jobwakes " ]
+  check "  with their reasons; set wine engine and set jobwakes off refused" \
+    eval '[ "$(sett wine_state)" = "off:This build of the app has no Wine build of mine." ] && [ "$(sett jobwakes_state)" = "off:Needs my Wine build (Graphics › Wine)." ] && ! "$G" set wine engine >/dev/null 2>&1 && ! "$G" set jobwakes off >/dev/null 2>&1'
+fi
 check "  rawmouse ok; mousespeed greyed: the engine sends the mouse's own counts" \
   eval '[ "$(sett rawmouse_state)" = ok ] && [ "$(sett mousespeed_state)" = "off:The engine gives the game the mouse'"'"'s own counts. A speed factor comes with #59 if I need one." ]'
 check "  ok for the ones my DXMT fork brings back: metalfx, warm; dxmt=fork by default" \
@@ -359,7 +405,7 @@ check "  it says which" has <(echo "$out") "^DXMT: the engine's own DXMT (athei/
 check "  warming and MetalFX greyed with the reason; set warm refused" \
   eval '[ "$(sett warm_state)" = "off:Needs my DXMT fork (Graphics › DXMT)." ] && [ "$(sett metalfx_state)" = "$(sett warm_state)" ] && ! "$G" set warm off >/dev/null 2>&1'
 check "  none of the fork's variables in the environment" sh -c "! '$G' env | grep -qE 'DXMT_(CACHE_DIR|WARM|DEPENDENCY_COMPRESSION|SUBSAMPLE|STATS)'"
-check "  the game's shader cache: the engine's DXMT's own" has <(g rules) "^exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=$DXMT_CACHE_ENGINE$"
+check "  the game's shader cache: the engine's DXMT's own" has <(g rules) "^exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=$DXMT_CACHE_ENGINE\(;env=WINE_HEAT_[^;]*\)*$"
 check "  wine.app untouched" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
 out=$(g set dxmt fork 2>&1) && rc=0 || rc=$?
 check "set dxmt fork: mine again, the engine's own kept as it ships" eval '[ "$rc" = 0 ] && dxgi_is fork && [ "$(st graphics)/$(st dxmt_tree)" = yes/fork ] && ! echo "$out" | grep -q Repair'
@@ -378,6 +424,37 @@ check "cut short while making my tree (an unfinished dxmt.fork.new): set dxmt fo
   eval 'g set dxmt fork >/dev/null && dxgi_is fork && [ ! -e "$DX/dxmt.fork.new" ] && [ "$(st graphics)" = yes ]'
 check "  the engine's own tree, its link's target and wine.app as they ship through all of it" \
   eval 'diff -r "$S/lib/wine/dxgi/dxmt" "$DX/dxmt.engine" >/dev/null && [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]'
+# My ntdll.so and the engine's own, and back (nothing runs: the file switches at once)
+if mine; then
+  out=$(g set wine engine 2>&1) && rc=0 || rc=$?
+  check "set wine engine: the engine's own ntdll.so in place, nothing next to it" \
+    eval '[ "$rc" = 0 ] && ntdll_is engine && [ "$(st wine_ready)/$(st wine_file)/$(st wine_commit)" = "yes/engine/$ENGINE_WINE" ] && ! echo "$out" | grep -q Repair'
+  check "  it says which" has <(echo "$out") "^ntdll.so: the engine's own ntdll.so (athei/wine $ENGINE_WINE) is in the engine$"
+  check "  job wakes greyed with the reason; set jobwakes refused" \
+    eval '[ "$(sett jobwakes_state)" = "off:Needs my Wine build (Graphics › Wine)." ] && ! "$G" set jobwakes off >/dev/null 2>&1'
+  check "  wine.app and the DXMT trees untouched" eval '[ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ] && dxgi_is fork'
+  out=$(g set wine mine 2>&1) && rc=0 || rc=$?
+  check "set wine mine: mine again, the engine's own next to it as it ships" \
+    eval '[ "$rc" = 0 ] && ntdll_is mine && [ "$(st wine_ready)/$(st wine_file)/$(st wine_commit)" = "yes/mine/$MYWINE_COMMIT" ] && [ "$(sett jobwakes_state)" = ok ]'
+  check "  wine.app untouched" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
+  # A switch cut short: between the two renames on the way to mine no ntdll.so is there; an
+  # unfinished copy (ntdll.so.new) may be left; an earlier build of mine may be in place
+  mv "$NT/ntdll.so" "$NT/ntdll.so.new"
+  check "cut short between the renames (no ntdll.so): wine_ready=switch" [ "$(st wine_ready)/$(st wine_file)" = switch/none ]
+  check "  the next set wine mine puts it in" eval 'g set wine mine >/dev/null && ntdll_is mine && [ "$(st wine_ready)" = yes ]'
+  g set wine engine >/dev/null && mv "$NT/ntdll.so" "$NT/ntdll.so.engine" && echo half >"$NT/ntdll.so.new"
+  sed -i '' 's/^wine=.*/wine=mine/' "$AD/settings.conf"
+  check "cut short with an unfinished ntdll.so.new: set wine mine copies it again" \
+    eval 'g set wine mine >/dev/null && ntdll_is mine && [ "$(st wine_ready)" = yes ]'
+  echo "an earlier build of mine" >"$NT/ntdll.so"
+  check "an earlier build of mine in place: wine_ready=switch, wine_file=other" [ "$(st wine_ready)/$(st wine_file)/$(st wine_commit)" = switch/other/ ]
+  check "  set wine engine puts the engine's own back, set wine mine this build's" \
+    eval 'g set wine engine >/dev/null && ntdll_is engine && g set wine mine >/dev/null && ntdll_is mine'
+  check "  the engine's own ntdll.so and wine.app as they ship through all of it" \
+    eval 'same "$S/lib/wine/aarch64-unix/ntdll.so" "$NT/ntdll.so.engine" && [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]'
+else
+  skip "set wine engine and mine, and the switches cut short"
+fi
 check "set ncpu all: no WINENCPU" sh -c "'$G' set ncpu all >/dev/null && ! '$G' env | grep -q WINENCPU"
 MAXC=$(sysctl -n hw.logicalcpu)
 # (GitHub's runners have 3 CPUs, too few for the checks of 6 and 8)
@@ -417,7 +494,7 @@ check "set launchopts -maploadinfo" g set launchopts "-maploadinfo"
 check "launchopts with a ; refused" sh -c "! '$G' set launchopts '-x; rm -rf /' >/dev/null"
 check "unknown value refused (exit 2)" sh -c "'$G' set fpscap 45 >/dev/null; [ \$? = 2 ]"
 check "unknown key refused" sh -c "! '$G' set colour red >/dev/null"
-check "settings.conf has every key" [ "$(grep -c '=' "$AD/settings.conf")" = 21 ]
+check "settings.conf has every key" [ "$(grep -c '=' "$AD/settings.conf")" = 23 ]
 
 section "The larger interface (addon)"
 GD="$STEAM/steamapps/common/Guild Wars 2"
@@ -537,7 +614,9 @@ section "The game's compatdb rules (compatdb.rules)"
 # The texts are pinned in scripts/compatdb-check/rules, which CI reads with Mach9 0.3.1's
 # compatdb-core; there the sandbox's home is /Users/me
 FIX="$ROOT/scripts/compatdb-check/rules"
-rules_are() { g rules | sed "s|$H|/Users/me|" | cmp -s - "$FIX/$1.rules"; }
+rules_are() { g rules | sed "s|$H|/Users/me|g" | cmp -s - "$FIX/$1.rules"; }
+# (job wakes off, as everything else, until the checks of my ntdll.so's switches below)
+! mine || g set jobwakes off >/dev/null
 check "everything off: the cache path for the game, taken away from CefHost.exe" rules_are off
 g set hud on >/dev/null
 check "the HUD on: metal_hud=true for the game, false for CefHost.exe" rules_are hud
@@ -565,9 +644,40 @@ check "raw mouse-look on: the rules as before, and the dry run's rule has no gcm
 g set dxmt engine >/dev/null
 check "the engine's own DXMT: the game's shader cache is that DXMT's own" rules_are engine-dxmt
 g set dxmt fork >/dev/null
+# My ntdll.so's switches (HEAT_SWITCHES): after the cache path, taken away from CefHost.exe again
+if mine; then
+  g set jobwakes on >/dev/null
+  check "job wakes on: WINE_HEAT_WAKE=one,skip for the game, unset for CefHost.exe" rules_are jobwakes
+  out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
+  check "  a dry run of Play prints the game's rule with it" eval 'echo "$out" | grep -qxF "[dry-run] rule $(g rules | head -1)" && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;.*;env=WINE_HEAT_WAKE=one,skip$"'
+  g set debug on >/dev/null
+  check "  with Debug logging: the counters too, written to the logs folder" rules_are jobwakes-debug
+  g set debug off >/dev/null; g set jobwakes off >/dev/null
+  out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
+  check "job wakes off: no WINE_HEAT_* in the rules or in a dry run of Play" eval 'rules_are off && ! echo "$out" | grep -q WINE_HEAT_'
+  g set jobwakes on >/dev/null; g set debug on >/dev/null; g set wine engine >/dev/null
+  out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
+  check "wine engine, job wakes and Debug logging on: no WINE_HEAT_* in the rules or in a dry run of Play" \
+    eval '! g rules | grep -q WINE_HEAT_ && ! echo "$out" | grep -q WINE_HEAT_ && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=[^;]*$"'
+  g set debug off >/dev/null; g set wine mine >/dev/null; g set jobwakes off >/dev/null
+else
+  out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
+  check "no ntdll.so of mine, job wakes on by default: no WINE_HEAT_* in the rules or in a dry run of Play" \
+    eval 'rules_are off && ! echo "$out" | grep -q WINE_HEAT_'
+fi
+# A home with odd characters, in a fresh root: its settings.conf (job wakes and Debug logging off)
+# is all there is in it
 ODD="$SANDBOX/a%b;c$(printf '\t')d é"
-check "a home with %, ; and a tab: escaped as %XX, the é as it is" \
-  eval 'GW2_ON_MAC_ROOT="$ODD" "$G" rules | sed "s|$SANDBOX/a%25b%3Bc%09d é/home|/Users/a%25b%3Bc%09d é|" | cmp -s - "$FIX/escaped.rules" && [ ! -e "$ODD" ]'
+ODD_CONF="$ODD/home/Library/Application Support/$APP_NAME/settings.conf"
+mkdir -p "${ODD_CONF%/*}" && printf 'jobwakes=off\ndebug=off\n' >"$ODD_CONF"
+odd_rules_are() { GW2_ON_MAC_ROOT="$ODD" "$G" rules | sed "s|$SANDBOX/a%25b%3Bc%09d é/home|/Users/a%25b%3Bc%09d é|g" | cmp -s - "$FIX/$1.rules"; }
+odd_only_conf() { [ "$(cd "$ODD" && find . | LC_ALL=C sort | tr '\n' '|')" = ".|./home|./home/Library|./home/Library/Application Support|./home/Library/Application Support/$APP_NAME|./home/Library/Application Support/$APP_NAME/settings.conf|" ]; }
+check "a home with %, ; and a tab: escaped as %XX, the é as it is" eval 'odd_rules_are escaped && odd_only_conf'
+if mine; then
+  printf 'jobwakes=on\ndebug=on\n' >"$ODD_CONF"
+  check "  with job wakes and Debug logging on: the logs folder escaped the same way" eval 'odd_rules_are escaped-heat && odd_only_conf'
+fi
+rm -rf "$ODD"
 printf 'exe=Gw2-64.exe;env=FEX_HOSTFEATURES=disableavx\n' >"$AD/compatdb.local"
 check "compatdb.local is appended as it is" eval '[ "$(g rules | tail -1)" = "exe=Gw2-64.exe;env=FEX_HOSTFEATURES=disableavx" ] && [ "$(g rules | wc -l | tr -d " ")" = 3 ]'
 # a dry run of play with every setting of 0.1.x's environment on in settings.conf
@@ -576,8 +686,11 @@ sed -i '' -e 's/^metalfx=.*/metalfx=on/' -e 's/^hud=.*/hud=on/' -e 's/^debug=.*/
 out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
 check "dry-run play: the engine's variables, the app's files, my DXMT fork's switches and the CPUs, nothing else" \
   eval '[ "$(echo "$out" | sed -n "s/^\[dry-run\]   //p" | grep -v ^WINENCPU= | tr "\n" "|")" = "WINEPREFIX=$BOTTLE|WINEDEBUG=err+all,fixme-all|WINEDLLOVERRIDES=winemenubuilder.exe=d|WINEMSYNC=1|DXMT_CONFIG_FILE=$AD/dxmt.conf|DXMT_LOG_PATH=$LOGS|WINE_COMPATDB_FILE=$AD/compatdb.rules|DXMT_CACHE_DIR=$CACHE/fork|DXMT_DEPENDENCY_COMPRESSION=1|DXMT_WARM=all|DXMT_SUBSAMPLE_METALFX=1|DXMT_LOG_LEVEL=debug|DXMT_STATS=1|" ] && echo "$out" | grep -q "^\[dry-run\]   WINENCPU="'
-check "  none of 0.1.x's Wine variables" eval '! echo "$out" | grep -qE "WINE_HEAT_|ROSETTA_X87_PATH|WINEDLLPATH|WINE_COMPATDB=|MTL_HUD"'
+check "  none of 0.1.x's Wine variables in the environment (my ntdll.so's switches are in the rules)" \
+  eval '! echo "$out" | sed -n "s/^\[dry-run\]   //p" | grep -qE "WINE_HEAT_|ROSETTA_X87_PATH|WINEDLLPATH|WINE_COMPATDB=|MTL_HUD"'
 cp "$SANDBOX/settings.keep" "$AD/settings.conf"
+# (job wakes on again, its default, for the sessions below)
+! mine || g set jobwakes on >/dev/null
 
 section "Play"
 : >"$STANDIN_LOG"
@@ -591,6 +704,13 @@ check "  session.env records the engine, its commits, the settings, the environm
   eval 'has "$LOGS/session.env" "^ENGINE=mach9-v0.3.1$" && has "$LOGS/session.env" "^ENGINE_FEX=" && has "$LOGS/session.env" "^SETTING_hud=off$" && has "$LOGS/session.env" "^WINE_COMPATDB_FILE=" && [ "$(sed -n "s/^RULE=//p" "$LOGS/session.env")" = "$(cat "$AD/compatdb.rules")" ]'
 check "  and which DXMT the session loads: my fork, its build" \
   eval 'has "$LOGS/session.env" "^DXMT_TREE=fork$" && [ "$(sed -n "s/^DXMT_FORK=//p" "$LOGS/session.env")" = "$(head -1 "$COMP/dxmt/VERSION")" ] && has "$LOGS/session.env" "^SETTING_dxmt=fork$"'
+if mine; then
+  check "  and which ntdll.so: mine, its commit and the sha256 of the file in the engine; job wakes in the game's rule" \
+    eval '[ "$(sed -n "s/^LIB_wine=//p" "$LOGS/session.env")" = "ntdll.so mine $MYWINE_COMMIT $(shasum -a 256 "$COMP/ntdll/ntdll.so" | cut -d" " -f1)" ] && grep -q "^RULE=exe=Gw2-64.exe;.*;env=WINE_HEAT_WAKE=one,skip$" "$LOGS/session.env"'
+else
+  check "  and which ntdll.so: the engine's own, no WINE_HEAT_* in the rules" \
+    eval '[ "$(sed -n "s/^LIB_wine=//p" "$LOGS/session.env")" = "ntdll.so engine $ENGINE_WINE $GW2_ON_MAC_ENGINE_NTDLL_SHA256" ] && ! grep -q WINE_HEAT_ "$LOGS/session.env"'
+fi
 
 section "Collect Logs (redaction and the leak check)"
 mkdir -p "$STEAM/config" "$STEAM/logs" "$BOTTLE/drive_c/users/$BUSER/AppData/Roaming/Guild Wars 2"
@@ -612,6 +732,20 @@ done
 check "  the session report read DXMT's log" has "$Z/session-report.txt" "Frame rate: median 60.0"
 check "  and says which DXMT ran: my fork, its build" has "$Z/session-report.txt" "^DXMT that ran: my DXMT fork, $(head -1 "$COMP/dxmt/VERSION" | cut -c1-20)"
 check "  and which mouse the game had: GameController's (raw mouse-look on)" has "$Z/session-report.txt" "^Mouse the game had: the mouse's own counts from GameController"
+if mine; then
+  check "  and which ntdll.so ran, with its switches" \
+    eval 'has "$Z/session-report.txt" "^ntdll.so that ran: my Wine build, jdrly/wine ${MYWINE_COMMIT:0:11} (sha256 " && has "$Z/session-report.txt" "^Its switches: WINE_HEAT_WAKE=one,skip$"'
+  # (a heat log of the session: three threads, the game thread the one with the most releases)
+  printf 'heat pid 4242 exe Gw2-64.exe mode count one skip seconds 10.0 threads 3\ntotal release 520000 wake_skipped 410000 wake_one 1 wake_none 3\nthread 0024 release 20000 wake_skipped 1000 wake_one 19000 wake_none 0 server_ms 0.5\nthread 00a4 release 490000 wake_skipped 410000 wake_one 80000 wake_none 3 server 70 server_ms 0.2\nthread 00b0 release 10000 wake_skipped 0 wake_one 1 wake_none 0 server_ms 0.1\n' >"$LOGS/heat-4242.log"
+  touch -t 202601010000 "$LOGS/session.env"
+  out=$("$APP/Contents/Resources/session-report.sh" 2>&1)
+  check "  the session's heat log: the game thread's row, a second" \
+    has <(echo "$out") "^Heat log heat-4242.log (10 s): the game thread, thread 00a4 (the most releases), a second: release 49000, wake_skipped 41000, wake_one 8000, wake_none 0, server 7$"
+  rm -f "$LOGS/heat-4242.log"
+else
+  check "  and which ntdll.so ran: the engine's own, no switches" \
+    eval 'has "$Z/session-report.txt" "^ntdll.so that ran: the engine.s own, athei/wine $ENGINE_WINE$" && has "$Z/session-report.txt" "^Its switches: none$"'
+fi
 cp "$LOGS/session.env" "$SANDBOX/session.env.keep"
 sed -i '' -e 's/^DXMT_TREE=.*/DXMT_TREE=engine/' -e 's/^RULE=exe=Gw2-64.exe;/&gcmouse=false;/' "$LOGS/session.env"
 echo "info:  Using feature level D3D_FEATURE_LEVEL_11_1" >"$LOGS/engine-only_d3d11.log"
@@ -677,6 +811,22 @@ check "set arcdps on while it runs: refused, nothing placed" eval '! "$G" set ar
 kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
 mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
 check "  once it has ended, the switch goes through" eval 'g set dxmt engine >/dev/null && dxgi_is engine && g set dxmt fork >/dev/null && dxgi_is fork'
+if mine; then
+  mv "$ENG/bin/wineserver" "$ENG/bin/wineserver.heat" && cp "$SANDBOX/sleeper" "$ENG/bin/wineserver"
+  "$ENG/bin/wineserver" 60 & sp=$!
+  sleep 0.3
+  check "set wine engine while a session runs: saved, and my ntdll.so stays (every process of the session has it loaded)" \
+    eval '"$G" set wine engine | grep -q "after Steam has quit" && [ "$(sett wine)" = engine ] && ntdll_is mine && [ "$(st wine_ready)" = switch ]'
+  kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
+  mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
+  : >"$STANDIN_LOG"; out=$(g play 2>&1); started
+  check "  once it has ended, the next Play puts the engine's own in before Wine starts" \
+    eval 'ntdll_is engine && has "$LOGS/session.env" "^LIB_wine=ntdll.so engine $ENGINE_WINE "'
+  watch_done
+  g set wine mine >/dev/null
+else
+  skip "set wine engine while a session runs"
+fi
 cp "$SANDBOX/sleeper" "$ENG/bin/Gw2-64.exe"
 "$ENG/bin/Gw2-64.exe" 60 & gp=$!
 sleep 0.3
@@ -1130,6 +1280,22 @@ g set dxmt engine >/dev/null
 g repair >/dev/null 2>&1
 check "  repair puts the engine's own back" eval 'dxgi_is engine && [ "$(st graphics)" = yes ]'
 g set dxmt fork >/dev/null
+# An ntdll.so that is neither the engine's own nor mine, and no engine's own next to it
+echo "something else" >"$NT/ntdll.so" && rm -f "$NT/ntdll.so.engine"
+check "wine_ready=other: an ntdll.so that is neither the engine's own nor mine, and none next to it" [ "$(st wine_ready)/$(st wine_file)" = other/other ]
+: >"$STANDIN_LOG"; out=$(g play 2>&1); started
+check "  Play says Repair and leaves it as it is" eval 'echo "$out" | grep -q "^@warn The engine.s ntdll.so is neither its own nor mine. Click Repair." && has "$NT/ntdll.so" "something else"'
+watch_done
+if mine; then
+  out=$(g set wine engine 2>&1)
+  check "  set wine says Repair too, and changes nothing" eval 'echo "$out" | grep -q "^@warn .*ntdll.so .*Click Repair" && has "$NT/ntdll.so" "something else"'
+  g set wine mine >/dev/null
+fi
+out=$(g repair 2>&1) && rc=0 || rc=$?
+check "  repair unpacks the engine again and puts the ntdll.so Settings asks for in: $MYWINE" \
+  eval '[ "$rc" = 0 ] && echo "$out" | grep -q "unpacking the engine again" && ntdll_is $MYWINE && [ "$(st wine_ready)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ]'
+check "  and says which ntdll.so is in the engine" has <(echo "$out") "^@done Repaired: .*, with $([ "$MYWINE" = mine ] && echo "my ntdll.so (jdrly/wine ${MYWINE_COMMIT:0:11})" || echo "the engine's own ntdll.so (athei/wine $ENGINE_WINE)")\.$"
+check "  wine.app untouched" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
 check "the game and the settings stay" [ "$(st game)/$(sett launchopts)" = yes/-maploadinfo ]
 
 MF="$AD/install-manifest.json"
@@ -1192,14 +1358,15 @@ mkdir -p "$SANDBOX/tar-check" && tar -xJf "$QA" -C "$SANDBOX/tar-check"
 check "a quarantined archive: tar alone copies the attribute onto what it unpacks" sh -c "xattr -r '$SANDBOX/tar-check' | grep -q com.apple.quarantine"
 # An app copied out of a DMG downloaded in a browser (a dev build: ad hoc signed, not notarized):
 # its components are quarantined too, and the DXMT tree and version.dll are copied from them
-qc() { find "$COMP/dxmt" -type f; echo "$COMP/ui-scale/version.dll"; }
+qc() { find "$COMP/dxmt" -type f; [ ! -d "$COMP/ntdll" ] || find "$COMP/ntdll" -type f; echo "$COMP/ui-scale/version.dll"; }
 qc | while IFS= read -r f; do xattr -w com.apple.quarantine "0083;6731f0a1;Safari;" "$f"; done
 cp -p "$COMP/ui-scale/version.dll" "$SANDBOX/cp-check"
 check "quarantined components: cp -p alone copies the attribute" sh -c "xattr '$SANDBOX/cp-check' | grep -q com.apple.quarantine"
 out=$(g reinstall-engine 2>&1) && rc=0 || rc=$?
 check "reinstall-engine from it: the verified download, unpacked again" eval '[ "$rc" = 0 ] && echo "$out" | grep -q "^@done" && echo "$out" | grep -q "using the verified download"'
-check "  no file of the engine has the quarantine attribute (my DXMT tree, made from the components, included)" sh -c "! xattr -r '$ENG' | grep -q com.apple.quarantine"
-check "  graphics=yes after it, the engine as it ships with my DXMT in its tree" eval '[ "$(st graphics)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ] && dxgi_is fork'
+check "  no file of the engine has the quarantine attribute (my DXMT tree and ntdll.so, copied from the components, included)" sh -c "! xattr -r '$ENG' | grep -q com.apple.quarantine"
+check "  graphics=yes after it, the engine as it ships with my DXMT in its tree and the ntdll.so Settings asks for" \
+  eval '[ "$(st graphics)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ] && dxgi_is fork && ntdll_is $MYWINE'
 check "  wine.app untouched through all of it" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
 check "set uiscale on: the game folder's version.dll has no quarantine attribute" eval 'g set uiscale on >/dev/null && [ -f "$GD/version.dll" ] && ! xattr "$GD/version.dll" | grep -q com.apple.quarantine'
 g set uiscale off >/dev/null

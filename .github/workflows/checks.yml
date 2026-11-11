@@ -98,11 +98,12 @@ jobs:
         if: inputs.components == ''
         run: scripts/stage-components.sh --fetch
 
-      # Until prebuilt.lock pins an archive with my arm64 DXMT (jdrly/dxmt#182), a stand-in in its
-      # layout: what the sandbox needs, never a release (scripts/release.sh refuses it)
-      - name: Stand-in DXMT, if the archive has none
+      # Until prebuilt.lock pins an archive with my arm64 DXMT (jdrly/dxmt#182) and my ntdll.so
+      # (jdrly/wine's mach9-builds), stand-ins in their layout for what it lacks: what the sandbox
+      # needs, never a release (scripts/release.sh refuses them)
+      - name: Stand-ins for the components prebuilt.lock doesn't pin
         if: inputs.components == ''
-        run: if [ ! -d prebuilt/dxmt ]; then scripts/stage-components.sh --standin; fi
+        run: scripts/stage-components.sh --standin
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: inputs.components != ''
@@ -135,7 +136,8 @@ jobs:
           path: ${{ runner.temp }}/app.tar
           retention-days: 7
 
-      # The refusals change the files this job has finished with. A dev build has no archive.
+      # The refusals change the files this job has finished with. A dev build has no archive, and
+      # until #50 no ntdll.so of mine.
       - name: build.sh refuses a changed component, stage-components.sh a changed archive
         env:
           ARCHIVE: ${{ inputs.components == '' }}
@@ -149,10 +151,42 @@ jobs:
           if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took a file the DXMT record doesn't name"; exit 1; fi
           grep "prebuilt/dxmt has files its record" "$RUNNER_TEMP/build.txt"
           rm prebuilt/dxmt/i386-windows/d3d12.dll
+          if [ -d prebuilt/ntdll ]; then
+            cp -R prebuilt/ntdll "$RUNNER_TEMP/ntdll"
+            printf x >>prebuilt/ntdll/ntdll.so
+            if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took an ntdll.so that isn't its record's"; exit 1; fi
+            grep 'prebuilt/ntdll does not match its record' "$RUNNER_TEMP/build.txt"
+            rm -rf prebuilt/ntdll && cp -R "$RUNNER_TEMP/ntdll" prebuilt/ntdll
+          fi
           printf 'not the addon' >prebuilt/ui-scale/version.dll
           if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took a changed version.dll"; exit 1; fi
           grep 'version.dll is not the addon' "$RUNNER_TEMP/build.txt"
           [ "$ARCHIVE" = true ] || exit 0
+          # My ntdll.so as a pinned download (prebuilt.lock's ntdll_url and ntdll_sha256), in the
+          # layout of jdrly/wine's asset: a signed dylib in place of the real file, which has no
+          # asset yet. Staged with the right sha256, refused with another.
+          nt="$RUNNER_TEMP/ntdll-asset"
+          mkdir -p "$nt/files"
+          echo 'int gw2om_check;' | clang -x c -dynamiclib -o "$nt/files/ntdll.so" -
+          engine_sha="$(sed -n 's/^ENGINE_SHA256=\([0-9a-f]*\).*/\1/p' src/gw2om.sh)"
+          { echo "wine-11.21-0-g0000000"; echo "commit: 1111111111111111111111111111111111111111"
+            echo "engine: Mach9 v0.3.1 (wine-v0.3.1-macos-arm64.tar.xz, sha256 $engine_sha)"
+            echo "ntdll.so: sha256 $(shasum -a 256 "$nt/files/ntdll.so" | cut -d' ' -f1)"; } >"$nt/files/VERSION"
+          echo "LGPL" >"$nt/files/COPYING.LIB" && echo "Wine's LICENSE" >"$nt/files/LICENSE"
+          tar -cJf "$nt/ntdll-mach9-1111111111111111111111111111111111111111.tar.xz" -C "$nt/files" ntdll.so VERSION COPYING.LIB LICENSE
+          asset_sha="$(shasum -a 256 "$nt/ntdll-mach9-1111111111111111111111111111111111111111.tar.xz" | cut -d' ' -f1)"
+          cp prebuilt.lock "$RUNNER_TEMP/prebuilt.lock"
+          { cat "$RUNNER_TEMP/prebuilt.lock"; echo "ntdll_url=file://$nt/ntdll-mach9-1111111111111111111111111111111111111111.tar.xz"
+            echo "ntdll_sha256=$asset_sha"; } >prebuilt.lock
+          scripts/stage-components.sh --fetch
+          cmp "$nt/files/ntdll.so" prebuilt/ntdll/ntdll.so
+          grep -x 'commit: 1111111111111111111111111111111111111111' prebuilt/ntdll/VERSION
+          grep '^ntdll 1111111111111111111111111111111111111111 ' prebuilt/STAGED
+          { cat "$RUNNER_TEMP/prebuilt.lock"; echo "ntdll_url=file://$nt/ntdll-mach9-1111111111111111111111111111111111111111.tar.xz"
+            echo "ntdll_sha256=$(echo other | shasum -a 256 | cut -d' ' -f1)"; } >prebuilt.lock
+          if scripts/stage-components.sh --fetch >"$RUNNER_TEMP/stage.txt" 2>&1; then echo "stage-components.sh took an ntdll.so archive with another sha256"; exit 1; fi
+          grep 'ntdll-mach9-1111111111111111111111111111111111111111.tar.xz does not match the sha256 in prebuilt.lock' "$RUNNER_TEMP/stage.txt"
+          cp "$RUNNER_TEMP/prebuilt.lock" prebuilt.lock
           archive=".cache/$(sed -n 's/^sha256=//p' prebuilt.lock)/$(sed -n 's/^file=//p' prebuilt.lock)"
           printf x >>"$archive"
           if scripts/stage-components.sh --fetch >"$RUNNER_TEMP/stage.txt" 2>&1; then echo "stage-components.sh took a changed archive"; exit 1; fi

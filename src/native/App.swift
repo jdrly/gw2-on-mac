@@ -610,8 +610,9 @@ enum AppActions {
     ]
   }
 
-  // "Engine mach9-v0.3.1 · DXMT fork e02a4d6 · Sparkle 2.10.0" from Resources/VERSIONS (its lines
-  // "dxmt <commit> <version>", my fork's build in the app, and "engine <name> wine <commit> ...")
+  // "Engine mach9-v0.3.1 · DXMT fork e02a4d6 · ntdll 0a1b2c3 · Sparkle 2.10.0" from Resources/VERSIONS
+  // (its lines "dxmt <commit> <version>", my fork's build in the app, "ntdll <commit> <sha256>" or
+  // "ntdll none", my ntdll.so, and "engine <name> wine <commit> ...")
   static func componentVersions() -> String {
     let url = Brand.resources.appendingPathComponent("VERSIONS")
     guard let text = try? String(contentsOf: url, encoding: .utf8) else { return "" }
@@ -621,6 +622,7 @@ enum AppActions {
       guard f.count >= 2 else { continue }
       if f[0] == "engine" { parts.insert("Engine \(f[1])", at: 0) }
       if f[0] == "dxmt" { parts.append("DXMT fork \(f[1].prefix(7))") }
+      if f[0] == "ntdll", f[1] != "none" { parts.append("ntdll \(f[1].prefix(7))") }
       if f[0] == "sparkle" { parts.append("Sparkle \(f[1])") }
     }
     return parts.joined(separator: " · ")

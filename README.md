@@ -3,15 +3,17 @@
 GW2 on Mac is a small macOS app I wrote to play [Guild Wars 2](https://www.guildwars2.com) on
 Apple silicon. It installs the game into a Wine engine and bottle of its own and starts it. The
 engine is athei's [Mach9](https://github.com/athei/mach9) 0.3.1, an arm64 Wine 11.21 that runs the
-game's x86_64 code with FEX, used as it ships but for one part: the game's Direct3D 11 goes to
-Metal through my DXMT fork, built for this engine, which the app puts into the engine's DXMT tree.
-The engine's own DXMT stays next to it, and a setting switches back to it. It changes nothing you
-already have installed.
+game's x86_64 code with FEX, used as it ships but for two parts: the game's Direct3D 11 goes to
+Metal through my DXMT fork, built for this engine, which the app puts into the engine's DXMT tree,
+and every Wine process loads my build of Wine's `ntdll.so`, which has switches for the game. The
+engine's own DXMT and `ntdll.so` stay next to them, and a setting switches back to each. It
+changes nothing you already have installed.
 
 > **This is the `arm64` branch.** It builds *GW2 on Mac arm64*, the development app for 0.2,
 > which moves the game to an arm64 Wine engine. 0.1.x runs CrossOver 26.3 under Rosetta with my
 > DXMT fork and my Wine pieces. This app puts my DXMT fork, built for the arm64 engine, into its
-> engine, and none of my Wine pieces yet. It has its own name, bundle id
+> engine, and the first of my Wine pieces for it: an `ntdll.so` with job wakes. A build made
+> without that file leaves the engine's own in place. It has its own name, bundle id
 > (`cz.jandrly.gw2onmac.arm64`) and folders, so it installs next to GW2 on Mac 0.1.x and shares
 > nothing with it. The name is `APP_NAME` at the top of `src/gw2om.sh`, `collect-logs.sh` and
 > `session-report.sh`, and `appName` in `src/native/App.swift`. It has no updates, and 0.1.x stays
@@ -170,12 +172,14 @@ untested on this engine.
 | Graphics | Retina | `retina` | on | draws at your display's full resolution, at some cost in frame rate |
 | | Frame cap | `fpscap` | off | a steady cap paced by Metal at 30, 40, 60 or 120. Use it with the game's own vsync |
 | | DXMT | `dxmt` | `fork` | `fork`: my DXMT fork draws the game, and Steam's windows with it. `engine`: the engine's own, to compare. The engine's DXMT tree switches while no session runs, else at the next start after Steam has quit ([The DXMT tree](#the-dxmt-tree)) |
+| | Wine | `wine` | `mine` | `mine`: every Wine process loads my `ntdll.so`, Steam's too. `engine`: the engine's own, to compare. Greyed in a build without my file. The file switches while no session runs, else at the next start after Steam has quit ([My ntdll.so](#my-ntdllso)) |
 | | MetalFX for Subsample | `metalfx` | off | MetalFX upscales the 3D scene of the game's Subsample render sampling. Greyed while the engine's own DXMT is chosen |
 | | Metal HUD | `hud` | off | Apple's overlay with frame rate and frame times, over the game only and not over Steam's windows |
 | Performance | Shader warming | `warm` | on | builds the pipelines the last sessions used before the game asks for them. Greyed while the engine's own DXMT is chosen |
-| | Cooler job workers | `coolworkers` | 3 | greyed: needs my Wine changes, which come with step 3 |
-| | Faster locks | `fastlocks` | on | greyed: needs my Wine changes, which come with step 3 |
 | | CPUs the game sees | `ncpu` | 8 | from 2 up to your Mac's logical CPUs, or all. The game starts one job worker per CPU, minus one |
+| | Job wakes | `jobwakes` | on | a job the game hands out wakes one sleeping worker, and none when no worker sleeps (`WINE_HEAT_WAKE=one,skip`). Greyed while the engine's own `ntdll.so` is chosen |
+| | Faster locks | `fastlocks` | on | greyed: needs my Wine changes, which come with step 3 |
+| | Cooler job workers | `coolworkers` | 3 | greyed: needs my Wine changes, which come with step 3 |
 | Interface | Larger interface | `uiscale` | off | my interface addon, see below. Untested on this engine |
 | | Interface Size "Larger" | `uiscale_size` | 1.75 | the addon's scale: 1.5, 1.75, 1.8 or 2.0 |
 | | Small text in Cronos | `uiscale_sans` | on | chat, the tracker and labels have no larger font, so the addon draws them in Cronos at the larger size |
@@ -273,7 +277,7 @@ nothing in `/Applications` besides itself.
 
 | Path | What | Uninstall |
 |---|---|---|
-| `~/Library/Application Support/GW2 on Mac arm64/engine/` | the Wine engine as it ships, without its SDK, about 1 GB, with my DXMT fork's tree in `lib/wine/dxgi/dxmt` and the engine's own next to it | removed |
+| `~/Library/Application Support/GW2 on Mac arm64/engine/` | the Wine engine as it ships, without its SDK, about 1 GB, with my DXMT fork's tree in `lib/wine/dxgi/dxmt` and my `ntdll.so` in `lib/wine/aarch64-unix`, the engine's own next to each | removed |
 | `…/GW2 on Mac arm64/bottle/` | the game's Wine prefix with Steam, the game's files and the game's settings. About 75 GB, or no extra space for a clone of files on the same disk | removed, with the game |
 | `…/GW2 on Mac arm64/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `compatdb.rules`, `compatdb.local`, `session`, `session.req`, `.session.lock` | settings, install state, what was installed, DXMT's options, the game's compatdb rules and my own, the current game session and its lock | removed |
 | `~/Library/Caches/GW2 on Mac arm64/downloads/` | the engine archive, `SteamSetup.exe`, a copy of `Gw2Setup-64.exe` | removed |
@@ -363,9 +367,10 @@ it removes the SDK, which nothing reads at run time: `include/`, `lib/wine/tests
 `codesign --verify --strict` on `wine.app` with Mach9's team `WLKUUJD25W` and the identifier
 `app.mach9.loader`. That reads the signature and starts nothing.
 
-The app writes nothing into the engine afterwards but its DXMT tree, and nothing at all inside
-`wine.app`. The loader is signed with an embedded provisioning profile, and a re-signed, edited or
-copied loader exits.
+The app writes nothing into the engine afterwards but its DXMT tree and `ntdll.so`, and nothing at
+all inside `wine.app`. The loader is signed with an embedded provisioning profile, and a re-signed,
+edited or copied loader exits. The check of the engine's `ntdll.so` takes it where it is, in place
+or next to mine as `ntdll.so.engine`.
 
 ### The DXMT tree
 
@@ -403,6 +408,34 @@ To tell my fork's tree from an earlier build, the script compares every file of
 `components/dxmt` (44 MB in `0.2.0-dev.3`) with the tree. Play and `status` do that once and
 reuse the answer for the rest of the command, until a swap changes the tree.
 
+### My ntdll.so
+
+Wine has one `ntdll.so` for every process of the bottle, `lib/wine/aarch64-unix/ntdll.so`. My
+build of it comes from my Wine fork [jdrly/wine](https://github.com/jdrly/wine), which starts at
+the commit the engine was built from, and is in the app as `components/ntdll`. The app puts it in
+place and moves the engine's own aside once, as `ntdll.so.engine`, only after its sha256 matched
+the pin. Back to the engine's own is one rename. Like the DXMT tree, it switches only while no
+session runs or starts, under the session's lock, at install, Repair, `set wine` and Play. Mine is
+copied next to it first, so a switch cut short leaves one of the two files in place, or none
+between the renames, and the next switch finishes it.
+
+`status` prints `wine` (the setting), `wine_file` (`mine`, `engine`, `other` or `none`, the file
+in place), `wine_commit` (its commit), `wine_build` (my build's commit in this app) and
+`wine_ready`: `yes`, `switch` when the next start puts the asked-for file in, and `other` when the
+engine's own is neither in place nor next to it. Repair then unpacks the engine again. The *This
+Mac* panel shows my file with its commit in the Engine cell.
+
+The app tells my file from the engine's by comparing it with `components/ntdll/ntdll.so`, not by
+the fork's hash, because a release signed with my Developer ID changes the file's bytes. The
+engine's loader has library validation off, so it loads the file either way. `Resources/VERSIONS`
+names the file's sha256 as built, and `session.env` the sha256 of the file in the engine.
+
+A build of the app without my file has no `components/ntdll`. It leaves the engine's own in place,
+and greys *Wine* and the switches that need my file.
+
+The code is written for more than one file: `unix_lib` in `gw2om.sh` has one row per file, with its
+setting, its folder in `components/` and the engine's pinned sha256.
+
 ## Installing, step by step
 
 `gw2om.sh install <route>` runs five phases. A failed or cancelled first install removes what that
@@ -411,7 +444,7 @@ and an import's copied game folder with Steam's record. Other files it made can 
 cached downloads, logs and `dxmt.conf`.
 
 1. **The engine.** Check macOS, download, unpack, take the quarantine off, remove the SDK, check
-   the build, then put my DXMT fork into its DXMT tree, as above.
+   the build, then put my DXMT fork into its DXMT tree and my `ntdll.so` in place, as above.
 2. **The bottle.** `wineboot`, then `settings.conf`, `dxmt.conf` and three values in `user.reg`,
    the ones Mach9's own launcher writes: `RetinaMode` under `Software\Wine\Mac Driver`,
    `EmulateModeset=Y` under `Software\Wine\X11 Driver` and `ShowCrashDialog=dword:0` under
@@ -484,6 +517,12 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   in 0.2.0-dev.1, and `fork/dxmt/Gw2-64.exe` while my fork is active. My fork doesn't read the
   variable; it takes the same folder from `DXMT_CACHE_DIR`.
   `CefHost.exe` gets it removed.
+- The `WINE_HEAT_*` entries are my `ntdll.so`'s switches, which it acts on in `Gw2-64.exe` only.
+  They follow the cache path, one `env=` field each, and only while my file is in place. The table
+  `HEAT_SWITCHES` in `gw2om.sh` has one row per setting, `<key> <entry>`: *Job wakes* writes
+  `WINE_HEAT_WAKE=one,skip`. Debug logging adds `WINE_HEAT_COUNT=1` and `WINE_HEAT_LOG` with the
+  logs folder, where my file writes `heat-<pid>.log` every 5 seconds. `CefHost.exe`'s rule unsets
+  each of them again with an empty value.
 - A `compatdb.local` that I put in the app's folder is appended as it is, for trying FEX switches
   such as `exe=Gw2-64.exe;env=FEX_HOSTFEATURES=disableavx`. Nothing in the app writes it, and
   Collect Logs includes it.
@@ -494,7 +533,8 @@ text the sandbox suite pins (`scripts/compatdb-check/rules`) with Mach9 0.3.1's 
 checks that it writes back byte for byte.
 
 A setting change that only changes the rules or `dxmt.conf` takes effect at the next game start.
-One that changes the environment or the registry (`ncpu`, `debug`, `retina`) waits until Steam has
+One that changes the environment, the registry or the engine's files (`ncpu`, `debug`, `retina`,
+`dxmt`, `wine`) waits until Steam has
 quit.
 
 The other settings:
@@ -539,6 +579,7 @@ sequenceDiagram
 `-silent` once Steam's `config/loginusers.vdf` has a user with `"RememberPassword" "1"`. On the
 ArenaNet route it runs `Gw2-64.exe <launch options>`. It also writes `session.env` and rotates the
 logs when no session runs. `session.env` records the engine and its Wine, FEX and DXMT commits, the
+`ntdll.so` the session loads (`LIB_wine`: mine or the engine's, its commit and sha256), the
 settings, the environment and the rules.
 
 Play refuses while a `Gw2-64.exe` of another app runs, such as 0.1.x's or a Mach9.app's: one
@@ -689,6 +730,9 @@ last session from DXMT's own log lines:
 - frame rate as median, 10th percentile and minimum, frame times, hitches and DXMT's share of them
 - shader compiles and the render thread's waits for them
 - shader warming, presentation and Metal 4 errors
+- which `ntdll.so` ran and its switches, and with Debug logging the game thread's row of the
+  session's heat log, a second. The game thread is the thread with the most semaphore releases: it
+  hands the job workers their jobs, about 49,000 a second, and the workers make a few thousand
 
 # Development
 
@@ -697,13 +741,13 @@ last session from DXMT's own log lines:
 You need Xcode 27, for the macOS 27 SDK. The app targets macOS 26.4, as the engine does.
 
 ```sh
-scripts/stage-components.sh    # copy my DXMT fork and the interface addon into prebuilt/
+scripts/stage-components.sh    # copy my DXMT fork, my ntdll.so and the interface addon into prebuilt/
 ./build.sh                     # build dist/GW2 on Mac arm64.app, ad-hoc signed
 ```
 
-On this branch the app bundles two components: my DXMT fork built for the arm64 engine, and the
-interface addon. 0.1.x's Wine pieces stay on `main`; `build.sh` doesn't need them and
-`stage-components.sh` doesn't stage them.
+On this branch the app bundles three components: my DXMT fork built for the arm64 engine, my
+`ntdll.so` built for it when there is one, and the interface addon. 0.1.x's Wine pieces stay on
+`main`; `build.sh` doesn't need them and `stage-components.sh` doesn't stage them.
 
 **Where DXMT comes from.** The fork's CI builds it for this engine
 ([jdrly/dxmt#182](https://github.com/jdrly/dxmt/issues/182)): `aarch64-windows/` and
@@ -716,6 +760,17 @@ that doesn't match the record, or one the record doesn't name. Until a component
 real build, `stage-components.sh --standin` adds a stand-in in the same layout for the checks;
 `--pack` and `scripts/release.sh` refuse it.
 
+**Where my ntdll.so comes from.** My Wine fork's `GW2` workflow builds it for this engine (#40)
+and publishes each commit's build as the asset `ntdll-mach9-<commit>.tar.xz` of jdrly/wine's
+pre-release `mach9-builds`: `ntdll.so`, `VERSION`, `COPYING.LIB` and `LICENSE`. `VERSION` has the
+lines `commit: <full sha>`, `engine: … sha256 <the engine tarball's>` and `ntdll.so: sha256 <the
+file's>`. `stage-components.sh` copies it, unpacked, from `work/ntdll-mach9/install` in the
+workspace (`NTDLL_BUILD` overrides it) and writes `prebuilt/ntdll/SHA256SUMS`. It refuses a build
+for another engine than `ENGINE_SHA256`, an `ntdll.so` that isn't the file its `VERSION` names or
+has no valid signature, and with `WINE_COMMIT` set, a build of another commit or none. Without a
+build and without `WINE_COMMIT` it stages no `ntdll/`, and the app leaves the engine's own in
+place. `build.sh` refuses a `prebuilt/ntdll` that doesn't match its record.
+
 **Where the addon comes from.** `stage-components.sh` copies `version.dll` and
 `gw2-ui-scale.ini` from `GW2_ON_MAC_WORKSPACE`, by default `../gw2-on-mac` next to this checkout,
 at `work/ui-scale/build`. `UISCALE_BUILD` overrides that. The DLL must carry the addon's marker
@@ -726,10 +781,13 @@ anything, so `stage-components.sh` downloads the components archive instead and 
 `ui-scale/`, and its `dxmt/` if that is the arm64 build (0.1.x's archives have an x86_64 one). It does that when `GW2_ON_MAC_WORKSPACE` doesn't exist, or with `--fetch`. The archive
 is a pre-release of this repository, tagged `components-<date>`. [`prebuilt.lock`](prebuilt.lock)
 pins its tag, file name and sha256, and the script refuses a download or cached copy with another
-sha256 before it unpacks anything. `build.sh` then checks it like any other `prebuilt/`.
+sha256 before it unpacks anything. My `ntdll.so` is a download of its own: with `ntdll_url=` and
+`ntdll_sha256=` in `prebuilt.lock`, the script fetches jdrly/wine's asset, checks its sha256 the
+same way and stages it as from the workspace. Until the fork has an asset, `prebuilt.lock` pins
+none. `build.sh` then checks `prebuilt/` like any other.
 
-`--pack <tag>` makes such an archive from `prebuilt/` and writes `prebuilt.lock` for it; README.md
-on `main` says how I publish one.
+`--pack <tag>` makes such an archive from `prebuilt/` without `ntdll/` and writes `prebuilt.lock`
+for it, keeping its `ntdll_` lines; README.md on `main` says how I publish one.
 
 **In a dev build.** The Dev build workflow ([Releasing](#releasing)) takes neither my workspace nor
 the archive. It fetches my DXMT fork's build of the commit I name into `work/dxmt-arm64/install`,
@@ -737,11 +795,14 @@ builds the addon with `scripts/build-addon.sh` into `work/ui-scale/build`, and s
 the checkout as `GW2_ON_MAC_WORKSPACE`. Staging refuses a DXMT build whose `VERSION` names another
 engine than `ENGINE_SHA256` in `src/gw2om.sh`, or a `winemetal.so` without a valid signature, and
 with `DXMT_COMMIT` set, a build of another commit. `STAGED_FROM` puts the fork's commit and where
-its files came from into the first line of `prebuilt/STAGED`.
+its files came from into the first line of `prebuilt/STAGED`. My `ntdll.so` reaches the dev build
+through #50, which fetches the fork's asset into `work/ntdll-mach9/install`; until then a dev build
+has none.
 
 **The engine's source** is athei's: [athei/mach9](https://github.com/athei/mach9) and the
 repositories its release page lists, each under its own licence. The app doesn't bundle any of it,
-and changes only which DXMT tree is active ([The DXMT tree](#the-dxmt-tree)). See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+and changes only which DXMT tree and `ntdll.so` are active ([The DXMT tree](#the-dxmt-tree),
+[My ntdll.so](#my-ntdllso)). See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 **The interface addon** is this repository's own code in [`addon/ui-scale`](addon/ui-scale).
 `scripts/build-addon.sh` builds `version.dll` with Homebrew's mingw-w64 (`brew install mingw-w64`)
@@ -749,7 +810,8 @@ into `work/ui-scale/build` and runs its native test. Staging still takes the wor
 the same source, which differs only in link timestamps.
 
 **What build.sh does.** It checks `prebuilt/` again, compiles `src/native/*.swift` for arm64 and the
-`procpaths` and `sessionlock` helpers, and bundles my DXMT fork, the addon, fonts, art and licences. It
+`procpaths` and `sessionlock` helpers, and bundles my DXMT fork, my `ntdll.so` if staged, the addon,
+fonts, art and licences. It
 downloads Sparkle at a pinned version and sha256, and compiles the Icon Composer icon
 `src/AppIcon.icon` with actool into `Assets.car` and a fallback `AppIcon.icns`.
 
@@ -780,9 +842,11 @@ Mac. It has read-only access and no secrets, and its actions are pinned by commi
 - `build`: `bash -n` (macOS's 3.2) on the scripts, `stage-components.sh --fetch`, `./build.sh`,
   then the build's `VERSIONS` and component hashes in the run's summary. `build.sh` writes
   `dist/<name>.files`, every file's sha256, which a dev build's DMG is compared with. Until `prebuilt.lock`
-  pins an archive with my arm64 DXMT, `stage-components.sh --standin` adds a stand-in. It also
-  checks that `build.sh` refuses a DXMT file that doesn't match its record, a file the record
-  doesn't name and a changed `version.dll`, and `stage-components.sh` a changed archive.
+  pins my arm64 DXMT and my `ntdll.so`, `stage-components.sh --standin` adds a stand-in for each it
+  lacks. It also checks that `build.sh` refuses a DXMT file or an `ntdll.so` that doesn't match its
+  record, a file the record doesn't name and a changed `version.dll`, and `stage-components.sh` a
+  changed archive. It stages an `ntdll.so` from a pinned download in the asset's layout (a signed
+  dylib built on the runner, as a `file://` URL) and refuses it under another sha256.
 - `sandbox`: `test-sandbox.sh` on that build. Without my workspace, the ArenaNet route and the real
   arcdps are skipped, and each skip shows as a notice on the run.
 - `renders`: `ui-render.sh`, with the PNGs as the run's `renders` artifact. A runner has no design
@@ -796,7 +860,7 @@ What still needs my Mac is signing with my Developer ID, notarizing and publishi
 real arcdps's checks, and playing.
 
 `scripts/test-sandbox.sh` tests the backend of a built app end to end in `work/app-sandbox/test`,
-with 425 checks. It uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and
+with 474 checks. It uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and
 ArenaNet's downloads itself, and uses a clone of the game's own ArenaNet-signed `Gw2-64.exe` as the
 installer to check. That's `SIGNED_PE`, by default the copy in my development workspace's bottle.
 Without one, those checks are skipped. It covers:
@@ -807,6 +871,11 @@ Without one, those checks are skipped. It covers:
   earlier build of mine replaced at Play, a swap cut short between its renames or during its copy,
   a foreign tree left for Repair, and the hashes of `wine.app`'s files unchanged through all of
   it
+- my `ntdll.so` in the engine with the engine's own next to it, the switch to the engine's own and
+  back, a switch waiting while a session runs, a switch cut short, an earlier build of mine, a
+  foreign file left for Repair, the `WINE_HEAT_*` entries in the rules, the session's record and
+  the session report. With a build that has no `ntdll.so` of mine, the checks that the engine's
+  own stays and the settings are greyed run instead, and the rest say "skip"
 - raw mouse-look's registry values, which go to `Gw2-64.exe` only and never set `PhysicalKeyboard`,
   and registry writes waiting while a session holds the lock
 - arcdps on and off from a stand-in deltaconnected.com, set by `GW2_ON_MAC_ARCDPS_URL` to a
@@ -875,7 +944,8 @@ delta updates and checks it with `scripts/check-appcast.swift`.
   it as a GitHub pre-release with no feed, so `releases/latest` stays on 0.1.x.
 - `--adhoc` does the same without my Developer ID, for the Dev build workflow. It keeps
   `build.sh`'s ad hoc signatures and only verifies them, makes an unsigned DMG, and doesn't
-  notarize. It refuses a version below `build.sh`'s, a tag that exists and the stand-in DXMT. It
+  notarize. It refuses a version below `build.sh`'s, a tag that exists and the stand-in DXMT or
+  `ntdll.so`. It
   mounts the DMG and checks that its app matches `dist/<name>.files` file for file, with a valid
   signature, this app's bundle id, the dev channel and no feed. The pre-release gets the DMG and
   the record `GW2-on-Mac-arm64-<version>.build.txt`, and the notes get a section on installing a
@@ -903,8 +973,8 @@ gh release download v0.2.0-dev.4 -R jdrly/gw2-on-mac -p '*.dmg' -D ~/Downloads
 - The notes are `release-notes/<version>.md` when the commit has one. Otherwise the run writes
   them: the app's and the fork's commits, and a link to the fork's changes since the previous dev
   build's DXMT.
-- The run proves its refusals on copies: the stand-in DXMT, a `VERSION` with another commit or
-  another engine, a version below `build.sh`'s and a tag that exists.
+- The run proves its refusals on copies: the stand-in DXMT and `ntdll.so`, a `VERSION` with another
+  commit or another engine, a version below `build.sh`'s and a tag that exists.
 - A pull request that changes the workflow, `checks.yml`, `build.sh`, `release.sh`,
   `stage-components.sh`, `build-addon.sh` or `app-files.sh` runs it with `publish` false.
 

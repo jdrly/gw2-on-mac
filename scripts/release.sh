@@ -200,6 +200,8 @@ package() {
   local fw stage
   ! grep -q '^stand-in' "$APP/Contents/Resources/components/dxmt/VERSION" ||
     { echo "The app bundles the stand-in DXMT (scripts/stage-components.sh --standin); stage the real one" >&2; exit 1; }
+  ! grep -q '^stand-in' "$APP/Contents/Resources/components/ntdll/VERSION" 2>/dev/null ||
+    { echo "The app bundles the stand-in ntdll.so (scripts/stage-components.sh --standin); stage the real one or none" >&2; exit 1; }
   if [ "$MODE" = --adhoc ]; then
     # build.sh's ad hoc signatures, verified and kept: nothing is signed again
     codesign --verify --strict --deep "$APP"
@@ -208,7 +210,9 @@ package() {
   else
     # Inside out: the process lister and the session's lock (helpers/procpaths, sessionlock), my
     # DXMT fork's winemetal.so (gw2om.sh puts it into the engine's DXMT tree, where Wine loads it;
-    # every Mach-O of a notarized app is signed; the PE DLLs are not Mach-O), Sparkle in its
+    # every Mach-O of a notarized app is signed; the PE DLLs are not Mach-O), my ntdll.so if the
+    # app has it (the engine's loader has library validation off, so it loads with my signature
+    # too; the app tells it from the engine's own by its bytes, not by the fork's hash), Sparkle in its
     # documented order (Autoupdate, Updater.app, the framework, each with the hardened runtime and
     # no --deep; build.sh removed its XPC services), then the app (app.plist: no exceptions). The
     # engine is downloaded at install time, signed by its author, and nothing goes inside wine.app.
@@ -216,6 +220,7 @@ package() {
     sign "$APP/Contents/Resources/helpers/procpaths"
     sign "$APP/Contents/Resources/helpers/sessionlock"
     sign "$APP/Contents/Resources/components/dxmt/aarch64-unix/winemetal.so"
+    [ ! -f "$APP/Contents/Resources/components/ntdll/ntdll.so" ] || sign "$APP/Contents/Resources/components/ntdll/ntdll.so"
     fw="$APP/$FW_REL"
     sign "$fw/Versions/B/Autoupdate"
     sign "$fw/Versions/B/Updater.app"

@@ -324,7 +324,7 @@ jobs:
 
       # On a copy of the scripts and the app; a stand-in gh that knows the tag, so nothing reaches
       # GitHub and no token is passed
-      - name: release.sh refuses the stand-in DXMT, a version below build.sh's and a tag that exists
+      - name: release.sh refuses the stand-in DXMT and ntdll.so, a version below build.sh's and a tag that exists
         run: |
           copy="$RUNNER_TEMP/copy"
           mkdir -p "$copy" "$RUNNER_TEMP/fake-gh"
@@ -341,6 +341,12 @@ jobs:
           echo "stand-in v0.80-0-g0000000 (not a build: scripts/stage-components.sh --standin)" >"$v"
           refuse "the stand-in DXMT" "bundles the stand-in DXMT" --adhoc --no-release
           cp "$RUNNER_TEMP/VERSION" "$v"
+          # (a build may have no ntdll.so of mine, but never the stand-in's)
+          n="$copy/dist/$APP_NAME.app/Contents/Resources/components/ntdll"
+          rm -rf "$RUNNER_TEMP/ntdll" && if [ -d "$n" ]; then cp -R "$n" "$RUNNER_TEMP/ntdll"; fi
+          mkdir -p "$n" && echo "stand-in wine-11.21-0-g0000000 (not a build: scripts/stage-components.sh --standin)" >"$n/VERSION"
+          refuse "the stand-in ntdll.so" "bundles the stand-in ntdll.so" --adhoc --no-release
+          rm -rf "$n" && if [ -d "$RUNNER_TEMP/ntdll" ]; then cp -R "$RUNNER_TEMP/ntdll" "$n"; fi
           cp build.sh "$RUNNER_TEMP/build.sh"
           # shellcheck disable=SC2016 # (build.sh's line, literally)
           sed -i '' 's/^APP_VERSION=.*/APP_VERSION=${GW2_ON_MAC_VERSION:-99.0.0-dev.1}/' "$copy/build.sh"

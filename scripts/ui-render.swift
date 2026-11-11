@@ -123,6 +123,7 @@ func installer(_ state: String) -> Installer {
   var st: [String: String] = [
     "version": "0.2.0-dev.2", "engine": "mach9-v0.3.1", "engine_title": "Mach9 0.3.1 · Wine 11.21",
     "engine_dxmt": "d903db89036", "dxmt": "fork", "dxmt_tree": "fork", "dxmt_commit": "e02a4d6",
+    "wine": "mine", "wine_ready": "yes", "wine_file": "mine", "wine_commit": "4f1c2e9a7b31", "wine_build": "4f1c2e9a7b31",
     "macos": "27.2", "macos_min": "26.4", "macos_ok": "yes",
     "arch": "arm64", "installed": "yes", "installed_version": "0.2.0-dev.2", "engine_installed": "yes", "graphics": "yes",
     "gamemode": "engine", "route": "steam", "steam": "yes", "game": "yes", "stage": "finished",
@@ -257,7 +258,8 @@ func settings(_ extra: [String: String] = [:]) -> GameSettings {
              "warm": "on", "coolworkers": "3", "fastlocks": "on", "ncpu": "8", "uiscale": "off", "uiscale_addon": "off",
              "uiscale_size": "1.75", "uiscale_sans": "on", "uiscale_cinema": "off", "gamemode": "on", "launchopts": "",
              "route": "steam", "updates": "off", "debug": "off", "steambg": "on", "quitsteam": "on", "cpus": "12",
-             "steam_login": "no", "rawmouse": "on", "mousespeed": "1", "dxmt": "fork", "arcdps": "off", "arcdps_state": "off",
+             "steam_login": "no", "rawmouse": "on", "mousespeed": "1", "dxmt": "fork", "wine": "mine", "jobwakes": "on",
+             "arcdps": "off", "arcdps_state": "off",
              "arcdps_foreign": ""].merging(engineStates) { $1 }.merging(extra) { $1 })
   return s
 }

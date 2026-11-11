@@ -2,8 +2,9 @@
 # The install, status, play and settings logic behind the app's window. Unlike SWTOR
 # on Mac it changes no existing install: it creates its own Wine engine and bottle and installs the
 # game through Steam or ArenaNet's own installer. On this line the engine is Mach9's arm64 Wine as
-# it ships, with one exception: its DXMT tree is my DXMT fork's (components/dxmt), the engine's own
-# kept next to it (Settings › Graphics › DXMT switches back). Nothing goes inside wine.app.
+# it ships, with two exceptions: its DXMT tree is my DXMT fork's (components/dxmt), and its ntdll.so
+# is my Wine build's (components/ntdll), the engine's own kept next to each (Settings › Graphics ›
+# DXMT and Wine switch back). Nothing goes inside wine.app.
 #
 #   gw2om.sh status            KEY=VALUE lines describing this Mac (what the window shows)
 #   gw2om.sh install steam     phases 1-4: engine, bottle, Steam from Valve, then Steam starts
@@ -26,8 +27,8 @@
 #   gw2om.sh stop-waiting      the window stops following the game's download (the engine and
 #                              the bottle stay; Install picks up from there)
 #   gw2om.sh repair            the engine (unpacked again if it isn't the expected one), its DXMT
-#                              tree as Settings asks, the bottle's settings; keeps the game and the
-#                              settings
+#                              tree and ntdll.so as Settings asks, the bottle's settings; keeps the
+#                              game and the settings
 #   gw2om.sh uninstall         removes everything this app created: the bottle (with the game in
 #                              it), the engine, the settings, its caches (DXMT's in them); logs
 #                              stay
@@ -73,7 +74,8 @@
 #                              archive (a stand-in whose bin/wine only pretends)
 #   GW2_ON_MAC_ENGINE_CHECKS=0 don't check the unpacked engine's files against the real engine's
 #   GW2_ON_MAC_ENGINE_LOADER_SHA256, GW2_ON_MAC_ENGINE_NTDLL_SHA256, GW2_ON_MAC_ENGINE_D3D11_SHA256,
-#   GW2_ON_MAC_ENGINE_WINEMETAL_SHA256   a stand-in engine's own files (engine_matches, graphics)
+#   GW2_ON_MAC_ENGINE_WINEMETAL_SHA256   a stand-in engine's own files (engine_matches, graphics,
+#                              unix_lib)
 #   GW2_ON_MAC_MACOS           the macOS version preflight sees
 #   GW2_ON_MAC_STEAMSETUP_URL  another SteamSetup.exe
 #   GW2_ON_MAC_SIGNER          the signer check-setup accepts (default ArenaNet)
@@ -122,8 +124,9 @@ ENGINE_WINE=53def89293a   # athei/wine, wine-11.21-37
 ENGINE_FEX=9d4fa4b46b1
 ENGINE_DXMT=d903db89036   # athei/dxmt
 # Checked after unpacking (engine_matches): the loader, a signed app bundle that every Wine process
-# runs as (nothing may change inside it: a copied or re-signed loader exits), and ntdll.so. The
-# DXMT tree's d3d11.dll and winemetal.so tell the engine's own DXMT from mine (dxmt_tree).
+# runs as (nothing may change inside it: a copied or re-signed loader exits), and ntdll.so, which
+# also tells the engine's own from mine (unix_lib). The DXMT tree's d3d11.dll and winemetal.so tell
+# the engine's own DXMT from mine (dxmt_tree).
 ENGINE_LOADER_APP=lib/wine/aarch64-unix/wine.app
 ENGINE_LOADER_SHA256=fac8babc821737c25483679e179f2e61e9dd2c43e3122decb1a77c5870dbeb99
 ENGINE_LOADER_ID=app.mach9.loader
@@ -609,10 +612,11 @@ apply_registry() {
 # --- Settings
 #
 # The keys are 0.1.x's, so settings.conf reads the same on both lines, and dxmt (fork: my DXMT
-# fork; engine: the engine's own, to compare). On this engine some of them need pieces of mine that
+# fork; engine: the engine's own, to compare), wine (mine: my ntdll.so; engine: the engine's own)
+# and jobwakes (a row of HEAT_SWITCHES). On this engine some of them need pieces of mine that
 # come in later steps: setting_state says so, the Settings window greys them with the reason, set
 # refuses them, and they keep what settings.conf says without an effect.
-SETTING_KEYS="retina fpscap metalfx hud warm coolworkers fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam dxmt"
+SETTING_KEYS="retina fpscap metalfx hud warm coolworkers fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam dxmt wine jobwakes"
 FPS_CAPS="off 30 40 60 120"
 # Mouse-look speed (mousespeed): RawMouseGameControllerScale on 0.1.x, a factor on the macOS
 # pointer's speed (SWTOR on Mac's MOUSE_SPEEDS)
@@ -622,7 +626,7 @@ CPU_MAX="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 8)"
 UI_SCALES="1.5 1.75 1.8 2.0"
 setting_default() {
   case "$1" in
-    retina|warm|fastlocks|uiscale_sans|gamemode|rawmouse|updates|steambg|quitsteam) echo on ;;
+    retina|warm|fastlocks|uiscale_sans|gamemode|rawmouse|updates|steambg|quitsteam|jobwakes) echo on ;;
     metalfx|hud|uiscale|uiscale_cinema) echo off ;;
     mousespeed) echo 1 ;;
     debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
@@ -632,11 +636,12 @@ setting_default() {
     uiscale_size) echo 1.75 ;;
     launchopts) echo "" ;;
     dxmt) echo fork ;;
+    wine) echo mine ;;
   esac
 }
 setting_valid() { # <key> <value>
   case "$1" in
-    retina|metalfx|hud|warm|fastlocks|uiscale|uiscale_sans|uiscale_cinema|gamemode|rawmouse|updates|debug|steambg|quitsteam)
+    retina|metalfx|hud|warm|fastlocks|uiscale|uiscale_sans|uiscale_cinema|gamemode|rawmouse|updates|debug|steambg|quitsteam|jobwakes)
       [ "$2" = on ] || [ "$2" = off ] ;;
     mousespeed) in_list "$2" "$MOUSE_SPEEDS" ;;
     fpscap) in_list "$2" "$FPS_CAPS" ;;
@@ -647,6 +652,7 @@ setting_valid() { # <key> <value>
     # would take for something else)
     launchopts) case "$2" in *[!A-Za-z0-9\ _.:=,/+-]*) false ;; *) [ ${#2} -le 200 ] ;; esac ;;
     dxmt) [ "$2" = fork ] || [ "$2" = engine ] ;;
+    wine) [ "$2" = mine ] || [ "$2" = engine ] ;;
     *) false ;;
   esac
 }
@@ -666,7 +672,12 @@ setting_state() {
     coolworkers|fastlocks) echo "off:Need my Wine changes. Come with step 3." ;;
     mousespeed) echo "off:The engine gives the game the mouse's own counts. A speed factor comes with #59 if I need one." ;;
     gamemode) echo "off:The engine's loader is a Game Mode app. Nothing to switch." ;;
-    *) echo ok ;;
+    wine) if lib_bundled wine; then echo ok; else echo "off:This build of the app has no Wine build of mine."; fi ;;
+    *)
+      if ! in_list "$1" "$(heat_keys)"; then echo ok
+      elif [ "$(lib_want wine)" = mine ]; then echo ok
+      else echo "off:Needs my Wine build (Graphics › Wine)."
+      fi ;;
   esac
 }
 # setting_note <key>: what the window shows under a setting that works but is untested here
@@ -769,18 +780,44 @@ cdb_value() {
 #                      there (arcdps, Nexus), version while the larger interface is on. With no
 #                      such file Wine loads its own (n,b).
 #   env                DXMT's shader cache in the app's cache folder (dxmt_cache: my fork's, or
-#                      the engine's DXMT's own)
+#                      the engine's DXMT's own), then my ntdll.so's switches (heat_entries)
 # CefHost.exe, which the game starts for its launcher and the Trading Post, inherits the game's
-# variables: the rule takes the cache path away from it again, and the HUD while it is on.
+# variables: the rule takes the cache path and the switches away from it again (an empty value
+# unsets a variable), and the HUD while it is on.
 rules_text() {
-  local game="exe=Gw2-64.exe" cef="exe=CefHost.exe"
+  local game="exe=Gw2-64.exe" cef="exe=CefHost.exe" entries="" removed="" e
   [ "$(setting rawmouse)" = on ] || game="$game;gcmouse=false"
   if [ "$(setting hud)" = on ]; then game="$game;metal_hud=true" cef="$cef;metal_hud=false"; fi
   arcdps_state
   case "$ARC" in on|foreign) game="$game;dll_overrides=d3d11,dxgi=n,b" ;; esac
   [ "$(setting uiscale)" != on ] || game="$game;dll_overrides=version=n,b"
-  echo "$game;env=DXMT_SHADER_CACHE_PATH=$(cdb_value "$(dxmt_cache)")"
-  echo "$cef;env=DXMT_SHADER_CACHE_PATH="
+  while IFS= read -r e; do
+    if [ -n "$e" ]; then entries="$entries;env=$e" removed="$removed;env=${e%%=*}="; fi
+  done <<EOF
+$(heat_entries)
+EOF
+  echo "$game;env=DXMT_SHADER_CACHE_PATH=$(cdb_value "$(dxmt_cache)")$entries"
+  echo "$cef;env=DXMT_SHADER_CACHE_PATH=$removed"
+}
+
+# The game's switches in my ntdll.so (jdrly/wine, WINE_HEAT_*; it acts on them in Gw2-64.exe only),
+# one row per setting: "<setting> <entry>". The entry goes into the game's rule while the setting
+# isn't off and my ntdll.so is the one in the engine (heat_entries). A new switch is a new row.
+HEAT_SWITCHES="
+jobwakes WINE_HEAT_WAKE=one,skip
+"
+heat_keys() { printf '%s\n' "$HEAT_SWITCHES" | awk 'NF { print $1 }'; }
+# heat_entries: the entries for the game's rule, one a line and already through cdb_value (a
+# newline in the logs folder's path can't split one): the switches that are on and, with
+# Debug logging, the counters (WINE_HEAT_COUNT), which my ntdll.so writes to the logs folder as
+# heat-<pid>.log every 5 s. None while the engine's own ntdll.so is in place.
+heat_entries() {
+  local k e
+  [ "$(lib_in_use wine)" = mine ] || return 0
+  printf '%s\n' "$HEAT_SWITCHES" | while read -r k e; do
+    if [ -n "$k" ] && [ "$(setting "$k")" != off ]; then cdb_value "$e"; echo; fi
+  done
+  if [ "$(setting debug)" = on ]; then echo WINE_HEAT_COUNT=1; echo "WINE_HEAT_LOG=$(cdb_value "$LOGS")"; fi
 }
 # write_rules: compatdb.rules from the settings, then compatdb.local as it is (a temporary file
 # and a rename, so a process that starts meanwhile reads the old rules or the new, never half)
@@ -792,14 +829,18 @@ write_rules() {
 
 engine_ok() { [ -x "$ENG/bin/wine" ] && [ "$(cat "$ENG/.gw2om-source" 2>/dev/null || true)" = "$ENGINE_SHA256" ]; }
 
-# engine_matches <dir>: the unpacked engine is the expected build: its loader's and ntdll.so's
-# sha256, and wine.app's signature (codesign reads it and starts nothing): valid, by Mach9's team,
-# with the loader's identifier
+# engine_matches <dir>: the unpacked engine is the expected build: its loader's sha256, the
+# engine's own ntdll.so (in place, or next to mine as ntdll.so.engine: every row of unix_lib), and
+# wine.app's signature (codesign reads it and starts nothing): valid, by Mach9's team, with the
+# loader's identifier
 engine_matches() {
-  local app="$1/$ENGINE_LOADER_APP" info
-  [ "$(sha256 "$app/Contents/MacOS/wine" 2>/dev/null)" = "$ENGINE_LOADER_SHA256" ] &&
-    [ "$(sha256 "$1/lib/wine/aarch64-unix/ntdll.so" 2>/dev/null)" = "$ENGINE_NTDLL_SHA256" ] &&
-    codesign --verify --strict "$app" >>"$LOGFILE" 2>&1 || return 1
+  local app="$1/$ENGINE_LOADER_APP" info k u="$1/lib/wine/aarch64-unix"
+  [ "$(sha256 "$app/Contents/MacOS/wine" 2>/dev/null)" = "$ENGINE_LOADER_SHA256" ] || return 1
+  for k in $UNIX_LIBS; do
+    unix_lib "$k"
+    [ "$(sha256 "$u/$LIB" 2>/dev/null)" = "$LIB_SHA" ] || [ "$(sha256 "$u/$LIB.engine" 2>/dev/null)" = "$LIB_SHA" ] || return 1
+  done
+  codesign --verify --strict "$app" >>"$LOGFILE" 2>&1 || return 1
   info=$(codesign -dv "$app" 2>&1) || return 1
   printf '%s\n' "$info" | grep -qx "Identifier=$ENGINE_LOADER_ID" &&
     printf '%s\n' "$info" | grep -qx "TeamIdentifier=$ENGINE_TEAM"
@@ -820,7 +861,7 @@ engine_matches() {
 #                 one .so behind its ARM64X and i386 DLLs: mine replaces the link with its own
 #                 file, so the two DXMTs never share one, and the engine's stays as it ships
 # Steam's processes get the same DXMT as the game, as on 0.1.x. The setting dxmt (fork|engine)
-# picks the tree; the swap happens only while no session runs or starts (apply_dxmt): at install,
+# picks the tree; the swap happens only while no session runs or starts (apply_engine_files): at install,
 # repair, set dxmt and Play.
 DXGI="$ENG/lib/wine/dxgi"
 DXMT_MARK=.gw2om-dxmt
@@ -866,7 +907,7 @@ dxmt_label() {
 }
 
 # Graphics in the engine: yes (the DXMT tree Settings asks for is the active one), switch (it is
-# not, and the engine's own tree is there to make it from: apply_dxmt swaps them at the next
+# not, and the engine's own tree is there to make it from: apply_engine_files swaps them at the next
 # chance), other (something else: Repair unpacks the engine again), no (no engine)
 graphics_state() {
   local cur
@@ -927,20 +968,124 @@ dxmt_switch() {
   say "DXMT: $(dxmt_label "$want") draws the game$([ "$want" = fork ] && echo ", the engine's own kept next to it")"
 }
 
-# apply_dxmt: dxmt_switch while no session runs or starts (the session's lock, as apply_registry
-# takes it), else at the next game start that finds none (Play)
-apply_dxmt() {
-  [ -x "$ENG/bin/wine" ] || { [ -z "$DRY" ] || echo "[dry-run] $(dxmt_label "$(setting dxmt)") as the engine's DXMT tree"; return 0; }
+# --- My unix libraries: single files of the engine's lib/wine/aarch64-unix that a build of mine
+# replaces, each with a setting of its own (mine|engine). One row each in unix_lib:
+#   <setting>) LIB=<file> LIB_COMP=<its folder in components/> LIB_SHA=<the engine's file's sha256>
+# The engine's own file moves aside once, as <file>.engine, and only when its sha256 is the pin's;
+# mine is copied in from the components. Every process of the bottle loads the same file, Steam's
+# too, so it changes only while no session runs or starts (apply_engine_files). A build of the app
+# without my file (no components/<folder>) leaves the engine's own in place and greys the setting.
+UNIX_LIBS="wine"
+UNIX_DIR="$ENG/lib/wine/aarch64-unix"
+unix_lib() {
+  case "$1" in
+    wine) LIB=ntdll.so LIB_COMP="$COMP/ntdll" LIB_SHA=$ENGINE_NTDLL_SHA256 ;;
+    *) return 1 ;;
+  esac
+}
+# lib_bundled <key>: this app carries my build of it
+lib_bundled() { unix_lib "$1" && [ -f "$LIB_COMP/$LIB" ]; }
+# lib_commit <key>: the commit of my build in this app (its VERSION's "commit:" line)
+lib_commit() { unix_lib "$1"; sed -n 's/^commit: //p' "$LIB_COMP/VERSION" 2>/dev/null | head -1; }
+# lib_file <key> <path>: what <path> is: mine (this app's build), engine (the engine's own, by the
+# pin), other (another build of mine, from an earlier version of the app, or anything else), none
+lib_file() {
+  unix_lib "$1"
+  if [ ! -f "$2" ]; then echo none
+  elif [ -f "$LIB_COMP/$LIB" ] && cmp -s "$LIB_COMP/$LIB" "$2"; then echo mine
+  elif [ "$(sha256 "$2")" = "$LIB_SHA" ]; then echo engine
+  else echo other
+  fi
+}
+# lib_want <key>: the file the setting asks for (engine without my build in the app)
+lib_want() { if lib_bundled "$1" && [ "$(setting "$1")" = mine ]; then echo mine; else echo engine; fi; }
+# lib_in_use <key>: the file the next process loads (mine, engine or other; without an engine, or
+# between lib_switch's renames, the one it will be)
+lib_in_use() {
+  local f
+  unix_lib "$1"
+  f=$(lib_file "$1" "$UNIX_DIR/$LIB")
+  if [ "$f" = none ]; then lib_want "$1"; else echo "$f"; fi
+}
+# lib_commit_of <key> <mine|engine|other|none>: that file's commit (mine: my build's; engine: the
+# engine's Wine)
+lib_commit_of() { case "$2" in mine) lib_commit "$1" ;; engine) echo "$ENGINE_WINE" ;; esac; }
+# lib_label <key> <mine|engine|other>: what the window and the log call it
+lib_label() {
+  unix_lib "$1"
+  case "$2" in
+    mine) echo "my $LIB (jdrly/wine $(lib_commit "$1" | cut -c1-11))" ;;
+    engine) echo "the engine's own $LIB (athei/wine $ENGINE_WINE)" ;;
+    *) echo "another $LIB" ;;
+  esac
+}
+# lib_state <key>: yes (the file the setting asks for is in place), switch (it is not, and the
+# engine's own is there to make it from: apply_engine_files puts it in at the next chance), other
+# (the engine's own is nowhere: Repair unpacks the engine again), no (no engine)
+lib_state() {
+  local cur
+  unix_lib "$1"
+  [ -x "$ENG/bin/wine" ] || { echo no; return; }
+  cur=$(lib_file "$1" "$UNIX_DIR/$LIB")
+  if [ "$cur" = "$(lib_want "$1")" ]; then echo yes
+  elif [ "$cur" = engine ] || [ "$(lib_file "$1" "$UNIX_DIR/$LIB.engine")" = engine ]; then echo switch
+  else echo other
+  fi
+}
+# lib_switch <key>: the file the setting asks for into place (the caller has made sure that no
+# session runs or starts). Mine is copied next to it first ($LIB.new); the engine's own goes aside
+# as $LIB.engine when it is the one in place; then mine comes in. Back to the engine's own is one
+# rename. Interrupted, the old file or the new one is in place, or none between the two renames,
+# and the next switch puts the asked-for one in.
+lib_switch() {
+  local want cur f
+  unix_lib "$1"
+  f="$UNIX_DIR/$LIB"
+  want=$(lib_want "$1")
+  cur=$(lib_file "$1" "$f")
+  [ "$cur" != "$want" ] || return 0
+  if [ "$cur" != engine ] && [ "$(lib_file "$1" "$f.engine")" != engine ]; then
+    # (lib_state says other: Play and set say Repair)
+    log "$LIB: neither the engine's file nor $LIB.engine is the engine's own; $(lib_label "$1" "$want") waits for Repair"
+    return 0
+  fi
+  if [ "$want" = engine ]; then
+    run mv -f "$f.engine" "$f"
+    say "$LIB: $(lib_label "$1" engine) is in the engine"
+    return 0
+  fi
+  run rm -f "$f.new"
+  run cp -p "$LIB_COMP/$LIB" "$f.new"
+  # (cp -p copies the quarantine attribute of an app copied out of a browser's download)
+  [ -n "$DRY" ] || xattr -d com.apple.quarantine "$f.new" 2>/dev/null || true
+  [ "$cur" != engine ] || run mv -f "$f" "$f.engine"
+  run mv -f "$f.new" "$f"
+  say "$LIB: $(lib_label "$1" mine) is in the engine, the engine's own kept next to it as $LIB.engine"
+}
+
+# apply_engine_files: dxmt_switch and lib_switch for each of UNIX_LIBS while no session runs or
+# starts (the session's lock, as apply_registry takes it), else at the next game start that finds
+# none (Play)
+apply_engine_files() {
+  local k
+  if [ ! -x "$ENG/bin/wine" ]; then
+    if [ -n "$DRY" ]; then
+      echo "[dry-run] $(dxmt_label "$(setting dxmt)") as the engine's DXMT tree"
+      for k in $UNIX_LIBS; do echo "[dry-run] $(lib_label "$k" "$(lib_want "$k")") in the engine"; done
+    fi
+    return 0
+  fi
   if ! registry_lock; then
-    log "DXMT's tree waits for the next start without a running session (its lock is held, or its helper missing)"
+    log "The engine's DXMT tree and unix libraries wait for the next start without a running session (its lock is held, or its helper missing)"
     return 0
   fi
   if session_running; then
     registry_unlock
-    log "DXMT's tree waits for the next start without a running session"
+    log "The engine's DXMT tree and unix libraries wait for the next start without a running session"
     return 0
   fi
   dxmt_switch
+  for k in $UNIX_LIBS; do lib_switch "$k"; done
   registry_unlock
 }
 
@@ -955,8 +1100,8 @@ test_pause() {
 }
 
 # install_engine [force]: the verified engine unpacked into $ENG (unless it's there already). The
-# app writes nothing into it afterwards but its DXMT tree (apply_dxmt), and nothing at all inside
-# wine.app.
+# app writes nothing into it afterwards but its DXMT tree and its unix libraries of mine
+# (apply_engine_files), and nothing at all inside wine.app.
 install_engine() {
   local dst="$ENG"
   if engine_ok && [ "${1:-}" != force ]; then
@@ -1574,7 +1719,7 @@ cmd_check_setup() {
 # --- Status
 
 status() {
-  local free b l installed=no
+  local free b l k f installed=no
   echo "version=$VERSION"
   echo "engine=$ENGINE_NAME"
   echo "engine_title=$ENGINE_TITLE"
@@ -1598,6 +1743,17 @@ status() {
   echo "dxmt_tree=$(dxmt_tree "$DXGI/dxmt")"
   echo "dxmt_version=$DXMT_VERSION"
   echo "dxmt_commit=$DXMT_COMMIT"
+  # (each of my unix libraries: the setting, the file Settings asks for (lib_state), the one in the
+  # engine now (mine, engine, other, none) and its commit, and my build's commit in this app)
+  for k in $UNIX_LIBS; do
+    unix_lib "$k"
+    f=$(lib_file "$k" "$UNIX_DIR/$LIB")
+    echo "$k=$(setting "$k")"
+    echo "${k}_ready=$(lib_state "$k")"
+    echo "${k}_file=$f"
+    echo "${k}_commit=$(lib_commit_of "$k" "$f")"
+    echo "${k}_build=$(lib_commit "$k")"
+  done
   # (the engine's loader is a Game Mode app: nothing for the app to set up or switch)
   echo "gamemode=engine"
   echo "route=$(state route)"
@@ -1664,11 +1820,16 @@ cmd_set() {
     fpscap) write_dxmt_conf ;;
     uiscale|uiscale_size|uiscale_sans|uiscale_cinema) sync_uiscale ;;
     retina) apply_registry ;;
-    dxmt) apply_dxmt; [ "$(graphics_state)" != other ] || warn "The engine's DXMT is neither its own nor mine. Click Repair." ;;
+    dxmt) apply_engine_files; [ "$(graphics_state)" != other ] || warn "The engine's DXMT is neither its own nor mine. Click Repair." ;;
   esac
-  # (each process reads the rules and dxmt.conf when it starts; the environment, the registry and
-  # the DXMT tree are the session's, fixed while Steam runs)
-  if session_running && in_list "$key" "ncpu debug retina dxmt"; then
+  if in_list "$key" "$UNIX_LIBS"; then
+    apply_engine_files
+    unix_lib "$key"
+    [ "$(lib_state "$key")" != other ] || warn "The engine's $LIB is neither its own nor mine. Click Repair."
+  fi
+  # (each process reads the rules and dxmt.conf when it starts; the environment, the registry, the
+  # DXMT tree and the unix libraries are the session's, fixed while Steam runs)
+  if session_running && in_list "$key" "ncpu debug retina dxmt $UNIX_LIBS"; then
     echo "@done $key=$value. It takes effect the next time the game starts after Steam has quit."
   else
     echo "@done $key=$value. It takes effect the next time the game starts."
@@ -1844,7 +2005,7 @@ rotate_logs() {
 # (Collect Logs, the session report), and each later game start in the session (Play with Steam
 # still open, not Show Steam) updates the rules there
 launch() {
-  local e
+  local e k f
   game_env
   write_rules
   if [ -n "$DRY" ]; then
@@ -1861,6 +2022,13 @@ launch() {
       echo "ENGINE=$ENGINE_NAME"; echo "ENGINE_WINE=$ENGINE_WINE"; echo "ENGINE_FEX=$ENGINE_FEX"; echo "ENGINE_DXMT=$ENGINE_DXMT"
       # (the DXMT this session loads: the engine's tree as it is now)
       echo "DXMT_TREE=$(dxmt_tree "$DXGI/dxmt")"; echo "DXMT_FORK=$DXMT_VERSION"
+      # (each unix library the session loads: <file> <mine|engine|other|none> <commit> <sha256>,
+      # the sha256 of the file as it is in the engine)
+      for k in $UNIX_LIBS; do
+        unix_lib "$k"
+        f=$(lib_file "$k" "$UNIX_DIR/$LIB")
+        echo "LIB_$k=$LIB $f $(lib_commit_of "$k" "$f") $(sha256 "$UNIX_DIR/$LIB" 2>/dev/null || true)"
+      done
       for k in $SETTING_KEYS; do echo "SETTING_$k=$(setting "$k")"; done
       printf '%s\n' "${E[@]}"
       sed 's/^/RULE=/' "$RULES"; } >"$LOGS/session.env"
@@ -2216,7 +2384,7 @@ cmd_install() {
   [ -n "$DRY" ] || mkdir -p "$APPDIR"
   step "The Wine engine"
   install_engine
-  apply_dxmt
+  apply_engine_files
   phase 2
   step "The game's own bottle"
   install_bottle
@@ -2284,9 +2452,9 @@ cmd_stop_waiting() {
   echo "@done Stopped following the game's download. Install picks up from there."
 }
 
-# Repair: the engine (unpacked again if it isn't the expected one, or its DXMT tree is neither its
-# own nor mine), the DXMT tree Settings asks for, the bottle's settings; Steam again if it is gone;
-# the game and settings stay
+# Repair: the engine (unpacked again if it isn't the expected one, or its DXMT tree or one of my
+# unix libraries is neither its own nor mine), the DXMT tree and the files Settings asks for, the
+# bottle's settings; Steam again if it is gone; the game and settings stay
 cmd_repair() {
   CREATED="" FETCH_PID=""
   open_log
@@ -2299,13 +2467,13 @@ cmd_repair() {
   trap on_install_exit EXIT
   trap 'exit 143' TERM INT HUP
   step "The Wine engine"
-  if engine_ok && { [ "$(graphics_state)" = other ] || { [ "$ENGINE_CHECKS" = 1 ] && ! engine_matches "$ENG"; }; }; then
+  if engine_ok && { [ "$(graphics_state)" = other ] || libs_other || { [ "$ENGINE_CHECKS" = 1 ] && ! engine_matches "$ENG"; }; }; then
     warn "The engine's files changed; unpacking the engine again"
     install_engine force
   else
     install_engine
   fi
-  apply_dxmt
+  apply_engine_files
   phase 2
   step "The game's own bottle"
   install_bottle
@@ -2318,7 +2486,13 @@ cmd_repair() {
   apply_registry
   write_manifest
   log "repair complete"
-  echo "@done Repaired: the engine and the bottle's settings are set up again. The game draws with $(dxmt_label "$(dxmt_in_use)")."
+  echo "@done Repaired: the engine and the bottle's settings are set up again. The game draws with $(dxmt_label "$(dxmt_in_use)")$(for k in $UNIX_LIBS; do printf ', with %s' "$(lib_label "$k" "$(lib_in_use "$k")")"; done)."
+}
+# libs_other: one of my unix libraries has lost the engine's own file (lib_state other)
+libs_other() {
+  local k
+  for k in $UNIX_LIBS; do [ "$(lib_state "$k")" != other ] || return 0; done
+  return 1
 }
 
 cmd_reinstall_engine() {
@@ -2330,7 +2504,7 @@ cmd_reinstall_engine() {
   lock
   trap on_install_exit EXIT
   install_engine force
-  apply_dxmt
+  apply_engine_files
   echo "@done The engine was unpacked again."
 }
 
@@ -2346,7 +2520,7 @@ cmd_reset_shaders() {
 }
 
 cmd_play() {
-  local key
+  local key k
   open_log
   log "---- play $VERSION root=${ROOT:-/} dry=${DRY:-0}"
   [ -f "$MANIFEST" ] && engine_ok || [ -n "$DRY" ] || die "$APP_NAME is not installed. Install it first."
@@ -2392,13 +2566,14 @@ cmd_play() {
   fi
   # This Play's own session (it holds the session's lock: no other Play, session or registry write
   # until its watcher takes over), with no Wine of the bottle running: the manifest follows this
-  # version, then the registry, the DXMT tree and DXMT's options. A Play that joined a session
-  # changes nothing; without the session helper the registry and the tree wait.
+  # version, then the registry, the DXMT tree, my unix libraries and DXMT's options. A Play that
+  # joined a session changes nothing; without the session helper the registry and the engine's files
+  # wait.
   if [ "$fresh" = yes ] && [ -z "$DRY" ]; then SESSION_LOCKED=yes; fi
   if { [ "$fresh" = yes ] || [ -n "$DRY" ] || [ ! -x "$LOCKER" ]; } && ! session_running; then
     [ "$(json_get "$MANIFEST" version)" = "$VERSION" ] || [ -n "$DRY" ] || write_manifest
     apply_registry
-    apply_dxmt
+    apply_engine_files
     write_dxmt_conf
   fi
   dxmt_look "$DXGI/dxmt"
@@ -2408,6 +2583,13 @@ cmd_play() {
       switch) echo "@notice Steam is still running with $(dxmt_label "$(dxmt_in_use)"); quit Steam to switch to $(dxmt_label "$(setting dxmt)")." ;;
       *) warn "The engine's DXMT is neither its own nor mine. Click Repair." ;;
     esac
+    for k in $UNIX_LIBS; do
+      unix_lib "$k"
+      case "$(lib_state "$k")" in
+        switch) echo "@notice Steam is still running with $(lib_label "$k" "$(lib_in_use "$k")"); quit Steam to switch to $(lib_label "$k" "$(lib_want "$k")")." ;;
+        other) warn "The engine's $LIB is neither its own nor mine. Click Repair." ;;
+      esac
+    done
   fi
   # A running session keeps the settings it started with: Steam passes its own environment on
   if session_running && [ -f "$LOGS/session.key" ]; then

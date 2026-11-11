@@ -12,9 +12,13 @@
 #           log is rotated at every game start, so keep the sessions to compare
 #
 # Which DXMT ran (my fork, or the engine's own, which writes none of the lines below) comes from
-# the session's record, logs/session.env (DXMT_TREE, DXMT_FORK), for the current log, and so does
+# the session's record, logs/session.env (DXMT_TREE, DXMT_FORK), for the current log, and so do
 # which mouse the game had (its rule, RULE: GameController's counts, or the pointer's with
-# gcmouse=false).
+# gcmouse=false), which ntdll.so ran (LIB_wine: mine with its commit, or the engine's own) and its
+# switches (the WINE_HEAT_* entries of the game's rule). With Debug logging my ntdll.so writes its
+# counters to heat-<pid>.log in the logs folder: the report reads the newest one written since the
+# session started, and from it the game thread's row, the thread with the most semaphore releases
+# (it hands the job workers their jobs: about 49,000 a second, the workers a few thousand).
 # Sources, all from the fork's own lines (DXMT_STATS is on by default):
 #   "GW2 fork <version>: …"  the start of a session: DXMT's version, its switches, cpus, refresh
 #   STATS    the frame rate and frame times (avg/max ms) of each interval, the command buffers
@@ -117,6 +121,40 @@ summary() {
 
 get() { printf '%s\n' "$1" | sed -n "s/^$2=//p"; }
 
+# wine_report: the ntdll.so the session loaded and its switches (session.env), and the game
+# thread's row of the session's heat log, a second
+wine_report() {
+  local lib f commit hash switches heat
+  lib=$(sed -n 's/^LIB_wine=//p' "$LOGS/session.env")
+  [ -n "$lib" ] || return 0
+  read -r _ f commit hash <<<"$lib"
+  case "$f" in
+    mine) echo "ntdll.so that ran: my Wine build, jdrly/wine ${commit:0:11} (sha256 ${hash:0:12})" ;;
+    engine) echo "ntdll.so that ran: the engine's own, athei/wine $commit" ;;
+    *) echo "ntdll.so that ran: neither the engine's own nor mine (sha256 ${hash:0:12})" ;;
+  esac
+  switches=$(sed -n 's/^RULE=exe=Gw2-64\.exe;//p' "$LOGS/session.env" | tr ';' '\n' |
+    sed -n -e '/^env=WINE_HEAT_LOG=/d' -e 's/^env=\(WINE_HEAT_[A-Z_]*=.*\)/\1/p' | tr '\n' ' ' | sed 's/ $//')
+  echo "Its switches: ${switches:-none}"
+  heat=$(ls -t "$LOGS"/heat-[0-9]*.log 2>/dev/null | head -1 || true)
+  [ -n "$heat" ] && [ "$heat" -nt "$LOGS/session.env" ] || return 0
+  LC_ALL=C awk -v name="$(basename "$heat")" '
+    NR == 1 { for (i = 1; i < NF; i++) if ($i == "seconds") secs = $(i + 1) + 0; next }
+    $1 == "thread" {
+      r = 0; for (i = 3; i < NF; i += 2) if ($i == "release") r = $(i + 1) + 0
+      if (row == "" || r > most) { most = r; row = $0 }
+    }
+    END {
+      if (row == "" || secs <= 0) exit
+      n = split(row, f, " "); out = ""
+      for (i = 3; i < n; i += 2) {
+        k = f[i]; if (k !~ /^(release|wake_skipped|wake_one|wake_none|woken|spurious|server|lock_sleep|yield)$/) continue
+        out = out sprintf("%s%s %.0f", out == "" ? "" : ", ", k, f[i + 1] / secs)
+      }
+      printf "Heat log %s (%.0f s): the game thread, thread %s (the most releases), a second: %s\n", name, secs, f[2], out
+    }' "$heat"
+}
+
 report() {  # <log>
   local s ran=""
   s=$(summary "$1")
@@ -134,6 +172,7 @@ report() {  # <log>
     else
       echo "Mouse the game had: the mouse's own counts from GameController (the engine's built-in rule)"
     fi
+    wine_report
   fi
   if [ "$(get "$s" sessions)" = 0 ]; then
     case "$ran" in
