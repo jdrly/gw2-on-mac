@@ -9,7 +9,9 @@
 #   Contents/Resources/collect-logs.sh "Collect Logs…" (src/collect-logs.sh)
 #   Contents/Resources/session-report.sh  a game session in short (scripts/session-report.sh)
 #   Contents/Resources/components/     dxmt/ (my DXMT fork, jdrly/dxmt, built for the engine),
-#                                      which gw2om.sh puts into the engine's DXMT tree, and
+#                                      which gw2om.sh puts into the engine's DXMT tree, ntdll/ (my
+#                                      ntdll.so, jdrly/wine, built for the engine; only if staged),
+#                                      which it puts into the engine next to the engine's own, and
 #                                      ui-scale/ (the interface addon), which it puts into the game
 #                                      folder, staged in prebuilt/ by scripts/stage-components.sh
 #   Contents/Resources/helpers/procpaths  every process's real executable (gw2om.sh's process
@@ -20,8 +22,8 @@
 #   Contents/Resources/Licenses/       licences of the app and everything bundled
 # The Wine engine is not bundled: gw2om.sh downloads athei's Mach9 release at install time (an arm64
 # Wine with FEX and his DXMT build; pinned URL, size and sha256 in src/gw2om.sh) and uses it as it
-# ships, but for its DXMT tree (mine, the engine's own kept next to it). Steam and the game come
-# from Valve or ArenaNet.
+# ships, but for its DXMT tree and its ntdll.so (mine, the engine's own kept next to each). Steam
+# and the game come from Valve or ArenaNet.
 #
 # Built with the macOS 27 SDK (Xcode 27) for macOS 26.4 and later (the engine's loader needs it).
 #
@@ -97,10 +99,17 @@ sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
 sdk="$(xcrun --sdk macosx --show-sdk-version)"
 case "$sdk" in 2[7-9]*|[3-9]*) ;; *) echo "Needs the macOS 27 SDK (Xcode 27); found $sdk" >&2; exit 1 ;; esac
 
-# The bundled components (scripts/stage-components.sh): my DXMT fork for the engine, checked against
-# the record staging wrote (dxmt/SHA256SUMS: every file, and nothing else), and the interface
-# addon. 0.1.x's Wine builds (prebuilt/heat, winemac) aren't used on this line.
+# The bundled components (scripts/stage-components.sh): my DXMT fork for the engine and, if staged,
+# my ntdll.so, each checked against the record staging wrote (SHA256SUMS: every file, and nothing
+# else), and the interface addon. 0.1.x's Wine builds (prebuilt/heat, winemac) aren't used on this
+# line. A build without prebuilt/ntdll leaves the engine's own ntdll.so in place.
 P=prebuilt
+# check_record <dir>: its files are the ones its SHA256SUMS names, with those hashes
+check_record() {
+  (cd "$1" && shasum -a 256 -c --quiet SHA256SUMS >&2) || { echo "$1 does not match its record (SHA256SUMS); stage it again" >&2; exit 1; }
+  [ "$(cd "$1" && find . -type f ! -name SHA256SUMS | sed 's|^\./||' | LC_ALL=C sort)" = "$(sed 's/^[0-9a-f]*  //' "$1/SHA256SUMS")" ] ||
+    { echo "$1 has files its record (SHA256SUMS) doesn't name; stage it again" >&2; exit 1; }
+}
 [ -f "$P/STAGED" ] || { echo "No $P/; run scripts/stage-components.sh" >&2; exit 1; }
 for f in ui-scale/version.dll ui-scale/gw2-ui-scale.ini dxmt/SHA256SUMS dxmt/VERSION dxmt/LICENSE dxmt/COPYING.LIB \
   dxmt/aarch64-unix/winemetal.so; do
@@ -109,13 +118,22 @@ done
 for a in aarch64-windows i386-windows; do for d in d3d11 dxgi d3d10core winemetal; do
   [ -f "$P/dxmt/$a/$d.dll" ] || { echo "Missing $P/dxmt/$a/$d.dll; run scripts/stage-components.sh" >&2; exit 1; }
 done; done
-(cd "$P/dxmt" && shasum -a 256 -c --quiet SHA256SUMS >&2) || { echo "$P/dxmt does not match its record (SHA256SUMS); stage it again" >&2; exit 1; }
-[ "$(cd "$P/dxmt" && find . -type f ! -name SHA256SUMS | sed 's|^\./||' | LC_ALL=C sort)" = "$(sed 's/^[0-9a-f]*  //' "$P/dxmt/SHA256SUMS")" ] ||
-  { echo "$P/dxmt has files its record (SHA256SUMS) doesn't name; stage it again" >&2; exit 1; }
+check_record "$P/dxmt"
 DXMT_VERSION="$(head -1 "$P/dxmt/VERSION")"
 DXMT_COMMIT="$(printf '%s\n' "$DXMT_VERSION" | grep -oE '[0-9a-f]{7,40}' | tail -1 || true)"
 [ -n "$DXMT_COMMIT" ] || { echo "$P/dxmt/VERSION names no commit on its first line ($DXMT_VERSION)" >&2; exit 1; }
 grep -aq 'gw2-on-mac ui-scale' "$P/ui-scale/version.dll" || { echo "$P/ui-scale/version.dll is not the addon" >&2; exit 1; }
+# My ntdll.so: its VERSION names the fork's commit ("commit: <full sha>")
+NTDLL_COMMIT="" NTDLL_SHA=""
+if [ -d "$P/ntdll" ]; then
+  for f in ntdll.so VERSION LICENSE COPYING.LIB SHA256SUMS; do
+    [ -f "$P/ntdll/$f" ] || { echo "Missing $P/ntdll/$f; run scripts/stage-components.sh" >&2; exit 1; }
+  done
+  check_record "$P/ntdll"
+  NTDLL_COMMIT="$(sed -n 's/^commit: \([0-9a-f]\{40\}\)$/\1/p' "$P/ntdll/VERSION")"
+  [ -n "$NTDLL_COMMIT" ] || { echo "$P/ntdll/VERSION names no commit (a line commit: <full sha>)" >&2; exit 1; }
+  NTDLL_SHA="$(sha "$P/ntdll/ntdll.so")"
+fi
 # The engine gw2om.sh downloads, for the licences and VERSIONS
 engine_pin() { sed -n "s/^$1=\([^ ]*\).*/\1/p" src/gw2om.sh; }
 ENGINE_NAME="$(engine_pin ENGINE_NAME)" ENGINE_URL="$(engine_pin ENGINE_URL)"
@@ -172,6 +190,12 @@ mkdir -p "$C/dxmt"
 (cd "$P/dxmt" && find . -type f ! -name SHA256SUMS | while read -r f; do mkdir -p "$C/dxmt/$(dirname "$f")"; cp "$f" "$C/dxmt/$f"; done)
 chmod 644 "$C"/dxmt/*-windows/*.dll "$C"/dxmt/VERSION "$C"/dxmt/LICENSE "$C"/dxmt/COPYING.LIB
 chmod 755 "$C/dxmt/aarch64-unix/winemetal.so"
+if [ -n "$NTDLL_COMMIT" ]; then
+  mkdir -p "$C/ntdll"
+  cp "$P/ntdll/ntdll.so" "$P/ntdll/VERSION" "$P/ntdll/LICENSE" "$P/ntdll/COPYING.LIB" "$C/ntdll/"
+  chmod 644 "$C/ntdll/VERSION" "$C/ntdll/LICENSE" "$C/ntdll/COPYING.LIB"
+  chmod 755 "$C/ntdll/ntdll.so"
+fi
 
 # The process lister gw2om.sh tells its own Wine processes by (proc_pidpath)
 mkdir -p "$R/helpers"
@@ -186,6 +210,14 @@ mkdir -p "$L/dxmt" "$L/sparkle" "$L/fonts" "$L/lucide"
 cp LICENSE "$L/GW2-on-Mac-LICENSE.txt"
 cp THIRD_PARTY_NOTICES.md "$L/THIRD_PARTY_NOTICES.md"
 cp "$P/dxmt/LICENSE" "$P/dxmt/COPYING.LIB" "$P/dxmt/VERSION" "$L/dxmt/"
+NTDLL_NOTE="This build has no ntdll.so of mine: the engine's own stays in place."
+if [ -n "$NTDLL_COMMIT" ]; then
+  mkdir -p "$L/wine"
+  cp "$P/ntdll/LICENSE" "$P/ntdll/COPYING.LIB" "$P/ntdll/VERSION" "$L/wine/"
+  NTDLL_NOTE="components/ntdll: ntdll.so, built from my Wine fork jdrly/wine (a fork of athei/wine)
+for the engine below, https://github.com/jdrly/wine/tree/$NTDLL_COMMIT: LGPL-2.1-or-later
+(wine/COPYING.LIB, wine/LICENSE). Its complete source is that commit of the fork."
+fi
 cp "$SPARKLE/LICENSE" "$L/sparkle/LICENSE"
 cp src/fonts/*-OFL.txt "$L/fonts/"
 cp src/icons/LICENSE.txt "$L/lucide/LICENSE.txt"
@@ -200,6 +232,8 @@ components/dxmt: DXMT ($DXMT_VERSION), the jdrly/dxmt fork of 3Shain/dxmt, built
 engine below, https://github.com/jdrly/dxmt/tree/$DXMT_COMMIT: LGPL-2.1-or-later (dxmt/COPYING.LIB,
 dxmt/LICENSE). Its complete source is that commit of the fork.
 
+$NTDLL_NOTE
+
 Sparkle $SPARKLE_VERSION (app updates), https://sparkle-project.org: MIT-style licence, see
 sparkle/LICENSE.
 
@@ -212,16 +246,19 @@ licence, see lucide/LICENSE.txt.
 Not included in this app: the Wine engine, athei's Mach9 ($ENGINE_NAME: Wine with his patches,
 FEX, DXMT, Mesa, vkd3d-proton, GStreamer and the rest its release page lists, each under its own
 licence), is downloaded at install time from $ENGINE_URL
-and used as it ships, but for its DXMT tree: components/dxmt goes there, the engine's own next to
-it. Its sources and that list: https://github.com/athei/mach9/releases.
+and used as it ships, but for its DXMT tree and its ntdll.so: components/dxmt and components/ntdll
+go there, the engine's own next to each. Its sources and that list:
+https://github.com/athei/mach9/releases.
 Steam comes from Valve, Guild Wars 2 from Valve (Steam) or ArenaNet.
 EOF
 
 # channel: release, or dev (development build; gw2om.sh and the app read it)
 printf 'version=%s\nbuild=%s\nchannel=%s\nauthor=%s\ngithub=%s\nrepo=%s\nfeed=%s\n' "$APP_VERSION" "$BUNDLE_VERSION" \
   "$CHANNEL" "$APP_AUTHOR" "$GITHUB_URL" "$REPO_URL" "$(plutil -extract SUFeedURL raw "$APP/Contents/Info.plist" 2>/dev/null || true)" >"$R/app.properties"
-printf 'app %s\ndxmt %s %s\nengine %s wine %s fex %s dxmt %s\nui-scale %s\nsparkle %s\nsdk %s\n' \
-  "$APP_VERSION" "$DXMT_COMMIT" "$DXMT_VERSION" "$ENGINE_NAME" "$(engine_pin ENGINE_WINE)" "$(engine_pin ENGINE_FEX)" "$(engine_pin ENGINE_DXMT)" \
+# (ntdll: my ntdll.so's commit and its sha256 as built, or none)
+printf 'app %s\ndxmt %s %s\nntdll %s\nengine %s wine %s fex %s dxmt %s\nui-scale %s\nsparkle %s\nsdk %s\n' \
+  "$APP_VERSION" "$DXMT_COMMIT" "$DXMT_VERSION" "$([ -n "$NTDLL_COMMIT" ] && echo "$NTDLL_COMMIT $NTDLL_SHA" || echo none)" \
+  "$ENGINE_NAME" "$(engine_pin ENGINE_WINE)" "$(engine_pin ENGINE_FEX)" "$(engine_pin ENGINE_DXMT)" \
   "$(sha "$P/ui-scale/version.dll" | cut -c1-12)" "$SPARKLE_VERSION" "$sdk" >"$R/VERSIONS"
 
 # The Liquid Glass icon from Icon Composer's document (Assets.car, CFBundleIconName), plus the
