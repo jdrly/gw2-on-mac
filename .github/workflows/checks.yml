@@ -152,6 +152,21 @@ jobs:
           grep -E '^ +skip' "$RUNNER_TEMP/sandbox.txt" | sed 's/^ *skip */::notice title=sandbox skip::/' || true
           exit "$rc"
 
+      # After a failed check: the first one in the summary, and the checks' files as an artifact
+      # (each check's gw2om.sh output; a failed one's session, settings, state, logs and the
+      # stand-in's log, which hold no secret: the sandbox has none)
+      - name: The first failed check
+        if: failure()
+        run: if [ -f work/app-sandbox/test.failed/summary.md ]; then cat work/app-sandbox/test.failed/summary.md >>"$GITHUB_STEP_SUMMARY"; fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: sandbox-checks
+          path: work/app-sandbox/test.failed
+          if-no-files-found: ignore
+          retention-days: 14
+
   renders:
     needs: build
     runs-on: xcode-27

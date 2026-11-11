@@ -26,14 +26,17 @@ WS="${GW2_ON_MAC_WORKSPACE:-$ROOT/../gw2-on-mac}"
 APP="$(cd "${1:-dist/$APP_NAME.app}" && pwd)"
 G="$APP/Contents/Resources/gw2om.sh"
 [ -f "$G" ] || { echo "no $G; run ./build.sh" >&2; exit 1; }
+GW2OM="$G"
 SANDBOX="${SANDBOX:-$ROOT/work/app-sandbox/test}"
 case "$SANDBOX" in "$ROOT"/work/app-sandbox/*) ;; *) echo "SANDBOX must be under work/app-sandbox/" >&2; exit 1 ;; esac
+# (the checks' files after a failure)
+FAILED="$SANDBOX.failed"
 SIGNED_PE="${SIGNED_PE:-$WS/work/bottles/gw2/drive_c/Program Files (x86)/Steam/steamapps/common/Guild Wars 2/Gw2-64.exe}"
 # the stand-in processes (sleepers) and watchers of an earlier run of this sandbox, and of this one
 # at its end
-end_sandbox_processes() { [ ! -d "$SANDBOX" ] || pkill -f "^$(cd "$SANDBOX" && pwd -P)/" 2>/dev/null || true; pkill -f "^/bin/bash $G watch-session" 2>/dev/null || true; }
+end_sandbox_processes() { [ ! -d "$SANDBOX" ] || pkill -f "^$(cd "$SANDBOX" && pwd -P)/" 2>/dev/null || true; pkill -f "^/bin/bash $GW2OM watch-session" 2>/dev/null || true; }
 end_sandbox_processes
-rm -rf "$SANDBOX"
+rm -rf "$SANDBOX" "$FAILED"
 mkdir -p "$SANDBOX"
 SANDBOX="$(cd "$SANDBOX" && pwd -P)"
 H="$SANDBOX/home"
@@ -60,8 +63,47 @@ export PATH="$SANDBOX/bin:$PATH"
 other_dxmt_kept() { has "$OTHER_DXMT/shaders_320.db" "another setup's"; }
 
 pass=0 fail=0
-ok() { pass=$((pass + 1)); echo "  ok   $*"; }
-bad() { fail=$((fail + 1)); echo "  FAIL $*"; }
+# Each check's commands: what gw2om.sh prints goes to checks/NNNN.txt as well, through G, a wrapper
+# that appends it there (GW2OM is the app's own gw2om.sh). checks.txt lists the results, and a
+# failed check gets a copy of the state files next to it (NNNN.state). After a failure, the end
+# copies the folder to $FAILED with summary.md, which the Checks workflow uploads.
+CHECKS="$SANDBOX/checks"
+export GW2OM CHECK_OUT="$CHECKS/0001.txt"
+G="$SANDBOX/bin/gw2om"
+mkdir -p "$CHECKS" "$SANDBOX/bin"
+cat >"$G" <<'EOF'
+#!/bin/bash
+# the app's gw2om.sh, with what it prints appended to the current check's file as well: its stdout
+# and stderr through a tee each, by FIFOs the tees remove once open. gw2om.sh gets them as fds 1
+# and 2 and nothing else, so its detached processes, which redirect those, hold no tee open. This
+# exits with gw2om.sh's status once both tees are done, so its output is all there when it ends.
+f="$CHECK_OUT.$$"
+mkfifo "$f.1" "$f.2" || exec "$GW2OM" "$@"
+echo "\$ gw2om.sh $*" >>"$CHECK_OUT"
+{ rm -f "$f.1"; exec tee -a "$CHECK_OUT"; } <"$f.1" & t1=$!
+{ rm -f "$f.2"; exec tee -a "$CHECK_OUT" >&2; } <"$f.2" & t2=$!
+"$GW2OM" "$@" >"$f.1" 2>"$f.2"; rc=$?
+wait "$t1" "$t2"
+exit "$rc"
+EOF
+chmod 755 "$G"
+# end_check <ok|FAIL> <what>: its line in checks.txt, the state files after a failure, and the next
+# check's file
+end_check() {
+  local n f
+  n=$(printf %04d $((pass + fail)))
+  echo "$n $1 $2" >>"$CHECKS/checks.txt"
+  if [ "$1" = FAIL ]; then
+    mkdir -p "$CHECKS/$n.state"
+    for f in "$AD/session" "$AD/session.req" "$AD/settings.conf" "$AD/state" "$AD/compatdb.rules" \
+      "$LOGS/install.log" "$LOGS/wine.log" "$LOGS/session.env" "$STANDIN_LOG"; do
+      [ ! -f "$f" ] || cp "$f" "$CHECKS/$n.state/"
+    done
+  fi
+  CHECK_OUT="$CHECKS/$(printf %04d $((pass + fail + 1))).txt"
+}
+ok() { pass=$((pass + 1)); echo "  ok   $*"; end_check ok "$*"; }
+bad() { fail=$((fail + 1)); echo "  FAIL $*"; end_check FAIL "$*"; }
 check() { local what=$1; shift; if "$@"; then ok "$what"; else bad "$what"; fi; }
 section() { echo; echo "== $*"; }
 g() { "$G" "$@"; }
@@ -482,7 +524,7 @@ echo "<html>portal</html>" >"$ARCSRV/d3d11.dll.md5sum"
 check "  a checksum that is a web page: refused" eval '! "$G" set arcdps on >"$SANDBOX/arc.txt" 2>&1 && has "$SANDBOX/arc.txt" "is not a checksum" && [ ! -e "$GD/d3d11.dll" ]'
 check "  no server: refused, saying so" sh -c "! GW2_ON_MAC_ARCDPS_URL='file://$SANDBOX/nowhere' '$G' set arcdps on >'$SANDBOX/arc.txt' 2>&1 && grep -q 'Check your internet connection' '$SANDBOX/arc.txt' && [ ! -e '$GD/d3d11.dll' ]"
 cp "$SANDBOX/pe/arcdps.dll" "$ARCSRV/d3d11.dll"; echo "$(md5 -q "$ARCSRV/d3d11.dll")  d3d11.dll" >"$ARCSRV/d3d11.dll.md5sum"
-check "the base address can be changed only in a sandbox" sh -c "grep -q '^\[ -z \"\$ROOT\" \] || ARCDPS_URL=' '$G'"
+check "the base address can be changed only in a sandbox" sh -c "grep -q '^\[ -z \"\$ROOT\" \] || ARCDPS_URL=' '$GW2OM'"
 check "dry run: says what it would download, places nothing" sh -c "GW2_ON_MAC_DRY_RUN=1 '$G' set arcdps on | grep -q 'dry-run.*deltaconnected\|dry-run.*d3d11.dll.md5sum' && [ ! -e '$GD/d3d11.dll' ]"
 # while a Play holds the session's lock, nothing changes in the game folder
 "$APP/Contents/Resources/helpers/sessionlock" hold "$AD/.session.lock" 30 & hp=$!
@@ -726,7 +768,7 @@ splay
 check "a second Play joins the session and keeps its watcher" [ "$(sess watcher_pid)/$(sess started_steam)/$(sess quit_steam)/$(sess replay)" = "$wp/yes/yes/1" ]
 # (the watcher's own subshells carry its command line: only those whose parent isn't one count)
 watchers() {
-  ps -axo pid=,ppid=,command= | awk -v c="/bin/bash $G watch-session" '
+  ps -axo pid=,ppid=,command= | awk -v c="/bin/bash $GW2OM watch-session" '
     { x = $0; sub(/^ *[0-9]+ +[0-9]+ /, "", x) }
     index(x, c) == 1 { w[$1] = $2 }
     END { for (p in w) if (!(w[p] in w)) n++; print n + 0 }'
@@ -782,12 +824,14 @@ check "Play in the grace after Steam quit: joins (replay=1), its own Steam (star
 game_session
 check "  its game quits: that Steam quits" eval 'watch_done && [ "$(sess result)" = quit ] && ! steam_runs'
 
-# Play near the end of the grace (a 4 s grace): the watcher waits for that Play's game instead of
-# quitting
-: >"$STANDIN_LOG"; GW2_ON_MAC_WATCH_GRACE=4 "$G" play >/dev/null 2>&1; started; watcher_up; steam_up
+# Play in the grace, and its game only after the grace: the watcher waits for that Play's game
+# instead of quitting Steam. The grace is 6 s, at least 5 s as the watcher counts whole seconds.
+# The Play starts as soon as the grace does and returns once the watcher has its join. On my
+# runners, a settings change and a joining Play with its checks took 1.9 s at most.
+: >"$STANDIN_LOG"; GW2_ON_MAC_WATCH_GRACE=6 "$G" play >/dev/null 2>&1; started; watcher_up; steam_up
 game_session
-sleep 2.5; splay; sleep 3
-check "Play in the grace: the watcher waits for the game again, past the grace, no -shutdown" eval '[ "$(sess stage)" = waiting_game ] && [ "$(sess replay)" = 1 ] && steam_runs && ! has "$STANDIN_LOG" "steam.exe -shutdown"'
+check "Play in the grace: joins (replay=1)" eval 'g play >/dev/null 2>&1 && [ "$(sess replay)" = 1 ]'
+check "  past the grace, the watcher waits for the game again: no -shutdown, Steam runs" eval 'wait_stage waiting_game && steam_runs && ! has "$STANDIN_LOG" "steam.exe -shutdown"'
 game_session
 check "  then that game quits: Steam quits" eval 'watch_done && [ "$(sess result)" = quit ] && ! steam_runs'
 
@@ -1081,7 +1125,8 @@ g set launchopts -maploadinfo >/dev/null
 wait_file() { local i=0; until [ -e "$1" ] || [ $i -ge 100 ]; do sleep 0.1; i=$((i + 1)); done; [ -e "$1" ]; }
 P1="$SANDBOX/pauseA" P2="$SANDBOX/pauseB"
 touch "$P1" "$P2"; rm -f "$P1.at" "$P2.at"
-GW2_ON_MAC_TEST_PAUSE="$P1" GW2_ON_MAC_TEST_PAUSE_AT=locked "$G" set launchopts -ownerA >"$SANDBOX/ownA.txt" 2>&1 & oa=$!
+# (A's pid is the lock's: the app's gw2om.sh itself, not the wrapper)
+GW2_ON_MAC_TEST_PAUSE="$P1" GW2_ON_MAC_TEST_PAUSE_AT=locked "$GW2OM" set launchopts -ownerA >"$SANDBOX/ownA.txt" 2>&1 & oa=$!
 wait_file "$P1.at"
 GW2_ON_MAC_TEST_PAUSE="$P2" GW2_ON_MAC_TEST_PAUSE_AT=lock-owner-read "$G" set launchopts -contenderB >"$SANDBOX/contB.txt" 2>&1 & ob=$!
 check "owner A holds the lock; contender B has read A's pid under the claim (paused)" eval 'wait_file "$P2.at" && [ "$(cat "$AD/.lock/pid")" = "$oa" ] && "$APP/Contents/Resources/helpers/sessionlock" held "$LOGS/.lock-claim"'
@@ -1343,5 +1388,13 @@ check "0.1's folders: still the same checksum" [ "$(o1sum)" = "$O1SUM" ]
 echo
 echo "$pass passed, $fail failed"
 end_sandbox_processes
+if [ "$fail" != 0 ]; then
+  first=$(grep -m1 '^[0-9]* FAIL ' "$CHECKS/checks.txt")
+  { echo "First failed check: ${first#* FAIL }"; echo
+    echo "The last 40 lines of its commands' output (checks/${first%% *}.txt; its state files in checks/${first%% *}.state):"; echo
+    echo '```'; tail -n 40 "$CHECKS/${first%% *}.txt" 2>/dev/null; echo '```'; } >"$CHECKS/summary.md"
+  cp -R "$CHECKS" "$FAILED"
+  echo "The checks' files: $FAILED"
+fi
 [ -n "${KEEP:-}" ] || rm -rf "$SANDBOX"
 [ "$fail" = 0 ]
