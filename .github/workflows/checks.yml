@@ -151,9 +151,6 @@ jobs:
           if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took a file the DXMT record doesn't name"; exit 1; fi
           grep "prebuilt/dxmt has files its record" "$RUNNER_TEMP/build.txt"
           rm prebuilt/dxmt/i386-windows/d3d12.dll
-          printf 'not the addon' >prebuilt/ui-scale/version.dll
-          if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took a changed version.dll"; exit 1; fi
-          grep 'version.dll is not the addon' "$RUNNER_TEMP/build.txt"
           if [ -d prebuilt/ntdll ]; then
             cp -R prebuilt/ntdll "$RUNNER_TEMP/ntdll"
             printf x >>prebuilt/ntdll/ntdll.so
@@ -161,6 +158,9 @@ jobs:
             grep 'prebuilt/ntdll does not match its record' "$RUNNER_TEMP/build.txt"
             rm -rf prebuilt/ntdll && cp -R "$RUNNER_TEMP/ntdll" prebuilt/ntdll
           fi
+          printf 'not the addon' >prebuilt/ui-scale/version.dll
+          if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took a changed version.dll"; exit 1; fi
+          grep 'version.dll is not the addon' "$RUNNER_TEMP/build.txt"
           [ "$ARCHIVE" = true ] || exit 0
           # My ntdll.so as a pinned download (prebuilt.lock's ntdll_url and ntdll_sha256), in the
           # layout of jdrly/wine's asset: a signed dylib in place of the real file, which has no
