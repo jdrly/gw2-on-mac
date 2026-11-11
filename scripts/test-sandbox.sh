@@ -354,7 +354,7 @@ check "set metalfx on: DXMT_SUBSAMPLE_METALFX=1" sh -c "'$G' set metalfx on >/de
 # the engine's own DXMT, and back (nothing runs: the tree swaps at once)
 out=$(g set dxmt engine 2>&1) && rc=0 || rc=$?
 check "set dxmt engine: the engine's own tree is the active one, mine waits next to it" \
-  eval '[ "$rc" = 0 ] && dxgi_is engine && [ -f "$ENG/lib/wine/dxgi/dxmt.fork/.gw2om-dxmt" ] && [ "$(st graphics)/$(st dxmt_tree)" = yes/engine ]'
+  eval '[ "$rc" = 0 ] && dxgi_is engine && [ -f "$ENG/lib/wine/dxgi/dxmt.fork/.gw2om-dxmt" ] && [ "$(st graphics)/$(st dxmt_tree)" = yes/engine ] && ! echo "$out" | grep -q Repair'
 check "  it says which" has <(echo "$out") "^DXMT: the engine's own DXMT (athei/dxmt d903db89036) draws the game"
 check "  warming and MetalFX greyed with the reason; set warm refused" \
   eval '[ "$(sett warm_state)" = "off:Needs my DXMT fork (Graphics › DXMT)." ] && [ "$(sett metalfx_state)" = "$(sett warm_state)" ] && ! "$G" set warm off >/dev/null 2>&1'
@@ -362,7 +362,7 @@ check "  none of the fork's variables in the environment" sh -c "! '$G' env | gr
 check "  the game's shader cache: the engine's DXMT's own" has <(g rules) "^exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=$DXMT_CACHE_ENGINE$"
 check "  wine.app untouched" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
 out=$(g set dxmt fork 2>&1) && rc=0 || rc=$?
-check "set dxmt fork: mine again, the engine's own kept as it ships" eval '[ "$rc" = 0 ] && dxgi_is fork && [ "$(st graphics)/$(st dxmt_tree)" = yes/fork ]'
+check "set dxmt fork: mine again, the engine's own kept as it ships" eval '[ "$rc" = 0 ] && dxgi_is fork && [ "$(st graphics)/$(st dxmt_tree)" = yes/fork ] && ! echo "$out" | grep -q Repair'
 check "  wine.app untouched" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
 # A swap cut short (the Mac off, a kill): between its two renames there is no active tree, and
 # during the copy an unfinished dxmt.fork.new; the next call puts the asked-for tree in
@@ -841,6 +841,26 @@ game_session; splay
 game_session
 check "Play and its game within the grace: after that game, Steam quits" eval 'watch_done && [ "$(sess result)" = quit ] && [ "$(sess replay)" = 1 ] && ! steam_runs'
 
+# My fork's build is 44 MB, and the stand-in's files are a few bytes: with 44 MB of random bytes
+# added to the component (and the engine's tree made from it again), one Play and one status each
+# compare the engine's tree with the component once (a cmp on PATH counts the files compared), and
+# two Plays at once (below) still meet: the joining one waits about 3.6 s for the first one's
+# watcher (join_session)
+BIG="$COMP/dxmt/real-size.bin"
+head -c 46137344 /dev/urandom >"$BIG"
+g set dxmt fork >/dev/null
+mkdir -p "$SANDBOX/cmp-bin"
+printf '#!/bin/bash\necho "$3" >>"%s/cmp.log"\nexec /usr/bin/cmp "$@"\n' "$SANDBOX" >"$SANDBOX/cmp-bin/cmp"
+chmod 755 "$SANDBOX/cmp-bin/cmp"
+# compared <gw2om.sh's arguments>: the files that command compared in the engine's active tree, and
+# once is every file of the component
+compared() { : >"$SANDBOX/cmp.log"; PATH="$SANDBOX/cmp-bin:$PATH" "$G" "$@" >/dev/null 2>&1; grep -cF "$ENG/lib/wine/dxgi/dxmt/" "$SANDBOX/cmp.log"; }
+once=$(find "$COMP/dxmt" -type f | wc -l | tr -d ' ')
+: >"$STANDIN_LOG"; n=$(compared play); started; watcher_up; steam_up
+check "my DXMT at its real size (44 MB): Play compares the engine's tree with it once" [ "$n" = "$once" ]
+game_session; watch_done
+check "  status once" [ "$(compared status)" = "$once" ]
+
 # two Plays at once: one watcher, the other joins
 : >"$STANDIN_LOG"
 "$G" play >/dev/null 2>&1 & p1=$!
@@ -849,6 +869,9 @@ wait $p1 $p2; started; watcher_up; steam_up
 check "two Plays at once: one watcher, the other joined" eval '[ "$(watchers)" = 1 ] && watcher_runs && [ "$(sess replay)" = 1 ]'
 game_session
 check "  Steam quits once" eval 'watch_done && [ "$(sess result)" = quit ] && [ "$(grep -c "steam.exe -shutdown" "$STANDIN_LOG")" = 1 ]'
+# (a tree with a file more than the component still counts as mine: the file goes from both)
+rm -f "$BIG" "$ENG/lib/wine/dxgi/dxmt/real-size.bin"
+check "the usual build again, in the component and the engine's tree" eval 'dxgi_is fork && [ "$(st dxmt_tree)" = fork ]'
 
 # the lock is the kernel's (flock): a lock file a dead watcher left holds nothing
 echo "left behind" >"$AD/.session.lock"

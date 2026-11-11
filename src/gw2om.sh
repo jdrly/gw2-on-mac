@@ -830,9 +830,11 @@ DXMT_COMMIT="$(printf '%s\n' "$DXMT_VERSION" | grep -oE '[0-9a-f]{7,40}' | tail 
 # dxmt_files: the component's files, relative to components/dxmt
 dxmt_files() { (cd "$COMP/dxmt" 2>/dev/null && find . -type f | sed 's|^\./||' | LC_ALL=C sort); }
 # dxmt_tree <dir>: engine (the engine's own DXMT: its d3d11.dll and winemetal.so), fork (mine, this
-# app's build), oldfork (mine, another build: an earlier version of the app), other, none
+# app's build), oldfork (mine, another build: an earlier version of the app), other, none. An
+# answer dxmt_look has remembered in this run comes from DXMT_SEEN, without reading the files again.
 dxmt_tree() {
-  local t=$1 f
+  local t=$1 f s=${DXMT_SEEN#*"$NL$1="}
+  if [ "$s" != "$DXMT_SEEN" ]; then echo "${s%%"$NL"*}"; return; fi
   [ -d "$t" ] || { echo none; return; }
   if [ ! -e "$t/$DXMT_MARK" ] && [ "$(sha256 "$t/aarch64-windows/d3d11.dll" 2>/dev/null)" = "$ENGINE_D3D11_SHA256" ] &&
     [ "$(sha256 "$t/aarch64-unix/winemetal.so" 2>/dev/null)" = "$ENGINE_WINEMETAL_SHA256" ]; then
@@ -841,6 +843,16 @@ dxmt_tree() {
   [ -f "$t/$DXMT_MARK" ] || { echo other; return; }
   for f in $(dxmt_files); do cmp -s "$COMP/dxmt/$f" "$t/$f" || { echo oldfork; return; }; done
   echo fork
+}
+# dxmt_look <dir>: dxmt_tree's answer for <dir>, remembered for the rest of this run. My fork's build
+# is tens of MB, and Play and status ask for the active tree up to five times, mostly from $(…),
+# whose variables die with it: so the command's own shell calls this first, and the $(…) after it
+# inherit DXMT_SEEN. dxmt_switch forgets the answers when it changes a tree.
+NL=$'\n'
+DXMT_SEEN=""
+dxmt_look() {
+  case "$DXMT_SEEN" in *"$NL$1="*) return ;; esac
+  DXMT_SEEN="$DXMT_SEEN$NL$1=$(dxmt_tree "$1")"
 }
 # dxmt_in_use: the DXMT the next process loads (fork or engine; without an engine, the setting's)
 dxmt_in_use() {
@@ -877,6 +889,7 @@ graphics_state() {
 dxmt_switch() {
   local want cur src f
   want=$(setting dxmt)
+  dxmt_look "$DXGI/dxmt"
   cur=$(dxmt_tree "$DXGI/dxmt")
   [ "$cur" != "$want" ] || return 0
   if [ "$cur" = engine ]; then src="$DXGI/dxmt"
@@ -886,6 +899,7 @@ dxmt_switch() {
     log "DXMT: the engine's tree is neither its own nor mine; $(dxmt_label "$want") waits for Repair"
     return 0
   fi
+  DXMT_SEEN=""
   if [ "$want" = fork ] && [ "$(dxmt_tree "$DXGI/dxmt.fork")" != fork ]; then
     run rm -rf "$DXGI/dxmt.fork.new" "$DXGI/dxmt.fork"
     run cp -Rp "$src" "$DXGI/dxmt.fork.new"
@@ -909,6 +923,7 @@ dxmt_switch() {
     oldfork) run rm -rf "$DXGI/dxmt" ;;
   esac
   run mv "$DXGI/dxmt.$want" "$DXGI/dxmt"
+  dxmt_look "$DXGI/dxmt"
   say "DXMT: $(dxmt_label "$want") draws the game$([ "$want" = fork ] && echo ", the engine's own kept next to it")"
 }
 
@@ -1576,6 +1591,7 @@ status() {
   echo "installed=$installed"
   echo "installed_version=$(json_get "$MANIFEST" version)"
   echo "engine_installed=$(engine_ok && echo yes || echo no)"
+  dxmt_look "$DXGI/dxmt"
   echo "graphics=$(graphics_state)"
   # (the DXMT Settings asks for, the one in the engine's tree now, and my fork's build)
   echo "dxmt=$(setting dxmt)"
@@ -2385,6 +2401,7 @@ cmd_play() {
     apply_dxmt
     write_dxmt_conf
   fi
+  dxmt_look "$DXGI/dxmt"
   if [ -z "$DRY" ]; then
     case "$(graphics_state)" in
       yes) ;;
