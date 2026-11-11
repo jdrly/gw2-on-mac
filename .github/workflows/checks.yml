@@ -116,7 +116,8 @@ jobs:
         run: tar -xf "$RUNNER_TEMP/app.tar"
 
       # The checks that need files from my development workspace (the ArenaNet-signed installer,
-      # the real arcdps) say "skip" and pass; each skip is a notice on the run.
+      # the real arcdps) or more CPUs than the runner's 3 (ncpu 6 and 8) say "skip" and pass;
+      # each skip is a notice on the run.
       - name: test-sandbox.sh
         run: |
           rc=0
