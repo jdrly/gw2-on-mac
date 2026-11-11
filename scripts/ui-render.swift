@@ -267,8 +267,7 @@ func settings(_ extra: [String: String] = [:]) -> GameSettings {
 let engineStates: [String: String] = [
   "coolworkers_state": "off:Need my Wine changes. Come with step 3.",
   "fastlocks_state": "off:Need my Wine changes. Come with step 3.",
-  "rawmouse_state": "off:This engine reads the mouse from GameController by itself. My mouse-look comes with step 4.",
-  "mousespeed_state": "off:This engine reads the mouse from GameController by itself. My mouse-look comes with step 4.",
+  "mousespeed_state": "off:The engine gives the game the mouse's own counts. A speed factor comes with #59 if I need one.",
   "gamemode_state": "off:The engine's loader is a Game Mode app. Nothing to switch.",
   "uiscale_note": "Untested on this engine. #27.", "uiscale_size_note": "Untested on this engine. #27.",
   "uiscale_sans_note": "Untested on this engine. #27.", "uiscale_cinema_note": "A code patch, untested under FEX.",

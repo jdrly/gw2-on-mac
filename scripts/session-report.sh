@@ -12,7 +12,9 @@
 #           log is rotated at every game start, so keep the sessions to compare
 #
 # Which DXMT ran (my fork, or the engine's own, which writes none of the lines below) comes from
-# the session's record, logs/session.env (DXMT_TREE, DXMT_FORK), for the current log.
+# the session's record, logs/session.env (DXMT_TREE, DXMT_FORK), for the current log, and so does
+# which mouse the game had (its rule, RULE: GameController's counts, or the pointer's with
+# gcmouse=false).
 # Sources, all from the fork's own lines (DXMT_STATS is on by default):
 #   "GW2 fork <version>: …"  the start of a session: DXMT's version, its switches, cpus, refresh
 #   STATS    the frame rate and frame times (avg/max ms) of each interval, the command buffers
@@ -126,6 +128,12 @@ report() {  # <log>
       ?*) ran="a DXMT that is neither the engine's own nor mine" ;;
     esac
     [ -z "$ran" ] || echo "DXMT that ran: $ran"
+    # (the game's rule as play wrote it: gcmouse=false with raw mouse-look off)
+    if grep -qE '^RULE=exe=Gw2-64\.exe;(.*;)?gcmouse=false(;|$)' "$LOGS/session.env"; then
+      echo "Mouse the game had: the pointer's movement, as Wine does it (gcmouse=false)"
+    else
+      echo "Mouse the game had: the mouse's own counts from GameController (the engine's built-in rule)"
+    fi
   fi
   if [ "$(get "$s" sessions)" = 0 ]; then
     case "$ran" in
