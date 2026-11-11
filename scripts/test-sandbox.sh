@@ -750,8 +750,13 @@ check "  the rest as the session started (STARTED, SETTING_rawmouse=on)" \
   eval '[ "$(sed -n "s/^STARTED=//p" "$LOGS/session.env")" = "$t0" ] && has "$LOGS/session.env" "^SETTING_rawmouse=on$"'
 g set rawmouse on >/dev/null; splay
 check "  rawmouse on again, another Play: the rule without it" eval 'rules_recorded && ! grep -q gcmouse "$LOGS/session.env"'
+g set rawmouse off >/dev/null; : >"$STANDIN_LOG"
+check "  rawmouse off, then Show Steam (no game start): the record keeps the running game's rule" \
+  eval 'g show-steam >/dev/null && started && has "$STANDIN_LOG" "steam.exe steam://open/main" && ! grep -q gcmouse "$LOGS/session.env"'
+g set rawmouse on >/dev/null
 game_session
-check "  Steam quits once" eval 'watch_done && [ "$(sess result)" = quit ] && ! steam_runs'
+check "  Steam left open after the game (its window was shown)" eval 'watch_done && [ "$(sess result)" = left_running ] && steam_runs'
+steam_down
 
 # Steam restarts itself while it starts (an update): a new steam.exe without a request stays the
 # session's (the bottle's Steam starts only through Play)
