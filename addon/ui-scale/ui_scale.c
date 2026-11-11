@@ -8,8 +8,9 @@
  * the table (another font, or another step), about new scale / old scale times its cap height.
  * Font 0's donor sets the new layout scale. The small UI sans has no file above Larger's; it
  * borrows the Cronos face (sans=cronos) or keeps its own (sans=keep). One code detour (cinema=1,
- * 2026-11-04) makes the story cinematics' own text use its font's pixel size; nothing else is
- * written: no other code, no file of the game, no pref.
+ * 2026-11-04) makes the story cinematics' own text use its font's pixel size. One import patch
+ * (csspin=, off by default, 2026-11-11) gives the game's critical sections a spin count. Nothing
+ * else is written: no other code, no file of the game, no pref.
  *
  * Every check passes before anything is written, or nothing is written. The table is watched
  * for reloads (a language change) and patched again. gw2-ui-scale.ini next to the DLL sets the
@@ -222,7 +223,7 @@ static uint64_t table_sig(const table_t *t)
 
 /* ---- the change ---- */
 
-static struct { int enabled, sans_keep, cinema; uint32_t keep; double scale; } cfg;  /* keep: bit per font index */
+static struct { int enabled, sans_keep, cinema; uint32_t keep; double scale, csspin; } cfg;  /* keep: bit per font index */
 
 static void read_config(void)
 {
@@ -254,8 +255,14 @@ static void read_config(void)
   snprintf(keep, sizeof keep, "%s", *v ? v : "(none)");
   GetPrivateProfileStringA("ui-scale", "cinema", "1", v, sizeof v, path);
   cfg.cinema = atoi(v) != 0;
-  ui_log("config %s: enabled=%d scale=%.3f sans=%s keep=%s cinema=%d", path, cfg.enabled, cfg.scale,
-         cfg.sans_keep ? "keep" : "cronos", keep, cfg.cinema);
+  GetPrivateProfileStringA("ui-scale", "csspin", "0", v, sizeof v, path);
+  cfg.csspin = strtod(v, &end);
+  if (end == v || !(cfg.csspin >= 0)) {
+    ui_log("config: csspin=%s is not a number of microseconds; using 0 (off)", v);
+    cfg.csspin = 0;
+  }
+  ui_log("config %s: enabled=%d scale=%.3f sans=%s keep=%s cinema=%d csspin=%g", path, cfg.enabled, cfg.scale,
+         cfg.sans_keep ? "keep" : "cronos", keep, cfg.cinema, cfg.csspin);
 }
 
 /* The Latin font table this remap knows (family 0, from the AFNT file 154945 and its glyph
@@ -691,18 +698,117 @@ static void cine_watch(void)
   }
 }
 
+/* ---- critical sections: a spin count sized in time (csspin=, 2026-11-11) ----
+ * Wine gives InitializeCriticalSection no spin count, and a critical section without one sleeps
+ * (RtlWaitOnAddress, then NtWaitForAlertByThreadId) on every contended enter: dlls/ntdll/sync.c,
+ * RtlEnterCriticalSection. GW2 passes a spin count at 3 call sites and none at the rest. With
+ * csspin=<us> the exe's import of InitializeCriticalSection goes to cs_init, which calls
+ * InitializeCriticalSectionAndSpinCount with as many turns of Wine's spin loop as last that long.
+ * A turn's cost depends on what runs the x86 code: under Rosetta a pause is nearly free (2,000
+ * turns in 0.48 us, 2026-11-10), under FEX it is something else, so the count comes from timing
+ * the loop at load. The import is patched from DllMain, after the loader has bound the exe's
+ * imports and before the game's own code runs, so every critical section the game makes this
+ * way gets the count. The PE ntdll is not touched. csspin=0, the default, leaves the import
+ * table as it is. */
+#define CS_SPIN_MAX 0x00ffffffu  /* Windows keeps flags in a spin count's top byte */
+#define CS_CAL_US   100          /* the calibration times runs at least this long */
+
+static volatile LONG cs_cal_lock;  /* 0: held, no other waiter, so the loop runs every turn */
+static ULONG cs_count;
+
+/* RtlEnterCriticalSection's spin loop (dlls/ntdll/sync.c), on a lock that stays held */
+static ULONG cs_wine_spin(ULONG n)
+{
+  ULONG count;
+  for (count = n; count > 0; count--) {
+    if (cs_cal_lock > 0) break;
+    if (cs_cal_lock == -1 && InterlockedCompareExchange(&cs_cal_lock, 0, -1) == -1) break;
+    YieldProcessor();
+  }
+  return count;
+}
+
+/* Turns of that loop per microsecond here: the turns double until one run lasts CS_CAL_US, then
+ * the fastest of 5 runs of that length (a preempted run only reads slower). 0 when the clock
+ * gives no time: with a counter that stands still the doubling stops at 2^24 turns, about 8 ms
+ * in all under Rosetta, since this runs in DllMain. *turns is the run's length. */
+static double cs_spin_rate(ULONG *turns)
+{
+  LARGE_INTEGER f, a, b;
+  if (!QueryPerformanceFrequency(&f) || f.QuadPart <= 0) return 0;
+  ULONG n = 1024;
+  double best = 0;
+  for (int run = 0; run < 5;) {
+    QueryPerformanceCounter(&a);
+    cs_wine_spin(n);
+    QueryPerformanceCounter(&b);
+    double us = (double)(b.QuadPart - a.QuadPart) * 1e6 / (double)f.QuadPart;
+    if (us < CS_CAL_US && !run && n < (1u << 24)) { n *= 2; continue; }
+    if (!(us > 0)) return 0;
+    if (n / us > best) best = n / us;
+    run++;
+  }
+  *turns = n;
+  return best;
+}
+
+static void WINAPI cs_init(CRITICAL_SECTION *cs)
+{
+  InitializeCriticalSectionAndSpinCount(cs, cs_count);
+}
+
+/* Points every import of `name` by the module at `base` to `to`. Returns how many it changed. */
+static int cs_redirect(uintptr_t base, const char *name, uintptr_t to)
+{
+  const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)base;
+  const IMAGE_NT_HEADERS64 *nt = (const IMAGE_NT_HEADERS64 *)(base + dos->e_lfanew);
+  const IMAGE_DATA_DIRECTORY *imp = &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+  if (!imp->VirtualAddress || !imp->Size) return 0;
+  int n = 0;
+  for (const IMAGE_IMPORT_DESCRIPTOR *d = (const IMAGE_IMPORT_DESCRIPTOR *)(base + imp->VirtualAddress); d->Name; d++) {
+    if (!d->OriginalFirstThunk) continue;  /* no names to match */
+    const IMAGE_THUNK_DATA64 *names = (const IMAGE_THUNK_DATA64 *)(base + d->OriginalFirstThunk);
+    IMAGE_THUNK_DATA64 *slots = (IMAGE_THUNK_DATA64 *)(base + d->FirstThunk);
+    for (int i = 0; names[i].u1.AddressOfData; i++) {
+      if (IMAGE_SNAP_BY_ORDINAL64(names[i].u1.Ordinal)) continue;
+      const IMAGE_IMPORT_BY_NAME *by = (const IMAGE_IMPORT_BY_NAME *)(base + (uintptr_t)names[i].u1.AddressOfData);
+      if (strcmp((const char *)by->Name, name)) continue;
+      DWORD old, tmp;
+      if (!VirtualProtect(&slots[i], sizeof slots[i], PAGE_READWRITE, &old)) {
+        ui_log("critical sections: cannot unprotect the import at %p (%lu); leaving it", (void *)&slots[i],
+               (unsigned long)GetLastError());
+        continue;
+      }
+      slots[i].u1.Function = to;
+      VirtualProtect(&slots[i], sizeof slots[i], old, &tmp);
+      n++;
+    }
+  }
+  return n;
+}
+
+static void cs_install(uintptr_t base)
+{
+  if (!(cfg.csspin > 0) || !cfg.enabled) {
+    ui_log("critical sections: left as they are (%s)", cfg.enabled ? "csspin=0" : "enabled=0");
+    return;
+  }
+  ULONG turns = 0;
+  double rate = cs_spin_rate(&turns);
+  if (!(rate > 0)) { ui_log("critical sections: the clock gave no time for Wine's spin loop; left as they are"); return; }
+  double c = cfg.csspin * rate;
+  cs_count = c >= CS_SPIN_MAX ? CS_SPIN_MAX : c < 1 ? 1 : (ULONG)(c + 0.5);
+  ui_log("critical sections: Wine's spin loop runs %.0f turns a microsecond here (fastest of 5 runs of %lu); "
+         "csspin=%g us gives a spin count of %lu%s", rate, (unsigned long)turns, cfg.csspin, (unsigned long)cs_count,
+         c >= CS_SPIN_MAX ? ", the most a spin count holds" : "");
+  int n = cs_redirect(base, "InitializeCriticalSection", (uintptr_t)cs_init);
+  ui_log("critical sections: redirected %d import%s of InitializeCriticalSection to "
+         "InitializeCriticalSectionAndSpinCount(cs, %lu)", n, n == 1 ? "" : "s", (unsigned long)cs_count);
+}
+
 static DWORD WINAPI worker(LPVOID arg)
 {
   (void)arg;
-  WCHAR exe[MAX_PATH];
-  DWORD n = GetModuleFileNameW(NULL, exe, MAX_PATH);
-  if (n < 11 || lstrcmpiW(exe + n - 11, L"\\Gw2-64.exe")) {
-    ui_log("not Gw2-64.exe; doing nothing");
-    return 0;
-  }
-  ui_log("gw2-on-mac ui-scale, loaded as version.dll");
-  read_config();
-  if (!cfg.enabled) ui_log("disabled in the ini: observing only, nothing is written");
   if (!locate()) { ui_log("writing nothing this session"); return 0; }
   if (cfg.enabled && cfg.cinema) cine_install();
   else ui_log("cinema text: left as it is (%s)", cfg.enabled ? "cinema=0" : "enabled=0");
@@ -788,6 +894,17 @@ void ui_scale_start(HINSTANCE self)
   DWORD n = GetModuleFileNameA(self, dir, MAX_PATH);
   while (n && dir[n - 1] != '\\') n--;
   dir[n] = 0;
+  WCHAR exe[MAX_PATH];
+  n = GetModuleFileNameW(NULL, exe, MAX_PATH);
+  if (n < 11 || lstrcmpiW(exe + n - 11, L"\\Gw2-64.exe")) {
+    ui_log("not Gw2-64.exe; doing nothing");
+    return;
+  }
+  ui_log("gw2-on-mac ui-scale, loaded as version.dll");
+  read_config();
+  if (!cfg.enabled) ui_log("disabled in the ini: observing only, nothing is written");
+  /* now, from DllMain: before the game's own code makes its first critical section */
+  cs_install((uintptr_t)GetModuleHandleW(NULL));
   HANDLE h = CreateThread(NULL, 0, worker, NULL, 0, NULL);
   if (h) CloseHandle(h);
 }

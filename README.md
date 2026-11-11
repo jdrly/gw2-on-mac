@@ -719,6 +719,8 @@ Mac. It has read-only access and no secrets, and its actions are pinned by commi
   arcdps are skipped, and each skip shows as a notice on the run.
 - `renders`: `ui-render.sh`, with the PNGs as the run's `renders` artifact. A runner has no design
   exports, so there are no `compare-*.png`.
+- `addon`: `scripts/build-addon.sh` with Homebrew's mingw-w64, so the addon compiles and its native
+  test runs. The app's build takes `version.dll` from the components archive instead.
 
 What still needs my Mac is signing, notarizing and publishing a release (`scripts/release.sh`,
 which has Sparkle's key and my Developer ID), building the components themselves, the ArenaNet

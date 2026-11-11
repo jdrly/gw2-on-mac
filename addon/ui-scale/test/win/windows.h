@@ -21,11 +21,20 @@ typedef size_t SIZE_T;
 typedef DWORD (*LPTHREAD_START_ROUTINE)(LPVOID);
 typedef struct { int unused; } CRITICAL_SECTION;
 typedef struct { int wYear, wMonth, wDay, wHour, wMinute, wSecond, wMilliseconds; } SYSTEMTIME;
+typedef uint32_t ULONG;
+typedef struct { int64_t QuadPart; } LARGE_INTEGER;
 typedef struct { LONG e_lfanew; } IMAGE_DOS_HEADER;
+typedef struct { DWORD VirtualAddress, Size; } IMAGE_DATA_DIRECTORY;
+#define IMAGE_DIRECTORY_ENTRY_IMPORT 1
 typedef struct {
   struct { int NumberOfSections; DWORD TimeDateStamp; } FileHeader;
-  struct { DWORD SizeOfImage; } OptionalHeader;
+  struct { DWORD SizeOfImage; IMAGE_DATA_DIRECTORY DataDirectory[16]; } OptionalHeader;
 } IMAGE_NT_HEADERS64;
+typedef struct { DWORD OriginalFirstThunk, TimeDateStamp, ForwarderChain, Name, FirstThunk; } IMAGE_IMPORT_DESCRIPTOR;
+typedef struct { union { uint64_t AddressOfData, Ordinal, Function; } u1; } IMAGE_THUNK_DATA64;
+typedef struct { uint16_t Hint; char Name[1]; } IMAGE_IMPORT_BY_NAME;
+#define IMAGE_ORDINAL_FLAG64 0x8000000000000000ull
+#define IMAGE_SNAP_BY_ORDINAL64(o) (((o) & IMAGE_ORDINAL_FLAG64) != 0)
 typedef struct { char Name[8]; DWORD VirtualAddress; struct { DWORD VirtualSize; } Misc; } IMAGE_SECTION_HEADER;
 #define IMAGE_FIRST_SECTION(nt) ((const IMAGE_SECTION_HEADER *)((nt) + 1))
 #define INVALID_HANDLE_VALUE ((HANDLE)(intptr_t)-1)
@@ -40,6 +49,13 @@ typedef struct { char Name[8]; DWORD VirtualAddress; struct { DWORD VirtualSize;
 int test_bad_ptr(const void *p, size_t n);
 int test_screen(int axis);
 const char *test_ini(const char *key);
+/* the critical section spin: a clock and a pause the test drives, VirtualProtect's answer, and
+ * the spin count InitializeCriticalSectionAndSpinCount got */
+BOOL test_qpf(LARGE_INTEGER *f);
+BOOL test_qpc(LARGE_INTEGER *c);
+void test_yield(void);
+BOOL test_protect(void *a, size_t n);
+BOOL test_cs_init(void *cs, DWORD spin);
 
 static inline void GetLocalTime(SYSTEMTIME *t) { memset(t, 0, sizeof *t); }
 static inline void InitializeCriticalSection(CRITICAL_SECTION *c) { (void)c; }
@@ -63,7 +79,8 @@ static inline DWORD GetTickCount(void) { return 0; }
 static inline HANDLE CreateThread(void *a, size_t s, LPTHREAD_START_ROUTINE f, LPVOID p, DWORD fl, DWORD *id)
 { (void)a; (void)s; (void)f; (void)p; (void)fl; (void)id; return NULL; }
 static inline BOOL CloseHandle(HANDLE h) { (void)h; return 1; }
-/* the cinema detour's calls: never reached by the test (it tests cine_find and cine_tramp) */
+/* the cinema detour's calls, never reached by the test (it tests cine_find and cine_tramp), and
+ * the critical section import patch's */
 #define MEM_COMMIT 0x1000
 #define MEM_RESERVE 0x2000
 #define MEM_RELEASE 0x8000
@@ -72,7 +89,12 @@ static inline BOOL CloseHandle(HANDLE h) { (void)h; return 1; }
 #define PAGE_EXECUTE_READWRITE 0x40
 static inline void *VirtualAlloc(void *a, size_t n, DWORD t, DWORD p) { (void)a; (void)n; (void)t; (void)p; return NULL; }
 static inline BOOL VirtualFree(void *a, size_t n, DWORD t) { (void)a; (void)n; (void)t; return 1; }
-static inline BOOL VirtualProtect(void *a, size_t n, DWORD p, DWORD *old) { (void)a; (void)n; (void)p; *old = 0; return 0; }
+static inline BOOL VirtualProtect(void *a, size_t n, DWORD p, DWORD *old) { (void)p; *old = 0; return test_protect(a, n); }
+static inline BOOL QueryPerformanceFrequency(LARGE_INTEGER *f) { return test_qpf(f); }
+static inline BOOL QueryPerformanceCounter(LARGE_INTEGER *c) { return test_qpc(c); }
+static inline void YieldProcessor(void) { test_yield(); }
+static inline LONG InterlockedCompareExchange(volatile LONG *p, LONG v, LONG cmp) { LONG o = *p; if (o == cmp) *p = v; return o; }
+static inline BOOL InitializeCriticalSectionAndSpinCount(CRITICAL_SECTION *c, DWORD n) { return test_cs_init(c, n); }
 static inline HANDLE GetCurrentProcess(void) { return NULL; }
 static inline BOOL FlushInstructionCache(HANDLE h, const void *a, size_t n) { (void)h; (void)a; (void)n; return 1; }
 static inline DWORD GetLastError(void) { return 0; }
