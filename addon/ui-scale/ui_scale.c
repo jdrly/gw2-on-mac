@@ -730,7 +730,8 @@ static ULONG cs_wine_spin(ULONG n)
 
 /* Turns of that loop per microsecond here: the turns double until one run lasts CS_CAL_US, then
  * the fastest of 5 runs of that length (a preempted run only reads slower). 0 when the clock
- * gives no time. *turns is the run's length. */
+ * gives no time: a counter that stands still stops the doubling at 2^24 turns, 4 ms under
+ * Rosetta, since this runs in DllMain. *turns is the run's length. */
 static double cs_spin_rate(ULONG *turns)
 {
   LARGE_INTEGER f, a, b;
@@ -742,8 +743,9 @@ static double cs_spin_rate(ULONG *turns)
     cs_wine_spin(n);
     QueryPerformanceCounter(&b);
     double us = (double)(b.QuadPart - a.QuadPart) * 1e6 / (double)f.QuadPart;
-    if (us < CS_CAL_US && !run && n < (1u << 30)) { n *= 2; continue; }
-    if (us > 0 && n / us > best) best = n / us;
+    if (us < CS_CAL_US && !run && n < (1u << 24)) { n *= 2; continue; }
+    if (!(us > 0)) return 0;
+    if (n / us > best) best = n / us;
     run++;
   }
   *turns = n;

@@ -296,6 +296,8 @@ static void test_csspin(void)
 
   qpf_ok = 0;
   CHECK(cs_run("csspin=5, no clock", NULL, "5", rosetta), "redirected without a calibration");
+  CHECK(cs_run("csspin=5, a clock that stands still", NULL, "5", 0) && qpc_calls == 30,
+        "redirected, or timed past 2^24 turns (%d clock reads, want 30)", qpc_calls);
   protect_ok = 0;
   CHECK(cs_run("csspin=5, VirtualProtect fails", NULL, "5", rosetta), "wrote an import it could not unprotect");
 }
