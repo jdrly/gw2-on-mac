@@ -16,7 +16,11 @@
 #
 # Sources: GW2_ON_MAC_WORKSPACE (default ../gw2-on-mac, next to this repository) and in it
 # DXMT_BUILD=work/dxmt-arm64/install (the fork's CI artifact, unpacked) and
-# UISCALE_BUILD=work/ui-scale/build (relative to the workspace, or absolute).
+# UISCALE_BUILD=work/ui-scale/build (relative to the workspace, or absolute). It refuses a DXMT build
+# for another engine than src/gw2om.sh's ENGINE_SHA256, a winemetal.so without a valid signature,
+# and, with DXMT_COMMIT set, a build of another commit. STAGED_FROM replaces "the development
+# workspace" in the first line of prebuilt/STAGED (the dev build workflow names the fork's commit
+# and where its files came from).
 #
 # Without the workspace (GitHub's runners), or with --fetch, it downloads the files as one archive
 # instead: a pre-release of this repository, pinned in prebuilt.lock by tag, file name and sha256,
@@ -120,6 +124,14 @@ UISCALE_BUILD="$(in_ws "${UISCALE_BUILD:-work/ui-scale/build}")"
 need() { for f in "$@"; do [ -f "$f" ] || die "missing $f"; done; }
 # DXMT: the PE DLLs and winemetal.so of one build always go together
 for f in $DXMT_FILES; do need "$DXMT_BUILD/$f"; done
+# Built for the engine gw2om.sh installs (VERSION's engine: line names its tarball's sha256), from
+# the commit asked for (DXMT_COMMIT, a full sha; the dev build sets it), and a winemetal.so with a
+# valid signature (the linker's: nothing signs it again before the engine loads it)
+engine_sha="$(sed -n 's/^ENGINE_SHA256=\([0-9a-f]*\).*/\1/p' "$ROOT/src/gw2om.sh")"
+[ -n "$engine_sha" ] || die "no ENGINE_SHA256 in src/gw2om.sh"
+grep -q "^engine: .*sha256 $engine_sha" "$DXMT_BUILD/VERSION" || die "$DXMT_BUILD/VERSION names another engine than ENGINE_SHA256 ($engine_sha)"
+[ -z "${DXMT_COMMIT:-}" ] || grep -qx "commit: $DXMT_COMMIT" "$DXMT_BUILD/VERSION" || die "$DXMT_BUILD/VERSION is not commit $DXMT_COMMIT"
+codesign --verify "$DXMT_BUILD/aarch64-unix/winemetal.so" || die "$DXMT_BUILD/aarch64-unix/winemetal.so has no valid signature"
 need "$UISCALE_BUILD/version.dll" "$UISCALE_BUILD/gw2-ui-scale.ini"
 grep -aq 'gw2-on-mac ui-scale' "$UISCALE_BUILD/version.dll" || die "$UISCALE_BUILD/version.dll is not the ui-scale addon"
 
@@ -129,7 +141,7 @@ dxmt_record "$P.new/dxmt"
 mkdir -p "$P.new/ui-scale" && cp "$UISCALE_BUILD"/{version.dll,gw2-ui-scale.ini} "$P.new/ui-scale/"
 # The record names the sources relative to the workspace (no home folder in it)
 rel() { echo "${1#"$WS"/}"; }
-{ echo "staged $(date '+%F %T') by scripts/stage-components.sh from the development workspace"
+{ echo "staged $(date '+%F %T') by scripts/stage-components.sh from ${STAGED_FROM:-the development workspace}"
   echo "dxmt $(head -1 "$DXMT_BUILD/VERSION") d3d11 $(sha "$DXMT_BUILD/aarch64-windows/d3d11.dll") winemetal.so $(sha "$DXMT_BUILD/aarch64-unix/winemetal.so") from $(rel "$DXMT_BUILD")"
   echo "ui-scale $(sha "$UISCALE_BUILD/version.dll") from $(rel "$UISCALE_BUILD")"; } >"$P.new/STAGED"
 rm -rf "$P" && mv "$P.new" "$P"

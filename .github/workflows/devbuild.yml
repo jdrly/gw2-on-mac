@@ -1,0 +1,375 @@
+# Dev build: a development build of GW2 on Mac arm64 made on GitHub's runners and published as a
+# pre-release v<version>, signed ad hoc and not notarized (no secret, no Developer ID). I download it
+# with `gh release download`, which sets no quarantine attribute.
+#
+#   plan        the DXMT commit (a full sha on jdrly/dxmt's gw2-on-mac, by default its head) and the
+#               version (by default build.sh's)
+#   components  my DXMT fork's build of that commit: the release asset dxmt-mach9-<commit>.tar.xz of
+#               jdrly/dxmt's mach9-builds, checked against the digest GitHub reports, or else the
+#               artifact dxmt-mach9-<commit> of the fork's GW2 run for it, fetched with this run's
+#               own token. The interface addon built here by scripts/build-addon.sh. Both staged by
+#               scripts/stage-components.sh, which refuses another commit, another engine or a
+#               winemetal.so without a valid signature; the refusals are proved on copies.
+#   checks      the Checks workflow's jobs (lint, compatdb, build, sandbox, renders) with those
+#               components and that version
+#   package     scripts/release.sh --adhoc on the app the build job made (it never builds again):
+#               the DMG, its app compared with build.sh's file list, the record
+#               GW2-on-Mac-arm64-<version>.build.txt, and with publish the pre-release. Only this
+#               job may write to the repository. Its refusals are proved on copies first.
+#
+# Run by hand on arm64: gh workflow run devbuild.yml --ref arm64 [-f dxmt_commit=<sha>]
+# [-f version=X.Y.Z-dev.N] [-f publish=false]. A pull request that changes the build's scripts or
+# workflows runs it with publish false; a dry run keeps the DMG and the record as an artifact for 7
+# days.
+name: Dev build
+
+on:
+  workflow_dispatch:
+    inputs:
+      dxmt_commit:
+        description: A full sha on jdrly/dxmt's gw2-on-mac; empty is the branch's head
+        type: string
+        default: ""
+      version:
+        description: X.Y.Z-dev.N, not lower than build.sh's; empty is build.sh's
+        type: string
+        default: ""
+      publish:
+        description: Publish the pre-release v<version> (only from arm64); false keeps the DMG as an artifact
+        type: boolean
+        default: true
+  pull_request:
+    paths:
+      - .github/workflows/devbuild.yml
+      - .github/workflows/checks.yml
+      - scripts/release.sh
+      - scripts/stage-components.sh
+      - scripts/build-addon.sh
+      - scripts/app-files.sh
+      - build.sh
+
+permissions:
+  contents: read
+
+# (not the called Checks' group; a publishing run is never cancelled)
+concurrency:
+  group: devbuild-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  DXMT_REPO: jdrly/dxmt
+  DXMT_BRANCH: gw2-on-mac
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      dxmt_commit: ${{ steps.plan.outputs.dxmt_commit }}
+      version: ${{ steps.plan.outputs.version }}
+      publish: ${{ steps.plan.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The DXMT commit and the version
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DXMT_COMMIT: ${{ inputs.dxmt_commit }}
+          VERSION: ${{ inputs.version }}
+          PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          [ -n "$DXMT_COMMIT" ] || DXMT_COMMIT="$(gh api "repos/$DXMT_REPO/branches/$DXMT_BRANCH" --jq .commit.sha)"
+          [[ $DXMT_COMMIT =~ ^[0-9a-f]{40}$ ]] || fail "dxmt_commit is not a full sha: $DXMT_COMMIT"
+          # On the branch: the branch is that commit or ahead of it. A pull request's head that the
+          # squash left behind is not.
+          status="$(gh api "repos/$DXMT_REPO/compare/$DXMT_COMMIT...$DXMT_BRANCH" --jq .status)" ||
+            fail "$DXMT_REPO has no commit $DXMT_COMMIT"
+          case "$status" in ahead|identical) ;; *) fail "$DXMT_COMMIT is not on $DXMT_REPO's $DXMT_BRANCH ($status)" ;; esac
+          # shellcheck disable=SC2016 # (build.sh's line, literally)
+          [ -n "$VERSION" ] || VERSION="$(sed -n 's/^APP_VERSION=${GW2_ON_MAC_VERSION:-\(.*\)}$/\1/p' build.sh)"
+          [[ $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+-dev\.[0-9]+$ ]] || fail "version is not X.Y.Z-dev.N: $VERSION"
+          if [ "$PUBLISH" = true ] && [ "$GITHUB_REF" != refs/heads/arm64 ]; then
+            fail "Dev builds are published from arm64 only, not $GITHUB_REF; run it with publish false"
+          fi
+          { echo "dxmt_commit=$DXMT_COMMIT"; echo "version=$VERSION"; echo "publish=$PUBLISH"; } | tee -a "$GITHUB_OUTPUT"
+
+  components:
+    needs: plan
+    runs-on: xcode-27
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+      DXMT_COMMIT: ${{ needs.plan.outputs.dxmt_commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Unpacked where stage-components.sh looks with the checkout as the workspace
+      # (work/dxmt-arm64/install; work/ is ignored by git)
+      - name: DXMT for the commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          name="dxmt-mach9-$DXMT_COMMIT" dl="$RUNNER_TEMP/dxmt" dir=work/dxmt-arm64/install
+          mkdir -p "$dl" "$dir"
+          # The release asset, if the fork has published it (jdrly/dxmt#194)
+          asset=""
+          if out="$(gh api "repos/$DXMT_REPO/releases/tags/mach9-builds" \
+            --jq ".assets[] | select(.name == \"$name.tar.xz\") | [.browser_download_url, .digest] | @tsv" 2>&1)"; then
+            asset="$out"
+          elif ! grep -q 'HTTP 404' <<<"$out"; then
+            fail "Could not read $DXMT_REPO's mach9-builds release: $out"
+          fi
+          if [ -n "$asset" ]; then
+            IFS=$'\t' read -r url digest <<<"$asset"
+            [[ $digest == sha256:* ]] || fail "GitHub reports no sha256 for $url"
+            curl -fL --retry 3 --no-progress-meter -o "$dl/$name.tar.xz" "$url"
+            sha="$(shasum -a 256 "$dl/$name.tar.xz" | cut -d' ' -f1)"
+            [ "sha256:$sha" = "$digest" ] || fail "$url is $sha, GitHub reports $digest"
+            tar -xJf "$dl/$name.tar.xz" -C "$dir"
+            from="$DXMT_REPO $DXMT_COMMIT, release asset $url"
+          else
+            # The artifact of the fork's GW2 run for the push of that commit
+            IFS=$'\t' read -r run status conclusion html < <(gh api \
+              "repos/$DXMT_REPO/actions/workflows/gw2.yml/runs?head_sha=$DXMT_COMMIT&event=push&per_page=1" \
+              --jq '.workflow_runs[0] // {} | [.id, .status, .conclusion // "none", .html_url] | @tsv')
+            [ -n "$run" ] || fail "$DXMT_REPO has no release asset $name.tar.xz and no GW2 run for the push of $DXMT_COMMIT"
+            [ "$status" = completed ] || fail "The GW2 run for $DXMT_COMMIT, $html, is $status. Start this again when it has finished."
+            [ "$conclusion" = success ] || fail "The GW2 run for $DXMT_COMMIT, $html, ended $conclusion"
+            IFS=$'\t' read -r id digest expired < <(gh api "repos/$DXMT_REPO/actions/runs/$run/artifacts?name=$name" \
+              --jq '.artifacts[0] // {} | [.id, .digest // "none", .expired] | @tsv')
+            [ -n "$id" ] || fail "$html has no artifact $name"
+            [ "$expired" = false ] || fail "The artifact $name of $html has expired; the release asset (jdrly/dxmt#194) has to come first"
+            [[ $digest == sha256:* ]] || fail "GitHub reports no sha256 for the artifact $name of $html"
+            if ! gh api "repos/$DXMT_REPO/actions/artifacts/$id/zip" >"$dl/$name.zip" 2>"$dl/error.txt"; then
+              fail "GitHub refused this run's token for $DXMT_REPO's artifact $name ($(cat "$dl/error.txt")). The release asset (jdrly/dxmt#194) has to come first."
+            fi
+            echo "::notice title=DXMT::This run's own token downloaded $DXMT_REPO's artifact $name"
+            sha="$(shasum -a 256 "$dl/$name.zip" | cut -d' ' -f1)"
+            [ "sha256:$sha" = "$digest" ] || fail "The artifact $name is $sha, GitHub reports $digest"
+            unzip -q "$dl/$name.zip" -d "$dir"
+            from="$DXMT_REPO $DXMT_COMMIT, artifact $name of $html"
+          fi
+          find "$dir" -type f | LC_ALL=C sort
+          cat "$dir/VERSION"
+          { echo "DXMT_FROM=$from"; echo "DXMT_ARCHIVE_SHA256=$sha"; } >>"$GITHUB_ENV"
+
+      # The commit and engine checks run before stage-components.sh writes anything
+      - name: stage-components.sh refuses another commit and another engine
+        run: |
+          refuse() { # <message> <dxmt dir>
+            if GW2_ON_MAC_WORKSPACE="$PWD" DXMT_BUILD="$2" scripts/stage-components.sh >"$RUNNER_TEMP/stage.txt" 2>&1; then
+              echo "::error::stage-components.sh took a DXMT whose $1"; exit 1
+            fi
+            cat "$RUNNER_TEMP/stage.txt"
+          }
+          other="$RUNNER_TEMP/other-commit"
+          cp -R work/dxmt-arm64/install "$other"
+          sed -i '' "s/^commit: .*/commit: 0000000000000000000000000000000000000000/" "$other/VERSION"
+          refuse "VERSION names another commit" "$other"
+          grep -q "is not commit $DXMT_COMMIT" "$RUNNER_TEMP/stage.txt"
+          other="$RUNNER_TEMP/other-engine"
+          cp -R work/dxmt-arm64/install "$other"
+          sed -i '' -E "s/^(engine: .*sha256 )[0-9a-f]{64}/\10000000000000000000000000000000000000000000000000000000000000000/" "$other/VERSION"
+          refuse "VERSION names another engine" "$other"
+          grep -q 'names another engine than ENGINE_SHA256' "$RUNNER_TEMP/stage.txt"
+
+      - name: The interface addon
+        run: |
+          brew install mingw-w64
+          scripts/build-addon.sh
+          echo "MINGW=$(x86_64-w64-mingw32-gcc --version | head -1)" >>"$GITHUB_ENV"
+
+      - name: Stage
+        run: |
+          GW2_ON_MAC_WORKSPACE="$PWD" STAGED_FROM="$DXMT_FROM; the addon built on this runner" scripts/stage-components.sh
+          mkdir -p "$RUNNER_TEMP/components"
+          tar -cf "$RUNNER_TEMP/components/prebuilt.tar" prebuilt
+          { echo "dxmt $DXMT_COMMIT"
+            echo "dxmt from $DXMT_FROM"
+            echo "dxmt archive sha256 $DXMT_ARCHIVE_SHA256"
+            echo "ui-scale built with $MINGW"; } >"$RUNNER_TEMP/components/components.txt"
+          cat "$RUNNER_TEMP/components/components.txt"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: components
+          path: ${{ runner.temp }}/components
+          retention-days: 7
+          if-no-files-found: error
+
+  checks:
+    needs: [plan, components]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/checks.yml
+    with:
+      components: components
+      version: ${{ needs.plan.outputs.version }}
+
+  package:
+    needs: [plan, checks]
+    runs-on: xcode-27
+    timeout-minutes: 30
+    # The one job that may write, for the pre-release. plan allows publishing only for a manual run on
+    # arm64; the token goes to the steps that read releases and, with publish, to release.sh.
+    permissions:
+      contents: write
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+      DXMT_COMMIT: ${{ needs.plan.outputs.dxmt_commit }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      PUBLISH: ${{ needs.plan.outputs.publish }}
+    steps:
+      # All history: release.sh checks that the commit is on a pushed branch
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: app
+          path: ${{ runner.temp }}
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: components
+          path: ${{ runner.temp }}/components
+
+      - name: Unpack the app the build job made, and its components
+        run: |
+          tar -xf "$RUNNER_TEMP/app.tar"
+          tar -xf "$RUNNER_TEMP/components/prebuilt.tar"
+          name="$(sed -n 's/^APP_NAME="\(.*\)"$/\1/p' src/gw2om.sh)"
+          echo "APP_NAME=$name" >>"$GITHUB_ENV"
+          [ "$(plutil -extract CFBundleShortVersionString raw "dist/$name.app/Contents/Info.plist")" = "$VERSION" ] ||
+            { echo "::error::The build job's app is not version $VERSION"; exit 1; }
+
+      # release-notes/<version>.md when the commit has it, otherwise notes in its form: the commits,
+      # and the fork's changes since the DXMT of the previous dev build that has a record
+      - name: Release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="$PWD/release-notes/$VERSION.md"
+          if [ ! -f "$notes" ]; then
+            notes="$RUNNER_TEMP/notes.md"
+            app="$(git rev-parse HEAD)"
+            short="${DXMT_COMMIT:0:7}"
+            changes=""
+            prev="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isPrerelease \
+              --jq '[.[] | select(.isPrerelease and (.tagName | test("-dev\\.")))][0].tagName // ""')"
+            if [ -n "$prev" ] && gh release download "$prev" --repo "$GITHUB_REPOSITORY" --pattern '*.build.txt' --output "$RUNNER_TEMP/prev.build.txt" 2>/dev/null; then
+              old="$(sed -n 's/^dxmt \([0-9a-f]\{40\}\)$/\1/p' "$RUNNER_TEMP/prev.build.txt")"
+              if [ -n "$old" ] && [ "$old" != "$DXMT_COMMIT" ]; then
+                changes=" Its changes since $prev: [\`${old:0:7}...$short\`](https://github.com/$DXMT_REPO/compare/$old...$DXMT_COMMIT)."
+              elif [ "$old" = "$DXMT_COMMIT" ]; then
+                changes=" $prev has the same DXMT."
+              fi
+            fi
+            cat >"$notes" <<EOF
+          ## $APP_NAME $VERSION (development build)
+
+          The app at \`${app:0:7}\` with my DXMT fork at \`$short\`, built on GitHub's runners.
+
+          ### My DXMT fork at \`$short\`
+          [\`$short\`](https://github.com/$DXMT_REPO/commit/$DXMT_COMMIT) of the fork's \`$DXMT_BRANCH\`.$changes
+
+          ### Support
+          GW2 on Mac is an unofficial project. ArenaNet and NCSOFT don't make, endorse or support it, and
+          you use it at your own risk. Please send questions and bug reports to me, Pharaphobia, on
+          [Discord](https://discord.gg/AnV3fZWz2b) or as a [GitHub issue](https://github.com/jdrly/gw2-on-mac/issues),
+          never to ArenaNet's support.
+          EOF
+          fi
+          echo "RELEASE_NOTES=$notes" >>"$GITHUB_ENV"
+          cat "$notes"
+
+      - name: The build's record
+        run: |
+          app="dist/$APP_NAME.app" record="$RUNNER_TEMP/record.txt"
+          {
+            echo "$APP_NAME $VERSION, a development build by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "app $(git rev-parse HEAD) ($GITHUB_REF)"
+            echo "version $VERSION, CFBundleVersion $(plutil -extract CFBundleVersion raw "$app/Contents/Info.plist")"
+            cat "$RUNNER_TEMP/components/components.txt"
+            echo "ui-scale version.dll sha256 $(shasum -a 256 prebuilt/ui-scale/version.dll | cut -d' ' -f1)"
+            echo "xcode $(xcodebuild -version | tr '\n' ' ' | sed 's/ $//')"
+            echo "runner $ImageOS $ImageVersion"
+            echo
+            echo "prebuilt/STAGED:"; cat prebuilt/STAGED
+            echo
+            echo "prebuilt/dxmt/SHA256SUMS:"; cat prebuilt/dxmt/SHA256SUMS
+            echo
+            echo "VERSIONS:"; cat "$app/Contents/Resources/VERSIONS"
+          } >"$record"
+          echo "BUILD_RECORD=$record" >>"$GITHUB_ENV"
+
+      # On a copy of the scripts and the app; a stand-in gh that knows the tag, so nothing reaches
+      # GitHub and no token is passed
+      - name: release.sh refuses the stand-in DXMT, a version below build.sh's and a tag that exists
+        run: |
+          copy="$RUNNER_TEMP/copy"
+          mkdir -p "$copy" "$RUNNER_TEMP/fake-gh"
+          cp -R scripts src build.sh dist "$copy/"
+          refuse() { # <what it took> <message> <args...>
+            if "$copy/scripts/release.sh" "${@:3}" >"$RUNNER_TEMP/release.txt" 2>&1; then
+              cat "$RUNNER_TEMP/release.txt"; echo "::error::release.sh took $1"; exit 1
+            fi
+            cat "$RUNNER_TEMP/release.txt"
+            grep -qF "$2" "$RUNNER_TEMP/release.txt"
+          }
+          v="$copy/dist/$APP_NAME.app/Contents/Resources/components/dxmt/VERSION"
+          cp "$v" "$RUNNER_TEMP/VERSION"
+          echo "stand-in v0.80-0-g0000000 (not a build: scripts/stage-components.sh --standin)" >"$v"
+          refuse "the stand-in DXMT" "bundles the stand-in DXMT" --adhoc --no-release
+          cp "$RUNNER_TEMP/VERSION" "$v"
+          cp build.sh "$RUNNER_TEMP/build.sh"
+          # shellcheck disable=SC2016 # (build.sh's line, literally)
+          sed -i '' 's/^APP_VERSION=.*/APP_VERSION=${GW2_ON_MAC_VERSION:-99.0.0-dev.1}/' "$copy/build.sh"
+          refuse "a version below build.sh's" "is lower than build.sh's 99.0.0-dev.1" --adhoc --no-release
+          cp "$RUNNER_TEMP/build.sh" "$copy/build.sh"
+          # shellcheck disable=SC2016 # (the stand-in gh's lines, literally)
+          printf '%s\n' '#!/bin/bash' \
+            'case "$1 $2" in "auth status") exit 0 ;; "release view") exit 1 ;; esac' \
+            'if [ "$1" = api ] && [[ $2 == */git/ref/tags/* ]]; then echo "{\"ref\":\"refs/tags/x\"}"; exit 0; fi' \
+            'echo "stand-in gh: $*" >&2; exit 1' >"$RUNNER_TEMP/fake-gh/gh"
+          chmod +x "$RUNNER_TEMP/fake-gh/gh"
+          PATH="$RUNNER_TEMP/fake-gh:$PATH" GW2_ON_MAC_PUBLISH=1 refuse "a tag that exists" "Tag v$VERSION already exists" --adhoc
+          rm -rf "$copy"
+
+      - name: release.sh --adhoc
+        env:
+          GW2_ON_MAC_PUBLISH: ${{ needs.plan.outputs.publish == 'true' && '1' || '' }}
+          GH_TOKEN: ${{ needs.plan.outputs.publish == 'true' && github.token || '' }}
+        run: |
+          if [ "$PUBLISH" = true ]; then scripts/release.sh --adhoc; else scripts/release.sh --adhoc --no-release; fi
+
+      - name: The record and the notes in the summary
+        run: |
+          out="release/$VERSION" dashed="${APP_NAME// /-}"
+          { echo "### $dashed-$VERSION.build.txt"; echo '```'; cat "$out/$dashed-$VERSION.build.txt"; echo '```'
+            echo "### Release notes"; echo '````markdown'; cat "$out/notes.md"; echo '````'; } >>"$GITHUB_STEP_SUMMARY"
+          cat "$out/$dashed-$VERSION.build.txt"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: needs.plan.outputs.publish != 'true'
+        with:
+          name: devbuild-${{ needs.plan.outputs.version }}
+          path: |
+            release/${{ needs.plan.outputs.version }}/*.dmg
+            release/${{ needs.plan.outputs.version }}/*.build.txt
+            release/${{ needs.plan.outputs.version }}/notes.md
+          retention-days: 7
+          if-no-files-found: error

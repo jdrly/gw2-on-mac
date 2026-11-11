@@ -731,6 +731,14 @@ sha256 before it unpacks anything. `build.sh` then checks it like any other `pre
 `--pack <tag>` makes such an archive from `prebuilt/` and writes `prebuilt.lock` for it; README.md
 on `main` says how I publish one.
 
+**In a dev build.** The Dev build workflow ([Releasing](#releasing)) takes neither my workspace nor
+the archive. It fetches my DXMT fork's build of the commit I name into `work/dxmt-arm64/install`,
+builds the addon with `scripts/build-addon.sh` into `work/ui-scale/build`, and stages both with
+the checkout as `GW2_ON_MAC_WORKSPACE`. Staging refuses a DXMT build whose `VERSION` names another
+engine than `ENGINE_SHA256` in `src/gw2om.sh`, or a `winemetal.so` without a valid signature, and
+with `DXMT_COMMIT` set, a build of another commit. `STAGED_FROM` puts the fork's commit and where
+its files came from into the first line of `prebuilt/STAGED`.
+
 **The engine's source** is athei's: [athei/mach9](https://github.com/athei/mach9) and the
 repositories its release page lists, each under its own licence. The app doesn't bundle any of it,
 and changes only which DXMT tree is active ([The DXMT tree](#the-dxmt-tree)). See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
@@ -745,7 +753,7 @@ the same source, which differs only in link timestamps.
 downloads Sparkle at a pinned version and sha256, and compiles the Icon Composer icon
 `src/AppIcon.icon` with actool into `Assets.car` and a fallback `AppIcon.icns`.
 
-- `GW2_ON_MAC_VERSION` sets the version, 0.2.0-dev.2 by default. `X.Y.Z-dev.N` makes a development build,
+- `GW2_ON_MAC_VERSION` sets the version, 0.2.0-dev.4 by default. `X.Y.Z-dev.N` makes a development build,
   as in SWTOR on Mac.
 - `GW2_ON_MAC_FEED_URL` and `GW2_ON_MAC_ED_PUBLIC_KEY` turn updates on. Without them Sparkle stays
   off, which is normal for local builds.
@@ -770,7 +778,8 @@ Mac. It has read-only access and no secrets, and its actions are pinned by commi
   suite pins with Mach9 0.3.1's `compatdb-core` (`Table::parse_strict`) and checks that it writes
   back byte for byte. It needs `cargo`, so it runs only there, never in the app's build.
 - `build`: `bash -n` (macOS's 3.2) on the scripts, `stage-components.sh --fetch`, `./build.sh`,
-  then the build's `VERSIONS` and component hashes in the run's summary. Until `prebuilt.lock`
+  then the build's `VERSIONS` and component hashes in the run's summary. `build.sh` writes
+  `dist/<name>.files`, every file's sha256, which a dev build's DMG is compared with. Until `prebuilt.lock`
   pins an archive with my arm64 DXMT, `stage-components.sh --standin` adds a stand-in. It also
   checks that `build.sh` refuses a DXMT file that doesn't match its record, a file the record
   doesn't name and a changed `version.dll`, and `stage-components.sh` a changed archive.
@@ -779,9 +788,12 @@ Mac. It has read-only access and no secrets, and its actions are pinned by commi
 - `renders`: `ui-render.sh`, with the PNGs as the run's `renders` artifact. A runner has no design
   exports, so there are no `compare-*.png`.
 
-What still needs my Mac is signing, notarizing and publishing a release (`scripts/release.sh`,
-which has Sparkle's key and my Developer ID), building the components themselves, the ArenaNet
-route's and the real arcdps's checks, and playing.
+The Dev build workflow calls the same jobs with my real DXMT fork and the addon built on the
+runner instead of the archive and the stand-in ([Releasing](#releasing)).
+
+What still needs my Mac is signing with my Developer ID, notarizing and publishing a release
+(`scripts/release.sh`, which has Sparkle's key and my Developer ID), the ArenaNet route's and the
+real arcdps's checks, and playing.
 
 `scripts/test-sandbox.sh` tests the backend of a built app end to end in `work/app-sandbox/test`,
 with 425 checks. It uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and
@@ -861,6 +873,45 @@ delta updates and checks it with `scripts/check-appcast.swift`.
 - `--sign-only` and `--no-notarize` run locally without touching GitHub.
 - `--dev` makes `GW2-on-Mac-arm64-<version>.dmg` with `GW2 on Mac arm64.app` in it and publishes
   it as a GitHub pre-release with no feed, so `releases/latest` stays on 0.1.x.
+- `--adhoc` does the same without my Developer ID, for the Dev build workflow. It keeps
+  `build.sh`'s ad hoc signatures and only verifies them, makes an unsigned DMG, and doesn't
+  notarize. It refuses a version below `build.sh`'s, a tag that exists and the stand-in DXMT. It
+  mounts the DMG and checks that its app matches `dist/<name>.files` file for file, with a valid
+  signature, this app's bundle id, the dev channel and no feed. The pre-release gets the DMG and
+  the record `GW2-on-Mac-arm64-<version>.build.txt`, and the notes get a section on installing a
+  build that isn't notarized.
+
+**Dev builds come from GitHub's runners.** The Dev build workflow
+([`.github/workflows/devbuild.yml`](.github/workflows/devbuild.yml)) builds one from `arm64` and
+publishes it as the pre-release `v<version>`:
+
+```sh
+gh workflow run devbuild.yml --ref arm64                    # DXMT at the fork's head, build.sh's version
+gh workflow run devbuild.yml --ref arm64 -f dxmt_commit=<sha> -f version=0.2.0-dev.5
+gh workflow run devbuild.yml --ref arm64 -f publish=false   # a dry run: the DMG as an artifact, 7 days
+gh release download v0.2.0-dev.4 -R jdrly/gw2-on-mac -p '*.dmg' -D ~/Downloads
+```
+
+- DXMT is my fork's build of a commit on its `gw2-on-mac`: the release asset
+  `dxmt-mach9-<commit>.tar.xz` of jdrly/dxmt's `mach9-builds`, checked against GitHub's digest,
+  or until that exists, the artifact `dxmt-mach9-<commit>` of the fork's `GW2` run, fetched with
+  the run's own token. A commit that isn't on the branch, or whose run hasn't finished green, is
+  refused.
+- The addon is built on the runner from the commit, with Homebrew's mingw-w64.
+- Checks' jobs run on that build: `lint`, `compatdb`, `build`, `sandbox` and `renders`. Then
+  `release.sh --adhoc` packages the app the `build` job made and never builds it again.
+- The notes are `release-notes/<version>.md` when the commit has one. Otherwise the run writes
+  them: the app's and the fork's commits, and a link to the fork's changes since the previous dev
+  build's DXMT.
+- The run proves its refusals on copies: the stand-in DXMT, a `VERSION` with another commit or
+  another engine, a version below `build.sh`'s and a tag that exists.
+- A pull request that changes the workflow, `checks.yml`, `build.sh`, `release.sh`,
+  `stage-components.sh`, `build-addon.sh` or `app-files.sh` runs it with `publish` false.
+
+A dev build is signed ad hoc and not notarized. `gh release download` sets no quarantine
+attribute, so macOS opens it. After a download in a browser, `xattr -dr com.apple.quarantine
+"/Applications/GW2 on Mac arm64.app"` comes before the first start. Signing it with my Developer
+ID on the runner is a later step.
 - I haven't tested `wineserver` under the hardened runtime yet.
 
 Release notes live in [`release-notes/`](release-notes), one file per version, in SWTOR on Mac's
@@ -881,7 +932,7 @@ src/fonts/, src/art/, src/icons/, src/AppIcon.icon, src/make-icon.swift, src/Inf
 addon/ui-scale/            the interface addon's source (version.dll) and its native test
 patches/                   the patches to Wine in the bundled ntdll.so, wineserver and Mac driver
 scripts/                   stage-components, build-addon, test-sandbox, ui-render, session-report,
-                           release, check-appcast, gen-icons
+                           release, app-files, check-appcast, gen-icons
 release-notes/             the notes of each release
 prebuilt/, dist/, release/, work/, .cache/   build and test output, ignored by git
 ```
