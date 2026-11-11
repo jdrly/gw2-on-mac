@@ -15,8 +15,10 @@
 #      for a look), SIGNED_PE (an x86_64 PE signed by ArenaNet; default the game's Gw2-64.exe in
 #      $GW2_ON_MAC_WORKSPACE/work/bottles, the workspace defaulting to ../gw2-on-mac)
 # Runs under macOS's /bin/bash 3.2.
+# Many variables are read only inside the strings that check() evals, which shellcheck can't see.
+# shellcheck disable=SC2034
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 ROOT="$PWD"
 WS="${GW2_ON_MAC_WORKSPACE:-$ROOT/../gw2-on-mac}"
 APP="$(cd "${1:-dist/GW2 on Mac.app}" && pwd)"
@@ -81,7 +83,7 @@ same() { cmp -s "$1" "$2"; }
 sess() { sed -n "s/^$1=//p" "$AD/session" 2>/dev/null; }
 wait_stage() { local i=0; while [ "$(sess stage)" != "$1" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; [ "$(sess stage)" = "$1" ]; }
 watcher_runs() { local p; p=$(sess watcher_pid); [ -n "$p" ] && kill -0 "$p" 2>/dev/null; }
-watch_done() { local i=0; while { watcher_runs || [ "$(sess stage)" != done ]; } && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; ! watcher_runs && [ "$(sess stage)" = done ]; }
+watch_done() { local i=0; while { watcher_runs || [ "$(sess stage)" != "done" ]; } && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; ! watcher_runs && [ "$(sess stage)" = "done" ]; }
 
 # --- The stand-in engine: the real engine's layout, files that only pretend
 section "Stand-in engine and downloads"
@@ -125,12 +127,14 @@ export STANDIN_LOG
 echo "stand-in SteamSetup.exe" >"$SANDBOX/SteamSetup.exe"
 export GW2_ON_MAC_ROOT="$SANDBOX"
 export GW2_ON_MAC_ENGINE_URL="file://$SANDBOX/engine.tar.xz"
-export GW2_ON_MAC_ENGINE_SHA256="$(shasum -a 256 "$SANDBOX/engine.tar.xz" | cut -d' ' -f1)"
-export GW2_ON_MAC_ENGINE_SIZE="$(stat -f %z "$SANDBOX/engine.tar.xz")"
+GW2_ON_MAC_ENGINE_SHA256="$(shasum -a 256 "$SANDBOX/engine.tar.xz" | cut -d' ' -f1)"
+GW2_ON_MAC_ENGINE_SIZE="$(stat -f %z "$SANDBOX/engine.tar.xz")"
+export GW2_ON_MAC_ENGINE_SHA256 GW2_ON_MAC_ENGINE_SIZE
 export GW2_ON_MAC_ENGINE_CHECKS=0
 # (the stand-in engine's own winemac.drv, below)
-export GW2_ON_MAC_WINEMAC_PE64_STOCK="$(echo "engine's x86_64-windows winemac.drv" | shasum -a 256 | cut -d' ' -f1)"
-export GW2_ON_MAC_WINEMAC_PE32_STOCK="$(echo "engine's i386-windows winemac.drv" | shasum -a 256 | cut -d' ' -f1)"
+GW2_ON_MAC_WINEMAC_PE64_STOCK="$(echo "engine's x86_64-windows winemac.drv" | shasum -a 256 | cut -d' ' -f1)"
+GW2_ON_MAC_WINEMAC_PE32_STOCK="$(echo "engine's i386-windows winemac.drv" | shasum -a 256 | cut -d' ' -f1)"
+export GW2_ON_MAC_WINEMAC_PE64_STOCK GW2_ON_MAC_WINEMAC_PE32_STOCK
 # (stand-ins for an earlier version's files, see "An update of the app")
 export GW2_ON_MAC_OLD_COMPONENTS="$SANDBOX/old-components" OLDC="$SANDBOX/old-components"
 : >"$OLDC"
@@ -706,7 +710,7 @@ check "  elapsed since the session's start" eval 'e=$(ss elapsed); [ "$e" -ge 60
 check "  status: session=live (the window picks it up when it opens)" [ "$(st session)" = live ]
 check "  a Play that joined the session (--since its time): elapsed from then" eval 'e=$(g session-status --since $((now - 5)) | sed -n "s/^elapsed=//p"); [ "$e" -ge 5 ] && [ "$e" -le 10 ]'
 check "  an earlier --since than the session's start: from the start" eval 'e=$(g session-status --since $((now - 900)) | sed -n "s/^elapsed=//p"); [ "$e" -ge 60 ] && [ "$e" -le 65 ]'
-session_file done
+session_file "done"
 check "  the watcher's session done: session=none, stage=none" eval '[ "$(st session)/$(ss stage)" = none/none ]'
 session_file waiting_game
 "$ENG/bin/steam.exe" 120 & sp=$!
