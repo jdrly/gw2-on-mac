@@ -1,0 +1,17 @@
+# Reads the compatdb rules gw2om.sh writes (rules/*.rules, which test-sandbox.sh pins) with the
+# crate Mach9 0.3.1's compatdb.so is built from, strictly, and checks that each writes back byte
+# for byte. Runs in CI (.github/workflows/checks.yml), never in the app's build.
+#
+#   cargo run --manifest-path scripts/compatdb-check/Cargo.toml -- scripts/compatdb-check/rules/*.rules
+[package]
+name = "compatdb-check"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# (its own workspace, so cargo looks for none above it)
+[workspace]
+
+[dependencies]
+# athei/mach9 at v0.3.1, the engine's release
+compatdb-core = { git = "https://github.com/athei/mach9", rev = "39f186e88de52e1960341d9939e5bf5ebb2a889d" }

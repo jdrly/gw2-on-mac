@@ -253,13 +253,28 @@ func session(_ state: String) -> Installer.LaunchSession {
 func settings(_ extra: [String: String] = [:]) -> GameSettings {
   let s = GameSettings()
   s.preview(["installed": "yes", "running": "no", "retina": "on", "fpscap": "off", "metalfx": "off", "hud": "off",
-             "warm": "on", "coolworkers": "3", "fastlocks": "on", "ncpu": "8", "uiscale": "off", "uiscale_state": "off",
-             "uiscale_size": "1.75", "uiscale_sans": "on", "uiscale_cinema": "on", "gamemode": "on", "launchopts": "",
+             "warm": "on", "coolworkers": "3", "fastlocks": "on", "ncpu": "8", "uiscale": "off", "uiscale_addon": "off",
+             "uiscale_size": "1.75", "uiscale_sans": "on", "uiscale_cinema": "off", "gamemode": "on", "launchopts": "",
              "route": "steam", "updates": "off", "debug": "off", "steambg": "on", "quitsteam": "on", "cpus": "12",
              "steam_login": "no", "rawmouse": "on", "mousespeed": "1", "arcdps": "off", "arcdps_state": "off",
-             "arcdps_foreign": ""].merging(extra) { $1 })
+             "arcdps_foreign": ""].merging(engineStates) { $1 }.merging(extra) { $1 })
   return s
 }
+
+// The states and notes gw2om.sh settings prints on this line (setting_state, setting_note; the
+// sandbox suite pins them there): the greyed rows with their reasons, the untested notes
+let engineStates: [String: String] = [
+  "metalfx_state": "off:Needs my DXMT fork. Comes with step 2.",
+  "warm_state": "off:Needs my DXMT fork. Comes with step 2.",
+  "coolworkers_state": "off:Need my Wine changes. Come with step 3.",
+  "fastlocks_state": "off:Need my Wine changes. Come with step 3.",
+  "rawmouse_state": "off:This engine reads the mouse from GameController by itself. My mouse-look comes with step 4.",
+  "mousespeed_state": "off:This engine reads the mouse from GameController by itself. My mouse-look comes with step 4.",
+  "gamemode_state": "off:The engine's loader is a Game Mode app. Nothing to switch.",
+  "uiscale_note": "Untested on this engine. #27.", "uiscale_size_note": "Untested on this engine. #27.",
+  "uiscale_sans_note": "Untested on this engine. #27.", "uiscale_cinema_note": "A code patch, untested under FEX.",
+  "arcdps_note": "A code patch, untested under FEX.",
+]
 
 @MainActor
 func renderAll(_ dir: URL, exports: URL?) async {
@@ -370,7 +385,7 @@ func renderAll(_ dir: URL, exports: URL?) async {
                                          to: dir.appendingPathComponent("compare-" + name + ".png")) }
   }
   for pane in SettingsPane.allCases {
-    for dark in [false, true] where !dark || [.performance, .interface, .game, .mouse].contains(pane) {
+    for dark in [false, true] where !dark || [.graphics, .performance, .interface, .game, .mouse].contains(pane) {
       UserDefaults.standard.set(pane.rawValue, forKey: SettingsView.selectedPaneKey)
       let name = "settings-\(pane.rawValue)-\(dark ? "dark" : "light")"
       let rep = await render(SettingsView(settings: settings()), size: SettingsView.designSize, dark: dark)

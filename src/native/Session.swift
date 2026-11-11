@@ -153,9 +153,9 @@ extension Installer {
     return true
   }
 
-  // Bring to Front: the game's app (the Game Mode bundle)
+  // Bring to Front: the game's process (Play.swift, gameApp)
   func bringGameToFront() {
-    NSRunningApplication.runningApplications(withBundleIdentifier: Installer.gameBundleID).first?.activate()
+    gameApp?.activate()
   }
 
   // Show Steam: its window comes up (gw2om.sh show-steam: steam://open/main through the engine)

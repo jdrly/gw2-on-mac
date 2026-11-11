@@ -125,8 +125,7 @@ While the game starts, the window shows the stages as they happen, with the time
 3. Signing in
 4. Checking game files, only when Steam verifies or updates the game
 5. Starting Guild Wars 2
-6. Loading
-7. Playing
+6. Playing
 
 On ArenaNet's route the stages begin at *Starting Guild Wars 2*, and the game's launcher takes over
 from there. If Steam waits for you to sign in, *Show Steam* brings its window up, and after 2
@@ -157,30 +156,36 @@ Open Settings with ⌘, or from the window. Each pane covers one area. The defau
 play with. The settings with a key in the table also exist as `gw2om.sh set <key> <value>` for
 scripting.
 
+On this line some settings need pieces of mine that come in later steps. Settings greys them and
+says why under each, `gw2om.sh set` refuses them with the same reason, and `settings.conf` keeps
+their values, which do nothing here. `gw2om.sh settings` prints `<key>_state=ok` or
+`<key>_state=off:<reason>` for every key, and a `<key>_note` for the ones that work but are
+untested on this engine.
+
 | Pane | Setting | Key | Default | What it does |
 |---|---|---|---|---|
 | Graphics | Retina | `retina` | on | draws at your display's full resolution, at some cost in frame rate |
 | | Frame cap | `fpscap` | off | a steady cap paced by Metal at 30, 40, 60 or 120. Use it with the game's own vsync |
-| | MetalFX for Subsample | `metalfx` | off | with the game's Render Sampling at Subsample, MetalFX upscales the 3D scene and the interface stays sharp. Experimental |
+| | MetalFX for Subsample | `metalfx` | off | greyed: needs my DXMT fork, which comes with step 2 |
 | | Metal HUD | `hud` | off | Apple's overlay with frame rate and frame times, over the game only and not over Steam's windows |
-| Performance | Shader warming | `warm` | on | builds the pipelines your recent sessions used before the game asks for them, up to 8,192 or about 300 MB |
-| | Cooler job workers | `coolworkers` | 3 | moves this many of the game's job workers to the efficiency cores, or none when off. Saves power, but moving all of them can cost frames in big crowds |
-| | Faster locks | `fastlocks` | on | short waits before the game thread sleeps on a busy lock or job group |
+| Performance | Shader warming | `warm` | on | greyed: needs my DXMT fork, which comes with step 2 |
+| | Cooler job workers | `coolworkers` | 3 | greyed: needs my Wine changes, which come with step 3 |
+| | Faster locks | `fastlocks` | on | greyed: needs my Wine changes, which come with step 3 |
 | | CPUs the game sees | `ncpu` | 8 | from 2 up to your Mac's logical CPUs, or all. The game starts one job worker per CPU, minus one |
-| Interface | Larger interface | `uiscale` | off | my interface addon, see below |
+| Interface | Larger interface | `uiscale` | off | my interface addon, see below. Untested on this engine |
 | | Interface Size "Larger" | `uiscale_size` | 1.75 | the addon's scale: 1.5, 1.75, 1.8 or 2.0 |
 | | Small text in Cronos | `uiscale_sans` | on | chat, the tracker and labels have no larger font, so the addon draws them in Cronos at the larger size |
-| | Cinematic dialogue | `uiscale_cinema` | on | story cinematics size their dialogue apart from the interface. This draws it at the same size, with a small code patch |
-| | arcdps | `arcdps` | off | downloads or removes arcdps, see below |
-| Game | Game Mode | `gamemode` | on | in full screen, macOS gives the game priority on the CPU and GPU and lowers Bluetooth latency |
+| | Cinematic dialogue | `uiscale_cinema` | off | story cinematics size their dialogue apart from the interface. This draws it at the same size, with a small code patch, untested under FEX |
+| | arcdps | `arcdps` | off | downloads or removes arcdps, see below. Untested under FEX |
+| Game | Game Mode | `gamemode` | on | greyed and shown on: the engine's loader is a Game Mode app, see [Game Mode](#game-mode) |
 | | Start Steam in the background | `steambg` | on | Steam starts without a window once it remembers your login |
 | | Quit Steam when the game quits | `quitsteam` | on | shown while the previous setting is on |
 | | Launch options | `launchopts` | none | arguments for `Gw2-64.exe`, using letters, digits and `-_.:=,/+` |
 | | Quit GW2 on Mac after launching | | off | the app quits once Play has started Steam or the game |
-| Mouse | Raw mouse-look | `rawmouse` | on | see below |
-| | Mouse-look speed | `mousespeed` | 1× | 0.5× to 3×. At 1× the camera turns as fast as your pointer moves |
-| Updates | Check automatically | `updates` | on | Sparkle checks for new versions |
-| Troubleshooting | Debug logging | `debug` | off | detailed DXMT and Wine logs for a bug report, at some cost in performance. On in development builds |
+| Mouse | Raw mouse-look | `rawmouse` | on | greyed: the engine reads the mouse from GameController by itself. My mouse-look comes with step 4 |
+| | Mouse-look speed | `mousespeed` | 1× | greyed, as raw mouse-look |
+| Updates | Check automatically | `updates` | on | Sparkle checks for new versions. Off in development builds, which have no update feed |
+| Troubleshooting | Debug logging | `debug` | off | DXMT's log at `debug` and Wine's errors, for a bug report, at some cost in performance. On in development builds |
 
 ### Raw mouse-look
 
@@ -264,9 +269,9 @@ nothing in `/Applications` besides itself.
 |---|---|---|
 | `~/Library/Application Support/GW2 on Mac arm64/engine/` | the Wine engine as it ships, without its SDK, about 1 GB | removed |
 | `…/GW2 on Mac arm64/bottle/` | the game's Wine prefix with Steam, the game's files and the game's settings. About 75 GB, or no extra space for a clone of files on the same disk | removed, with the game |
-| `…/GW2 on Mac arm64/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `session`, `session.req`, `.session.lock` | settings, install state, what was installed, DXMT's options, the current game session and its lock | removed |
+| `…/GW2 on Mac arm64/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `compatdb.rules`, `compatdb.local`, `session`, `session.req`, `.session.lock` | settings, install state, what was installed, DXMT's options, the game's compatdb rules and my own, the current game session and its lock | removed |
 | `~/Library/Caches/GW2 on Mac arm64/downloads/` | the engine archive, `SteamSetup.exe`, a copy of `Gw2Setup-64.exe` | removed |
-| `~/Library/Caches/GW2 on Mac arm64/dxmt/Gw2-64.exe/` | DXMT's shader cache and pipeline archives. Another process, such as the launcher's `CefHost.exe`, gets its own folder next to it | removed. *Reset the shader cache* in Settings empties it too |
+| `~/Library/Caches/GW2 on Mac arm64/dxmt/Gw2-64.exe/` | DXMT's shader cache for the game. Other processes, such as the launcher's `CefHost.exe`, keep theirs where the engine's DXMT puts it by default | removed. *Reset the shader cache* in Settings empties it too |
 | `~/Library/Logs/GW2 on Mac arm64/` | `install.log`, `wine.log`, DXMT's `Gw2-64_d3d11.log`, `session.env`, the heat logs, and `.lock-claim` for the install lock | kept |
 
 In the game folder, `version.dll` and `gw2-ui-scale.ini` exist only while *Larger interface* is on,
@@ -395,31 +400,55 @@ or `WINE_PROF_SERVICE`, they are removed from every Wine start, because each cha
 engine does for every process. The engine's built-in rules already give each process DXMT, leave
 Mono and Gecko out, and set Steam's web helper up.
 
-`settings.conf` holds the settings, and every Play turns them into the game's environment.
-`gw2om.sh env` prints what Play would use. These are always set:
+`settings.conf` holds the settings. Every start turns them into three things: the environment of
+the session's first process, `dxmt.conf`, and the game's compatdb rules. `gw2om.sh env` and
+`gw2om.sh rules` print what Play would use.
 
-- `WINEMSYNC=1`
-- `WINEDLLOVERRIDES=winemenubuilder.exe=d`
-- `DXMT_CONFIG_FILE`, `DXMT_LOG_PATH`, `DXMT_CACHE_DIR` and `DXMT_DEPENDENCY_COMPRESSION=1`
-- my ntdll's `WINE_HEAT_EVPOOL=1`, `WINE_HEAT_WAKE=one,skip`, `WINE_HEAT_LAZYCLOCK=1`,
-  `WINE_HEAT_MSYNC_UNREG=1` and `WINE_HEAT_MSYNC_PORTFIX=1`
+The environment is fixed while Steam runs, because Steam passes its own on to the game. It holds
+`WINEPREFIX`, `WINEDEBUG=-all`, `WINEDLLOVERRIDES=winemenubuilder.exe=d`, `WINEMSYNC=1`,
+`DXMT_CONFIG_FILE`, `DXMT_LOG_PATH`, `WINE_COMPATDB_FILE`, and `WINENCPU` unless the game sees every
+CPU. Debug logging adds `DXMT_LOG_LEVEL=debug` and sets `WINEDEBUG=err+all,fixme-all`.
 
-The settings map to these:
+`compatdb.rules` in the app's folder is the file `WINE_COMPATDB_FILE` names. Every Wine process
+reads it when it starts, so a change reaches the next game start even while Steam runs. Play
+writes it before it starts anything, to a temporary file that it then renames. The rules are in the
+text Mach9's compatdb reads. With everything on they are:
+
+```text
+exe=Gw2-64.exe;metal_hud=true;dll_overrides=d3d11,dxgi=n,b;dll_overrides=version=n,b;env=DXMT_SHADER_CACHE_PATH=<caches>/dxmt/Gw2-64.exe
+exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
+```
+
+- `metal_hud` is there while the Metal HUD is on. The engine turns it into the `MTL_HUD_` variables
+  in the game only. `CefHost.exe`, which the game starts for its launcher and the Trading Post,
+  would inherit them, so its rule takes them away.
+- `d3d11,dxgi=n,b` is there while a `d3d11.dll` or `dxgi.dll` is in the game folder, such as
+  arcdps or Nexus. `version=n,b` is there while the larger interface is on. With no such file Wine
+  loads its own.
+- `DXMT_SHADER_CACHE_PATH` keeps DXMT's shader cache for the game in the app's cache folder, never
+  in the per-user one another DXMT setup may use. `CefHost.exe` gets it removed.
+- A `compatdb.local` that I put in the app's folder is appended as it is, for trying FEX switches
+  such as `exe=Gw2-64.exe;env=FEX_HOSTFEATURES=disableavx`. Nothing in the app writes it, and
+  Collect Logs includes it.
+
+The engine's built-in rules already give every process DXMT, DPI awareness, raw mouse input from
+GameController and FEX's reduced x87 precision. The `compatdb` check on GitHub's runners reads each
+text the sandbox suite pins (`scripts/compatdb-check/rules`) with Mach9 0.3.1's `compatdb-core` and
+checks that it writes back byte for byte.
+
+A setting change that only changes the rules or `dxmt.conf` takes effect at the next game start.
+One that changes the environment or the registry (`ncpu`, `debug`, `retina`) waits until Steam has
+quit.
+
+The other settings:
 
 | Key | Sets |
 |---|---|
 | `retina` | `RetinaMode` in the bottle's `user.reg` |
 | `fpscap` | `d3d11.preferredMaxFrameRate` in `dxmt.conf` |
-| `metalfx` | `DXMT_SUBSAMPLE_METALFX=1` |
-| `hud` | `WINE_HEAT_METAL_HUD=1`. My ntdll then sets `MTL_HUD_ENABLED=1` in `Gw2-64.exe` only, at its start |
-| `warm` | `DXMT_WARM=all` |
-| `coolworkers` | `WINE_HEAT_QOS=1=utility:<n>`, the first n ABOVE_NORMAL job workers at utility QoS |
-| `fastlocks` | `WINE_HEAT_SPIN=lock=20:game,event=30:game` |
 | `ncpu` | `WINENCPU`, bounded by `sysctl hw.logicalcpu` |
-| `uiscale` | the addon files. The `version=native,builtin` order it needs comes with the game's compatdb rules, not yet on this line |
+| `uiscale` | the addon files in the game folder |
 | `uiscale_size`, `uiscale_sans`, `uiscale_cinema` | the addon's ini: `scale`, `sans=cronos` or `keep`, `cinema=1` |
-| `rawmouse`, `mousespeed` | nothing on this line. The engine reads the mouse from GameController by itself |
-| `debug` | `DXMT_LOG_LEVEL=debug`, `WINE_HEAT_COUNT` and `WINEDEBUG=err+all,fixme-all` |
 
 The script writes registry settings straight into the bottle's `user.reg`, as SWTOR on Mac does.
 It only does that while no Wine session of the bottle runs or starts. The write takes the session's
@@ -436,7 +465,7 @@ sequenceDiagram
     participant X as Session watcher
     W->>P: Play
     P->>P: take the session lock
-    P->>P: write registry and DXMT options
+    P->>P: write registry, DXMT options and compatdb rules
     P->>S: steam.exe -applaunch 1284210, with -silent once Steam remembers a login
     P->>X: start the watcher, hand it the lock
     S->>G: start the game
@@ -452,7 +481,13 @@ sequenceDiagram
 `gw2om.sh play` runs `steam.exe -applaunch 1284210 <launch options>` on the Steam route, adding
 `-silent` once Steam's `config/loginusers.vdf` has a user with `"RememberPassword" "1"`. On the
 ArenaNet route it runs `Gw2-64.exe <launch options>`. It also writes `session.env` and rotates the
-logs when no session runs.
+logs when no session runs. `session.env` records the engine and its Wine, FEX and DXMT commits, the
+settings, the environment and the rules.
+
+Play refuses while a `Gw2-64.exe` of another app runs, such as 0.1.x's or a Mach9.app's: one
+account, one login. While this bottle's game runs, Play brings it to the front instead. Every Wine
+process here runs as the engine's loader, `app.mach9.loader`, and so does Steam's, so the window
+finds the game by the pid that `status` and `session-status` print as `game_pid`.
 
 One session runs at a time. The session's lock is a kernel `flock` on `.session.lock`, taken by the
 app's helper `helpers/sessionlock`. Play takes it before it writes registry settings, and passes it to the
@@ -492,8 +527,8 @@ it.
 ### The start's stages
 
 The window polls `gw2om.sh session-status` once a second while a session runs. It prints `stage`,
-`detail`, `progress`, `elapsed`, `game_elapsed`, `steam`, `game`, `closing`, `quit_steam` and
-`limiter_hint`. The stages come from these signals:
+`detail`, `progress`, `elapsed`, `game_elapsed`, `steam`, `game`, `game_pid`, `closing`,
+`quit_steam` and `limiter_hint`. The stages come from these signals:
 
 | Stage | Detected by |
 |---|---|
@@ -502,8 +537,7 @@ The window polls `gw2om.sh session-status` once a second while a session runs. I
 | Signing in | `steamwebhelper.exe` runs and `logs/connection_log.txt` shows no logon since the start |
 | Checking game files | `logs/content_log.txt` has app 1284210 validating or updating. An update's percent comes from its appmanifest |
 | Starting Guild Wars 2 | Steam has signed in, or `Gw2-64.exe` runs |
-| Loading | DXMT's log for this session has the device, but no frame yet |
-| Playing | DXMT's first `Present pacing` line |
+| Playing | DXMT's log for this session has the device (`Using feature level`). The engine's DXMT logs nothing per frame |
 
 Only the session's lines count, meaning Steam's log lines from the session's start on, and only
 their state lines. Nothing from them is printed, so no account name or ID leaves `session-status`. `status`
@@ -523,8 +557,9 @@ and never writes the file.
 macOS turns Game Mode on only for a process whose executable sits in a bundle with
 `LSSupportsGameMode`. On this engine every Wine process runs as the loader in `wine.app`, whose
 `Info.plist` carries `LSSupportsGameMode`, `GCSupportsGameMode` and the games category, so the app
-builds nothing and has nothing to switch. `status` prints `gamemode=engine`. Whether the game gets
-Game Mode when Steam starts it, rather than Launch Services, is still to be seen in play.
+builds nothing and has nothing to switch. `status` prints `gamemode=engine`, and Settings shows
+*Game Mode* greyed and on. Whether the game gets Game Mode when Steam starts it, rather than Launch
+Services, is still to be seen in play.
 
 ## Raw mouse-look in the driver
 
@@ -554,8 +589,8 @@ flowchart LR
     game -.->|"no addon"| sys
 ```
 
-`Gw2-64.exe` always gets `d3d11` and `dxgi` as `native,builtin`, so an addon placed as `d3d11.dll`
-or `dxgi.dll` next to it loads first. The addon then loads `system32\d3d11.dll`, Wine's built-in,
+While a `d3d11.dll` or `dxgi.dll` is next to `Gw2-64.exe`, the game's compatdb rule gives it `d3d11`
+and `dxgi` as `n,b`, so that addon loads first. The addon then loads `system32\d3d11.dll`, Wine's built-in,
 which the compatdb points at the DXMT tree. I checked the chain on 2026-11-08 with arcdps
 1.2026.1023.2303. arcdps loaded system32's `d3d11.dll`, that loaded `winemetal.dll`, and a device
 came up.
@@ -660,6 +695,9 @@ runs on every pull request and every push to `main`, on GitHub's runners, so non
 Mac. It has read-only access and no secrets, and its actions are pinned by commit.
 
 - `lint`: `shellcheck -S warning` on the bash scripts and `actionlint` on the workflows
+- `compatdb`: `scripts/compatdb-check`, a small Rust program, reads each rules text the sandbox
+  suite pins with Mach9 0.3.1's `compatdb-core` (`Table::parse_strict`) and checks that it writes
+  back byte for byte. It needs `cargo`, so it runs only there, never in the app's build.
 - `build`: `bash -n` (macOS's 3.2) on the scripts, `stage-components.sh --fetch`, `./build.sh`,
   then the build's `VERSIONS` and component hashes in the run's summary. It also checks that
   `build.sh` refuses a changed `ntdll.so` and `stage-components.sh` a changed archive.

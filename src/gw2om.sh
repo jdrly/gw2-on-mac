@@ -31,7 +31,8 @@
 #                              stay
 #   gw2om.sh play              starts the game (Steam: steam.exe -applaunch 1284210, -silent once
 #                              Steam remembers a login; ArenaNet: Gw2-64.exe) with the settings as
-#                              its environment, and the session's watcher (watch-session)
+#                              its environment and its compatdb rules (compatdb.rules), and the
+#                              session's watcher (watch-session)
 #   gw2om.sh watch-session     follows the session Play started (the file `session`): waits for
 #                              Gw2-64.exe, then for its exit, and quits the Steam that Play started
 #                              in the background (Quit Steam when the game quits); play starts it
@@ -42,8 +43,9 @@
 #                              the session's processes, Steam's logs (their state lines only),
 #                              DXMT's log and the watcher's session file; the window polls it
 #   gw2om.sh show-steam        brings Steam's window up (steam.exe steam://open/main in the bottle)
-#   gw2om.sh settings          KEY=VALUE lines: the settings (Settings window) and their state
-#   gw2om.sh set K V           change one setting (see setting_valid)
+#   gw2om.sh settings          KEY=VALUE lines: the settings (Settings window), and for each
+#                              <key>_state=ok or off:<reason> (setting_state) and maybe <key>_note
+#   gw2om.sh set K V           change one setting (see setting_valid); refuses one that is off
 #   gw2om.sh set arcdps on|off arcdps into the game folder (downloaded from deltaconnected.com,
 #                              checked against its published md5) or out of it (only arcdps; its
 #                              addons/arcdps settings stay), while no session runs; status and
@@ -56,6 +58,7 @@
 #   gw2om.sh end-leftovers     ends leftover Wine processes of the engine (no session running)
 #   gw2om.sh fetch-engine      downloads and verifies the engine into the cache
 #   gw2om.sh env               the game's environment as play would set it (for Terminal)
+#   gw2om.sh rules             the compatdb rules play would write (for Terminal)
 #
 # Environment:
 #   GW2_ON_MAC_ROOT=/abs/dir   sandbox for tests: the app's files, logs and caches all live under
@@ -183,22 +186,27 @@ STATE="$APPDIR/state"                 # route, stage (none|waiting_game|finished
                                       # origin (download|import)
 MANIFEST="$APPDIR/install-manifest.json"
 DXMT_CONF="$APPDIR/dxmt.conf"
+# The game's compatdb rules (WINE_COMPATDB_FILE): written at each start, read by every process of
+# the bottle when it starts. compatdb.local, if I create one, is appended as it is (FEX switches to
+# try); nothing of the app writes it.
+RULES="$APPDIR/compatdb.rules"
+RULES_LOCAL="$APPDIR/compatdb.local"
 # The last Play's session (watch-session keeps it; key=value lines, SESSION_KEYS), the requests to
 # its watcher, and the lock that keeps one watcher per session (a file the watcher holds a flock on)
 SESSION="$APPDIR/session"
 WATCH_LOCK="$APPDIR/.session.lock"
 SESSION_REQ="$APPDIR/session.req"
-# DXMT's caches, in the app's own cache folder (DXMT_CACHE_DIR=$CACHE, jdrly/dxmt #134) instead of
-# the per-user one ($(getconf DARWIN_USER_CACHE_DIR)dxmt/, which another DXMT setup of the game on
-# this Mac may use and this app never touches): per process <exe>/ (the game's Gw2-64.exe/:
-# shaders, pipeline archives, recorded pipelines)
+# DXMT's shader cache for the game, in the app's own cache folder instead of the per-user one
+# ($(getconf DARWIN_USER_CACHE_DIR)dxmt/, which another DXMT setup of the game on this Mac may use
+# and this app never touches): the game's rule sets DXMT_SHADER_CACHE_PATH to $DXMT_CACHE
+# (rules_text)
 DXMT_CACHE_ROOT="$CACHE/dxmt"
 DXMT_CACHE="$DXMT_CACHE_ROOT/Gw2-64.exe"
 STEAM_DIR="$BOTTLE/drive_c/Program Files (x86)/Steam"
 STEAM_EXE='C:\Program Files (x86)\Steam\steam.exe'
 # What uninstall removes in APPDIR (the folder itself goes too once empty; gamemode is what a build
 # of this line before the Mach9 engine made)
-APP_FILES="engine bottle gamemode settings.conf state install-manifest.json dxmt.conf engine.new bottle.new session session.req .session.lock"
+APP_FILES="engine bottle gamemode settings.conf state install-manifest.json dxmt.conf compatdb.rules compatdb.local engine.new bottle.new session session.req .session.lock"
 LOGFILE=/dev/null
 
 # --- Output and logging
@@ -590,17 +598,9 @@ apply_registry() {
 
 # --- Settings
 #
-# The defaults are the mix I play with in my development workspace. Some are newer than
-# the rest; Settings turns each off:
-#   warm=on          DXMT_WARM=all: pipelines built ahead by recent use (jdrly/dxmt #128)
-#   coolworkers=3    HEAT_QOS=1=utility:3: only the first 3 job workers on the cooler cores
-#   fastlocks=on     HEAT_SPIN=lock=20:game,event=30:game: short spins before sleeps (round 7)
-#   rawmouse=on      raw mouse-look, as SWTOR on Mac's default (mousespeed=1: as fast as the
-#                    macOS pointer). The bundled Mac driver also carries SWTOR on Mac's game keys
-#                    by keyboard position (PhysicalKeyboard), which stays inert: no setting
-#                    writes it
-# (and, with no setting of their own, DXMT_DEPENDENCY_COMPRESSION=1, the checkpoint chain, #133,
-# and round 7's HEAT_LAZYCLOCK, HEAT_MSYNC_UNREG and HEAT_MSYNC_PORTFIX: see game_env)
+# The keys are 0.1.x's, so settings.conf reads the same on both lines. On this engine some of them
+# need pieces of mine that come in later steps: setting_state says so, the Settings window greys
+# them with the reason, set refuses them, and they keep what settings.conf says without an effect.
 SETTING_KEYS="retina fpscap metalfx hud warm coolworkers fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam"
 FPS_CAPS="off 30 40 60 120"
 # Mouse-look speed (mousespeed): RawMouseGameControllerScale, a factor on the macOS pointer's
@@ -611,8 +611,8 @@ CPU_MAX="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 8)"
 UI_SCALES="1.5 1.75 1.8 2.0"
 setting_default() {
   case "$1" in
-    retina|warm|fastlocks|uiscale_sans|uiscale_cinema|gamemode|rawmouse|updates|steambg|quitsteam) echo on ;;
-    metalfx|hud|uiscale) echo off ;;
+    retina|warm|fastlocks|uiscale_sans|gamemode|rawmouse|updates|steambg|quitsteam) echo on ;;
+    metalfx|hud|uiscale|uiscale_cinema) echo off ;;
     mousespeed) echo 1 ;;
     debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
     fpscap) echo off ;;
@@ -645,6 +645,24 @@ setting() { # <key>: its value, or the default
   fi
   setting_default "$1"
 }
+# setting_state <key>: ok, or off:<reason> for a setting this engine can't do yet (the one table of
+# them; settings prints it, the window greys the row and shows the reason, set refuses the key)
+setting_state() {
+  case "$1" in
+    metalfx|warm) echo "off:Needs my DXMT fork. Comes with step 2." ;;
+    coolworkers|fastlocks) echo "off:Need my Wine changes. Come with step 3." ;;
+    rawmouse|mousespeed) echo "off:This engine reads the mouse from GameController by itself. My mouse-look comes with step 4." ;;
+    gamemode) echo "off:The engine's loader is a Game Mode app. Nothing to switch." ;;
+    *) echo ok ;;
+  esac
+}
+# setting_note <key>: what the window shows under a setting that works but is untested here
+setting_note() {
+  case "$1" in
+    uiscale|uiscale_size|uiscale_sans) echo "Untested on this engine. #27." ;;
+    uiscale_cinema|arcdps) echo "A code patch, untested under FEX." ;;
+  esac
+}
 write_settings() { # [<key> <value>]: settings.conf with every key, one of them changed
   local k v
   for k in $SETTING_KEYS; do
@@ -670,44 +688,68 @@ write_dxmt_conf() {
   } | put "$DXMT_CONF" 644
 }
 
-# The game's environment at its start (play), from settings.conf; also what `env` prints
+# The environment of the session's first process (play), from settings.conf; also what `env`
+# prints. Steam passes it on to the game, so it is fixed while Steam runs. What only the game gets
+# goes into its compatdb rules instead (rules_text), which each process reads when it starts.
 game_env() {
-  local n qos
+  local n debug=-all
+  [ "$(setting debug)" != on ] || debug=err+all,fixme-all
   E=(
     "WINEPREFIX=$BOTTLE"
-    "WINEDEBUG=-all"
+    "WINEDEBUG=$debug"
     "WINEDLLOVERRIDES=winemenubuilder.exe=d"
     "WINEMSYNC=1"
-    # the heat ntdll.so (components/heat) applies these to Gw2-64.exe only
-    "WINE_HEAT_EVPOOL=1"
-    "WINE_HEAT_WAKE=one,skip"
-    # round 7, in the mix: msync waits read the clock only for a relative timeout; msync's
-    # contention bailout unregisters; the shm reply port's receive right is released
-    "WINE_HEAT_LAZYCLOCK=1"
-    "WINE_HEAT_MSYNC_UNREG=1"
-    "WINE_HEAT_MSYNC_PORTFIX=1"
     "DXMT_CONFIG_FILE=$DXMT_CONF"
     "DXMT_LOG_PATH=$LOGS"
-    # the caches under the app's own cache folder: $CACHE/dxmt/<exe>/ (jdrly/dxmt #134)
-    "DXMT_CACHE_DIR=$CACHE"
-    # the checkpoint-chain fence compression on Metal 4 (jdrly/dxmt #133; in the mix)
-    "DXMT_DEPENDENCY_COMPRESSION=1"
+    "WINE_COMPATDB_FILE=$RULES"
   )
   n=$(setting ncpu)
   [ "$n" = all ] || E+=("WINENCPU=$n")
-  # the Metal HUD on the game only: the heat ntdll.so sets MTL_HUD_ENABLED=1 in Gw2-64.exe at its
-  # start (Metal reads it at a process's first device); in Steam's environment every process
-  # Steam starts would show it (jdrly/dxmt #138)
-  [ "$(setting hud)" = on ] && E+=("WINE_HEAT_METAL_HUD=1")
-  [ "$(setting warm)" = on ] && E+=("DXMT_WARM=all")
-  [ "$(setting metalfx)" = on ] && E+=("DXMT_SUBSAMPLE_METALFX=1")
-  qos=$(setting coolworkers)
-  [ "$qos" = off ] || E+=("WINE_HEAT_QOS=1=utility:$qos")
-  [ "$(setting fastlocks)" = on ] && E+=("WINE_HEAT_SPIN=lock=20:game,event=30:game")
-  if [ "$(setting debug)" = on ]; then
-    E+=("WINE_HEAT_COUNT=1" "WINE_HEAT_LOG=$LOGS" "DXMT_LOG_LEVEL=debug" "WINEDEBUG=err+all,fixme-all")
-  fi
+  [ "$(setting debug)" != on ] || E+=("DXMT_LOG_LEVEL=debug")
   return 0
+}
+
+# cdb_value <text>: <text> as a value of a compatdb rule (the crate's wire.rs, encode_into): %, ;
+# and every ASCII control character as %XX, everything else as it is
+cdb_value() {
+  local v=$1 out="" c i LC_ALL=C
+  v=${v//%/%25}
+  v=${v//;/%3B}
+  case "$v" in
+    *[[:cntrl:]]*)
+      for ((i = 0; i < ${#v}; i++)); do
+        c=${v:i:1}
+        case "$c" in [[:cntrl:]]) out="$out$(printf '%%%02X' "'$c")" ;; *) out="$out$c" ;; esac
+      done
+      v=$out ;;
+  esac
+  printf '%s' "$v"
+}
+
+# rules_text: the game's compatdb rules, one line each, in the canonical text of Mach9's compatdb
+# 0.3.1 (Table's Display: the fields in the order of Key::ALL, words in lowercase), which CI's
+# compatdb check reads back byte for byte. The engine's built-in rules already give every process
+# DXMT, DPI awareness, raw mouse from GameController and FEX's reduced x87 precision. Gw2-64.exe:
+#   metal_hud=true     the Metal HUD (Settings › Graphics), in the game only
+#   dll_overrides      native first, for an addon in the game folder: d3d11 and dxgi while one is
+#                      there (arcdps, Nexus), version while the larger interface is on. With no
+#                      such file Wine loads its own (n,b).
+#   env                DXMT's shader cache in the app's cache folder
+# CefHost.exe, which the game starts for its launcher and the Trading Post, inherits the game's
+# variables: the rule takes the cache path away from it again, and the HUD while it is on.
+rules_text() {
+  local game="exe=Gw2-64.exe" cef="exe=CefHost.exe"
+  if [ "$(setting hud)" = on ]; then game="$game;metal_hud=true" cef="$cef;metal_hud=false"; fi
+  arcdps_state
+  case "$ARC" in on|foreign) game="$game;dll_overrides=d3d11,dxgi=n,b" ;; esac
+  [ "$(setting uiscale)" != on ] || game="$game;dll_overrides=version=n,b"
+  echo "$game;env=DXMT_SHADER_CACHE_PATH=$(cdb_value "$DXMT_CACHE")"
+  echo "$cef;env=DXMT_SHADER_CACHE_PATH="
+}
+# write_rules: compatdb.rules from the settings, then compatdb.local as it is (a temporary file
+# and a rename, so a process that starts meanwhile reads the old rules or the new, never half)
+write_rules() {
+  { rules_text; [ ! -f "$RULES_LOCAL" ] || cat "$RULES_LOCAL"; } | put "$RULES" 644
 }
 
 # --- Engine
@@ -860,8 +902,7 @@ write_uiscale_ini() {
     "$COMP/ui-scale/gw2-ui-scale.ini" | put "$1" 644
 }
 # The addon in or out of the game folder, as the setting says (another program's version.dll is
-# never touched). On this line nothing sets the native-first order version.dll needs yet: that
-# comes with the game's compatdb rules.
+# never touched). The game's compatdb rules give version.dll its native-first order (rules_text).
 sync_uiscale() {
   local dll
   game_state
@@ -886,8 +927,9 @@ sync_uiscale() {
 
 # --- arcdps (deltaconnected's addon; Settings › Interface): downloaded on request from
 # deltaconnected.com (never hosted or changed by the app) into the game folder as d3d11.dll,
-# where it loads first once Gw2-64.exe has a native-first d3d11/dxgi order (on this line that comes
-# with the game's compatdb rules) and passes the game's Direct3D 11 on to DXMT. It updates itself, so it is recognised by what it is, not by a hash: a PE
+# where it loads first (the game's compatdb rules give d3d11 and dxgi a native-first order while
+# one is there, rules_text) and passes the game's Direct3D 11 on to DXMT. It updates itself, so it
+# is recognised by what it is, not by a hash: a PE
 # whose export table has arcdps's extension API (addextension2) and that names arcdps. As dxgi.dll
 # it counts too. Its settings (addons/arcdps/) stay when it goes. Another d3d11.dll or dxgi.dll
 # (Nexus, ReShade...) is never touched: state foreign.
@@ -1403,6 +1445,8 @@ status() {
   b=$(busy_of "$l")
   echo "busy=$b"
   case "$b" in none) echo "busy_detail=" ;; *) echo "busy_detail=$(proc_names "$l" "$b")" ;; esac
+  # (every Wine process runs as the engine's loader, Steam's too: the window finds the game by pid)
+  echo "game_pid=$(printf '%s\n' "$l" | awk '$1 == "game" { print $2; exit }')"
   echo "uiscale=$(setting uiscale)"
   arcdps_state
   echo "arcdps=$([ "$ARC" = on ] && echo on || echo off)"
@@ -1412,12 +1456,18 @@ status() {
 }
 
 settings() {
-  local k
+  local k n
   echo "installed=$([ -f "$MANIFEST" ] && echo yes || echo no)"
   if session_running; then echo "running=yes"; else echo "running=no"; fi
   echo "route=$(state route)"
-  for k in $SETTING_KEYS; do echo "$k=$(setting "$k")"; done
-  echo "uiscale_state=$(uiscale_state)"
+  for k in $SETTING_KEYS; do
+    echo "$k=$(setting "$k")"
+    echo "${k}_state=$(setting_state "$k")"
+    n=$(setting_note "$k")
+    [ -z "$n" ] || echo "${k}_note=$n"
+  done
+  echo "arcdps_note=$(setting_note arcdps)"
+  echo "uiscale_addon=$(uiscale_state)"
   arcdps_state
   echo "arcdps=$([ "$ARC" = on ] && echo on || echo off)"
   echo "arcdps_state=$ARC"
@@ -1431,6 +1481,7 @@ cmd_set() {
   # (arcdps: not kept in settings.conf; the game folder says whether it is on, arcdps_state)
   { [ "$key" = arcdps ] && { [ "$value" = on ] || [ "$value" = off ]; }; } || setting_valid "$key" "$value" ||
     { echo "@error Unknown setting: $key=$value"; exit 2; }
+  case "$(setting_state "$key")" in off:*) echo "@error $(setting_state "$key" | cut -c5-)"; exit 1 ;; esac
   [ -f "$MANIFEST" ] || die "$APP_NAME is not installed."
   open_log
   log "---- set $key=$value"
@@ -1443,7 +1494,9 @@ cmd_set() {
     uiscale|uiscale_size|uiscale_sans|uiscale_cinema) sync_uiscale ;;
     retina) apply_registry ;;
   esac
-  if session_running; then
+  # (each process reads the rules and dxmt.conf when it starts; the environment and the registry
+  # are the session's, fixed while Steam runs)
+  if session_running && in_list "$key" "ncpu debug retina"; then
     echo "@done $key=$value. It takes effect the next time the game starts after Steam has quit."
   else
     echo "@done $key=$value. It takes effect the next time the game starts."
@@ -1613,11 +1666,13 @@ rotate_logs() {
   done
 }
 
-# launch <program> <args...>: a program in the bottle with the game's environment, detached; the
-# session's environment goes to logs/session.env (Collect Logs, the session report)
+# launch <program> <args...>: a program in the bottle with the game's environment and its compatdb
+# rules (written first), detached; the session's environment and rules go to logs/session.env
+# (Collect Logs, the session report)
 launch() {
   local e
   game_env
+  write_rules
   if [ -n "$DRY" ]; then
     echo "[dry-run] environment:"; for e in "${E[@]}"; do printf '[dry-run]   %s\n' "$e"; done
     echo "[dry-run] wine $*"
@@ -1630,7 +1685,8 @@ launch() {
     { echo "STARTED=$(date '+%F %T')"; echo "APP=$VERSION"; echo "ROUTE=$(state route)"
       echo "ENGINE=$ENGINE_NAME"; echo "ENGINE_WINE=$ENGINE_WINE"; echo "ENGINE_FEX=$ENGINE_FEX"; echo "ENGINE_DXMT=$ENGINE_DXMT"
       for k in $SETTING_KEYS; do echo "SETTING_$k=$(setting "$k")"; done
-      printf '%s\n' "${E[@]}"; } >"$LOGS/session.env"
+      printf '%s\n' "${E[@]}"
+      sed 's/^/RULE=/' "$RULES"; } >"$LOGS/session.env"
     printf '%s\n' "${E[@]}" | shasum | cut -c1-12 >"$LOGS/session.key"
   fi
   echo "=== $(date '+%F %T') $*" >>"$LOGS/wine.log"
@@ -2015,7 +2071,7 @@ cmd_install() {
 # The finishing touches, once the game is there (game_state): the shader cache's folder, the
 # interface addon, the registry settings, stage=finished
 finish_touches() {
-  say "The shader cache: $DXMT_CACHE (DXMT fills it while you play; warming builds ahead)"
+  say "The shader cache: $DXMT_CACHE (DXMT fills it while you play)"
   run mkdir -p "$DXMT_CACHE"
   sync_uiscale
   apply_registry
@@ -2116,6 +2172,8 @@ cmd_play() {
     installer) die "ArenaNet's installer is still running. Let it finish first." ;;
     leftovers) end_leftovers ;;
   esac
+  # (one account, one login: not while another app's Guild Wars 2 runs, 0.1.x's or a Mach9.app's)
+  ! game_runs_anywhere || die "Guild Wars 2 is running in another app. Quit it first."
   # The session (watch-session): a new one (this Play takes the session's lock) unless a watcher
   # still follows the last one. Then this Play joins it (while Steam starts the game, or in the
   # grace after the game quit) and waits until the watcher has it; refused while Steam quits.
@@ -2199,7 +2257,7 @@ cmd_play() {
 # starts and runs)
 #
 # Stages, in order: starting_steam, updating_steam, signing_in, checking_files (Steam's route),
-# starting_game, loading, playing; none when no start is under way (Steam on its own, or nothing).
+# starting_game, playing; none when no start is under way (Steam on its own, or nothing).
 # Steam's logs are read only for their state lines (since the session's start) and nothing of them
 # is printed: no account names or IDs ever leave this function.
 
@@ -2333,11 +2391,10 @@ cmd_session_status() {
   if [ -n "$gpid" ]; then
     game=yes
     dx="$LOGS/Gw2-64_d3d11.log"
-    # (DXMT's log of this session: written since its start)
-    if [ -f "$dx" ] && { [ -z "$t0" ] || [ "$(stat -f %m "$dx")" -ge "$t0" ]; }; then
-      if grep -q -m1 '^info:  Present pacing' "$dx"; then stage=playing
-      elif grep -q -m1 'Using feature level' "$dx"; then stage=loading
-      else stage=starting_game; fi
+    # (DXMT's log of this session: written since its start. The engine's DXMT logs its device
+    # and nothing per frame, so the device is as far as it tells.)
+    if [ -f "$dx" ] && { [ -z "$t0" ] || [ "$(stat -f %m "$dx")" -ge "$t0" ]; } && grep -q -m1 'Using feature level' "$dx"; then
+      stage=playing
     else
       stage=starting_game
     fi
@@ -2386,6 +2443,7 @@ cmd_session_status() {
   echo "route=$route"
   echo "steam=$steam"
   echo "game=$game"
+  echo "game_pid=$gpid"
   echo "closing=$closing"
   echo "quit_steam=$quit"
   # (the window keeps polling while it does: a game restarted within the grace shows again)
@@ -2515,5 +2573,6 @@ case "${1:-}" in
   end-leftovers) cmd_end_leftovers ;;
   fetch-engine) cmd_fetch_engine ;;
   env) cmd_env ;;
+  rules) rules_text; [ ! -f "$RULES_LOCAL" ] || cat "$RULES_LOCAL" ;;
   *) sed -n '2,/^# Environment/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 2 ;;
 esac

@@ -155,7 +155,7 @@ out=$(GW2_ON_MAC_DRY_RUN=1 g install steam 2>&1); rc=$?
 check "dry-run install steam exits 0" [ "$rc" = 0 ]
 check "dry-run install steam reaches phase 4" has <(echo "$out") "@phase 4"
 check "dry-run prints the game's environment" has <(echo "$out") "WINEPREFIX=$BOTTLE"
-check "  with no WINE_COMPATDB" eval '! echo "$out" | grep -q WINE_COMPATDB'
+check "  with the rules file and no WINE_COMPATDB" eval 'echo "$out" | grep -qxF "[dry-run]   WINE_COMPATDB_FILE=$AD/compatdb.rules" && ! echo "$out" | grep -q "WINE_COMPATDB="'
 check "dry-run creates nothing" eval '[ ! -e "$AD" ] && [ ! -e "$CACHE" ]'
 check "fresh status: not installed" [ "$(st installed)" = no ]
 check "fresh status: no engine" [ "$(st engine_installed)" = no ]
@@ -166,7 +166,7 @@ check "fresh status: disk_free is a number" [ "$(st disk_free)" -gt 0 ]
 out=$(env -u GW2_ON_MAC_ENGINE_URL -u GW2_ON_MAC_ENGINE_SHA256 -u GW2_ON_MAC_ENGINE_SIZE GW2_ON_MAC_DRY_RUN=1 "$G" install steam 2>&1)
 check "dry-run without the stand-in: the real engine, Mach9 0.3.1 from athei/mach9" \
   has <(echo "$out") "^\[dry-run\] download https://github.com/athei/mach9/releases/download/v0.3.1/wine-v0.3.1-macos-arm64.tar.xz (128991668 bytes, sha256 90aff9a897ed0ff9aac44d0e06f0aecd3ee985afb38037f3f915451e51fa974e)"
-check "  no WINE_COMPATDB, no WINEDLLPATH" eval '! echo "$out" | grep -q -e WINE_COMPATDB -e WINEDLLPATH'
+check "  no WINE_COMPATDB, no WINEDLLPATH" eval '! echo "$out" | grep -q -e WINE_COMPATDB= -e WINEDLLPATH'
 check "  and still nothing created" eval '[ ! -e "$AD" ] && [ ! -e "$CACHE" ]'
 
 section "macOS and the engine's checks (nothing is left behind)"
@@ -227,7 +227,8 @@ check "ShowCrashDialog=dword:0" eval 'regsec "Software\\\\\\\\Wine\\\\\\\\WineDb
 check "  nothing for Gw2-64.exe (AppDefaults) and no raw mouse-look values" sh -c "! grep -q -e AppDefaults -e RawMouse '$BOTTLE/user.reg'"
 check "wineboot with WINEMSYNC=1 and winemenubuilder off, nothing else of the app's" \
   eval '[ "$(awk "/^wine wineboot/ { f = 1; next } /^[^ ]/ { f = 0 } f" "$STANDIN_LOG" | sed "s/^  //" | tr "\n" "|")" = "WINEDEBUG=-all|WINEDLLOVERRIDES=winemenubuilder.exe=d|WINEMSYNC=1|WINEPREFIX=$BOTTLE|" ]'
-check "  no inherited compatdb variable reached any of the install's Wine starts" sh -c "! grep -q -e WINE_COMPATDB -e WINE_LARGE_ADDRESS_AWARE -e WINE_PROF_SERVICE '$STANDIN_LOG'"
+check "  no inherited compatdb variable reached any of the install's Wine starts (Steam's has the app's rules file)" \
+  sh -c "! grep -q -e WINE_COMPATDB= -e WINE_LARGE_ADDRESS_AWARE -e WINE_PROF_SERVICE '$STANDIN_LOG' && [ \"\$(grep WINE_COMPATDB_FILE '$STANDIN_LOG')\" = '  WINE_COMPATDB_FILE=$AD/compatdb.rules' ]"
 check "Steam started with the install page" has "$STANDIN_LOG" 'wine C:\\Program Files (x86)\\Steam\\steam.exe steam://install/1284210'
 check "  without WINEDLLPATH" sh -c "! grep -q WINEDLLPATH '$STANDIN_LOG'"
 check "logs/session.env written" has "$LOGS/session.env" "SETTING_warm=on"
@@ -255,15 +256,24 @@ check "stage=finished" [ "$(st stage)" = finished ]
 check "DXMT's cache folder" [ -d "$DXMT_CACHE" ]
 
 section "Settings"
-check "defaults: warm on, coolworkers 3, fastlocks on, ncpu 8, uiscale off" \
-  [ "$(sett warm)$(sett coolworkers)$(sett fastlocks)$(sett ncpu)$(sett uiscale)" = on3on8off ]
+check "defaults: warm on, coolworkers 3, fastlocks on, ncpu 8, uiscale off, cinematic dialogue off" \
+  [ "$(sett warm)$(sett coolworkers)$(sett fastlocks)$(sett ncpu)$(sett uiscale)$(sett uiscale_cinema)" = on3on8offoff ]
 check "default: Steam in the background on" [ "$(sett steambg)" = on ]
 check "default: Quit Steam when the game quits on" [ "$(sett quitsteam)" = on ]
-check "set coolworkers 5" g set coolworkers 5
-check "  WINE_HEAT_QOS=1=utility:5 in the environment" has <(g env) "WINE_HEAT_QOS=1=utility:5"
-check "set coolworkers off: no WINE_HEAT_QOS" sh -c "'$G' set coolworkers off >/dev/null && ! '$G' env | grep -q WINE_HEAT_QOS"
-check "set fastlocks off: no WINE_HEAT_SPIN" sh -c "'$G' set fastlocks off >/dev/null && ! '$G' env | grep -q WINE_HEAT_SPIN"
-check "set warm off: no DXMT_WARM" sh -c "'$G' set warm off >/dev/null && ! '$G' env | grep -q DXMT_WARM"
+check "settings: a state for each of the 20 keys" [ "$(g settings | grep -cE '^[a-z_]+_state=(ok|off:.+)$')" = 20 ]
+check "  off with the step that brings them: metalfx, warm (2), coolworkers, fastlocks (3), rawmouse, mousespeed (4), gamemode" \
+  [ "$(g settings | sed -n 's/^\([a-z_]*\)_state=off:.*/\1/p' | tr '\n' ' ')" = "metalfx warm coolworkers fastlocks gamemode rawmouse mousespeed " ]
+check "  the larger interface's settings and arcdps carry a note" \
+  [ "$(g settings | sed -n 's/^\([a-z_]*\)_note=.*/\1/p' | tr '\n' ' ')" = "uiscale uiscale_size uiscale_sans uiscale_cinema arcdps " ]
+out=$(g set warm on 2>&1) && rc=0 || rc=$?
+check "set warm on: refused with the step 2 reason" eval '[ "$rc" = 1 ] && [ "$out" = "@error Needs my DXMT fork. Comes with step 2." ]'
+for k in coolworkers=5 fastlocks=off metalfx=on rawmouse=off mousespeed=2.5 gamemode=off; do
+  check "set ${k%%=*} ${k#*=}: refused" sh -c "! '$G' set ${k%%=*} ${k#*=} >/dev/null"
+done
+sed -i '' 's/^warm=on$/warm=off/' "$AD/settings.conf"
+g set hud on >/dev/null; g set hud off >/dev/null
+check "  a greyed key keeps what settings.conf says (warm=off by hand), and does nothing" eval '[ "$(sett warm)" = off ] && grep -qx warm=off "$AD/settings.conf"'
+sed -i '' 's/^warm=off$/warm=on/' "$AD/settings.conf"
 check "set ncpu all: no WINENCPU" sh -c "'$G' set ncpu all >/dev/null && ! '$G' env | grep -q WINENCPU"
 MAXC=$(sysctl -n hw.logicalcpu)
 # (GitHub's runners have 3 CPUs, too few for the checks of 6 and 8)
@@ -277,24 +287,16 @@ check "ncpu $((MAXC + 1)) (more than the Mac has) refused" sh -c "'$G' set ncpu 
 if [ "$MAXC" -ge 8 ]; then check "ncpu 8 again" g set ncpu 8; else echo "  skip   ncpu 8 again (this Mac has $MAXC CPUs)"; fi
 check "set fpscap 60: dxmt.conf caps at 60" sh -c "'$G' set fpscap 60 >/dev/null && grep -q 'd3d11.preferredMaxFrameRate = 60' '$AD/dxmt.conf'"
 check "set fpscap off: no cap" sh -c "'$G' set fpscap off >/dev/null && ! grep -q preferredMaxFrameRate '$AD/dxmt.conf'"
-check "set metalfx on: DXMT_SUBSAMPLE_METALFX=1" sh -c "'$G' set metalfx on >/dev/null && '$G' env | grep -qx DXMT_SUBSAMPLE_METALFX=1"
-check "set hud on: WINE_HEAT_METAL_HUD=1, no MTL_HUD_ENABLED in Steam's environment" sh -c "'$G' set hud on >/dev/null && '$G' env | grep -qx WINE_HEAT_METAL_HUD=1 && ! '$G' env | grep -q MTL_HUD_ENABLED"
-check "set hud off: no WINE_HEAT_METAL_HUD" sh -c "'$G' set hud off >/dev/null && ! '$G' env | grep -q WINE_HEAT_METAL_HUD"
-check "set debug on: DXMT_LOG_LEVEL=debug and the heat counters" sh -c "'$G' set debug on >/dev/null && '$G' env | grep -qx DXMT_LOG_LEVEL=debug && '$G' env | grep -qx WINE_HEAT_COUNT=1"
+check "set debug on: DXMT_LOG_LEVEL=debug and Wine's errors" sh -c "'$G' set debug on >/dev/null && '$G' env | grep -qx DXMT_LOG_LEVEL=debug && [ \"\$('$G' env | grep ^WINEDEBUG=)\" = WINEDEBUG=err+all,fixme-all ]"
+check "set debug off: neither" sh -c "'$G' set debug off >/dev/null && ! '$G' env | grep -q DXMT_LOG_LEVEL && [ \"\$('$G' env | grep ^WINEDEBUG=)\" = WINEDEBUG=-all ]"
 g set retina off >/dev/null; check "set retina off: RetinaMode=n" reg "$ALL_MAC" RetinaMode n
 g set retina on >/dev/null; check "set retina on: RetinaMode=y" reg "$ALL_MAC" RetinaMode y
 check "  one value (not added twice)" [ "$(grep -c '^"RetinaMode"=' "$BOTTLE/user.reg")" = 1 ]
-check "set gamemode off: still gamemode=engine, no WINEDLLPATH (nothing to switch)" sh -c "'$G' set gamemode off >/dev/null && ! '$G' env | grep -q WINEDLLPATH && [ \"\$('$G' status | sed -n 's/^gamemode=//p')\" = engine ]"
-g set gamemode on >/dev/null
+check "status: gamemode=engine (nothing to switch)" [ "$(st gamemode)" = engine ]
 check "settings: rawmouse=on, mousespeed=1 by default" [ "$(sett rawmouse)/$(sett mousespeed)" = on/1 ]
 check "  no physkeys setting (refused, exit 2; not in the settings)" sh -c "'$G' set physkeys on >/dev/null; [ \$? = 2 ] && ! '$G' settings | grep -q '^physkeys='"
-g set rawmouse off >/dev/null; g set mousespeed 2.5 >/dev/null
-check "set rawmouse off, mousespeed 2.5: saved, and nothing in the registry (this engine reads the mouse itself)" \
-  eval '[ "$(sett rawmouse)/$(sett mousespeed)" = off/2.5 ] && ! grep -q RawMouse "$BOTTLE/user.reg"'
+check "  nothing of the mouse in the registry (this engine reads the mouse itself)" sh -c "! grep -q RawMouse '$BOTTLE/user.reg'"
 check "mousespeed 4 refused (exit 2)" sh -c "'$G' set mousespeed 4 >/dev/null; [ \$? = 2 ]"
-check "rawmouse maybe refused (exit 2)" sh -c "'$G' set rawmouse maybe >/dev/null; [ \$? = 2 ]"
-check "the mouse settings are not in the game's environment" sh -c "! '$G' env | grep -qiE 'physical|rawmouse|mousespeed'"
-g set rawmouse on >/dev/null; g set mousespeed 1 >/dev/null
 # A Play holds the session's lock from before it starts Wine (and its watcher for the session): a
 # setting saved meanwhile leaves user.reg alone, and a Play can't start while a registry write
 # holds the lock (the same flock, one holder at a time)
@@ -315,17 +317,17 @@ check "settings.conf has every key" [ "$(grep -c '=' "$AD/settings.conf")" = 20 
 
 section "The larger interface (addon)"
 GD="$STEAM/steamapps/common/Guild Wars 2"
-check "uiscale_state=off by default" [ "$(sett uiscale_state)" = off ]
+check "uiscale_addon=off by default" [ "$(sett uiscale_addon)" = off ]
 check "set uiscale on" g set uiscale on
 check "  version.dll in the game folder" same "$COMP/ui-scale/version.dll" "$GD/version.dll"
-check "  the ini: scale 1.75, sans cronos, cinema 1" sh -c "grep -qx 'scale=1.75' '$GD/gw2-ui-scale.ini' && grep -qx 'sans=cronos' '$GD/gw2-ui-scale.ini' && grep -qx 'cinema=1' '$GD/gw2-ui-scale.ini'"
+check "  the ini: scale 1.75, sans cronos, cinema 0 (off on this line)" sh -c "grep -qx 'scale=1.75' '$GD/gw2-ui-scale.ini' && grep -qx 'sans=cronos' '$GD/gw2-ui-scale.ini' && grep -qx 'cinema=0' '$GD/gw2-ui-scale.ini'"
 check "  no registry override for it (the game's compatdb rules carry that on this line)" sh -c "! grep -q AppDefaults '$BOTTLE/user.reg'"
-check "  uiscale_state=on" [ "$(sett uiscale_state)" = on ]
+check "  uiscale_addon=on" [ "$(sett uiscale_addon)" = on ]
 check "set uiscale_size 2.0 and sans off: the ini follows" sh -c "'$G' set uiscale_size 2.0 >/dev/null && '$G' set uiscale_sans off >/dev/null && grep -qx 'scale=2.0' '$GD/gw2-ui-scale.ini' && grep -qx 'sans=keep' '$GD/gw2-ui-scale.ini'"
 echo "addon log" >"$GD/gw2-ui-scale.log"
 check "set uiscale off: dll and ini gone, the log moved to Logs" sh -c "'$G' set uiscale off >/dev/null && [ ! -e '$GD/version.dll' ] && [ ! -e '$GD/gw2-ui-scale.ini' ] && [ ! -e '$GD/gw2-ui-scale.log' ] && ls '$LOGS'/gw2-ui-scale-*.log >/dev/null"
 echo "another addon" >"$GD/version.dll"
-check "another version.dll: uiscale_state=foreign" [ "$(sett uiscale_state)" = foreign ]
+check "another version.dll: uiscale_addon=foreign" [ "$(sett uiscale_addon)" = foreign ]
 g set uiscale on >/dev/null 2>&1 || true
 check "  turning it on leaves the other dll alone" has "$GD/version.dll" "another addon"
 g set uiscale off >/dev/null 2>&1 || true
@@ -427,15 +429,48 @@ check "set arcdps on while a Play holds the session's lock: refused, nothing pla
 kill $hp 2>/dev/null; wait $hp 2>/dev/null
 rm -rf "$GD/addons"
 
+section "The game's compatdb rules (compatdb.rules)"
+# The texts are pinned in scripts/compatdb-check/rules, which CI reads with Mach9 0.3.1's
+# compatdb-core; there the sandbox's home is /Users/me
+FIX="$ROOT/scripts/compatdb-check/rules"
+rules_are() { g rules | sed "s|$H|/Users/me|" | cmp -s - "$FIX/$1.rules"; }
+check "everything off: the cache path for the game, taken away from CefHost.exe" rules_are off
+g set hud on >/dev/null
+check "the HUD on: metal_hud=true for the game, false for CefHost.exe" rules_are hud
+g set hud off >/dev/null; g set uiscale on >/dev/null
+check "the larger interface on: version native first" rules_are addon
+g set hud on >/dev/null; cp "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll"
+check "the HUD and the larger interface on, arcdps in the game folder: d3d11 and dxgi native first too" rules_are hud-addon-arcdps
+rm -f "$GD/version.dll"
+check "  the addon's version.dll missing: the override stays (n,b loads Wine's own)" rules_are hud-addon-arcdps
+cp "$SANDBOX/pe/nexus.dll" "$GD/d3d11.dll"
+check "  another addon's d3d11.dll (Nexus): native first as well" eval 'g rules | grep -q "^exe=Gw2-64.exe;metal_hud=true;dll_overrides=d3d11,dxgi=n,b;"'
+g set hud off >/dev/null; g set uiscale off >/dev/null; rm -f "$GD/d3d11.dll"
+check "  all off again" rules_are off
+ODD="$SANDBOX/a%b;c$(printf '\t')d é"
+check "a home with %, ; and a tab: escaped as %XX, the é as it is" \
+  eval 'GW2_ON_MAC_ROOT="$ODD" "$G" rules | sed "s|$SANDBOX/a%25b%3Bc%09d é/home|/Users/a%25b%3Bc%09d é|" | cmp -s - "$FIX/escaped.rules" && [ ! -e "$ODD" ]'
+printf 'exe=Gw2-64.exe;env=FEX_HOSTFEATURES=disableavx\n' >"$AD/compatdb.local"
+check "compatdb.local is appended as it is" eval '[ "$(g rules | tail -1)" = "exe=Gw2-64.exe;env=FEX_HOSTFEATURES=disableavx" ] && [ "$(g rules | wc -l | tr -d " ")" = 3 ]'
+# a dry run of play with every setting of 0.1.x's environment on in settings.conf
+cp "$AD/settings.conf" "$SANDBOX/settings.keep"
+sed -i '' -e 's/^metalfx=.*/metalfx=on/' -e 's/^hud=.*/hud=on/' -e 's/^debug=.*/debug=on/' "$AD/settings.conf"
+out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
+check "dry-run play: the environment is the engine's, the app's files and the CPUs, nothing else" \
+  eval '[ "$(echo "$out" | sed -n "s/^\[dry-run\]   //p" | grep -v ^WINENCPU= | tr "\n" "|")" = "WINEPREFIX=$BOTTLE|WINEDEBUG=err+all,fixme-all|WINEDLLOVERRIDES=winemenubuilder.exe=d|WINEMSYNC=1|DXMT_CONFIG_FILE=$AD/dxmt.conf|DXMT_LOG_PATH=$LOGS|WINE_COMPATDB_FILE=$AD/compatdb.rules|DXMT_LOG_LEVEL=debug|" ] && echo "$out" | grep -q "^\[dry-run\]   WINENCPU="'
+check "  none of 0.1.x's variables" eval '! echo "$out" | grep -qE "WINE_HEAT_|DXMT_WARM|DXMT_CACHE_DIR|DXMT_SUBSAMPLE_METALFX|ROSETTA_X87_PATH|WINEDLLPATH|WINE_COMPATDB=|MTL_HUD"'
+cp "$SANDBOX/settings.keep" "$AD/settings.conf"
+
 section "Play"
 : >"$STANDIN_LOG"
 out=$(g play 2>&1) && rc=0 || rc=$?
 started
 check "play exits 0" [ "$rc" = 0 ]
 check "Steam -applaunch 1284210 with the launch options" has "$STANDIN_LOG" 'steam.exe -applaunch 1284210 -maploadinfo'
-check "  with DXMT's config file" has "$STANDIN_LOG" "DXMT_CONFIG_FILE=$AD/dxmt.conf"
-check "  with DXMT's caches in the app's cache folder (DXMT_CACHE_DIR)" grep -qxF "  DXMT_CACHE_DIR=$CACHE" "$STANDIN_LOG"
-check "  env has DXMT_CACHE_DIR too" sh -c "'$G' env | grep -qxF 'DXMT_CACHE_DIR=$CACHE'"
+check "  with DXMT's config file and the rules file" eval 'has "$STANDIN_LOG" "DXMT_CONFIG_FILE=$AD/dxmt.conf" && grep -qxF "  WINE_COMPATDB_FILE=$AD/compatdb.rules" "$STANDIN_LOG"'
+check "  play wrote compatdb.rules before it: the rules and compatdb.local" eval '[ "$(cat "$AD/compatdb.rules")" = "$(g rules)" ] && grep -q FEX_HOSTFEATURES "$AD/compatdb.rules"'
+check "  session.env records the engine, its commits, the settings, the environment and the rules" \
+  eval 'has "$LOGS/session.env" "^ENGINE=mach9-v0.3.1$" && has "$LOGS/session.env" "^ENGINE_FEX=" && has "$LOGS/session.env" "^SETTING_hud=off$" && has "$LOGS/session.env" "^WINE_COMPATDB_FILE=" && [ "$(sed -n "s/^RULE=//p" "$LOGS/session.env")" = "$(cat "$AD/compatdb.rules")" ]'
 
 section "Collect Logs (redaction and the leak check)"
 mkdir -p "$STEAM/config" "$STEAM/logs" "$BOTTLE/drive_c/users/$BUSER/AppData/Roaming/Guild Wars 2"
@@ -451,7 +486,7 @@ zip=$("$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip" 2>"$SANDBOX/colle
 check "collect-logs makes a zip" [ -f "$zip" ]
 rm -rf "$SANDBOX/unzipped" && mkdir -p "$SANDBOX/unzipped" && (cd "$SANDBOX/unzipped" && unzip -q "$zip")
 Z="$SANDBOX/unzipped/$(basename "$zip" .zip)"
-for f in logs/install.log logs/wine.log logs/Gw2-64_d3d11.log settings.conf install-manifest.json session-report.txt system-info.txt gpu-errors.txt game-logs/ArenaNet.log game-logs/steam/content_log.txt; do
+for f in logs/install.log logs/wine.log logs/Gw2-64_d3d11.log settings.conf compatdb.rules compatdb.local install-manifest.json session-report.txt system-info.txt gpu-errors.txt game-logs/ArenaNet.log game-logs/steam/content_log.txt; do
   check "  has $f" [ -f "$Z/$f" ]
 done
 check "  the session report read DXMT's log" has "$Z/session-report.txt" "Frame rate: median 60.0"
@@ -466,7 +501,7 @@ check "  never Local.dat or Steam's config" sh -c "! find '$Z' -name Local.dat -
 check "  the crash log kept its exception" has "$Z/game-logs/ArenaNet.log" "Exception: c0000005"
 check "  no arcdps log (its crash log may hold character names)" sh -c "! find '$Z' -iname 'arcdps*' | grep -q . && ! grep -rq 'Zz Charname Q' '$Z'"
 check "  system-info names the d3d11.dll addon: arcdps" has "$Z/system-info.txt" "d3d11.dll addon: arcdps"
-rm -rf "$GD/addons" "$GD/d3d11.dll"
+rm -rf "$GD/addons" "$GD/d3d11.dll" "$AD/compatdb.local"
 
 section "Steam in the background after the first login"
 LU="$STEAM/config/loginusers.vdf"
@@ -510,12 +545,21 @@ mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
 cp "$SANDBOX/sleeper" "$ENG/bin/Gw2-64.exe"
 "$ENG/bin/Gw2-64.exe" 60 & gp=$!
 sleep 0.3
-check "busy=game with a Gw2-64.exe of the engine running" [ "$(st busy)" = game ]
+check "busy=game with a Gw2-64.exe of the engine running, game_pid its pid" eval '[ "$(st busy)/$(st game_pid)" = "game/$gp" ]'
 check "play brings it up instead of starting another" sh -c "'$G' play | grep -q 'already running'"
 check "reset-shaders refused while the game runs" sh -c "! '$G' reset-shaders >/dev/null 2>&1"
 kill $gp 2>/dev/null || true; wait $gp 2>/dev/null || true
 rm -f "$ENG/bin/Gw2-64.exe"
 check "busy=none again" [ "$(st busy)" = none ]
+# another app's Guild Wars 2 (0.1.x's, a Mach9.app's): a Gw2-64.exe outside this engine
+mkdir -p "$SANDBOX/other" && cp "$SANDBOX/sleeper" "$SANDBOX/other/Gw2-64.exe"
+"$SANDBOX/other/Gw2-64.exe" 60 & op=$!
+sleep 0.3
+: >"$STANDIN_LOG"
+out=$(g play 2>&1) && rc=0 || rc=$?
+check "a Gw2-64.exe of another app running: play refuses, starts nothing" \
+  eval '[ "$rc" != 0 ] && echo "$out" | grep -qxF "@error Guild Wars 2 is running in another app. Quit it first." && [ ! -s "$STANDIN_LOG" ] && [ "$(st busy)/$(st game_pid)" = none/ ]'
+kill $op 2>/dev/null || true; wait $op 2>/dev/null || true
 
 section "Steam quits after the game (watch-session)"
 # stand-in Steam and game: sleepers at the engine's paths (proc_list: steam, game), started apart
@@ -791,9 +835,7 @@ printf 'info:  Found config file: x\ninfo:  Using feature level D3D_FEATURE_LEVE
 touch -t "$(date -r $((T0 - 600)) '+%Y%m%d%H%M.%S')" "$LOGS/Gw2-64_d3d11.log"
 check "  a DXMT log from before the session doesn't count" [ "$(ss stage)" = starting_game ]
 touch "$LOGS/Gw2-64_d3d11.log"
-check "the device is there, no frame yet: loading" [ "$(ss stage)" = loading ]
-echo 'info:  Present pacing: mode=vsync rate=60.0 refresh=60.00 cap=60 interval=1' >>"$LOGS/Gw2-64_d3d11.log"
-check "the first present: playing" [ "$(ss stage)" = playing ]
+check "DXMT's device is there (the engine's DXMT logs nothing per frame): playing, with the game's pid" eval '[ "$(ss stage)/$(ss game_pid)" = "playing/$gp" ]'
 check "  game_elapsed from the game process (the watcher hasn't seen it yet)" eval 'e=$(ss game_elapsed); [ -n "$e" ] && [ "$e" -le 5 ]'
 GS=$(($(date +%s) - 72)) session_file playing
 check "  game_elapsed from the watcher's game_started" eval 'e=$(ss game_elapsed); [ "$e" -ge 72 ] && [ "$e" -le 75 ]'
