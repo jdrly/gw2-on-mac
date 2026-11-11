@@ -819,7 +819,10 @@ steam_down
 : >"$STANDIN_LOG"; GW2_ON_MAC_WATCH_GRACE=4 "$G" play >/dev/null 2>&1; started; watcher_up; steam_up
 game_up; wait_stage playing
 steam_down; game_down; wait_stage grace
-splay; steam_up
+# (Steam once the watcher has the join, not once the Play returns: the grace runs from the join,
+# and the Play still has its checks to do)
+: >"$STANDIN_LOG"; "$G" play >/dev/null 2>&1 & jp=$!
+i=0; until [ "$(sess replay)" = 1 ] || [ $i -ge 50 ]; do sleep 0.1; i=$((i + 1)); done; steam_up; wait $jp
 check "Play in the grace after Steam quit: joins (replay=1), its own Steam (started_steam=yes quit_steam=yes)" eval '[ "$(sess replay)/$(sess started_steam)/$(sess quit_steam)" = 1/yes/yes ] && wait_stage waiting_game'
 game_session
 check "  its game quits: that Steam quits" eval 'watch_done && [ "$(sess result)" = quit ] && ! steam_runs'
@@ -861,16 +864,27 @@ check "my DXMT at its real size (44 MB): Play compares the engine's tree with it
 game_session; watch_done
 check "  status once" [ "$(compared status)" = "$once" ]
 
-# two Plays at once: one watcher, the other joins
+# two Plays at once: one watcher, the other joins. The Play that joins compares the engine's tree
+# with my DXMT after its join, while the watcher's grace for Steam already runs: on the dev build's
+# runner, with my real build and the file above (88 MB), it returned 2 s after its join. Here a cmp
+# on PATH, only for these two Plays, makes the joined Play's comparison (replay=1 in the session)
+# take 4 s longer on any runner. So the stand-in Steam comes once the first Play's watcher runs,
+# not once both Plays have returned. The watcher looks every second here (WATCH_POLL=1): the
+# joining Play looks for the first one's watcher (WATCH_POLL * 3 + 3) * 10 times, 0.1 s apart
+# (join_session), 36 times at the suite's 0.2 s and 60 at 1 s, and the first Play took 3 s to its
+# watcher on the dev build's runner.
+mkdir -p "$SANDBOX/slow-bin"
+printf '#!/bin/bash\ncase "$3" in */real-size.bin) ! grep -qx replay=1 "%s/session" || sleep 4 ;; esac\nexec /usr/bin/cmp "$@"\n' "$AD" >"$SANDBOX/slow-bin/cmp"
+chmod 755 "$SANDBOX/slow-bin/cmp"
 : >"$STANDIN_LOG"
-"$G" play >/dev/null 2>&1 & p1=$!
-"$G" play >/dev/null 2>&1 & p2=$!
-wait $p1 $p2; started; watcher_up; steam_up
+PATH="$SANDBOX/slow-bin:$PATH" GW2_ON_MAC_WATCH_POLL=1 "$G" play >/dev/null 2>&1 & p1=$!
+PATH="$SANDBOX/slow-bin:$PATH" GW2_ON_MAC_WATCH_POLL=1 "$G" play >/dev/null 2>&1 & p2=$!
+started; watcher_up; steam_up; wait $p1 $p2
 check "two Plays at once: one watcher, the other joined" eval '[ "$(watchers)" = 1 ] && watcher_runs && [ "$(sess replay)" = 1 ]'
 game_session
 check "  Steam quits once" eval 'watch_done && [ "$(sess result)" = quit ] && [ "$(grep -c "steam.exe -shutdown" "$STANDIN_LOG")" = 1 ]'
 # (a tree with a file more than the component still counts as mine: the file goes from both)
-rm -f "$BIG" "$ENG/lib/wine/dxgi/dxmt/real-size.bin"
+rm -f "$BIG" "$ENG/lib/wine/dxgi/dxmt/real-size.bin"; rm -rf "$SANDBOX/slow-bin"
 check "the usual build again, in the component and the engine's tree" eval 'dxgi_is fork && [ "$(st dxmt_tree)" = fork ]'
 
 # the lock is the kernel's (flock): a lock file a dead watcher left holds nothing
