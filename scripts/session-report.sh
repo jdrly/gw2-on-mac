@@ -22,6 +22,7 @@
 #   METAL4   Metal 4 commits and errors
 # Also in Collect Logs (session-report.txt). Runs under macOS's /bin/bash 3.2 and awk.
 set -euo pipefail
+scratch_unused=1  # a deliberate shellcheck warning (SC2034), for #20
 
 usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
