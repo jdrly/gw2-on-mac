@@ -34,7 +34,7 @@ extension Installer {
       let notice = output.split(separator: "\n").first { $0.hasPrefix("@notice ") }.map { String($0.dropFirst(8)) }
       let error = output.contains("@done ") ? notice
         : output.split(separator: "\n").first { $0.hasPrefix("@error ") }.map { String($0.dropFirst(7)) }
-          ?? "The game could not be started. Details are in ~/Library/Logs/GW2 on Mac/wine.log."
+          ?? "The game could not be started. Details are in ~/Library/Logs/\(appName)/wine.log."
       refresh()
       then(error, output.contains("@done "))
       if output.contains("@done "), UserDefaults.standard.bool(forKey: Installer.quitAfterLaunchKey) {
@@ -43,6 +43,6 @@ extension Installer {
     }
   }
 
-  // Settings › Game: "Quit GW2 on Mac after launching" (off by default)
+  // Settings › Game: "Quit the app after launching" (off by default)
   static let quitAfterLaunchKey = "quitAfterLaunch"
 }

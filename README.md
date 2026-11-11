@@ -7,6 +7,13 @@ engine is CrossOver 26.3 with Wine 11. The game's Direct3D 11 goes to Metal thro
 rendering and a Wine I tuned for the game's crowded maps. It changes nothing you already have
 installed.
 
+> **This is the `arm64` branch.** It builds *GW2 on Mac arm64*, the development app for 0.2,
+> which moves the game to an arm64 Wine engine. It has its own name, bundle id
+> (`cz.jandrly.gw2onmac.arm64`) and folders, so it installs next to GW2 on Mac 0.1.x and shares
+> nothing with it. The name is `APP_NAME` at the top of `src/gw2om.sh`, `collect-logs.sh` and
+> `session-report.sh`, and `appName` in `src/native/App.swift`. It has no updates, and 0.1.x stays
+> the release on `main`. The paths below are this app's.
+
 Website: [gw2onmac.com](https://gw2onmac.com). Download: the
 [latest release](https://github.com/jdrly/gw2-on-mac/releases/latest).
 
@@ -250,19 +257,19 @@ nothing in `/Applications` besides itself.
 
 | Path | What | Uninstall |
 |---|---|---|
-| `~/Library/Application Support/GW2 on Mac/engine/` | the Wine engine with my pieces, about 1 GB | removed |
-| `…/GW2 on Mac/bottle/` | the game's Wine prefix with Steam, the game's files and the game's settings. About 75 GB, or no extra space for a clone of files on the same disk | removed, with the game |
-| `…/GW2 on Mac/gamemode/GW2.app` | the Game Mode bundle | removed |
-| `…/GW2 on Mac/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `session`, `session.req`, `.session.lock` | settings, install state, what was installed, DXMT's options, the current game session and its lock | removed |
-| `~/Library/Caches/GW2 on Mac/downloads/` | the engine archive, `SteamSetup.exe`, a copy of `Gw2Setup-64.exe` | removed |
-| `~/Library/Caches/GW2 on Mac/dxmt/Gw2-64.exe/` | DXMT's shader cache and pipeline archives. Another process, such as the launcher's `CefHost.exe`, gets its own folder next to it | removed. *Reset the shader cache* in Settings empties it too |
+| `~/Library/Application Support/GW2 on Mac arm64/engine/` | the Wine engine with my pieces, about 1 GB | removed |
+| `…/GW2 on Mac arm64/bottle/` | the game's Wine prefix with Steam, the game's files and the game's settings. About 75 GB, or no extra space for a clone of files on the same disk | removed, with the game |
+| `…/GW2 on Mac arm64/gamemode/GW2.app` | the Game Mode bundle | removed |
+| `…/GW2 on Mac arm64/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `session`, `session.req`, `.session.lock` | settings, install state, what was installed, DXMT's options, the current game session and its lock | removed |
+| `~/Library/Caches/GW2 on Mac arm64/downloads/` | the engine archive, `SteamSetup.exe`, a copy of `Gw2Setup-64.exe` | removed |
+| `~/Library/Caches/GW2 on Mac arm64/dxmt/Gw2-64.exe/` | DXMT's shader cache and pipeline archives. Another process, such as the launcher's `CefHost.exe`, gets its own folder next to it | removed. *Reset the shader cache* in Settings empties it too |
 | `$(getconf DARWIN_USER_TEMP_DIR)winetemp-…/Gw2-64.exe` | the Game Mode link | removed |
-| `~/Library/Logs/GW2 on Mac/` | `install.log`, `wine.log`, DXMT's `Gw2-64_d3d11.log`, `session.env`, `gamemode.log`, the heat logs, and `.lock-claim` for the install lock | kept |
+| `~/Library/Logs/GW2 on Mac arm64/` | `install.log`, `wine.log`, DXMT's `Gw2-64_d3d11.log`, `session.env`, `gamemode.log`, the heat logs, and `.lock-claim` for the install lock | kept |
 
 In the game folder, `version.dll` and `gw2-ui-scale.ini` exist only while *Larger interface* is on,
 and arcdps's `d3d11.dll` only while *arcdps* is on. The app never touches another program's
 `version.dll`, `d3d11.dll` or `dxgi.dll` there. The app's own preferences, such as the chosen
-route and the last Settings pane, live in the defaults domain `cz.jandrly.gw2onmac`. Other Wine
+route and the last Settings pane, live in the defaults domain `cz.jandrly.gw2onmac.arm64`. Other Wine
 apps' bottles are only ever read.
 
 ## Uninstall
@@ -272,8 +279,8 @@ game and Steam before you run it. It removes everything in the table above excep
 it by hand:
 
 ```sh
-rm -rf ~/Library/"Application Support/GW2 on Mac" ~/Library/Caches/"GW2 on Mac"
-rm -rf ~/Library/Logs/"GW2 on Mac"      # the logs, if you want them gone too
+rm -rf ~/Library/"Application Support/GW2 on Mac" ~/Library/Caches/"GW2 on Mac arm64"
+rm -rf ~/Library/Logs/"GW2 on Mac arm64"      # the logs, if you want them gone too
 ```
 
 Then move the app to the Bin. A Steam library you added outside the bottle, in Steam › Settings ›
@@ -307,7 +314,7 @@ Storage, stays where it is.
 
 ```mermaid
 flowchart LR
-    app["GW2 on Mac.app<br/>SwiftUI window"] -->|"runs"| sh["gw2om.sh<br/>install, play, settings"]
+    app["GW2 on Mac arm64.app<br/>SwiftUI window"] -->|"runs"| sh["gw2om.sh<br/>install, play, settings"]
     sh -->|"downloads, adds my pieces"| engine["Wine engine<br/>CrossOver 26.3, Wine 11"]
     sh -->|"creates"| bottle["Bottle<br/>Steam and the game"]
     engine -->|"runs"| game["Gw2-64.exe"]
@@ -620,7 +627,7 @@ You need Xcode 27, for the macOS 27 SDK. The app targets macOS 26.0.
 
 ```sh
 scripts/stage-components.sh    # copy DXMT, my Wine pieces, the Mac driver and the addon into prebuilt/
-./build.sh                     # build dist/GW2 on Mac.app, ad-hoc signed
+./build.sh                     # build dist/GW2 on Mac arm64.app, ad-hoc signed
 ```
 
 **Where the binaries come from.** I build DXMT and the four Wine pieces, `ntdll.so`,
@@ -691,7 +698,7 @@ the same source, which differs only in link timestamps.
 downloads Sparkle at a pinned version and sha256, and compiles the Icon Composer icon
 `src/AppIcon.icon` with actool into `Assets.car` and a fallback `AppIcon.icns`.
 
-- `GW2_ON_MAC_VERSION` sets the version, 0.1.2 by default. `X.Y.Z-dev.N` makes a development build,
+- `GW2_ON_MAC_VERSION` sets the version, 0.2.0-dev.1 by default. `X.Y.Z-dev.N` makes a development build,
   as in SWTOR on Mac.
 - `GW2_ON_MAC_FEED_URL` and `GW2_ON_MAC_ED_PUBLIC_KEY` turn updates on. Without them Sparkle stays
   off, which is normal for local builds.
@@ -725,7 +732,7 @@ which has Sparkle's key and my Developer ID), building the components themselves
 route's and the real arcdps's checks, and playing.
 
 `scripts/test-sandbox.sh` tests the backend of a built app end to end in `work/app-sandbox/test`,
-with 413 checks. It uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and
+with 414 checks. It uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and
 ArenaNet's downloads itself, and uses a clone of the game's own ArenaNet-signed `Gw2-64.exe` as the
 installer to check. That's `SIGNED_PE`, by default the copy in my development workspace's bottle.
 Without one, those checks are skipped. It covers:
@@ -773,7 +780,7 @@ To try things by hand, `GW2_ON_MAC_ROOT=/abs/dir` puts every path `gw2om.sh` and
 use under that folder, and `GW2_ON_MAC_DRY_RUN=1` prints what would change without changing it:
 
 ```sh
-R="dist/GW2 on Mac.app/Contents/Resources"
+R="dist/GW2 on Mac arm64.app/Contents/Resources"
 GW2_ON_MAC_ROOT=$PWD/work/app-sandbox/try GW2_ON_MAC_DRY_RUN=1 "$R/gw2om.sh" install steam
 ```
 
@@ -794,6 +801,8 @@ delta updates and checks it with `scripts/check-appcast.swift`.
   apps read `https://github.com/jdrly/gw2-on-mac/releases/latest/download/appcast.xml`.
 - The feed needs an app built with `GW2_ON_MAC_FEED_URL` and `GW2_ON_MAC_ED_PUBLIC_KEY`.
 - `--sign-only` and `--no-notarize` run locally without touching GitHub.
+- `--dev` makes `GW2-on-Mac-arm64-<version>.dmg` with `GW2 on Mac arm64.app` in it and publishes
+  it as a GitHub pre-release with no feed, so `releases/latest` stays on 0.1.x.
 - I haven't tested `wineserver` under the hardened runtime yet.
 
 Release notes live in [`release-notes/`](release-notes), one file per version, in SWTOR on Mac's

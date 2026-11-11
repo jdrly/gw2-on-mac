@@ -1,5 +1,5 @@
 #!/bin/bash
-# GW2 on Mac: the install, status, play and settings logic behind the app's window. Unlike SWTOR
+# The install, status, play and settings logic behind the app's window. Unlike SWTOR
 # on Mac it changes no existing install: it creates its own Wine engine and bottle, puts GW2 on
 # Mac's graphics (DXMT) and Wine pieces into them, and installs the game through Steam or
 # ArenaNet's own installer.
@@ -51,7 +51,7 @@
 #                              valid Authenticode signature by ArenaNet ("@done <what>")
 #   gw2om.sh reset-shaders     deletes DXMT's caches (shaders, pipelines, recipes) in the app's
 #                              own cache folder; never DXMT's in the per-user cache folder
-#   gw2om.sh reinstall-engine  unpacks the engine again and puts GW2 on Mac's pieces back
+#   gw2om.sh reinstall-engine  unpacks the engine again and puts the app's pieces back
 #   gw2om.sh end-leftovers     ends leftover Wine processes of the engine (no session running)
 #   gw2om.sh fetch-engine      downloads and verifies the engine into the cache
 #   gw2om.sh env               the game's environment as play would set it (for Terminal)
@@ -93,6 +93,10 @@
 # "@notice <text>", "@error <text>", "@done <text>". Everything else is plain log text.
 # Runs under macOS's /bin/bash 3.2.
 set -euo pipefail
+# The app's name, for its texts and its three folders in ~/Library (Application Support, Logs,
+# Caches). The 0.2 development build has its own, so it installs next to 0.1.x and shares nothing
+# with it. build.sh and the scripts in scripts/ read it from here.
+APP_NAME="GW2 on Mac arm64"
 RES="$(cd "$(dirname "$0")" && pwd)"
 COMP="$RES/components"
 VERSION="$(sed -n 's/^version=//p' "$RES/app.properties" 2>/dev/null || true)"
@@ -112,7 +116,7 @@ ENGINE_URL=https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wi
 ENGINE_API_URL=https://api.github.com/repos/jdrly/wine-engine/releases/assets/734819803
 ENGINE_SIZE=234978748
 ENGINE_SHA256=1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d
-# The engine's own files that GW2 on Mac replaces (kept next to them as <file>.stock) and its
+# The engine's own files that the app replaces (kept next to them as <file>.stock) and its
 # loader, checked after unpacking: the bundled builds are made for exactly these
 ENGINE_LOADER_SHA256=2100dea802b2c560ba5d719c20ba1fcc1c8a09daf66580a4da6dd48e552d5a05
 ENGINE_NTDLL_SHA256=f1ca0f092c9435299bb06f2e6e9c92b52b4b0ab5016a42c1a4ce01ccc18c9f4a
@@ -166,10 +170,10 @@ else
   SYS_APPS=/Applications
   IMPORT_COPY="" FREE_KB=""
 fi
-APPDIR="$H/Library/Application Support/GW2 on Mac"
-LOGS="$H/Library/Logs/GW2 on Mac"
-CACHE="$H/Library/Caches/GW2 on Mac"
-ENG="$APPDIR/engine"                  # the unpacked engine with GW2 on Mac's pieces
+APPDIR="$H/Library/Application Support/$APP_NAME"
+LOGS="$H/Library/Logs/$APP_NAME"
+CACHE="$H/Library/Caches/$APP_NAME"
+ENG="$APPDIR/engine"                  # the unpacked engine with the app's pieces
 BOTTLE="$APPDIR/bottle"               # the game's Wine prefix (Steam and the game live in it)
 GAMEMODE_APP="$APPDIR/gamemode/GW2.app"
 SETTINGS="$APPDIR/settings.conf"
@@ -411,7 +415,7 @@ fetch() {
   # .wrong (replacing an earlier one) instead of deleted, and named in the window
   if [ -n "$have" ]; then
     log "$f in the cache is not the expected file ($(stat -f %z "$f") bytes, sha256 $have); moved to $f.wrong"
-    warn "$(basename "$f") in $dir is not the $label. It has $(thousands "$(stat -f %z "$f")") bytes and a sha256 starting ${have:0:12}, the $label has $(thousands "$size") bytes and a sha256 starting ${sha:0:12}. GW2 on Mac renamed your file to $(basename "$f").wrong and downloads the $label itself."
+    warn "$(basename "$f") in $dir is not the $label. It has $(thousands "$(stat -f %z "$f")") bytes and a sha256 starting ${have:0:12}, the $label has $(thousands "$size") bytes and a sha256 starting ${sha:0:12}. $APP_NAME renamed your file to $(basename "$f").wrong and downloads the $label itself."
     mv -f "$f" "$f.wrong"
   fi
   say "Downloading $label from $url"
@@ -563,7 +567,7 @@ registry_lock() {
   [ -z "$DRY" ] || return 0
   # (a Play that holds the session's lock already, on fd 9: SESSION_LOCKED)
   [ -z "${SESSION_LOCKED:-}" ] || return 0
-  [ -x "$LOCKER" ] || { warn "GW2 on Mac's session helper is missing ($LOCKER): registry settings wait for it. Reinstall GW2 on Mac."; return 1; }
+  [ -x "$LOCKER" ] || { warn "$APP_NAME's session helper is missing ($LOCKER): registry settings wait for it. Reinstall $APP_NAME."; return 1; }
   [ ! -d "$WATCH_LOCK" ] || rm -rf "$WATCH_LOCK"
   exec 8>>"$WATCH_LOCK"
   "$LOCKER" take 8 2>/dev/null && return 0
@@ -590,7 +594,7 @@ apply_registry() {
   set_reg "$REG_MAC" RetinaMode "$([ "$(setting retina)" = on ] && echo y || echo n)"
   # Addons that install as d3d11.dll (or dxgi.dll) next to Gw2-64.exe, like arcdps and Nexus,
   # load first, then load the system32 d3d11.dll: Wine's built-in, which the compatdb points at
-  # GW2 on Mac's DXMT. Without a native-first order Wine skips them. With no such file the game
+  # the app's DXMT. Without a native-first order Wine skips them. With no such file the game
   # gets the built-in as before. Gw2-64.exe only: Steam and the launcher keep the default order.
   set_reg "$REG_GW2_DLLS" d3d11 native,builtin
   set_reg "$REG_GW2_DLLS" dxgi native,builtin
@@ -668,7 +672,7 @@ write_settings() { # [<key> <value>]: settings.conf with every key, one of them 
     if [ "$k" = "${1:-}" ]; then v=$2; fi
     echo "$k=$v"
   done | {
-    echo "# GW2 on Mac settings (change them in the app: GW2 on Mac > Settings…)"
+    echo "# $APP_NAME settings (change them in the app: $APP_NAME > Settings…)"
     cat
   } | put "$SETTINGS" 644
 }
@@ -678,7 +682,7 @@ write_dxmt_conf() {
   local cap
   cap=$(setting fpscap)
   {
-    echo "# DXMT options for Guild Wars 2, written by GW2 on Mac from its settings (DXMT_CONFIG_FILE)."
+    echo "# DXMT options for Guild Wars 2, written by $APP_NAME from its settings (DXMT_CONFIG_FILE)."
     if [ "$cap" != off ]; then
       echo "# Frame cap: Metal-paced, a divisor of the display's refresh (use it with the game's vsync)"
       echo "d3d11.preferredMaxFrameRate = $cap"
@@ -747,7 +751,7 @@ install_file() {
   run install -m "$mode" "$src" "$dst"
 }
 
-# GW2 on Mac's pieces in the engine: DXMT as the dxmt DXGI tree (the PE DLLs and winemetal.so of
+# The app's pieces in the engine: DXMT as the dxmt DXGI tree (the PE DLLs and winemetal.so of
 # one build always together); the heat ntdll.so (the msync fix, the heat probes) and wineserver
 # (msync unregister fix); Wine's Mac driver, winemac.so and its PE sides (the launcher fix, game
 # keys by keyboard position, inert, and raw mouse-look; the PE sides start raw mouse-look's input thread
@@ -784,7 +788,7 @@ install_components() {
 
 engine_ok() { [ -x "$ENG/bin/wine" ] && [ "$(cat "$ENG/.gw2om-source" 2>/dev/null || true)" = "$ENGINE_SHA256" ]; }
 
-# --- GW2 on Mac's pieces in the engine, and an update of the app
+# --- The app's pieces in the engine, and an update of the app
 #
 # component_list: every file install_components puts into the engine, one
 # "<path in components/>\t<path in the engine>\t<mode>" a line (an update's whole inventory)
@@ -832,7 +836,7 @@ lib/wine/x86_64-unix/win32u.so 8aed31c9fe9c343af99330d419e81f61fd9340d30b2d7021f
 # (a sandbox: the tests' stand-ins for earlier versions' files, the same format)
 [ -z "$ROOT" ] || [ -z "${GW2_ON_MAC_OLD_COMPONENTS:-}" ] || OLD_COMPONENTS="$OLD_COMPONENTS
 $(cat "$GW2_ON_MAC_OLD_COMPONENTS")"
-# stock_sha256 <path in the engine>: the engine's own file there, for the paths GW2 on Mac replaces
+# stock_sha256 <path in the engine>: the engine's own file there, for the paths the app replaces
 stock_sha256() {
   case "$1" in
     lib/wine/x86_64-unix/ntdll.so) echo "$ENGINE_NTDLL_SHA256" ;;
@@ -862,7 +866,7 @@ comp_state() {
 }
 
 # Graphics in the engine: yes (this version's DXMT and Wine pieces: every file of component_list),
-# update (each one this version's or an earlier GW2 on Mac's, at least one earlier: Play puts this
+# update (each one this version's or an earlier version's, at least one earlier: Play puts this
 # version's in, update_components; or an update was interrupted, which Play finishes), other
 # (something else: Repair), no (no engine). components_missing: the files of the list that aren't
 # there at all (Play doesn't start the game then).
@@ -917,7 +921,7 @@ update_components() {
   local src dst mode i h moved=0
   lock
   trap update_exit EXIT
-  say "GW2 on Mac $VERSION has new pieces for the engine; putting them in"
+  say "$APP_NAME $VERSION has new pieces for the engine; putting them in"
   if [ -f "$UPD/committing" ]; then log "update: finishing an interrupted update"; fi
   mkdir -p "$UPD/new" "$UPD/old"
   component_list >"$UPD/list"
@@ -925,7 +929,7 @@ update_components() {
   while IFS='	' read -r src dst mode; do
     i=$((i + 1))
     { cp "$COMP/$src" "$UPD/new/$i" && chmod "$mode" "$UPD/new/$i" && cmp -s "$COMP/$src" "$UPD/new/$i"; } ||
-      die "Could not prepare GW2 on Mac's new pieces for the engine ($dst). Free some disk space and try again, or click Repair."
+      die "Could not prepare $APP_NAME's new pieces for the engine ($dst). Free some disk space and try again, or click Repair."
   done <"$UPD/list"
   i=0
   while IFS='	' read -r src dst mode; do
@@ -951,7 +955,7 @@ update_components() {
   while IFS='	' read -r src dst mode; do
     i=$((i + 1))
     mkdir -p "$(dirname "$ENG/$dst")"
-    mv -f "$UPD/new/$i" "$ENG/$dst" || die "Could not put GW2 on Mac's $dst into the engine."
+    mv -f "$UPD/new/$i" "$ENG/$dst" || die "Could not put $APP_NAME's $dst into the engine."
     moved=$((moved + 1))
     if [ -n "$ROOT" ]; then
       [ "${GW2_ON_MAC_UPDATE_FAIL_AFTER:-}" != "$moved" ] || die "test: the update fails after $moved files"
@@ -960,7 +964,7 @@ update_components() {
     fi
   done <"$UPD/list"
   while IFS='	' read -r src dst mode; do
-    cmp -s "$COMP/$src" "$ENG/$dst" || die "GW2 on Mac's $dst did not arrive in the engine as it should."
+    cmp -s "$COMP/$src" "$ENG/$dst" || die "$APP_NAME's $dst did not arrive in the engine as it should."
   done <"$UPD/list"
   record_components
   write_manifest
@@ -989,7 +993,7 @@ update_exit() {
 }
 
 # install_engine [force]: the verified engine unpacked into $ENG (unless it's there already),
-# then GW2 on Mac's pieces
+# then the app's pieces
 install_engine() {
   local dst="$ENG"
   if engine_ok && [ "${1:-}" != force ]; then
@@ -1194,7 +1198,7 @@ sync_uiscale() {
 }
 
 # --- arcdps (deltaconnected's addon; Settings › Interface): downloaded on request from
-# deltaconnected.com (never hosted or changed by GW2 on Mac) into the game folder as d3d11.dll,
+# deltaconnected.com (never hosted or changed by the app) into the game folder as d3d11.dll,
 # where it loads first (the d3d11/dxgi order for Gw2-64.exe, apply_registry) and passes the game's
 # Direct3D 11 on to DXMT. It updates itself, so it is recognised by what it is, not by a hash: a PE
 # whose export table has arcdps's extension API (addextension2) and that names arcdps. As dxgi.dll
@@ -1281,7 +1285,7 @@ set_arcdps() {
   fi
   case "$ARC" in
     on) registry_unlock; echo "@done arcdps is already in the game folder ($ARC_DLL)."; return 0 ;;
-    foreign) die "The game folder has another $ARC_FOREIGN (Nexus or another addon?). GW2 on Mac leaves it alone, so it can't add arcdps: remove that file, or add arcdps through that addon." ;;
+    foreign) die "The game folder has another $ARC_FOREIGN (Nexus or another addon?). $APP_NAME leaves it alone, so it can't add arcdps: remove that file, or add arcdps through that addon." ;;
   esac
   if [ -n "$DRY" ]; then
     echo "[dry-run] download $ARCDPS_URL/d3d11.dll, check it against $ARCDPS_URL/d3d11.dll.md5sum, put it into $GAME_DIR/d3d11.dll"
@@ -1422,7 +1426,7 @@ cmd_scan() {
 cmd_check_game() {
   local d
   d=$(game_dir_of "${1:-}") || { echo "@error This folder has no Guild Wars 2 in it: it needs Gw2-64.exe and a Gw2.dat of more than 1 GB."; exit 1; }
-  case "$d/" in "$BOTTLE/"*) echo "@error That is GW2 on Mac's own copy of the game."; exit 1 ;; esac
+  case "$d/" in "$BOTTLE/"*) echo "@error That is $APP_NAME's own copy of the game."; exit 1 ;; esac
   game_line "$d"
   echo "@done $d"
 }
@@ -1443,7 +1447,7 @@ import_game() {
   total=$(folder_bytes "$src")
   if [ -e "$dst" ]; then
     [ -z "$(ls -A "$dst" 2>/dev/null)" ] ||
-      die "The game's bottle already has a Guild Wars 2 folder ($dst). Uninstall GW2 on Mac first to use your own game files."
+      die "The game's bottle already has a Guild Wars 2 folder ($dst). Uninstall $APP_NAME first to use your own game files."
     run rmdir "$dst"
   fi
   if [ -n "$DRY" ]; then
@@ -1485,7 +1489,7 @@ import_game() {
   run rm -f "$dst/gw2-ui-scale.ini" "$dst/gw2-ui-scale.log"
   chmod -R u+w "$dst"
   ADDONS=$( (cd "$dst" && ls -d ./*.dll addons bin64/d3d9.dll 2>/dev/null || true) | sed 's|^\./||' | tr '\n' ',' | sed 's/,$//; s/,/, /g')
-  [ -z "$ADDONS" ] || say "Addons that came along with the game's files: $ADDONS (GW2 on Mac leaves them as they are)"
+  [ -z "$ADDONS" ] || say "Addons that came along with the game's files: $ADDONS ($APP_NAME leaves them as they are)"
   log "game files $IMPORT_HOW: $src -> $dst ($total bytes)"
 }
 
@@ -1510,7 +1514,7 @@ import_settings() {
   to="$BOTTLE/drive_c/users/$(bottle_user)/AppData/Roaming/Guild Wars 2"
   say "Your game settings from $from"
   if [ -n "$DRY" ]; then echo "[dry-run] copy Local.dat and GFXSettings.Gw2-64.exe.xml to $to"; return 0; fi
-  backup="$to/GW2 on Mac backup $(date '+%Y-%m-%d %H%M%S')"
+  backup="$to/$APP_NAME backup $(date '+%Y-%m-%d %H%M%S')"
   run mkdir -p "$to"
   for f in GFXSettings.Gw2-64.exe.xml Local.dat; do
     [ -f "$from/$f" ] || continue
@@ -1561,7 +1565,7 @@ install_imported() {
     finish_touches
     IMPORT_DST="" IMPORT_ACF=""
     log "install import complete"
-    echo "@done Guild Wars 2 is ready: its files were $how$([ "$SETTINGS_IMPORTED" = yes ] && echo ", with your game settings").$([ -z "$ADDONS" ] || echo " Addons that came along: $ADDONS; GW2 on Mac leaves them as they are.")$([ "$route" = steam ] && echo " Steam may check the files at the first Play.") Press Play."
+    echo "@done Guild Wars 2 is ready: its files were $how$([ "$SETTINGS_IMPORTED" = yes ] && echo ", with your game settings").$([ -z "$ADDONS" ] || echo " Addons that came along: $ADDONS; $APP_NAME leaves them as they are.")$([ "$route" = steam ] && echo " Steam may check the files at the first Play.") Press Play."
   else
     step "Steam opens: sign in, and it brings Guild Wars 2 up to date"
     launch "$STEAM_EXE" "steam://install/$GW2_APPID"
@@ -1719,7 +1723,7 @@ cmd_set() {
   # (arcdps: not kept in settings.conf; the game folder says whether it is on, arcdps_state)
   { [ "$key" = arcdps ] && { [ "$value" = on ] || [ "$value" = off ]; }; } || setting_valid "$key" "$value" ||
     { echo "@error Unknown setting: $key=$value"; exit 2; }
-  [ -f "$MANIFEST" ] || die "GW2 on Mac is not installed."
+  [ -f "$MANIFEST" ] || die "$APP_NAME is not installed."
   open_log
   log "---- set $key=$value"
   lock
@@ -1764,11 +1768,11 @@ lock() {
   mkdir -p "$APPDIR" "$LOGS"
   if [ ! -x "$LOCKER" ]; then
     # (without the helper: no claim, so no takeover either)
-    mkdir "$APPDIR/.lock" 2>/dev/null || die "Another GW2 on Mac install, repair or uninstall is running."
+    mkdir "$APPDIR/.lock" 2>/dev/null || die "Another $APP_NAME install, repair or uninstall is running."
     echo $$ >"$APPDIR/.lock/pid"
     return 0
   fi
-  claim "$LOCK_WAIT" || die "Another GW2 on Mac install, repair or uninstall is running."
+  claim "$LOCK_WAIT" || die "Another $APP_NAME install, repair or uninstall is running."
   if mkdir "$APPDIR/.lock" 2>/dev/null; then
     echo $$ >"$APPDIR/.lock/pid"
     unclaim
@@ -1789,7 +1793,7 @@ lock() {
     return 0
   fi
   unclaim
-  die "Another GW2 on Mac install, repair or uninstall is running."
+  die "Another $APP_NAME install, repair or uninstall is running."
 }
 unlock() {
   [ "$(cat "$APPDIR/.lock/pid" 2>/dev/null || true)" = "$$" ] || return 0
@@ -1804,7 +1808,7 @@ unlock() {
 write_manifest() {
   put "$MANIFEST" 644 <<EOF
 {
-  "app": "GW2 on Mac",
+  "app": "$APP_NAME",
   "version": "$VERSION",
   "installed": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "route": "$(state route)",
@@ -1849,7 +1853,7 @@ on_install_exit() {
 
 # preflight [import]: (an import checks the space its copy needs itself)
 preflight() {
-  [ "$(uname -m)" = arm64 ] || die "GW2 on Mac needs a Mac with Apple silicon."
+  [ "$(uname -m)" = arm64 ] || die "$APP_NAME needs a Mac with Apple silicon."
   rosetta_ok || die "Rosetta is not installed. Install it (softwareupdate --install-rosetta in Terminal), then try again."
   check_not_running
   local avail
@@ -1934,7 +1938,7 @@ launch() {
 # --- The session's watcher (watch-session)
 #
 # Play records the session in $SESSION and starts watch-session detached (nohup: it outlives the
-# app's window, which "Quit GW2 on Mac after launching" closes). The watcher follows the session
+# app's window, which "Quit the app after launching" closes). The watcher follows the session
 # through proc_list (only this engine's processes): it waits for Gw2-64.exe, then for its exit and
 # a grace, and then, if Play started Steam itself in the background with Quit Steam when the game
 # quits on, asks Steam to quit (steam.exe -shutdown), with wineserver -k for this bottle as the
@@ -2107,7 +2111,7 @@ watch_exit() {
 # gone
 watch_poll() {
   sleep "$WATCH_POLL"
-  [ -f "$MANIFEST" ] || { WATCH_RESULT=uninstalled; log "session: GW2 on Mac was uninstalled; stopping"; return 1; }
+  [ -f "$MANIFEST" ] || { WATCH_RESULT=uninstalled; log "session: $APP_NAME was uninstalled; stopping"; return 1; }
   WL=$(proc_list)
   apply_requests
 }
@@ -2249,7 +2253,7 @@ cmd_install() {
   if [ "$route" = import ]; then
     [ "${3:-}" != --no-settings ] || with_settings=no
     src=$(game_dir_of "$setup") || { echo "@error There is no Guild Wars 2 in ${setup:-that folder} (Gw2-64.exe and a Gw2.dat of more than 1 GB)."; exit 2; }
-    case "$src/" in "$BOTTLE/"*) echo "@error That is GW2 on Mac's own copy of the game."; exit 2 ;; esac
+    case "$src/" in "$BOTTLE/"*) echo "@error That is $APP_NAME's own copy of the game."; exit 2 ;; esac
     route=$(game_route_of "$src")
     if game_runs_anywhere; then echo "@error Guild Wars 2 is running. Quit it first (in every app), so its files don't change while they are copied."; exit 1; fi
   fi
@@ -2320,7 +2324,7 @@ finish_touches() {
 cmd_finish() {
   open_log
   log "---- finish $VERSION root=${ROOT:-/} dry=${DRY:-0}"
-  [ -f "$MANIFEST" ] || die "GW2 on Mac is not installed."
+  [ -f "$MANIFEST" ] || die "$APP_NAME is not installed."
   phase 5
   step "Finishing touches"
   game_state
@@ -2338,13 +2342,13 @@ cmd_stop_waiting() {
   echo "@done Stopped following the game's download. Install picks up from there."
 }
 
-# Repair: the engine (unpacked again if it isn't the expected one), GW2 on Mac's pieces in it,
+# Repair: the engine (unpacked again if it isn't the expected one), the app's pieces in it,
 # the bottle's settings and Game Mode; Steam again if it is gone; the game and settings stay
 cmd_repair() {
   CREATED="" FETCH_PID=""
   open_log
   log "---- repair $VERSION root=${ROOT:-/} dry=${DRY:-0}"
-  [ -f "$MANIFEST" ] || [ -d "$ENG" ] || die "GW2 on Mac is not installed."
+  [ -f "$MANIFEST" ] || [ -d "$ENG" ] || die "$APP_NAME is not installed."
   phase 1
   step "Checking your Mac"
   preflight
@@ -2378,13 +2382,13 @@ cmd_reinstall_engine() {
   CREATED="" FETCH_PID=""
   open_log
   log "---- reinstall-engine $VERSION"
-  [ -d "$ENG" ] || die "GW2 on Mac is not installed."
+  [ -d "$ENG" ] || die "$APP_NAME is not installed."
   check_not_running
   lock
   trap on_install_exit EXIT
   install_engine force
   install_gamemode
-  echo "@done The engine was unpacked again with GW2 on Mac's pieces."
+  echo "@done The engine was unpacked again with $APP_NAME's pieces."
 }
 
 cmd_reset_shaders() {
@@ -2402,7 +2406,7 @@ cmd_play() {
   local key
   open_log
   log "---- play $VERSION root=${ROOT:-/} dry=${DRY:-0}"
-  [ -f "$MANIFEST" ] && engine_ok || [ -n "$DRY" ] || die "GW2 on Mac is not installed. Install it first."
+  [ -f "$MANIFEST" ] && engine_ok || [ -n "$DRY" ] || die "$APP_NAME is not installed. Install it first."
   [ "$(state stage)" = finished ] || [ -n "$DRY" ] || die "Guild Wars 2 is not installed yet."
   game_state
   [ "$GAME" = yes ] || [ -n "$DRY" ] || die "Guild Wars 2 is not in the bottle any more. Install it again (Uninstall, then Install)."
@@ -2422,7 +2426,7 @@ cmd_play() {
     if [ "$(setting steambg)" = on ] && steam_remembers_login; then silent=-silent window=hidden; else window=shown; fi
   fi
   if [ -z "$DRY" ] && [ ! -x "$LOCKER" ]; then
-    warn "GW2 on Mac's session helper is missing ($LOCKER): Steam stays open after the game. Reinstall GW2 on Mac."
+    warn "$APP_NAME's session helper is missing ($LOCKER): Steam stays open after the game. Reinstall $APP_NAME."
   elif [ -z "$DRY" ]; then
     open_lock
     for try in 1 2 3; do
@@ -2435,12 +2439,12 @@ cmd_play() {
       case "$rc" in
         0) joined=yes; break ;;
         1) die "Steam is quitting after your last session. Try again in a few seconds." ;;
-        3) [ ! -d "$UPD" ] && [ ! -d "$APPDIR/.lock" ] || die "GW2 on Mac is busy putting its new pieces into the engine. Try again in a moment."
-           die "GW2 on Mac's last session did not answer. Try again in a few seconds." ;;
+        3) [ ! -d "$UPD" ] && [ ! -d "$APPDIR/.lock" ] || die "$APP_NAME is busy putting its new pieces into the engine. Try again in a moment."
+           die "$APP_NAME's last session did not answer. Try again in a few seconds." ;;
       esac
       # (2: the lock is free again: the last watcher has ended, this Play takes the session)
     done
-    [ "$fresh" = yes ] || [ "$joined" = yes ] || die "GW2 on Mac is still busy with the last session. Try again in a few seconds."
+    [ "$fresh" = yes ] || [ "$joined" = yes ] || die "$APP_NAME is still busy with the last session. Try again in a few seconds."
   fi
   # This Play's own session (it holds the session's lock: no other Play, session or registry write
   # until its watcher takes over), with no Wine of the bottle running: an update's new engine
@@ -2461,16 +2465,16 @@ cmd_play() {
     apply_registry
     write_dxmt_conf
   fi
-  # the game starts only on a whole set of GW2 on Mac's pieces (no file missing, no update half done)
+  # the game starts only on a whole set of the app's pieces (no file missing, no update half done)
   if [ -z "$DRY" ]; then
     MISSING=$(components_missing | head -1)
-    [ -z "$MISSING" ] || die "The engine is missing GW2 on Mac's $MISSING. Click Repair (with the game and Steam closed)."
+    [ -z "$MISSING" ] || die "The engine is missing $APP_NAME's $MISSING. Click Repair (with the game and Steam closed)."
     case "$(graphics_state)" in
       yes) ;;
       update)
-        [ ! -d "$UPD" ] || die "GW2 on Mac's update of the engine's pieces is not finished. Quit the game and Steam, then click Play again (or Repair)."
-        warn "GW2 on Mac's new pieces for the engine go in at the next Play without a running session." ;;
-      *) warn "The engine's graphics are not GW2 on Mac's. Click Repair." ;;
+        [ ! -d "$UPD" ] || die "$APP_NAME's update of the engine's pieces is not finished. Quit the game and Steam, then click Play again (or Repair)."
+        warn "$APP_NAME's new pieces for the engine go in at the next Play without a running session." ;;
+      *) warn "The engine's graphics are not $APP_NAME's. Click Repair." ;;
     esac
   fi
   # A running session keeps the settings it started with: Steam passes its own environment on
@@ -2732,7 +2736,7 @@ cmd_show_steam() {
     until watcher_proc "$(session_get watcher_pid)" && [ "$(session_get stage)" != "done" ]; do
       lock_held || { ask=no; break; }
       i=$((i + 1))
-      [ $i -lt "$lim" ] || die "GW2 on Mac is still handing the session over. Try Show Steam again in a moment."
+      [ $i -lt "$lim" ] || die "$APP_NAME is still handing the session over. Try Show Steam again in a moment."
       sleep 0.1
     done
     if [ "$ask" = yes ]; then
@@ -2749,7 +2753,7 @@ cmd_show_steam() {
         i=$((i + 1))
         if [ $i -ge "$lim" ]; then
           log "show-steam: the watcher did not answer the request; Steam's window stays shut"
-          die "GW2 on Mac's session didn't answer. Try Show Steam again in a moment."
+          die "$APP_NAME's session didn't answer. Try Show Steam again in a moment."
         fi
         sleep 0.1
       done
@@ -2789,7 +2793,7 @@ cmd_uninstall() {
   # (DXMT's caches are in it: $CACHE/dxmt)
   if [ -d "$CACHE" ]; then run rm -rf "$CACHE"; say "Removed the caches, DXMT's with them ($CACHE)"; fi
   log "uninstall complete"
-  echo "@done GW2 on Mac is removed, with the bottle and the game in it. Logs stay in $LOGS."
+  echo "@done $APP_NAME is removed, with the bottle and the game in it. Logs stay in $LOGS."
 }
 
 cmd_end_leftovers() {

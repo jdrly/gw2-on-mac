@@ -7,10 +7,10 @@
 // without them has an empty SUFeedURL and no SUPublicEDKey, and start() leaves Sparkle unstarted:
 // Check for Updates… is disabled and the Updates pane says so (README.md, Releasing).
 //
-// Sparkle keeps its settings in the app's defaults (cz.jandrly.gw2onmac). Installing an update
+// Sparkle keeps its settings in the app's defaults (cz.jandrly.gw2onmac.arm64). Installing an update
 // always takes a click. Only an install, repair or uninstall in progress holds an update.
 //
-// For testing, `defaults write cz.jandrly.gw2onmac GW2UpdateFeedURL <url>` replaces the feed
+// For testing, `defaults write cz.jandrly.gw2onmac.arm64 GW2UpdateFeedURL <url>` replaces the feed
 // (Sparkle accepts http only on 127.0.0.1/localhost), which also starts Sparkle without a feed in
 // Info.plist.
 //
@@ -23,7 +23,7 @@ import SwiftUI
 
 @MainActor
 final class Updates: NSObject, SPUUpdaterDelegate {
-  static let appBundleID = "cz.jandrly.gw2onmac"
+  static let appBundleID = "cz.jandrly.gw2onmac.arm64"
   static let feedOverrideKey = "GW2UpdateFeedURL"
   // build.sh compiles development builds with GW2_DEV (and writes GW2Channel dev into
   // Info.plist for som.sh); release binaries contain none of the dev-only UI.
@@ -46,14 +46,14 @@ final class Updates: NSObject, SPUUpdaterDelegate {
   func start() {
     let app = Bundle.main
     guard app.bundleIdentifier == Updates.appBundleID else {
-      NSLog("GW2 on Mac: not running as %@; no update checks", Updates.appBundleID)
+      NSLog("\(appName): not running as %@; no update checks", Updates.appBundleID)
       return
     }
     // a build without a feed (Info.plist's SUFeedURL is empty) and no test feed: updates stay off
     let feed = (app.object(forInfoDictionaryKey: "SUFeedURL") as? String) ?? ""
     let override = UserDefaults.standard.string(forKey: Updates.feedOverrideKey) ?? ""
     guard !feed.isEmpty || !override.isEmpty else {
-      NSLog("GW2 on Mac: this build has no update feed. Updates are off.")
+      NSLog("\(appName): this build has no update feed. Updates are off.")
       return
     }
     let driver = UserDriver(host: app)
@@ -61,14 +61,14 @@ final class Updates: NSObject, SPUUpdaterDelegate {
     do {
       try updater.start()
     } catch {
-      NSLog("GW2 on Mac: Sparkle did not start: %@", error.localizedDescription)
+      NSLog("\(appName): Sparkle did not start: %@", error.localizedDescription)
       return
     }
     userDriver = driver
     self.updater = updater
     // Sparkle keeps the setting in the defaults, which a release build may have turned on
     if Updates.isDevBuild { updater.automaticallyChecksForUpdates = false }
-    NSLog("GW2 on Mac: update checks %@, feed %@",
+    NSLog("\(appName): update checks %@, feed %@",
           updater.automaticallyChecksForUpdates ? "automatic" : "manual", updater.feedURL?.absoluteString ?? "-")
   }
 
@@ -85,7 +85,7 @@ final class Updates: NSObject, SPUUpdaterDelegate {
   func installerIdle() {
     guard let install = heldInstall else { return }
     heldInstall = nil
-    NSLog("GW2 on Mac: the installer has finished; installing the update")
+    NSLog("\(appName): the installer has finished; installing the update")
     install()
   }
 
@@ -105,14 +105,14 @@ final class Updates: NSObject, SPUUpdaterDelegate {
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { installHandler() }
       return true
     }
-    NSLog("GW2 on Mac: holding the update to %@ until the installer has finished", item.displayVersionString)
+    NSLog("\(appName): holding the update to %@ until the installer has finished", item.displayVersionString)
     heldInstall = installHandler
     userDriver?.window.showHeld()
     return true
   }
 
   func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
-    NSLog("GW2 on Mac: update aborted: %@", error.localizedDescription)
+    NSLog("\(appName): update aborted: %@", error.localizedDescription)
   }
 }
 
@@ -187,7 +187,7 @@ final class UserDriver: NSObject, SPUUserDriver {
 
   func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) {
     let version = host.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
-    window.showUpToDate("GW2 on Mac \(version) is the latest version.", acknowledge: acknowledgement)
+    window.showUpToDate("\(appName) \(version) is the latest version.", acknowledge: acknowledgement)
   }
 
   func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) {
@@ -465,8 +465,8 @@ private struct UpdateHeader: View {
     switch model.phase {
     case .checking: "Checking for updates…"
     case .upToDate: "You're up to date"
-    case .failed: "Couldn't update GW2 on Mac"
-    default: "A new version of GW2 on Mac is available"
+    case .failed: "Couldn't update \(appName)"
+    default: "A new version of \(appName) is available"
     }
   }
 
@@ -601,11 +601,11 @@ private struct UpdateStatusCard: View {
       case .installing:
         card {
           ProgressView().progressViewStyle(.linear)
-          Text("Installing the update. GW2 on Mac will open again in a moment.")
+          Text("Installing the update. \(appName) will open again in a moment.")
         }
       case .held:
         card {
-          Label("The update will be installed when GW2 on Mac has finished installing or "
+          Label("The update will be installed when \(appName) has finished installing or "
                 + "uninstalling. It then opens again by itself.", systemImage: "hourglass")
             .multilineTextAlignment(.leading)
         }

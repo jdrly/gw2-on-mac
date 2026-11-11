@@ -1,16 +1,17 @@
 #!/bin/bash
-# Signs, notarizes and packages dist/GW2 on Mac.app (run ./build.sh first), and prepares the
+# Signs, notarizes and packages the app in dist/ (run ./build.sh first), and prepares the
 # update feed for Sparkle (src/native/Updates.swift): SWTOR on Mac's release script, as is, for
-# GW2 on Mac (paths below are relative to the repository root).
+# this app (paths below are relative to the repository root).
 #
 # Releases go out from here. 0.1.0 and 0.1.1 are published, with their feed. As a safety stop,
 # every mode that creates or changes a GitHub release (the default, --ci, --dev, --feed) stops
 # unless GW2_ON_MAC_PUBLISH=1. A feed needs an app built with GW2_ON_MAC_FEED_URL and GW2_ON_MAC_ED_PUBLIC_KEY (./build.sh
 # puts them into Info.plist's SUFeedURL and SUPublicEDKey; without them Sparkle stays off).
 #
-#   release/<version>/GW2 on Mac.app                   Developer ID, hardened runtime
-#   release/<version>/GW2-on-Mac-<version>.dmg         signed, notarized, stapled
-#   release/<version>/GW2-on-Mac-<version>-from-<old>.delta   delta updates from older versions
+#   release/<version>/<name>.app                       Developer ID, hardened runtime (<name>: the
+#                                                       app's name; <Name>: the same with dashes)
+#   release/<version>/<Name>-<version>.dmg             signed, notarized, stapled
+#   release/<version>/<Name>-<version>-from-<old>.delta delta updates from older versions
 #   release/<version>/appcast.xml                       the feed, with only this version
 #   release/updates/                                    DMGs of this and the 5 previous versions
 # then creates a draft GitHub release v<version> with the DMG, the deltas and appcast.xml.
@@ -39,7 +40,7 @@
 #                                    install reads) stays on the last release.
 #   scripts/release.sh --dev --no-release   the same without the pre-release
 #
-# Releases from GitHub Actions (SWTOR on Mac's .github/workflows/release.yml; GW2 on Mac has no
+# Releases from GitHub Actions (SWTOR on Mac's .github/workflows/release.yml; this repository has no
 # workflow yet) come in two halves, so
 # Sparkle's EdDSA key never leaves my Mac:
 #   scripts/release.sh --ci          (CI) sign, package, notarize, and create the draft release
@@ -75,7 +76,10 @@ esac
 IDENTITY="${IDENTITY:-Developer ID Application: Jan Drly (3JT82CY6ZK)}"
 PROFILE="${NOTARY_PROFILE:-swgl-notary}"
 REPO=jdrly/gw2-on-mac
-SRC="dist/GW2 on Mac.app"
+# The app's name (src/gw2om.sh has the one definition), and as GitHub's asset names have it
+APP_NAME="$(sed -n 's/^APP_NAME="\(.*\)"$/\1/p' src/gw2om.sh)"
+DASHED="${APP_NAME// /-}"
+SRC="dist/$APP_NAME.app"
 ENT="$PWD/src/entitlements"
 if [ "$MODE" = --feed ]; then
   VERSION="$2"
@@ -91,8 +95,8 @@ esac
 RELEASE_DIR="${RELEASE_DIR:-release}"
 OUT="$RELEASE_DIR/$VERSION"
 UPDATES="$RELEASE_DIR/updates"
-APP="$OUT/GW2 on Mac.app"
-DMG="$OUT/GW2-on-Mac-$VERSION.dmg"
+APP="$OUT/$APP_NAME.app"
+DMG="$OUT/$DASHED-$VERSION.dmg"
 NOTES="${RELEASE_NOTES:-release-notes/$VERSION.md}"
 URL_PREFIX="${DOWNLOAD_URL_PREFIX:-https://github.com/$REPO/releases/download/v$VERSION/}"
 FW_REL="Contents/Frameworks/Sparkle.framework"
@@ -190,9 +194,9 @@ package() {
   echo "[release] building the disk image"
   stage="$OUT/dmg"
   mkdir -p "$stage"
-  ditto "$APP" "$stage/GW2 on Mac.app"
+  ditto "$APP" "$stage/$APP_NAME.app"
   ln -s /Applications "$stage/Applications"
-  hdiutil create -quiet -volname "GW2 on Mac $VERSION" -srcfolder "$stage" -fs HFS+ -format ULMO "$DMG"
+  hdiutil create -quiet -volname "$APP_NAME $VERSION" -srcfolder "$stage" -fs HFS+ -format ULMO "$DMG"
   rm -rf "$stage"
   codesign --force --timestamp --sign "$IDENTITY" "$DMG"
   if [ "$MODE" = --no-notarize ]; then
@@ -217,7 +221,7 @@ fetch_draft() {
   local mnt
   mnt="$(mktemp -d)"
   attach "$DMG" "$mnt"
-  ditto "$mnt/GW2 on Mac.app" "$APP"
+  ditto "$mnt/$APP_NAME.app" "$APP"
   detach "$mnt"
   rm -rf "$mnt"
   spctl --assess --type execute --verbose=2 "$APP"
@@ -247,12 +251,12 @@ case "$MODE" in
     head=$(git rev-parse HEAD)
     git branch -r --contains "$head" | grep -q . || { echo "Push $head first" >&2; exit 1; }
     gh release create "v$VERSION" --repo "$REPO" --prerelease --target "$head" \
-      --title "GW2 on Mac $VERSION (development build)" --notes-file "$NOTES" "$DMG"
+      --title "$APP_NAME $VERSION (development build)" --notes-file "$NOTES" "$DMG"
     echo "[release] $DMG ($(du -h "$DMG" | cut -f1)); pre-release v$VERSION"
     exit 0 ;;
   --ci)
     echo "[release] creating the draft GitHub release v$VERSION (DMG only)"
-    gh release create "v$VERSION" --repo "$REPO" --draft --title "GW2 on Mac $VERSION" \
+    gh release create "v$VERSION" --repo "$REPO" --draft --title "$APP_NAME $VERSION" \
       --notes-file "$NOTES" "$DMG"
     echo "[release] draft v$VERSION created; on the Mac, run scripts/release.sh --feed $VERSION"
     exit 0 ;;
@@ -267,32 +271,32 @@ mkdir -p "$UPDATES"
 rm -f "$UPDATES/${DMG##*/}"
 cp -c "$DMG" "$UPDATES/"
 kept=()
-while IFS= read -r v; do kept+=("$v"); done < <(ls "$UPDATES" | sed -n 's/^GW2-on-Mac-\(.*\)\.dmg$/\1/p' | sort -V)
-for ((i = 0; i < ${#kept[@]} - 6; i++)); do rm -f "$UPDATES/GW2-on-Mac-${kept[i]}.dmg"; done
+while IFS= read -r v; do kept+=("$v"); done < <(ls "$UPDATES" | sed -n "s/^$DASHED-\\(.*\\)\\.dmg\$/\\1/p" | sort -V)
+for ((i = 0; i < ${#kept[@]} - 6; i++)); do rm -f "$UPDATES/$DASHED-${kept[i]}.dmg"; done
 feed="$OUT/feed"
 rm -rf "$feed"
 mkdir -p "$feed"
-cp -c "$UPDATES"/GW2-on-Mac-*.dmg "$feed/"
-[ -f "$NOTES" ] && cp "$NOTES" "$feed/GW2-on-Mac-$VERSION.md"
+cp -c "$UPDATES/$DASHED"-*.dmg "$feed/"
+[ -f "$NOTES" ] && cp "$NOTES" "$feed/$DASHED-$VERSION.md"
 "$SPARKLE_BIN/generate_appcast" ${ED_KEY_FILE:+--ed-key-file "$ED_KEY_FILE"} \
   --maximum-versions 1 --maximum-deltas 5 --embed-release-notes \
   --download-url-prefix "$URL_PREFIX" "$feed"
-# Deltas are named "GW2 on Mac<new>-<old>.delta"; GitHub replaces spaces in asset names, so
+# Deltas are named "<name><new>-<old>.delta"; GitHub replaces spaces in asset names, so
 # rename them and their URLs. (The appcast itself is not signed, so it may be edited.)
 cp "$feed/appcast.xml" "$OUT/appcast.xml"
 deltas=()
 for d in "$feed"/*.delta; do
   [ -e "$d" ] || continue
-  pair="${d##*/GW2 on Mac}"; pair="${pair%.delta}"   # <new>-<old>
+  pair="${d##*/$APP_NAME}"; pair="${pair%.delta}"   # <new>-<old>
   new="${pair%%-*}"; old="${pair#*-}"
-  name="GW2-on-Mac-$new-from-$old.delta"
+  name="$DASHED-$new-from-$old.delta"
   mv "$d" "$OUT/$name"
-  sed -i '' "s|GW2%20on%20Mac$new-$old\.delta\"|$name\"|" "$OUT/appcast.xml"
+  sed -i '' "s|${APP_NAME// /%20}$new-$old\.delta\"|$name\"|" "$OUT/appcast.xml"
   deltas+=("$OUT/$name")
 done
 rm -rf "$feed"
 xmllint --noout "$OUT/appcast.xml"
-! grep -q 'GW2%20on%20Mac' "$OUT/appcast.xml" || { echo "appcast.xml still names unrenamed deltas" >&2; exit 1; }
+! grep -q "${APP_NAME// /%20}" "$OUT/appcast.xml" || { echo "appcast.xml still names unrenamed deltas" >&2; exit 1; }
 echo "  $OUT/appcast.xml, ${#deltas[@]} delta(s)"
 
 # Check the feed as Sparkle will: lengths and EdDSA signatures against the app's public key.
@@ -304,11 +308,11 @@ swift scripts/check-appcast.swift "$OUT/appcast.xml" "$OUT" \
 for d in ${deltas[@]+"${deltas[@]}"}; do
   old="${d##*-from-}"; old="${old%.delta}"
   mnt="$(mktemp -d)"; tmp="$(mktemp -d "$OUT/delta-check.XXXXXX")"
-  attach "$UPDATES/GW2-on-Mac-$old.dmg" "$mnt"
+  attach "$UPDATES/$DASHED-$old.dmg" "$mnt"
   ok=1
-  "$SPARKLE_BIN/BinaryDelta" apply "$mnt/GW2 on Mac.app" "$tmp/GW2 on Mac.app" "$d" >/dev/null &&
-    codesign --verify --strict --deep "$tmp/GW2 on Mac.app" &&
-    [ "$(plutil -extract CFBundleShortVersionString raw "$tmp/GW2 on Mac.app/Contents/Info.plist")" = "$VERSION" ] || ok=0
+  "$SPARKLE_BIN/BinaryDelta" apply "$mnt/$APP_NAME.app" "$tmp/$APP_NAME.app" "$d" >/dev/null &&
+    codesign --verify --strict --deep "$tmp/$APP_NAME.app" &&
+    [ "$(plutil -extract CFBundleShortVersionString raw "$tmp/$APP_NAME.app/Contents/Info.plist")" = "$VERSION" ] || ok=0
   detach "$mnt"
   rm -rf "$tmp" "$mnt"
   [ "$ok" = 1 ] || { echo "Delta ${d##*/} does not apply to $old" >&2; exit 1; }
@@ -324,7 +328,7 @@ case "$MODE" in
     echo "[release] draft v$VERSION complete; publish it to make the update live" ;;
   *)
     echo "[release] creating the draft GitHub release v$VERSION"
-    gh release create "v$VERSION" --repo "$REPO" --draft --title "GW2 on Mac $VERSION" \
+    gh release create "v$VERSION" --repo "$REPO" --draft --title "$APP_NAME $VERSION" \
       --notes-file "$NOTES" "$DMG" ${deltas[@]+"${deltas[@]}"} "$OUT/appcast.xml"
     echo "[release] $DMG ($(du -h "$DMG" | cut -f1)); publish the draft to make the update live" ;;
 esac

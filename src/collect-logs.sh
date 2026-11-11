@@ -1,12 +1,12 @@
 #!/bin/bash
 # Resources/collect-logs.sh: "Collect Logs…" in the app menu and in Settings › Troubleshooting
 # (src/native/App.swift), as SWTOR on Mac's. Zips what is needed to diagnose a problem into
-# ~/Desktop/GW2-on-Mac-logs-<YYYY-MM-DD-HHMM>.zip (the logs folder if the Desktop cannot be
+# ~/Desktop/<the app's name, dashed>-logs-<YYYY-MM-DD-HHMM>.zip (the logs folder if the Desktop cannot be
 # written) and prints the zip's path.
 #   collect-logs.sh [folder]   write the zip into folder instead
 #
 # In the zip:
-#   logs/          GW2 on Mac's logs (the end of large ones): install.log, wine.log (and .1-4, the
+#   logs/          the app's logs (the end of large ones): install.log, wine.log (and .1-4, the
 #                  game starts before the last), DXMT's Gw2-64_d3d11.log (and .1-4) and the other
 #                  processes' DXMT logs, the heat counters (heat-<pid>.log, Debug logging), the
 #                  Game Mode log, session.env (what the last session started with), the
@@ -24,7 +24,7 @@
 #                  engine pieces, which crash reports are in the zip, the GPU error count
 #   gpu-errors.txt  the GPU errors of the game and Wine in macOS's unified log of the last 2 hours
 #   crash-reports/  macOS's crash, hang and spin reports of the last 7 days for the game, Wine,
-#                  Steam's Windows processes and GW2 on Mac
+#                  Steam's Windows processes and the app
 # Every file is redacted on the way in, as SWTOR on Mac's: home folder → ~, user and full name →
 # USER and NAME, Steam account and persona names (read from the bottle's Steam loginusers.vdf, only
 # the names) → ACCOUNT, e-mail addresses → EMAIL, password/user name/token settings → REDACTED,
@@ -34,20 +34,22 @@
 #
 # GW2_ON_MAC_ROOT=/abs/dir: a sandbox (as for gw2om.sh); the zip then goes to its Desktop.
 set -u
+# The app's name and its folders' (as gw2om.sh's)
+APP_NAME="GW2 on Mac arm64"
 RES="$(cd "$(dirname "$0")" && pwd)"
 ROOT="${GW2_ON_MAC_ROOT:-}"
 H="${ROOT:+$ROOT/home}"
 H="${H:-$HOME}"
-APPDIR="$H/Library/Application Support/GW2 on Mac"
-LOGS="$H/Library/Logs/GW2 on Mac"
+APPDIR="$H/Library/Application Support/$APP_NAME"
+LOGS="$H/Library/Logs/$APP_NAME"
 DIAG="$H/Library/Logs/DiagnosticReports"
 BOTTLE="$APPDIR/bottle"
 STEAM="$BOTTLE/drive_c/Program Files (x86)/Steam"
 GW2_APPDATA="$BOTTLE/drive_c/users/crossover/AppData/Roaming/Guild Wars 2"
 # DXMT's caches for the game, in the app's own cache folder (gw2om.sh sets DXMT_CACHE_DIR to it)
-DXMT_CACHE="$H/Library/Caches/GW2 on Mac/dxmt/Gw2-64.exe"
+DXMT_CACHE="$H/Library/Caches/$APP_NAME/dxmt/Gw2-64.exe"
 
-name="GW2-on-Mac-logs-$(date +%Y-%m-%d-%H%M)"
+name="${APP_NAME// /-}-logs-$(date +%Y-%m-%d-%H%M)"
 dest="${1:-$H/Desktop}"
 work="$(mktemp -d)" || exit 1
 trap 'rm -rf "$work"' EXIT
@@ -209,7 +211,7 @@ add_log() {  # file max-bytes [folder in the zip [game]]: the end of a log
   mkdir -p "$dir"
   size=$(stat -f %z "$f")
   if [ "$size" -gt "$2" ]; then
-    { echo "[GW2 on Mac: only the last $(($2 / 1000000)) MB of ${f##*/}]"
+    { echo "[$APP_NAME: only the last $(($2 / 1000000)) MB of ${f##*/}]"
       tail -c "$2" "$f" | awk 'NR > 1'; } | redact ${4:+"$4"} >"$dir/${f##*/}"
   else
     redact ${4:+"$4"} <"$f" >"$dir/${f##*/}"
@@ -227,7 +229,7 @@ CRASH_FILE_MAX=3000000
 crash_reports() {
   local size f n=0 total=0
   find "$DIAG" -maxdepth 1 -type f \( -iname '*wine*' -o -iname 'Gw2*' -o -iname 'steam*' \
-    -o -name 'GW2 on Mac*' -o -name 'GW2onMac*' -o -name 'MTLCompilerService*' \) \
+    -o -name "$APP_NAME*" -o -name 'GW2onMac*' -o -name 'MTLCompilerService*' \) \
     \( -name '*.ips' -o -name '*.crash' -o -name '*.hang' -o -name '*.spin' -o -name '*.diag' \) \
     -mtime -7 -exec stat -f '%m %z %N' {} + 2>/dev/null | sort -rn | while read -r _ size f; do
       case "${f##*/}" in
@@ -365,7 +367,7 @@ gpu_errors 2>&1 | redact >"$out/gpu-errors.txt"
 m() { plutil -extract "$1" raw -o - "$APPDIR/install-manifest.json" 2>/dev/null || echo -; }
 sha12() { shasum -a 256 "$1" 2>/dev/null | cut -c1-12; }
 {
-  echo "GW2 on Mac logs, collected $(date '+%F %T %z')"
+  echo "$APP_NAME logs, collected $(date '+%F %T %z')"
   echo "Versions: $(tr -s '\n' ' ' <"$RES/VERSIONS" 2>/dev/null)"
   echo "Installed: $(m version), route $(m route), engine $(m engine), DXMT $(m dxmt)"
   echo "State: $(tr '\n' ' ' <"$APPDIR/state" 2>/dev/null | sed 's|game_dir=[^ ]*|game_dir=(set)|')"
@@ -379,7 +381,7 @@ sha12() { shasum -a 256 "$1" 2>/dev/null | cut -c1-12; }
   echo "  DXMT tree: $(cat "$E/lib/wine/dxgi/dxmt/VERSION" 2>/dev/null || echo "the engine's"), d3d11.dll $(sha12 "$E/lib/wine/dxgi/dxmt/x86_64-windows/d3d11.dll") (app's $(sha12 "$RES/components/dxmt/x86_64-windows/d3d11.dll"))"
   echo "Game Mode bundle: $([ -x "$APPDIR/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe" ] && echo present || echo none)"
   echo "Game: $([ -n "$GAME_DIR" ] && [ -f "$GAME_DIR/Gw2-64.exe" ] && echo "installed, Gw2-64.exe $(stat -f '%z bytes, %Sm' "$GAME_DIR/Gw2-64.exe")" || echo "not found")"
-  [ -z "$GAME_DIR" ] || echo "  interface addon (version.dll): $([ -f "$GAME_DIR/version.dll" ] && { grep -aq 'gw2-on-mac ui-scale' "$GAME_DIR/version.dll" && echo "GW2 on Mac's" || echo "another program's"; } || echo none)"
+  [ -z "$GAME_DIR" ] || echo "  interface addon (version.dll): $([ -f "$GAME_DIR/version.dll" ] && { grep -aq 'gw2-on-mac ui-scale' "$GAME_DIR/version.dll" && echo "$APP_NAME's" || echo "another program's"; } || echo none)"
   # d3d11.dll and dxgi.dll addons (arcdps, Nexus): which, by a quick look (gw2om.sh's arcdps_state
   # reads the exports); arcdps's own logs stay out (its crash log dumps the game's memory)
   for f in d3d11.dll dxgi.dll; do
