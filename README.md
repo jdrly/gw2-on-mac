@@ -186,20 +186,22 @@ untested on this engine.
 | | Quit Steam when the game quits | `quitsteam` | on | shown while the previous setting is on |
 | | Launch options | `launchopts` | none | arguments for `Gw2-64.exe`, using letters, digits and `-_.:=,/+` |
 | | Quit GW2 on Mac after launching | | off | the app quits once Play has started Steam or the game |
-| Mouse | Raw mouse-look | `rawmouse` | on | greyed: the engine reads the mouse from GameController by itself. My mouse-look comes with step 4 |
-| | Mouse-look speed | `mousespeed` | 1× | greyed, as raw mouse-look |
+| Mouse | Raw mouse-look | `rawmouse` | on | on, the game's raw input is the mouse's own counts from GameController; off, it is the pointer's movement, see below |
+| | Mouse-look speed | `mousespeed` | 1× | greyed: the engine gives the game the mouse's own counts. A speed factor comes with #59 if I need one |
 | Updates | Check automatically | `updates` | on | Sparkle checks for new versions. Off in development builds, which have no update feed |
 | Troubleshooting | Debug logging | `debug` | off | DXMT's log at `debug` and Wine's errors, for a bug report, at some cost in performance. On in development builds |
 
 ### Raw mouse-look
 
-When you hold a mouse button to turn the camera, the game hides the pointer and keeps moving it
-back to the centre. With Wine's stock Mac driver, each of those moves goes through the real
-macOS pointer, and the game sees your mouse once per screen refresh. With raw mouse-look on, the
-pointer stays frozen and the game gets the mouse's own movement as it arrives, around 1000 updates a
-second for a typical mouse. At 1× the camera turns as fast as it would with the pointer, including
-your pointer speed in System Settings. A trackpad keeps the pointer's movement, because macOS
-doesn't report its raw counts. Turn the setting off to get Wine's usual mouse-look back.
+On this engine the switch is Mach9's. Its Mac driver reads the mouse from GameController and
+gives the game's raw input the mouse's own counts, summed until the game next reads its input,
+without the pointer's acceleration and without the Retina factor. The engine does that for every
+program by a built-in rule, so with the setting on the game's rule says nothing about the mouse.
+With it off the rule gets `gcmouse=false`, and the game's raw input is the pointer's movement, as
+Wine does it. The pointer keeps moving under the hidden cursor either way, and the game moves it
+back. The rule is written at each game start, so the change needs no closed Steam, and the session
+report names which mouse the game had. *Mouse-look speed* stays greyed: 0.1.x's speed factor was a
+piece of my own driver, which this engine doesn't have.
 
 ### Larger interface
 
@@ -459,13 +461,15 @@ has on by default anyway. With the engine's own DXMT none of them is set, since 
 `compatdb.rules` in the app's folder is the file `WINE_COMPATDB_FILE` names. Every Wine process
 reads it when it starts, so a change reaches the next game start even while Steam runs. Play
 writes it before it starts anything, to a temporary file that it then renames. The rules are in the
-text Mach9's compatdb reads. With everything on they are:
+text Mach9's compatdb reads. With everything on and raw mouse-look off they are:
 
 ```text
-exe=Gw2-64.exe;metal_hud=true;dll_overrides=d3d11,dxgi=n,b;dll_overrides=version=n,b;env=DXMT_SHADER_CACHE_PATH=<caches>/dxmt/Gw2-64.exe
+exe=Gw2-64.exe;gcmouse=false;metal_hud=true;dll_overrides=d3d11,dxgi=n,b;dll_overrides=version=n,b;env=DXMT_SHADER_CACHE_PATH=<caches>/dxmt/Gw2-64.exe
 exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
 ```
 
+- `gcmouse=false` is there while raw mouse-look is off. It takes the game back from the engine's
+  built-in rule, which reads the mouse from GameController in every process.
 - `metal_hud` is there while the Metal HUD is on. The engine turns it into the `MTL_HUD_` variables
   in the game only. `CefHost.exe`, which the game starts for its launcher and the Trading Post,
   would inherit them, so its rule takes them away.

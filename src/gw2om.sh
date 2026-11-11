@@ -614,8 +614,8 @@ apply_registry() {
 # refuses them, and they keep what settings.conf says without an effect.
 SETTING_KEYS="retina fpscap metalfx hud warm coolworkers fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam dxmt"
 FPS_CAPS="off 30 40 60 120"
-# Mouse-look speed (mousespeed): RawMouseGameControllerScale, a factor on the macOS pointer's
-# speed (SWTOR on Mac's MOUSE_SPEEDS)
+# Mouse-look speed (mousespeed): RawMouseGameControllerScale on 0.1.x, a factor on the macOS
+# pointer's speed (SWTOR on Mac's MOUSE_SPEEDS)
 MOUSE_SPEEDS="0.5 0.75 1 1.25 1.5 1.75 2 2.5 3"
 # CPUs the game sees (ncpu): 2 up to this Mac's logical CPUs, or all
 CPU_MAX="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 8)"
@@ -664,7 +664,7 @@ setting_state() {
   case "$1" in
     metalfx|warm) if [ "$(setting dxmt)" = fork ]; then echo ok; else echo "off:Needs my DXMT fork (Graphics › DXMT)."; fi ;;
     coolworkers|fastlocks) echo "off:Need my Wine changes. Come with step 3." ;;
-    rawmouse|mousespeed) echo "off:This engine reads the mouse from GameController by itself. My mouse-look comes with step 4." ;;
+    mousespeed) echo "off:The engine gives the game the mouse's own counts. A speed factor comes with #59 if I need one." ;;
     gamemode) echo "off:The engine's loader is a Game Mode app. Nothing to switch." ;;
     *) echo ok ;;
   esac
@@ -762,6 +762,8 @@ cdb_value() {
 # 0.3.1 (Table's Display: the fields in the order of Key::ALL, words in lowercase), which CI's
 # compatdb check reads back byte for byte. The engine's built-in rules already give every process
 # DXMT, DPI awareness, raw mouse from GameController and FEX's reduced x87 precision. Gw2-64.exe:
+#   gcmouse=false      rawmouse=off: the game's raw input is the pointer's movement, as Wine does
+#                      it, not GameController's counts
 #   metal_hud=true     the Metal HUD (Settings › Graphics), in the game only
 #   dll_overrides      native first, for an addon in the game folder: d3d11 and dxgi while one is
 #                      there (arcdps, Nexus), version while the larger interface is on. With no
@@ -772,6 +774,7 @@ cdb_value() {
 # variables: the rule takes the cache path away from it again, and the HUD while it is on.
 rules_text() {
   local game="exe=Gw2-64.exe" cef="exe=CefHost.exe"
+  [ "$(setting rawmouse)" = on ] || game="$game;gcmouse=false"
   if [ "$(setting hud)" = on ]; then game="$game;metal_hud=true" cef="$cef;metal_hud=false"; fi
   arcdps_state
   case "$ARC" in on|foreign) game="$game;dll_overrides=d3d11,dxgi=n,b" ;; esac
@@ -1829,6 +1832,7 @@ launch() {
   write_rules
   if [ -n "$DRY" ]; then
     echo "[dry-run] environment:"; for e in "${E[@]}"; do printf '[dry-run]   %s\n' "$e"; done
+    rules_text | sed 's/^/[dry-run] rule /'
     echo "[dry-run] wine $*"
     return
   fi

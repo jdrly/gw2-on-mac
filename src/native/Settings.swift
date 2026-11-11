@@ -468,7 +468,7 @@ struct SettingsView: View {
 
     case .mouse:
       SettingsGroup {
-        SettingRow("Raw mouse-look", "While you hold a mouse button to turn the camera, the game gets every movement straight from the mouse as it happens, not once per screen refresh, and the pointer stays put. Turn it off for Wine's usual mouse-look.", off: off("rawmouse")) {
+        SettingRow("Raw mouse-look", "On, the game's raw mouse input is the mouse's own movement, read from GameController, without the pointer's acceleration. Off, it is the pointer's movement, as Wine usually does it. Takes effect the next time the game starts.", off: off("rawmouse")) {
           InkSwitch(isOn: settings.toggle("rawmouse"))
         }
         SettingRow("Mouse-look speed", "How fast the camera turns with raw mouse-look, compared with your pointer speed in System Settings. The game's own camera settings apply on top.", off: off("mousespeed")) {

@@ -290,15 +290,17 @@ check "defaults: warm on, coolworkers 3, fastlocks on, ncpu 8, uiscale off, cine
 check "default: Steam in the background on" [ "$(sett steambg)" = on ]
 check "default: Quit Steam when the game quits on" [ "$(sett quitsteam)" = on ]
 check "settings: a state for each of the 21 keys" [ "$(g settings | grep -cE '^[a-z_]+_state=(ok|off:.+)$')" = 21 ]
-check "  off with the step that brings them: coolworkers, fastlocks (3), rawmouse, mousespeed (4), gamemode" \
-  [ "$(g settings | sed -n 's/^\([a-z_]*\)_state=off:.*/\1/p' | tr '\n' ' ')" = "coolworkers fastlocks gamemode rawmouse mousespeed " ]
+check "  off with the step that brings them: coolworkers, fastlocks (3), mousespeed (#59), gamemode" \
+  [ "$(g settings | sed -n 's/^\([a-z_]*\)_state=off:.*/\1/p' | tr '\n' ' ')" = "coolworkers fastlocks gamemode mousespeed " ]
+check "  rawmouse ok; mousespeed greyed: the engine sends the mouse's own counts" \
+  eval '[ "$(sett rawmouse_state)" = ok ] && [ "$(sett mousespeed_state)" = "off:The engine gives the game the mouse'"'"'s own counts. A speed factor comes with #59 if I need one." ]'
 check "  ok for the ones my DXMT fork brings back: metalfx, warm; dxmt=fork by default" \
   [ "$(sett metalfx_state)/$(sett warm_state)/$(sett dxmt)/$(sett dxmt_state)" = ok/ok/fork/ok ]
 check "  the larger interface's settings and arcdps carry a note" \
   [ "$(g settings | sed -n 's/^\([a-z_]*\)_note=.*/\1/p' | tr '\n' ' ')" = "uiscale uiscale_size uiscale_sans uiscale_cinema arcdps " ]
 out=$(g set coolworkers 5 2>&1) && rc=0 || rc=$?
 check "set coolworkers 5: refused with the step 3 reason" eval '[ "$rc" = 1 ] && [ "$out" = "@error Need my Wine changes. Come with step 3." ]'
-for k in fastlocks=off rawmouse=off mousespeed=2.5 gamemode=off; do
+for k in fastlocks=off mousespeed=2.5 gamemode=off; do
   check "set ${k%%=*} ${k#*=}: refused" sh -c "! '$G' set ${k%%=*} ${k#*=} >/dev/null"
 done
 sed -i '' 's/^fastlocks=on$/fastlocks=off/' "$AD/settings.conf"
@@ -507,6 +509,17 @@ cp "$SANDBOX/pe/nexus.dll" "$GD/d3d11.dll"
 check "  another addon's d3d11.dll (Nexus): native first as well" eval 'g rules | grep "^exe=Gw2-64.exe;metal_hud=true;dll_overrides=d3d11,dxgi=n,b;" >/dev/null'
 g set hud off >/dev/null; g set uiscale off >/dev/null; rm -f "$GD/d3d11.dll"
 check "  all off again" rules_are off
+g set rawmouse off >/dev/null
+check "raw mouse-look off: gcmouse=false for the game, nothing for CefHost.exe" \
+  eval '[ "$(g rules | head -1)" = "exe=Gw2-64.exe;gcmouse=false;env=DXMT_SHADER_CACHE_PATH=$DXMT_CACHE" ] && [ "$(g rules | tail -1)" = "exe=CefHost.exe;env=DXMT_SHADER_CACHE_PATH=" ]'
+out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
+check "  a dry run of Play prints the game's rule with it" eval 'echo "$out" | grep -qxF "[dry-run] rule $(g rules | head -1)"'
+g set hud on >/dev/null
+check "  and the HUD on: after exe, before metal_hud (Key::ALL's order)" rules_are rawmouse-off-hud
+g set hud off >/dev/null; g set rawmouse on >/dev/null
+out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
+check "raw mouse-look on: the rules as before, and the dry run's rule has no gcmouse" \
+  eval 'rules_are off && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;env=" && ! echo "$out" | grep -q gcmouse'
 g set dxmt engine >/dev/null
 check "the engine's own DXMT: the game's shader cache is that DXMT's own" rules_are engine-dxmt
 g set dxmt fork >/dev/null
@@ -556,12 +569,14 @@ for f in logs/install.log logs/wine.log logs/Gw2-64_d3d11.log settings.conf comp
 done
 check "  the session report read DXMT's log" has "$Z/session-report.txt" "Frame rate: median 60.0"
 check "  and says which DXMT ran: my fork, its build" has "$Z/session-report.txt" "^DXMT that ran: my DXMT fork, $(head -1 "$COMP/dxmt/VERSION" | cut -c1-20)"
+check "  and which mouse the game had: GameController's (raw mouse-look on)" has "$Z/session-report.txt" "^Mouse the game had: the mouse's own counts from GameController"
 cp "$LOGS/session.env" "$SANDBOX/session.env.keep"
-sed -i '' 's/^DXMT_TREE=.*/DXMT_TREE=engine/' "$LOGS/session.env"
+sed -i '' -e 's/^DXMT_TREE=.*/DXMT_TREE=engine/' -e 's/^RULE=exe=Gw2-64.exe;/&gcmouse=false;/' "$LOGS/session.env"
 echo "info:  Using feature level D3D_FEATURE_LEVEL_11_1" >"$LOGS/engine-only_d3d11.log"
 out=$("$APP/Contents/Resources/session-report.sh" "$LOGS/engine-only_d3d11.log" 2>&1)
 check "the session report of the engine's DXMT: says which, and that it writes no STATS lines" \
   eval 'echo "$out" | grep -q "^DXMT that ran: the engine.s own DXMT, athei/dxmt d903db89036$" && echo "$out" | grep -q "writes no STATS lines"'
+check "  a session with raw mouse-look off: the pointer's movement" has <(echo "$out") "^Mouse the game had: the pointer's movement, as Wine does it (gcmouse=false)$"
 mv -f "$SANDBOX/session.env.keep" "$LOGS/session.env"; rm -f "$LOGS/engine-only_d3d11.log"
 check "  the Steam account name is gone" sh -c "! grep -rq zz_acct_name '$Z'"
 check "  the persona name is gone" sh -c "! grep -rqi 'Zz Persona Q' '$Z'"
@@ -614,6 +629,8 @@ check "set retina off while it runs: saved" sh -c "'$G' set retina off | grep -q
 check "  but the registry waits (Wine reads it at the session's start)" reg "$ALL_MAC" RetinaMode y
 check "set dxmt engine while it runs: saved, and the tree waits (the session's processes have it loaded)" \
   eval '"$G" set dxmt engine | grep -q "after Steam has quit" && [ "$(sett dxmt)" = engine ] && dxgi_is fork && [ "$(st graphics)" = switch ]'
+check "set rawmouse off while it runs: saved, for the next game start with Steam still open (the rules are written at each)" \
+  eval '[ "$("$G" set rawmouse off)" = "@done rawmouse=off. It takes effect the next time the game starts." ] && [ "$(sett rawmouse)" = off ] && g set rawmouse on >/dev/null'
 check "set arcdps on while it runs: refused, nothing placed" eval '! "$G" set arcdps on >"$SANDBOX/arc.txt" 2>&1 && has "$SANDBOX/arc.txt" "Quit Guild Wars 2 and Steam first" && [ ! -e "$STEAM/steamapps/common/Guild Wars 2/d3d11.dll" ]'
 kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
 mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
