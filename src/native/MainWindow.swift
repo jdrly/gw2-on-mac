@@ -377,6 +377,9 @@ struct ThisMac: View {
       }
     }
     let engine = s["engine_title"] ?? "Mach9 0.3.1 · Wine 11.21"
+    // the ntdll.so in the engine (gw2om.sh status wine_*): mine with its commit, or the engine's own
+    let short = engine.components(separatedBy: " · ").first ?? engine
+    let wine = s["wine_file"] == "mine" ? "\(short) · my ntdll \((s["wine_commit"] ?? "").prefix(7))" : engine
     let macos = s["macos"] ?? "?"
     // the DXMT Settings asks for: my fork (its commit) or the engine's own (athei/dxmt's)
     let dxmt = s["dxmt"] == "engine" ? "DXMT \((s["engine_dxmt"] ?? "").prefix(7)) · the engine's"
@@ -400,8 +403,13 @@ struct ThisMac: View {
       Check(id: "macOS", icon: "cpu",
             value: installer.macosOK ? macos : "\(macos) · needs \(s["macos_min"] ?? "26.4")",
             tone: installer.macosOK ? .good : .bad),
-      Check(id: "Engine", icon: "wine", value: s["engine_installed"] == "yes" ? engine : "\(engine) · not set up",
-            tone: s["engine_installed"] == "yes" ? .good : .off),
+      // (switch: Settings changed the ntdll.so while Steam ran; other: neither the engine's nor mine)
+      Check(id: "Engine", icon: "wine",
+            value: s["engine_installed"] != "yes" ? "\(engine) · not set up"
+              : s["wine_ready"] == "switch" ? "\(wine) · at the next Play"
+              : s["wine_ready"] == "other" ? "\(short) · ntdll needs Repair" : wine,
+            tone: s["engine_installed"] != "yes" ? .off : s["wine_ready"] == "switch" ? .pending
+              : s["wine_ready"] == "other" ? .bad : .good),
       // (switch: Settings changed it while Steam ran; the next Play puts it in)
       Check(id: "Graphics", icon: "sparkles",
             value: s["graphics"] == "yes" ? dxmt
