@@ -11,6 +11,8 @@
 #   --keep  also save the log as the logs folder's sessions/Gw2-64_d3d11-<date>.log: the
 #           log is rotated at every game start, so keep the sessions to compare
 #
+# Which DXMT ran (my fork, or the engine's own, which writes none of the lines below) comes from
+# the session's record, logs/session.env (DXMT_TREE, DXMT_FORK), for the current log.
 # Sources, all from the fork's own lines (DXMT_STATS is on by default):
 #   "GW2 fork <version>: …"  the start of a session: DXMT's version, its switches, cpus, refresh
 #   STATS    the frame rate and frame times (avg/max ms) of each interval, the command buffers
@@ -114,10 +116,24 @@ summary() {
 get() { printf '%s\n' "$1" | sed -n "s/^$2=//p"; }
 
 report() {  # <log>
-  local s
+  local s ran=""
   s=$(summary "$1")
   echo "Session: $1 (the last of $(get "$s" sessions) in it)"
-  [ "$(get "$s" sessions)" != 0 ] || { echo "No DXMT session in this log."; return; }
+  if [ -f "$LOGS/session.env" ] && [ "$(dirname "$1")" = "$LOGS" ]; then
+    case "$(sed -n 's/^DXMT_TREE=//p' "$LOGS/session.env")" in
+      fork) ran="my DXMT fork, $(sed -n 's/^DXMT_FORK=//p' "$LOGS/session.env")" ;;
+      engine) ran="the engine's own DXMT, athei/dxmt $(sed -n 's/^ENGINE_DXMT=//p' "$LOGS/session.env")" ;;
+      ?*) ran="a DXMT that is neither the engine's own nor mine" ;;
+    esac
+    [ -z "$ran" ] || echo "DXMT that ran: $ran"
+  fi
+  if [ "$(get "$s" sessions)" = 0 ]; then
+    case "$ran" in
+      "the engine's"*) echo "No session of my DXMT fork in this log: the engine's DXMT writes no STATS lines." ;;
+      *) echo "No session of my DXMT fork in this log." ;;
+    esac
+    return
+  fi
   echo "DXMT $(get "$s" version), $(get "$s" cpus) CPUs seen, display at $(get "$s" refresh) Hz"
   if [ -f "$LOGS/session.env" ] && [ "$(dirname "$1")" = "$LOGS" ]; then
     echo "Settings at the start: $(sed -n 's/^SETTING_//p' "$LOGS/session.env" | tr '\n' ' ')"

@@ -2,7 +2,8 @@
 # The install, status, play and settings logic behind the app's window. Unlike SWTOR
 # on Mac it changes no existing install: it creates its own Wine engine and bottle and installs the
 # game through Steam or ArenaNet's own installer. On this line the engine is Mach9's arm64 Wine as
-# it ships: the app puts nothing into it.
+# it ships, with one exception: its DXMT tree is my DXMT fork's (components/dxmt), the engine's own
+# kept next to it (Settings › Graphics › DXMT switches back). Nothing goes inside wine.app.
 #
 #   gw2om.sh status            KEY=VALUE lines describing this Mac (what the window shows)
 #   gw2om.sh install steam     phases 1-4: engine, bottle, Steam from Valve, then Steam starts
@@ -24,8 +25,9 @@
 #                              interface addon (if on), the registry settings, the manifest
 #   gw2om.sh stop-waiting      the window stops following the game's download (the engine and
 #                              the bottle stay; Install picks up from there)
-#   gw2om.sh repair            the engine (unpacked again if it isn't the expected one), the bottle's
-#                              settings; keeps the game and the settings
+#   gw2om.sh repair            the engine (unpacked again if it isn't the expected one), its DXMT
+#                              tree as Settings asks, the bottle's settings; keeps the game and the
+#                              settings
 #   gw2om.sh uninstall         removes everything this app created: the bottle (with the game in
 #                              it), the engine, the settings, its caches (DXMT's in them); logs
 #                              stay
@@ -52,8 +54,9 @@
 #                              settings print arcdps, arcdps_state (on|off|foreign|nogame)
 #   gw2om.sh check-setup FILE  is FILE ArenaNet's Gw2Setup-64.exe: a PE x86_64 executable with a
 #                              valid Authenticode signature by ArenaNet ("@done <what>")
-#   gw2om.sh reset-shaders     deletes DXMT's caches (shaders, pipelines, recipes) in the app's
-#                              own cache folder; never DXMT's in the per-user cache folder
+#   gw2om.sh reset-shaders     deletes DXMT's caches (shaders, pipelines, recipes; my fork's and
+#                              the engine's DXMT's) in the app's own cache folder; never DXMT's in
+#                              the per-user cache folder
 #   gw2om.sh reinstall-engine  unpacks the engine again
 #   gw2om.sh end-leftovers     ends leftover Wine processes of the engine (no session running)
 #   gw2om.sh fetch-engine      downloads and verifies the engine into the cache
@@ -120,7 +123,7 @@ ENGINE_FEX=9d4fa4b46b1
 ENGINE_DXMT=d903db89036   # athei/dxmt
 # Checked after unpacking (engine_matches): the loader, a signed app bundle that every Wine process
 # runs as (nothing may change inside it: a copied or re-signed loader exits), and ntdll.so. The
-# DXMT tree's d3d11.dll and winemetal.so tell status whether the graphics are the engine's own.
+# DXMT tree's d3d11.dll and winemetal.so tell the engine's own DXMT from mine (dxmt_tree).
 ENGINE_LOADER_APP=lib/wine/aarch64-unix/wine.app
 ENGINE_LOADER_SHA256=fac8babc821737c25483679e179f2e61e9dd2c43e3122decb1a77c5870dbeb99
 ENGINE_LOADER_ID=app.mach9.loader
@@ -196,12 +199,19 @@ RULES_LOCAL="$APPDIR/compatdb.local"
 SESSION="$APPDIR/session"
 WATCH_LOCK="$APPDIR/.session.lock"
 SESSION_REQ="$APPDIR/session.req"
-# DXMT's shader cache for the game, in the app's own cache folder instead of the per-user one
+# DXMT's caches, in the app's own cache folder instead of the per-user one
 # ($(getconf DARWIN_USER_CACHE_DIR)dxmt/, which another DXMT setup of the game on this Mac may use
-# and this app never touches): the game's rule sets DXMT_SHADER_CACHE_PATH to $DXMT_CACHE
-# (rules_text)
+# and this app never touches), one place for each DXMT: the two translate shaders differently, and
+# a switch must not hand one the other's.
+#   the engine's DXMT  $CACHE/dxmt/Gw2-64.exe, as 0.2.0-dev.1 had it: the game's rule sets
+#                      DXMT_SHADER_CACHE_PATH there (rules_text)
+#   my fork            under $FORK_CACHE_BASE: the fork takes its caches' base from
+#                      DXMT_CACHE_DIR (game_env) and doesn't read DXMT_SHADER_CACHE_PATH; the rule
+#                      names its game folder anyway, $DXMT_CACHE_FORK
 DXMT_CACHE_ROOT="$CACHE/dxmt"
 DXMT_CACHE="$DXMT_CACHE_ROOT/Gw2-64.exe"
+FORK_CACHE_BASE="$CACHE/fork"
+DXMT_CACHE_FORK="$FORK_CACHE_BASE/dxmt/Gw2-64.exe"
 STEAM_DIR="$BOTTLE/drive_c/Program Files (x86)/Steam"
 STEAM_EXE='C:\Program Files (x86)\Steam\steam.exe'
 # What uninstall removes in APPDIR (the folder itself goes too once empty; gamemode is what a build
@@ -598,10 +608,11 @@ apply_registry() {
 
 # --- Settings
 #
-# The keys are 0.1.x's, so settings.conf reads the same on both lines. On this engine some of them
-# need pieces of mine that come in later steps: setting_state says so, the Settings window greys
-# them with the reason, set refuses them, and they keep what settings.conf says without an effect.
-SETTING_KEYS="retina fpscap metalfx hud warm coolworkers fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam"
+# The keys are 0.1.x's, so settings.conf reads the same on both lines, and dxmt (fork: my DXMT
+# fork; engine: the engine's own, to compare). On this engine some of them need pieces of mine that
+# come in later steps: setting_state says so, the Settings window greys them with the reason, set
+# refuses them, and they keep what settings.conf says without an effect.
+SETTING_KEYS="retina fpscap metalfx hud warm coolworkers fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam dxmt"
 FPS_CAPS="off 30 40 60 120"
 # Mouse-look speed (mousespeed): RawMouseGameControllerScale, a factor on the macOS pointer's
 # speed (SWTOR on Mac's MOUSE_SPEEDS)
@@ -620,6 +631,7 @@ setting_default() {
     ncpu) echo 8 ;;
     uiscale_size) echo 1.75 ;;
     launchopts) echo "" ;;
+    dxmt) echo fork ;;
   esac
 }
 setting_valid() { # <key> <value>
@@ -634,6 +646,7 @@ setting_valid() { # <key> <value>
     # Gw2-64.exe's arguments: words of letters, digits and -_.:=,/+ only (nothing a shell or Wine
     # would take for something else)
     launchopts) case "$2" in *[!A-Za-z0-9\ _.:=,/+-]*) false ;; *) [ ${#2} -le 200 ] ;; esac ;;
+    dxmt) [ "$2" = fork ] || [ "$2" = engine ] ;;
     *) false ;;
   esac
 }
@@ -649,7 +662,7 @@ setting() { # <key>: its value, or the default
 # them; settings prints it, the window greys the row and shows the reason, set refuses the key)
 setting_state() {
   case "$1" in
-    metalfx|warm) echo "off:Needs my DXMT fork. Comes with step 2." ;;
+    metalfx|warm) if [ "$(setting dxmt)" = fork ]; then echo ok; else echo "off:Needs my DXMT fork (Graphics › DXMT)."; fi ;;
     coolworkers|fastlocks) echo "off:Need my Wine changes. Come with step 3." ;;
     rawmouse|mousespeed) echo "off:This engine reads the mouse from GameController by itself. My mouse-look comes with step 4." ;;
     gamemode) echo "off:The engine's loader is a Game Mode app. Nothing to switch." ;;
@@ -691,9 +704,20 @@ write_dxmt_conf() {
 # The environment of the session's first process (play), from settings.conf; also what `env`
 # prints. Steam passes it on to the game, so it is fixed while Steam runs. What only the game gets
 # goes into its compatdb rules instead (rules_text), which each process reads when it starts.
+# With my DXMT fork in the engine (dxmt_in_use), what it reads (jdrly/dxmt's docs/gw2/README.md):
+#   DXMT_CACHE_DIR=$FORK_CACHE_BASE its caches under the app's own cache folder,
+#                                   $CACHE/fork/dxmt/<exe>/ (#134), never the per-user one, 0.1.x's
+#                                   or the engine's DXMT's
+#   DXMT_DEPENDENCY_COMPRESSION=1   the checkpoint chain on Metal 4 (#133; in the mix)
+#   DXMT_WARM=all                   warm=on: pipelines built ahead by recent use (#128)
+#   DXMT_SUBSAMPLE_METALFX=1        metalfx=on: MetalFX for the Subsample pass (#56)
+#   DXMT_STATS=1                    debug=on: the 2 s STATS lines (on by default in the fork; said
+#                                   here so the session's record shows it)
+# The engine's DXMT reads none of them, so they stay out while it runs.
 game_env() {
-  local n debug=-all
+  local n debug=-all fork=""
   [ "$(setting debug)" != on ] || debug=err+all,fixme-all
+  [ "$(dxmt_in_use)" != fork ] || fork=yes
   E=(
     "WINEPREFIX=$BOTTLE"
     "WINEDEBUG=$debug"
@@ -703,9 +727,17 @@ game_env() {
     "DXMT_LOG_PATH=$LOGS"
     "WINE_COMPATDB_FILE=$RULES"
   )
+  if [ -n "$fork" ]; then
+    E+=("DXMT_CACHE_DIR=$FORK_CACHE_BASE" "DXMT_DEPENDENCY_COMPRESSION=1")
+    [ "$(setting warm)" != on ] || E+=("DXMT_WARM=all")
+    [ "$(setting metalfx)" != on ] || E+=("DXMT_SUBSAMPLE_METALFX=1")
+  fi
   n=$(setting ncpu)
   [ "$n" = all ] || E+=("WINENCPU=$n")
-  [ "$(setting debug)" != on ] || E+=("DXMT_LOG_LEVEL=debug")
+  if [ "$(setting debug)" = on ]; then
+    E+=("DXMT_LOG_LEVEL=debug")
+    [ -z "$fork" ] || E+=("DXMT_STATS=1")
+  fi
   return 0
 }
 
@@ -734,7 +766,8 @@ cdb_value() {
 #   dll_overrides      native first, for an addon in the game folder: d3d11 and dxgi while one is
 #                      there (arcdps, Nexus), version while the larger interface is on. With no
 #                      such file Wine loads its own (n,b).
-#   env                DXMT's shader cache in the app's cache folder
+#   env                DXMT's shader cache in the app's cache folder (dxmt_cache: my fork's, or
+#                      the engine's DXMT's own)
 # CefHost.exe, which the game starts for its launcher and the Trading Post, inherits the game's
 # variables: the rule takes the cache path away from it again, and the HUD while it is on.
 rules_text() {
@@ -743,7 +776,7 @@ rules_text() {
   arcdps_state
   case "$ARC" in on|foreign) game="$game;dll_overrides=d3d11,dxgi=n,b" ;; esac
   [ "$(setting uiscale)" != on ] || game="$game;dll_overrides=version=n,b"
-  echo "$game;env=DXMT_SHADER_CACHE_PATH=$(cdb_value "$DXMT_CACHE")"
+  echo "$game;env=DXMT_SHADER_CACHE_PATH=$(cdb_value "$(dxmt_cache)")"
   echo "$cef;env=DXMT_SHADER_CACHE_PATH="
 }
 # write_rules: compatdb.rules from the settings, then compatdb.local as it is (a temporary file
@@ -769,17 +802,123 @@ engine_matches() {
     printf '%s\n' "$info" | grep -qx "TeamIdentifier=$ENGINE_TEAM"
 }
 
-# Graphics in the engine: yes (its DXMT tree's d3d11.dll and winemetal.so are the engine's own),
-# other (something else: Repair unpacks the engine again), no (no engine)
-graphics_state() {
-  local t="$ENG/lib/wine/dxgi/dxmt"
-  [ -x "$ENG/bin/wine" ] || { echo no; return; }
-  if [ "$(sha256 "$t/aarch64-windows/d3d11.dll" 2>/dev/null)" = "$ENGINE_D3D11_SHA256" ] &&
+# --- DXMT: my fork (components/dxmt, jdrly/dxmt built for this engine) or the engine's own
+#
+# Mach9's compatdb gives every process the DXGI tree lib/wine/dxgi/dxmt (its built-in dxgi=dxmt
+# rule; Steam's web helper is pinned to it), and Wine loads winemetal.so from the same tree's
+# aarch64-unix/. A rule can't point the game at a tree of mine: the dxgi key knows only dxmt and
+# wined3d. So the app swaps the tree itself, outside wine.app. The active one is always
+# lib/wine/dxgi/dxmt, and the other waits next to it:
+#   dxmt.engine   the engine's own, as it ships (moved aside, never changed)
+#   dxmt.fork     the engine's tree with my fork's files over it (components/dxmt: d3d11, dxgi,
+#                 d3d10core and winemetal for aarch64-windows and i386-windows, winemetal.so,
+#                 VERSION and the licence), marked with $DXMT_MARK. The engine's tree has
+#                 aarch64-unix/winemetal.so as a link to lib/wine/aarch64-unix/winemetal.so, the
+#                 one .so behind its ARM64X and i386 DLLs: mine replaces the link with its own
+#                 file, so the two DXMTs never share one, and the engine's stays as it ships
+# Steam's processes get the same DXMT as the game, as on 0.1.x. The setting dxmt (fork|engine)
+# picks the tree; the swap happens only while no session runs or starts (apply_dxmt): at install,
+# repair, set dxmt and Play.
+DXGI="$ENG/lib/wine/dxgi"
+DXMT_MARK=.gw2om-dxmt
+# my fork's build: its VERSION's first line (git describe: v0.80-…-g<commit>) and the commit in it
+DXMT_VERSION="$(head -1 "$COMP/dxmt/VERSION" 2>/dev/null || true)"
+DXMT_COMMIT="$(printf '%s\n' "$DXMT_VERSION" | grep -oE '[0-9a-f]{7,40}' | tail -1 || true)"
+# dxmt_files: the component's files, relative to components/dxmt
+dxmt_files() { (cd "$COMP/dxmt" 2>/dev/null && find . -type f | sed 's|^\./||' | LC_ALL=C sort); }
+# dxmt_tree <dir>: engine (the engine's own DXMT: its d3d11.dll and winemetal.so), fork (mine, this
+# app's build), oldfork (mine, another build: an earlier version of the app), other, none
+dxmt_tree() {
+  local t=$1 f
+  [ -d "$t" ] || { echo none; return; }
+  if [ ! -e "$t/$DXMT_MARK" ] && [ "$(sha256 "$t/aarch64-windows/d3d11.dll" 2>/dev/null)" = "$ENGINE_D3D11_SHA256" ] &&
     [ "$(sha256 "$t/aarch64-unix/winemetal.so" 2>/dev/null)" = "$ENGINE_WINEMETAL_SHA256" ]; then
+    echo engine; return
+  fi
+  [ -f "$t/$DXMT_MARK" ] || { echo other; return; }
+  for f in $(dxmt_files); do cmp -s "$COMP/dxmt/$f" "$t/$f" || { echo oldfork; return; }; done
+  echo fork
+}
+# dxmt_in_use: the DXMT the next process loads (fork or engine; without an engine, the setting's)
+dxmt_in_use() {
+  case "$(dxmt_tree "$DXGI/dxmt")" in engine) echo engine ;; none) setting dxmt ;; *) echo fork ;; esac
+}
+# dxmt_cache: the game's shader cache for that DXMT
+dxmt_cache() { if [ "$(dxmt_in_use)" = engine ]; then echo "$DXMT_CACHE"; else echo "$DXMT_CACHE_FORK"; fi; }
+# dxmt_label <fork|engine>: what the window and the log call it
+dxmt_label() {
+  if [ "$1" = engine ]; then echo "the engine's own DXMT (athei/dxmt $ENGINE_DXMT)"; else echo "my DXMT fork ($DXMT_VERSION)"; fi
+}
+
+# Graphics in the engine: yes (the DXMT tree Settings asks for is the active one), switch (it is
+# not, and the engine's own tree is there to make it from: apply_dxmt swaps them at the next
+# chance), other (something else: Repair unpacks the engine again), no (no engine)
+graphics_state() {
+  local cur
+  [ -x "$ENG/bin/wine" ] || { echo no; return; }
+  cur=$(dxmt_tree "$DXGI/dxmt")
+  if [ "$cur" = "$(setting dxmt)" ]; then
     echo yes
+  elif [ "$cur" != other ] && { [ "$cur" = engine ] || [ "$(dxmt_tree "$DXGI/dxmt.engine")" = engine ]; }; then
+    echo switch
   else
     echo other
   fi
+}
+
+# dxmt_switch: the tree Settings asks for into place (the caller has made sure that no session runs
+# or starts). My fork's tree is made first, from the engine's own; then the active tree goes aside
+# (the engine's as dxmt.engine, mine as dxmt.fork, an earlier build of mine away) and the wanted
+# one comes in, two renames. Interrupted between them, there is no active tree, and the next
+# switch puts it in.
+dxmt_switch() {
+  local want cur src f
+  want=$(setting dxmt)
+  cur=$(dxmt_tree "$DXGI/dxmt")
+  [ "$cur" != "$want" ] || return 0
+  if [ "$cur" = engine ]; then src="$DXGI/dxmt"
+  elif [ "$cur" != other ] && [ "$(dxmt_tree "$DXGI/dxmt.engine")" = engine ]; then src="$DXGI/dxmt.engine"
+  else
+    # (graphics_state says other: Play and set dxmt say Repair)
+    log "DXMT: the engine's tree is neither its own nor mine; $(dxmt_label "$want") waits for Repair"
+    return 0
+  fi
+  if [ "$want" = fork ] && [ "$(dxmt_tree "$DXGI/dxmt.fork")" != fork ]; then
+    run rm -rf "$DXGI/dxmt.fork.new" "$DXGI/dxmt.fork"
+    run cp -Rp "$src" "$DXGI/dxmt.fork.new"
+    for f in $(dxmt_files); do
+      run mkdir -p "$(dirname "$DXGI/dxmt.fork.new/$f")"
+      # (the engine's winemetal.so is a link into lib/wine/aarch64-unix: removed, never written through)
+      run rm -f "$DXGI/dxmt.fork.new/$f"
+      run cp -p "$COMP/dxmt/$f" "$DXGI/dxmt.fork.new/$f"
+    done
+    if [ -z "$DRY" ]; then echo "$DXMT_VERSION" >"$DXGI/dxmt.fork.new/$DXMT_MARK"; fi
+    run mv "$DXGI/dxmt.fork.new" "$DXGI/dxmt.fork"
+  fi
+  case "$cur" in
+    engine) run rm -rf "$DXGI/dxmt.engine"; run mv "$DXGI/dxmt" "$DXGI/dxmt.engine" ;;
+    fork) run rm -rf "$DXGI/dxmt.fork"; run mv "$DXGI/dxmt" "$DXGI/dxmt.fork" ;;
+    oldfork) run rm -rf "$DXGI/dxmt" ;;
+  esac
+  run mv "$DXGI/dxmt.$want" "$DXGI/dxmt"
+  say "DXMT: $(dxmt_label "$want") draws the game$([ "$want" = fork ] && echo ", the engine's own kept next to it")"
+}
+
+# apply_dxmt: dxmt_switch while no session runs or starts (the session's lock, as apply_registry
+# takes it), else at the next game start that finds none (Play)
+apply_dxmt() {
+  [ -x "$ENG/bin/wine" ] || { [ -z "$DRY" ] || echo "[dry-run] $(dxmt_label "$(setting dxmt)") as the engine's DXMT tree"; return 0; }
+  if ! registry_lock; then
+    log "DXMT's tree waits for the next start without a running session (its lock is held, or its helper missing)"
+    return 0
+  fi
+  if session_running; then
+    registry_unlock
+    log "DXMT's tree waits for the next start without a running session"
+    return 0
+  fi
+  dxmt_switch
+  registry_unlock
 }
 
 # test_pause <point>: the tests' interleavings (a sandbox only): waits at <point> while the file
@@ -793,7 +932,8 @@ test_pause() {
 }
 
 # install_engine [force]: the verified engine unpacked into $ENG (unless it's there already). The
-# app writes nothing into it afterwards, and nothing at all inside wine.app.
+# app writes nothing into it afterwards but its DXMT tree (apply_dxmt), and nothing at all inside
+# wine.app.
 install_engine() {
   local dst="$ENG"
   if engine_ok && [ "${1:-}" != force ]; then
@@ -1427,6 +1567,11 @@ status() {
   echo "installed_version=$(json_get "$MANIFEST" version)"
   echo "engine_installed=$(engine_ok && echo yes || echo no)"
   echo "graphics=$(graphics_state)"
+  # (the DXMT Settings asks for, the one in the engine's tree now, and my fork's build)
+  echo "dxmt=$(setting dxmt)"
+  echo "dxmt_tree=$(dxmt_tree "$DXGI/dxmt")"
+  echo "dxmt_version=$DXMT_VERSION"
+  echo "dxmt_commit=$DXMT_COMMIT"
   # (the engine's loader is a Game Mode app: nothing for the app to set up or switch)
   echo "gamemode=engine"
   echo "route=$(state route)"
@@ -1493,10 +1638,11 @@ cmd_set() {
     fpscap) write_dxmt_conf ;;
     uiscale|uiscale_size|uiscale_sans|uiscale_cinema) sync_uiscale ;;
     retina) apply_registry ;;
+    dxmt) apply_dxmt; [ "$(graphics_state)" != other ] || warn "The engine's DXMT is neither its own nor mine. Click Repair." ;;
   esac
-  # (each process reads the rules and dxmt.conf when it starts; the environment and the registry
-  # are the session's, fixed while Steam runs)
-  if session_running && in_list "$key" "ncpu debug retina"; then
+  # (each process reads the rules and dxmt.conf when it starts; the environment, the registry and
+  # the DXMT tree are the session's, fixed while Steam runs)
+  if session_running && in_list "$key" "ncpu debug retina dxmt"; then
     echo "@done $key=$value. It takes effect the next time the game starts after Steam has quit."
   else
     echo "@done $key=$value. It takes effect the next time the game starts."
@@ -1581,6 +1727,7 @@ write_manifest() {
   "ntdll_sha256": "$ENGINE_NTDLL_SHA256",
   "dxmt_d3d11_sha256": "$ENGINE_D3D11_SHA256",
   "winemetal_sha256": "$ENGINE_WINEMETAL_SHA256",
+  "dxmt_fork": "$DXMT_VERSION",
   "app_files": ["$(echo $APP_FILES | sed 's/ /", "/g')"],
   "logs": "$LOGS",
   "caches": ["$CACHE"]
@@ -1684,6 +1831,8 @@ launch() {
     rotate_logs
     { echo "STARTED=$(date '+%F %T')"; echo "APP=$VERSION"; echo "ROUTE=$(state route)"
       echo "ENGINE=$ENGINE_NAME"; echo "ENGINE_WINE=$ENGINE_WINE"; echo "ENGINE_FEX=$ENGINE_FEX"; echo "ENGINE_DXMT=$ENGINE_DXMT"
+      # (the DXMT this session loads: the engine's tree as it is now)
+      echo "DXMT_TREE=$(dxmt_tree "$DXGI/dxmt")"; echo "DXMT_FORK=$DXMT_VERSION"
       for k in $SETTING_KEYS; do echo "SETTING_$k=$(setting "$k")"; done
       printf '%s\n' "${E[@]}"
       sed 's/^/RULE=/' "$RULES"; } >"$LOGS/session.env"
@@ -2034,6 +2183,7 @@ cmd_install() {
   [ -n "$DRY" ] || mkdir -p "$APPDIR"
   step "The Wine engine"
   install_engine
+  apply_dxmt
   phase 2
   step "The game's own bottle"
   install_bottle
@@ -2071,8 +2221,8 @@ cmd_install() {
 # The finishing touches, once the game is there (game_state): the shader cache's folder, the
 # interface addon, the registry settings, stage=finished
 finish_touches() {
-  say "The shader cache: $DXMT_CACHE (DXMT fills it while you play)"
-  run mkdir -p "$DXMT_CACHE"
+  say "The shader cache: $(dxmt_cache) (DXMT fills it while you play)"
+  run mkdir -p "$(dxmt_cache)"
   sync_uiscale
   apply_registry
   [ -n "$DRY" ] || { set_state stage finished; set_state game_dir "$GAME_DIR"; }
@@ -2101,8 +2251,9 @@ cmd_stop_waiting() {
   echo "@done Stopped following the game's download. Install picks up from there."
 }
 
-# Repair: the engine (unpacked again if it isn't the expected one), the bottle's settings; Steam
-# again if it is gone; the game and settings stay
+# Repair: the engine (unpacked again if it isn't the expected one, or its DXMT tree is neither its
+# own nor mine), the DXMT tree Settings asks for, the bottle's settings; Steam again if it is gone;
+# the game and settings stay
 cmd_repair() {
   CREATED="" FETCH_PID=""
   open_log
@@ -2115,12 +2266,13 @@ cmd_repair() {
   trap on_install_exit EXIT
   trap 'exit 143' TERM INT HUP
   step "The Wine engine"
-  if engine_ok && { [ "$(graphics_state)" != yes ] || { [ "$ENGINE_CHECKS" = 1 ] && ! engine_matches "$ENG"; }; }; then
+  if engine_ok && { [ "$(graphics_state)" = other ] || { [ "$ENGINE_CHECKS" = 1 ] && ! engine_matches "$ENG"; }; }; then
     warn "The engine's files changed; unpacking the engine again"
     install_engine force
   else
     install_engine
   fi
+  apply_dxmt
   phase 2
   step "The game's own bottle"
   install_bottle
@@ -2128,12 +2280,12 @@ cmd_repair() {
   if [ "$(state route)" = steam ]; then install_steam; fi
   phase 5
   step "Finishing touches"
-  run mkdir -p "$DXMT_CACHE"
+  run mkdir -p "$(dxmt_cache)"
   sync_uiscale
   apply_registry
   write_manifest
   log "repair complete"
-  echo "@done Repaired: the engine and the bottle's settings are set up again."
+  echo "@done Repaired: the engine and the bottle's settings are set up again. The game draws with $(dxmt_label "$(dxmt_in_use)")."
 }
 
 cmd_reinstall_engine() {
@@ -2145,6 +2297,7 @@ cmd_reinstall_engine() {
   lock
   trap on_install_exit EXIT
   install_engine force
+  apply_dxmt
   echo "@done The engine was unpacked again."
 }
 
@@ -2152,9 +2305,9 @@ cmd_reset_shaders() {
   open_log
   log "---- reset-shaders"
   case "$(busy_of "$(proc_list)")" in game) die "Quit Guild Wars 2 first." ;; esac
-  if [ -d "$DXMT_CACHE_ROOT" ]; then
-    run rm -rf "$DXMT_CACHE_ROOT"
-    run mkdir -p "$DXMT_CACHE"
+  if [ -d "$DXMT_CACHE_ROOT" ] || [ -d "$FORK_CACHE_BASE" ]; then
+    run rm -rf "$DXMT_CACHE_ROOT" "$FORK_CACHE_BASE"
+    run mkdir -p "$(dxmt_cache)"
   fi
   echo "@done DXMT's caches for the game are empty. The next sessions build them again."
 }
@@ -2206,15 +2359,22 @@ cmd_play() {
   fi
   # This Play's own session (it holds the session's lock: no other Play, session or registry write
   # until its watcher takes over), with no Wine of the bottle running: the manifest follows this
-  # version, then the registry and DXMT's options. A Play that joined a session changes nothing;
-  # without the session helper the registry waits.
+  # version, then the registry, the DXMT tree and DXMT's options. A Play that joined a session
+  # changes nothing; without the session helper the registry and the tree wait.
   if [ "$fresh" = yes ] && [ -z "$DRY" ]; then SESSION_LOCKED=yes; fi
   if { [ "$fresh" = yes ] || [ -n "$DRY" ] || [ ! -x "$LOCKER" ]; } && ! session_running; then
     [ "$(json_get "$MANIFEST" version)" = "$VERSION" ] || [ -n "$DRY" ] || write_manifest
     apply_registry
+    apply_dxmt
     write_dxmt_conf
   fi
-  [ -n "$DRY" ] || [ "$(graphics_state)" = yes ] || warn "The engine's graphics are not its own. Click Repair."
+  if [ -z "$DRY" ]; then
+    case "$(graphics_state)" in
+      yes) ;;
+      switch) echo "@notice Steam is still running with $(dxmt_label "$(dxmt_in_use)"); quit Steam to switch to $(dxmt_label "$(setting dxmt)")." ;;
+      *) warn "The engine's DXMT is neither its own nor mine. Click Repair." ;;
+    esac
+  fi
   # A running session keeps the settings it started with: Steam passes its own environment on
   if session_running && [ -f "$LOGS/session.key" ]; then
     game_env

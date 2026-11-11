@@ -610,8 +610,8 @@ enum AppActions {
     ]
   }
 
-  // "Engine mach9-v0.3.1 · DXMT d903db89036 · Sparkle 2.10.0" from Resources/VERSIONS (its engine
-  // line: "engine <name> wine <commit> fex <commit> dxmt <commit>")
+  // "Engine mach9-v0.3.1 · DXMT fork e02a4d6 · Sparkle 2.10.0" from Resources/VERSIONS (its lines
+  // "dxmt <commit> <version>", my fork's build in the app, and "engine <name> wine <commit> ...")
   static func componentVersions() -> String {
     let url = Brand.resources.appendingPathComponent("VERSIONS")
     guard let text = try? String(contentsOf: url, encoding: .utf8) else { return "" }
@@ -619,10 +619,8 @@ enum AppActions {
     for line in text.split(separator: "\n") {
       let f = line.split(separator: " ")
       guard f.count >= 2 else { continue }
-      if f[0] == "engine" {
-        parts.append("Engine \(f[1])")
-        if let i = f.firstIndex(of: "dxmt"), i + 1 < f.count { parts.append("DXMT \(f[i + 1])") }
-      }
+      if f[0] == "engine" { parts.insert("Engine \(f[1])", at: 0) }
+      if f[0] == "dxmt" { parts.append("DXMT fork \(f[1].prefix(7))") }
       if f[0] == "sparkle" { parts.append("Sparkle \(f[1])") }
     }
     return parts.joined(separator: " · ")

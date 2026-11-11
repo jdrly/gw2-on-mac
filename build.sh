@@ -8,9 +8,10 @@
 #   Contents/Resources/gw2om.sh        install/status/play/settings/uninstall logic (src/gw2om.sh)
 #   Contents/Resources/collect-logs.sh "Collect Logs…" (src/collect-logs.sh)
 #   Contents/Resources/session-report.sh  a game session in short (scripts/session-report.sh)
-#   Contents/Resources/components/     ui-scale/ (the interface addon), which gw2om.sh puts into
-#                                      the game folder, staged in prebuilt/ by
-#                                      scripts/stage-components.sh. Nothing goes into the engine.
+#   Contents/Resources/components/     dxmt/ (my DXMT fork, jdrly/dxmt, built for the engine),
+#                                      which gw2om.sh puts into the engine's DXMT tree, and
+#                                      ui-scale/ (the interface addon), which it puts into the game
+#                                      folder, staged in prebuilt/ by scripts/stage-components.sh
 #   Contents/Resources/helpers/procpaths  every process's real executable (gw2om.sh's process
 #                                      check; src/helpers/procpaths.c)
 #   Contents/Resources/helpers/sessionlock  the game session's kernel lock (gw2om.sh's watcher;
@@ -19,7 +20,8 @@
 #   Contents/Resources/Licenses/       licences of the app and everything bundled
 # The Wine engine is not bundled: gw2om.sh downloads athei's Mach9 release at install time (an arm64
 # Wine with FEX and his DXMT build; pinned URL, size and sha256 in src/gw2om.sh) and uses it as it
-# ships. Steam and the game come from Valve or ArenaNet.
+# ships, but for its DXMT tree (mine, the engine's own kept next to it). Steam and the game come
+# from Valve or ArenaNet.
 #
 # Built with the macOS 27 SDK (Xcode 27) for macOS 26.4 and later (the engine's loader needs it).
 #
@@ -33,7 +35,7 @@ cd "$(dirname "$0")"
 ROOT="$PWD"
 
 # GW2_ON_MAC_VERSION overrides the version for test builds.
-APP_VERSION=${GW2_ON_MAC_VERSION:-0.2.0-dev.1}
+APP_VERSION=${GW2_ON_MAC_VERSION:-0.2.0-dev.2}
 
 # Development builds: X.Y.Z-dev.N, as SWTOR on Mac's. CFBundleShortVersionString is the version as
 # is; CFBundleVersion (what Sparkle compares) is numeric and sorts above the previous release and
@@ -95,13 +97,24 @@ sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
 sdk="$(xcrun --sdk macosx --show-sdk-version)"
 case "$sdk" in 2[7-9]*|[3-9]*) ;; *) echo "Needs the macOS 27 SDK (Xcode 27); found $sdk" >&2; exit 1 ;; esac
 
-# The bundled component (scripts/stage-components.sh): the interface addon. This line puts no
-# DXMT or Wine build of mine into the engine, so prebuilt/dxmt, heat and winemac aren't used.
+# The bundled components (scripts/stage-components.sh): my DXMT fork for the engine, checked against
+# the record staging wrote (dxmt/SHA256SUMS: every file, and nothing else), and the interface
+# addon. 0.1.x's Wine builds (prebuilt/heat, winemac) aren't used on this line.
 P=prebuilt
 [ -f "$P/STAGED" ] || { echo "No $P/; run scripts/stage-components.sh" >&2; exit 1; }
-for f in ui-scale/version.dll ui-scale/gw2-ui-scale.ini; do
+for f in ui-scale/version.dll ui-scale/gw2-ui-scale.ini dxmt/SHA256SUMS dxmt/VERSION dxmt/LICENSE dxmt/COPYING.LIB \
+  dxmt/aarch64-unix/winemetal.so; do
   [ -f "$P/$f" ] || { echo "Missing $P/$f; run scripts/stage-components.sh" >&2; exit 1; }
 done
+for a in aarch64-windows i386-windows; do for d in d3d11 dxgi d3d10core winemetal; do
+  [ -f "$P/dxmt/$a/$d.dll" ] || { echo "Missing $P/dxmt/$a/$d.dll; run scripts/stage-components.sh" >&2; exit 1; }
+done; done
+(cd "$P/dxmt" && shasum -a 256 -c --quiet SHA256SUMS >&2) || { echo "$P/dxmt does not match its record (SHA256SUMS); stage it again" >&2; exit 1; }
+[ "$(cd "$P/dxmt" && find . -type f ! -name SHA256SUMS | sed 's|^\./||' | LC_ALL=C sort)" = "$(sed 's/^[0-9a-f]*  //' "$P/dxmt/SHA256SUMS")" ] ||
+  { echo "$P/dxmt has files its record (SHA256SUMS) doesn't name; stage it again" >&2; exit 1; }
+DXMT_VERSION="$(head -1 "$P/dxmt/VERSION")"
+DXMT_COMMIT="$(printf '%s\n' "$DXMT_VERSION" | grep -oE '[0-9a-f]{7,40}' | tail -1 || true)"
+[ -n "$DXMT_COMMIT" ] || { echo "$P/dxmt/VERSION names no commit on its first line ($DXMT_VERSION)" >&2; exit 1; }
 grep -aq 'gw2-on-mac ui-scale' "$P/ui-scale/version.dll" || { echo "$P/ui-scale/version.dll is not the addon" >&2; exit 1; }
 # The engine gw2om.sh downloads, for the licences and VERSIONS
 engine_pin() { sed -n "s/^$1=\([^ ]*\).*/\1/p" src/gw2om.sh; }
@@ -155,6 +168,10 @@ install -m 644 src/art/* "$R/Art/"
 C="$R/components"
 mkdir -p "$C"
 cp -R "$P/ui-scale" "$C/"
+mkdir -p "$C/dxmt"
+(cd "$P/dxmt" && find . -type f ! -name SHA256SUMS | while read -r f; do mkdir -p "$C/dxmt/$(dirname "$f")"; cp "$f" "$C/dxmt/$f"; done)
+chmod 644 "$C"/dxmt/*-windows/*.dll "$C"/dxmt/VERSION "$C"/dxmt/LICENSE "$C"/dxmt/COPYING.LIB
+chmod 755 "$C/dxmt/aarch64-unix/winemetal.so"
 
 # The process lister gw2om.sh tells its own Wine processes by (proc_pidpath)
 mkdir -p "$R/helpers"
@@ -165,9 +182,10 @@ clang -O2 -arch arm64 -mmacosx-version-min=$MACOS_MIN -o "$R/helpers/sessionlock
 # Licences: the app's own (zlib), the overview of what is bundled and what is downloaded
 # (THIRD_PARTY_NOTICES.md), and each component's
 L="$R/Licenses"
-mkdir -p "$L/sparkle" "$L/fonts" "$L/lucide"
+mkdir -p "$L/dxmt" "$L/sparkle" "$L/fonts" "$L/lucide"
 cp LICENSE "$L/GW2-on-Mac-LICENSE.txt"
 cp THIRD_PARTY_NOTICES.md "$L/THIRD_PARTY_NOTICES.md"
+cp "$P/dxmt/LICENSE" "$P/dxmt/COPYING.LIB" "$P/dxmt/VERSION" "$L/dxmt/"
 cp "$SPARKLE/LICENSE" "$L/sparkle/LICENSE"
 cp src/fonts/*-OFL.txt "$L/fonts/"
 cp src/icons/LICENSE.txt "$L/lucide/LICENSE.txt"
@@ -177,6 +195,10 @@ $APP_NAME $APP_VERSION - licences
 GW2 on Mac's own code (the app, gw2om.sh, collect-logs.sh, session-report.sh, the interface
 addon in components/ui-scale): zlib licence, see GW2-on-Mac-LICENSE.txt. What the app bundles and
 what it downloads at install time: THIRD_PARTY_NOTICES.md.
+
+components/dxmt: DXMT ($DXMT_VERSION), the jdrly/dxmt fork of 3Shain/dxmt, built for the
+engine below, https://github.com/jdrly/dxmt/tree/$DXMT_COMMIT: LGPL-2.1-or-later (dxmt/COPYING.LIB,
+dxmt/LICENSE). Its complete source is that commit of the fork.
 
 Sparkle $SPARKLE_VERSION (app updates), https://sparkle-project.org: MIT-style licence, see
 sparkle/LICENSE.
@@ -190,15 +212,16 @@ licence, see lucide/LICENSE.txt.
 Not included in this app: the Wine engine, athei's Mach9 ($ENGINE_NAME: Wine with his patches,
 FEX, DXMT, Mesa, vkd3d-proton, GStreamer and the rest its release page lists, each under its own
 licence), is downloaded at install time from $ENGINE_URL
-and used as it ships. Its sources and that list: https://github.com/athei/mach9/releases.
+and used as it ships, but for its DXMT tree: components/dxmt goes there, the engine's own next to
+it. Its sources and that list: https://github.com/athei/mach9/releases.
 Steam comes from Valve, Guild Wars 2 from Valve (Steam) or ArenaNet.
 EOF
 
 # channel: release, or dev (development build; gw2om.sh and the app read it)
 printf 'version=%s\nbuild=%s\nchannel=%s\nauthor=%s\ngithub=%s\nrepo=%s\nfeed=%s\n' "$APP_VERSION" "$BUNDLE_VERSION" \
   "$CHANNEL" "$APP_AUTHOR" "$GITHUB_URL" "$REPO_URL" "$(plutil -extract SUFeedURL raw "$APP/Contents/Info.plist" 2>/dev/null || true)" >"$R/app.properties"
-printf 'app %s\nengine %s wine %s fex %s dxmt %s\nui-scale %s\nsparkle %s\nsdk %s\n' \
-  "$APP_VERSION" "$ENGINE_NAME" "$(engine_pin ENGINE_WINE)" "$(engine_pin ENGINE_FEX)" "$(engine_pin ENGINE_DXMT)" \
+printf 'app %s\ndxmt %s %s\nengine %s wine %s fex %s dxmt %s\nui-scale %s\nsparkle %s\nsdk %s\n' \
+  "$APP_VERSION" "$DXMT_COMMIT" "$DXMT_VERSION" "$ENGINE_NAME" "$(engine_pin ENGINE_WINE)" "$(engine_pin ENGINE_FEX)" "$(engine_pin ENGINE_DXMT)" \
   "$(sha "$P/ui-scale/version.dll" | cut -c1-12)" "$SPARKLE_VERSION" "$sdk" >"$R/VERSIONS"
 
 # The Liquid Glass icon from Icon Composer's document (Assets.car, CFBundleIconName), plus the

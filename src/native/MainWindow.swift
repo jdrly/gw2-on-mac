@@ -378,7 +378,9 @@ struct ThisMac: View {
     }
     let engine = s["engine_title"] ?? "Mach9 0.3.1 · Wine 11.21"
     let macos = s["macos"] ?? "?"
-    let dxmt = "DXMT \((s["engine_dxmt"] ?? "").prefix(7))"
+    // the DXMT Settings asks for: my fork (its commit) or the engine's own (athei/dxmt's)
+    let dxmt = s["dxmt"] == "engine" ? "DXMT \((s["engine_dxmt"] ?? "").prefix(7)) · the engine's"
+      : "DXMT \((s["dxmt_commit"] ?? "").prefix(7)) · my fork"
     let route = installer.installedRoute == .arenanet ? "ArenaNet" : "Steam"
     let game: Check
     if installer.gameInstalled {
@@ -400,10 +402,13 @@ struct ThisMac: View {
             tone: installer.macosOK ? .good : .bad),
       Check(id: "Engine", icon: "wine", value: s["engine_installed"] == "yes" ? engine : "\(engine) · not set up",
             tone: s["engine_installed"] == "yes" ? .good : .off),
+      // (switch: Settings changed it while Steam ran; the next Play puts it in)
       Check(id: "Graphics", icon: "sparkles",
-            value: s["graphics"] == "yes" ? "\(dxmt) · engine's own"
+            value: s["graphics"] == "yes" ? dxmt
+              : s["graphics"] == "switch" ? "\(dxmt) · at the next Play"
               : s["graphics"] == "other" ? "\(dxmt) · needs Repair" : "\(dxmt) · not set up",
-            tone: s["graphics"] == "yes" ? .good : s["graphics"] == "other" ? .bad : .off),
+            tone: s["graphics"] == "yes" ? .good : s["graphics"] == "switch" ? .pending
+              : s["graphics"] == "other" ? .bad : .off),
       // (every Wine process runs as the engine's loader, a Game Mode app: nothing to set up)
       Check(id: "Game Mode", icon: "gamepad-2", value: "The engine's loader",
             tone: s["gamemode"] == "engine" ? .good : .off),
@@ -469,7 +474,7 @@ struct CheckCell: View {
 
 struct WhatItDoes: View {
   private let features: [(String, String, String)] = [
-    ("zap", "Direct3D 11 straight to Metal", "Mach9's DXMT draws the game through Metal."),
+    ("zap", "Direct3D 11 straight to Metal", "My DXMT fork draws the game through Metal 4."),
     ("cpu", "Wine for Apple silicon", "Wine runs natively. FEX translates only the game's own x86 code."),
     ("type", "Sharp text at 4K", "A larger interface drawn from the game's own crisp fonts."),
     ("undo-2", "Yours, and reversible", "Your own Steam or ArenaNet install. Uninstall removes everything."),
@@ -1046,8 +1051,9 @@ struct ReadyPanel: View {
   let installer: Installer
   let actions: PanelActions
 
-  // after an update of the app: an engine with its own graphics is this version's (Play only brings
-  // the manifest along); anything else needs Repair
+  // after an update of the app: an engine with the DXMT Settings asks for is this version's (Play
+  // only brings the manifest along); anything else, an earlier build of my DXMT fork too, takes
+  // Repair (or the next Play) to update
   private var versionChip: (warn: Bool, text: String) {
     guard installer.installedOtherVersion else { return (false, "Installed · \(installer.installedVersion)") }
     return installer.status["graphics"] == "yes"
