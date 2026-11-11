@@ -279,7 +279,7 @@ game and Steam before you run it. It removes everything in the table above excep
 it by hand:
 
 ```sh
-rm -rf ~/Library/"Application Support/GW2 on Mac" ~/Library/Caches/"GW2 on Mac arm64"
+rm -rf ~/Library/"Application Support/GW2 on Mac arm64" ~/Library/Caches/"GW2 on Mac arm64"
 rm -rf ~/Library/Logs/"GW2 on Mac arm64"      # the logs, if you want them gone too
 ```
 

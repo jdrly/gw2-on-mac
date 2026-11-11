@@ -21,6 +21,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 ROOT="$PWD"
 APP_NAME="$(sed -n 's/^APP_NAME="\(.*\)"$/\1/p' src/gw2om.sh)"
+[ -n "$APP_NAME" ] || { echo "No APP_NAME=\"…\" line in src/gw2om.sh" >&2; exit 1; }
 WS="${GW2_ON_MAC_WORKSPACE:-$ROOT/../gw2-on-mac}"
 APP="$(cd "${1:-dist/$APP_NAME.app}" && pwd)"
 G="$APP/Contents/Resources/gw2om.sh"

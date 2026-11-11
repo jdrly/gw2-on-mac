@@ -66,6 +66,7 @@ CACHE="$ROOT/.cache"
 # The app's name (gw2om.sh has the one definition) and bundle id: the 0.2 development build
 # has its own, so it installs next to 0.1.x and keeps its own defaults
 APP_NAME="$(sed -n 's/^APP_NAME="\(.*\)"$/\1/p' src/gw2om.sh)"
+[ -n "$APP_NAME" ] || { echo "No APP_NAME=\"…\" line in src/gw2om.sh" >&2; exit 1; }
 APP_ID=cz.jandrly.gw2onmac.arm64
 APP="$ROOT/dist/$APP_NAME.app"
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"

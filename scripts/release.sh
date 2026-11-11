@@ -78,6 +78,7 @@ PROFILE="${NOTARY_PROFILE:-swgl-notary}"
 REPO=jdrly/gw2-on-mac
 # The app's name (src/gw2om.sh has the one definition), and as GitHub's asset names have it
 APP_NAME="$(sed -n 's/^APP_NAME="\(.*\)"$/\1/p' src/gw2om.sh)"
+[ -n "$APP_NAME" ] || { echo "No APP_NAME=\"…\" line in src/gw2om.sh" >&2; exit 1; }
 DASHED="${APP_NAME// /-}"
 SRC="dist/$APP_NAME.app"
 ENT="$PWD/src/entitlements"
