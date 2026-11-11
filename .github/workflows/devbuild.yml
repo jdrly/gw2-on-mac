@@ -1,0 +1,23 @@
+# Dev builds of GW2 on Mac arm64 come from the arm64 branch, whose .github/workflows/devbuild.yml
+# builds and publishes them. GitHub offers a manual run only for a workflow file that the default
+# branch has too, so this one holds the name. A run takes the file of the branch it starts on:
+#
+#   gh workflow run devbuild.yml --ref arm64
+#
+# Started on main, it builds nothing and fails.
+name: Dev build
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  arm64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dev builds come from arm64
+        run: |
+          echo "::error::Dev builds come from the arm64 branch: gh workflow run devbuild.yml --ref arm64"
+          exit 1
