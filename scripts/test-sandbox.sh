@@ -1070,11 +1070,21 @@ QA="$CACHE/downloads/engine.tar.xz"
 xattr -w com.apple.quarantine "0083;6731f0a1;Safari;" "$QA"
 mkdir -p "$SANDBOX/tar-check" && tar -xJf "$QA" -C "$SANDBOX/tar-check"
 check "a quarantined archive: tar alone copies the attribute onto what it unpacks" sh -c "xattr -r '$SANDBOX/tar-check' | grep -q com.apple.quarantine"
+# An app copied out of a DMG downloaded in a browser (a dev build: ad hoc signed, not notarized):
+# its components are quarantined too, and the DXMT tree and version.dll are copied from them
+qc() { find "$COMP/dxmt" -type f; echo "$COMP/ui-scale/version.dll"; }
+qc | while IFS= read -r f; do xattr -w com.apple.quarantine "0083;6731f0a1;Safari;" "$f"; done
+cp -p "$COMP/ui-scale/version.dll" "$SANDBOX/cp-check"
+check "quarantined components: cp -p alone copies the attribute" sh -c "xattr '$SANDBOX/cp-check' | grep -q com.apple.quarantine"
 out=$(g reinstall-engine 2>&1) && rc=0 || rc=$?
 check "reinstall-engine from it: the verified download, unpacked again" eval '[ "$rc" = 0 ] && echo "$out" | grep -q "^@done" && echo "$out" | grep -q "using the verified download"'
-check "  no file of the engine has the quarantine attribute" sh -c "! xattr -r '$ENG' | grep -q com.apple.quarantine"
+check "  no file of the engine has the quarantine attribute (my DXMT tree, made from the components, included)" sh -c "! xattr -r '$ENG' | grep -q com.apple.quarantine"
 check "  graphics=yes after it, the engine as it ships with my DXMT in its tree" eval '[ "$(st graphics)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ] && dxgi_is fork'
 check "  wine.app untouched through all of it" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
+check "set uiscale on: the game folder's version.dll has no quarantine attribute" eval 'g set uiscale on >/dev/null && [ -f "$GD/version.dll" ] && ! xattr "$GD/version.dll" | grep -q com.apple.quarantine'
+g set uiscale off >/dev/null
+qc | while IFS= read -r f; do xattr -d com.apple.quarantine "$f"; done
+rm -f "$SANDBOX/cp-check"
 rm -rf "$SANDBOX/tar-check"
 mkdir "$AD/.lock"
 check "a second operation is refused while one runs (lock)" sh -c "'$G' repair 2>&1 | grep -q 'Another $APP_NAME'"
