@@ -399,6 +399,9 @@ build of mine, `other`) and `graphics`: `yes` when the tree is the one asked for
 next start puts it in (after a change during a session, or an update of the app with another build
 of my fork), and `other` when the tree is neither the engine's own nor mine. Repair then unpacks
 the engine again and puts the asked-for tree in.
+To tell my fork's tree from an earlier build, the script compares every file of
+`components/dxmt` (44 MB in `0.2.0-dev.3`) with the tree. Play and `status` do that once and
+reuse the answer for the rest of the command, until a swap changes the tree.
 
 ## Installing, step by step
 
