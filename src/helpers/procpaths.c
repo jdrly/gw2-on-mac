@@ -1,7 +1,7 @@
 // procpaths: every process's real executable, "<pid> <path>" lines (proc_pidpath), as SWTOR on
-// Mac's hold-launcher --paths. gw2om.sh tells its own Wine processes by it: Wine 11 rewrites
-// argv[0], so ps shows C:\...\name.exe for them, while the executable is the engine's loader, a
-// winetemp link to it or the Game Mode bundle's copy.
+// Mac's hold-launcher --paths. gw2om.sh tells its own Wine processes by it: Wine rewrites argv[0],
+// so ps shows C:\...\name.exe for them, while the executable is the engine's loader in wine.app.
+// The path is the resolved one, however the process was started.
 #include <libproc.h>
 #include <stdio.h>
 #include <stdlib.h>

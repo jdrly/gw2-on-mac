@@ -34,7 +34,7 @@
 		<string>arm64</string>
 	</array>
 	<key>LSMinimumSystemVersion</key>
-	<string>26.0</string>
+	<string>26.4</string>
 	<key>NSDesktopFolderUsageDescription</key>
 	<string>Collect Logs saves its zip file to your Desktop.</string>
 	<key>NSHighResolutionCapable</key>

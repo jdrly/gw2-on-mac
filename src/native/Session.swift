@@ -447,7 +447,7 @@ struct SecondaryActions: View {
   var body: some View {
     HStack {
       secondary("wrench", "Repair", Brand.fg, actions.repair)
-        .help("Sets up the engine, the graphics and Game Mode again; keeps the game and your settings")
+        .help("Sets up the engine and the bottle's settings again; keeps the game and your settings")
       Spacer()
       secondary("sliders-horizontal", "Settings", Brand.fg, actions.settings)
       Spacer()

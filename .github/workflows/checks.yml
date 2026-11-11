@@ -76,7 +76,7 @@ jobs:
       - name: VERSIONS and the component hashes
         run: |
           apps=(dist/*.app); r="${apps[0]}/Contents/Resources"
-          { echo '```'; cat "$r/VERSIONS"; echo; shasum -a 256 "$r/components/INVENTORY"; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+          { echo '```'; cat "$r/VERSIONS"; echo; (cd "$r" && shasum -a 256 components/ui-scale/*); echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Pack the app for the next jobs
         run: tar -cf "$RUNNER_TEMP/app.tar" dist .cache/sparkle-2.10.0
@@ -90,9 +90,9 @@ jobs:
       # Both refusals change the files this job has finished with.
       - name: build.sh refuses a changed component, stage-components.sh a changed archive
         run: |
-          printf x >>prebuilt/heat/ntdll.so
-          if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took a changed ntdll.so"; exit 1; fi
-          grep 'ntdll.so does not match its VERSION' "$RUNNER_TEMP/build.txt"
+          printf 'not the addon' >prebuilt/ui-scale/version.dll
+          if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took a changed version.dll"; exit 1; fi
+          grep 'version.dll is not the addon' "$RUNNER_TEMP/build.txt"
           archive=".cache/$(sed -n 's/^sha256=//p' prebuilt.lock)/$(sed -n 's/^file=//p' prebuilt.lock)"
           printf x >>"$archive"
           if scripts/stage-components.sh --fetch >"$RUNNER_TEMP/stage.txt" 2>&1; then echo "stage-components.sh took a changed archive"; exit 1; fi

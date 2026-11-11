@@ -2,13 +2,13 @@
 
 GW2 on Mac is a small macOS app I wrote to play [Guild Wars 2](https://www.guildwars2.com) on
 Apple silicon. It installs the game into a Wine engine and bottle of its own and starts it. The
-engine is CrossOver 26.3 with Wine 11. The game's Direct3D 11 goes to Metal through
-[my fork of DXMT](https://github.com/jdrly/dxmt), and the app adds macOS Game Mode, Retina
-rendering and a Wine I tuned for the game's crowded maps. It changes nothing you already have
-installed.
+engine is athei's [Mach9](https://github.com/athei/mach9) 0.3.1, an arm64 Wine 11.21 that runs the
+game's x86_64 code with FEX, used as it ships. The game's Direct3D 11 goes to Metal through the
+engine's own DXMT. It changes nothing you already have installed.
 
 > **This is the `arm64` branch.** It builds *GW2 on Mac arm64*, the development app for 0.2,
-> which moves the game to an arm64 Wine engine. It has its own name, bundle id
+> which moves the game to an arm64 Wine engine. 0.1.x runs CrossOver 26.3 under Rosetta with my
+> DXMT fork and my Wine pieces. This app puts none of them into its engine. It has its own name, bundle id
 > (`cz.jandrly.gw2onmac.arm64`) and folders, so it installs next to GW2 on Mac 0.1.x and shares
 > nothing with it. The name is `APP_NAME` at the top of `src/gw2om.sh`, `collect-logs.sh` and
 > `session-report.sh`, and `appName` in `src/native/App.swift`. It has no updates, and 0.1.x stays
@@ -44,9 +44,8 @@ is for building, testing and releasing the app.
 
 ## What you need
 
-- A Mac with Apple silicon and macOS 26 or later.
-- Rosetta. If *This Mac* in the window says it's missing, run `softwareupdate --install-rosetta`
-  in Terminal.
+- A Mac with Apple silicon and macOS 26.4 or later. The engine's loader needs 26.4, and the install
+  refuses to start on an earlier macOS, naming both versions.
 - About 75 GB of free space for the game, plus about 3 GB for the engine and Steam. The install
   refuses to start under 3 GB and warns under 75 GB.
 - Guild Wars 2 on Steam, or an ArenaNet account.
@@ -57,7 +56,7 @@ open it.
 
 ## Installing the game
 
-The window offers three ways in. Pick one and its card opens. The *This Mac* panel checks Rosetta,
+The window offers three ways in. Pick one and its card opens. The *This Mac* panel checks macOS,
 the engine, the graphics, Game Mode, the game and the free space.
 
 **Steam.** The app downloads the engine, creates the bottle, installs Steam from Valve's CDN and
@@ -103,7 +102,7 @@ first Play.
 
 If the first install fails or you cancel it, it removes the engine, the bottle, the settings and
 the install state it created, and any game files it copied. Other files it made on the way can
-stay, such as cached downloads, logs, `dxmt.conf` and the Game Mode bundle. You can quit
+stay, such as cached downloads, logs and `dxmt.conf`. You can quit
 the app during a Steam or ArenaNet download. The window picks the download up again when you open
 it, and *Stop waiting* stops following it but keeps the engine and the bottle.
 
@@ -143,8 +142,9 @@ Some details:
 - If the game's own Frame Limiter is set while vertical sync is on, the window suggests
   *Unlimited* with vsync. *Don't show again* hides the tip.
 
-**Repair** puts the engine, my pieces in it, the bottle's settings, Game Mode and Steam back in
-place. It keeps the game and your settings. Use it when the window says so.
+**Repair** puts the engine, the bottle's settings and Steam back in place. It unpacks the engine
+again when its files aren't the expected ones. It keeps the game and your settings. Use it when the
+window says so.
 
 ## Settings
 
@@ -257,14 +257,12 @@ nothing in `/Applications` besides itself.
 
 | Path | What | Uninstall |
 |---|---|---|
-| `~/Library/Application Support/GW2 on Mac arm64/engine/` | the Wine engine with my pieces, about 1 GB | removed |
+| `~/Library/Application Support/GW2 on Mac arm64/engine/` | the Wine engine as it ships, without its SDK, about 1 GB | removed |
 | `…/GW2 on Mac arm64/bottle/` | the game's Wine prefix with Steam, the game's files and the game's settings. About 75 GB, or no extra space for a clone of files on the same disk | removed, with the game |
-| `…/GW2 on Mac arm64/gamemode/GW2.app` | the Game Mode bundle | removed |
 | `…/GW2 on Mac arm64/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `session`, `session.req`, `.session.lock` | settings, install state, what was installed, DXMT's options, the current game session and its lock | removed |
 | `~/Library/Caches/GW2 on Mac arm64/downloads/` | the engine archive, `SteamSetup.exe`, a copy of `Gw2Setup-64.exe` | removed |
 | `~/Library/Caches/GW2 on Mac arm64/dxmt/Gw2-64.exe/` | DXMT's shader cache and pipeline archives. Another process, such as the launcher's `CefHost.exe`, gets its own folder next to it | removed. *Reset the shader cache* in Settings empties it too |
-| `$(getconf DARWIN_USER_TEMP_DIR)winetemp-…/Gw2-64.exe` | the Game Mode link | removed |
-| `~/Library/Logs/GW2 on Mac arm64/` | `install.log`, `wine.log`, DXMT's `Gw2-64_d3d11.log`, `session.env`, `gamemode.log`, the heat logs, and `.lock-claim` for the install lock | kept |
+| `~/Library/Logs/GW2 on Mac arm64/` | `install.log`, `wine.log`, DXMT's `Gw2-64_d3d11.log`, `session.env`, the heat logs, and `.lock-claim` for the install lock | kept |
 
 In the game folder, `version.dll` and `gw2-ui-scale.ini` exist only while *Larger interface* is on,
 and arcdps's `d3d11.dll` only while *arcdps* is on. The app never touches another program's
@@ -315,11 +313,11 @@ Storage, stays where it is.
 ```mermaid
 flowchart LR
     app["GW2 on Mac arm64.app<br/>SwiftUI window"] -->|"runs"| sh["gw2om.sh<br/>install, play, settings"]
-    sh -->|"downloads, adds my pieces"| engine["Wine engine<br/>CrossOver 26.3, Wine 11"]
+    sh -->|"downloads, checks"| engine["Wine engine<br/>Mach9 0.3.1, Wine 11.21, FEX"]
     sh -->|"creates"| bottle["Bottle<br/>Steam and the game"]
     engine -->|"runs"| game["Gw2-64.exe"]
     bottle --- game
-    game -->|"Direct3D 11"| dxmt["DXMT<br/>my fork"]
+    game -->|"Direct3D 11"| dxmt["DXMT<br/>the engine's"]
     dxmt -->|"winemetal"| metal["Metal"]
 ```
 
@@ -328,32 +326,41 @@ bash 3.2. The window calls it for everything: `status`, `install`, `play`, `sett
 `repair`, `uninstall` and a few more, listed at the top of [`src/gw2om.sh`](src/gw2om.sh). The
 script reports back in lines that start with `@`, such as `@phase`, `@progress` and `@error`.
 
-The Wine engine is not in the app. athei built it from CodeWeavers' CrossOver 26.3 sources and
-athei's own patches, and that release is gone now, so I host the same file in
-[jdrly/wine-engine](https://github.com/jdrly/wine-engine/releases/tag/cx-26.3.0-8), release
-`cx-26.3.0-8`, next to the Wine source it was built from. The script downloads it from there at
-install time, pinned by size and sha256. The download resumes, retries and has a second address
-through GitHub's API. Then my pieces go into the engine:
+The Wine engine is not in the app. It is athei's
+[Mach9 0.3.1](https://github.com/athei/mach9/releases/tag/v0.3.1), the release asset
+`wine-v0.3.1-macos-arm64.tar.xz`, built from Wine `athei/wine@53def89293a`, which is wine-11.21-37,
+FEX `9d4fa4b46b1`, DXMT `athei/dxmt@d903db89036` and the other components its release page lists. The script
+downloads it at install time, pinned by size and sha256. The download resumes, retries and has a
+second address through GitHub's API. `status`, the manifest and Collect Logs name the three
+commits.
 
-- DXMT `e02a4d6` over the engine's `dxgi/dxmt` tree
-- my `ntdll.so` and `wineserver`, which I call the heat build, tuned for the game's threads
-- Wine's Mac driver `winemac.so` with its `winemac.drv` PE sides for x86_64 and i386. It carries
-  the launcher fix and raw mouse-look, and its PE sides start raw mouse-look's input thread
-- `win32u.so` built at -O2, which draws the launcher's layered window
+After unpacking, the script takes the quarantine attribute off the whole tree. An archive downloaded
+in a browser and put into the downloads folder by hand carries it, and `tar` copies it onto every
+file. The loader is notarized and would pass, the engine's ad hoc signed libraries would not. Then
+it removes the SDK, which nothing reads at run time: `include/`, `lib/wine/tests/`,
+`lib/wine/x86_64-windows/` and `share/man/`. Last it checks the build, which means the sha256 of the loader
+`lib/wine/aarch64-unix/wine.app/Contents/MacOS/wine` and of `ntdll.so`, and
+`codesign --verify --strict` on `wine.app` with Mach9's team `WLKUUJD25W` and the identifier
+`app.mach9.loader`. That reads the signature and starts nothing.
 
-Before replacing an engine file, the script checks it against the engine's known sha256 and keeps
-it as `<name>.stock`.
+The app writes nothing into the engine afterwards, and nothing at all inside `wine.app`. The loader
+is signed with an embedded provisioning profile, and a re-signed, edited or copied loader exits.
+`status` says `graphics=yes` while the engine's DXMT tree has its own `d3d11.dll` and
+`winemetal.so`, and `other` when it doesn't. Repair then unpacks the engine again.
 
 ## Installing, step by step
 
 `gw2om.sh install <route>` runs five phases. A failed or cancelled first install removes what that
 run tracked as created: the engine, the bottle, `settings.conf`, `state`, `install-manifest.json`,
 and an import's copied game folder with Steam's record. Other files it made can stay, such as
-cached downloads, logs, `dxmt.conf` and a finished Game Mode bundle.
+cached downloads, logs and `dxmt.conf`.
 
-1. **The engine.** Download, check, unpack, check the loader, then my pieces as above.
-2. **The bottle.** `wineboot`, Retina mode in `user.reg`, `settings.conf`, `dxmt.conf` and the
-   Game Mode bundle.
+1. **The engine.** Check macOS, download, unpack, take the quarantine off, remove the SDK, check
+   the build, as above.
+2. **The bottle.** `wineboot`, then `settings.conf`, `dxmt.conf` and three values in `user.reg`,
+   the ones Mach9's own launcher writes: `RetinaMode` under `Software\Wine\Mac Driver`,
+   `EmulateModeset=Y` under `Software\Wine\X11 Driver` and `ShowCrashDialog=dword:0` under
+   `Software\Wine\WineDbg`.
 3. **Steam or ArenaNet's installer.** Steam's `SteamSetup.exe` comes from Valve's CDN and runs with
    `/S`. ArenaNet's installer goes through `gw2om.sh check-setup` first, which uses only macOS's
    `/usr/bin/openssl`. The file must be a PE x86_64 executable. Its Authenticode signature must be
@@ -376,13 +383,18 @@ Both only read.
 
 ## The game's environment
 
+The install's own Wine calls, `wineboot` and Valve's Steam installer, get `WINEPREFIX`,
+`WINEDEBUG=-all`, `WINEMSYNC=1` and `WINEDLLOVERRIDES=winemenubuilder.exe=d`, and nothing else of
+the app's. If the app inherited `WINE_COMPATDB`, `WINE_COMPATDB_FILE`, `WINE_LARGE_ADDRESS_AWARE`
+or `WINE_PROF_SERVICE`, they are removed from every Wine start, because each changes what the
+engine does for every process. The engine's built-in rules already give each process DXMT, leave
+Mono and Gecko out, and set Steam's web helper up.
+
 `settings.conf` holds the settings, and every Play turns them into the game's environment.
 `gw2om.sh env` prints what Play would use. These are always set:
 
 - `WINEMSYNC=1`
-- `ROSETTA_X87_PATH=` to turn the engine's x87sidecar off
 - `WINEDLLOVERRIDES=winemenubuilder.exe=d`
-- a compatdb rule that gives every process DXMT, the launcher's `CefHost.exe` included
 - `DXMT_CONFIG_FILE`, `DXMT_LOG_PATH`, `DXMT_CACHE_DIR` and `DXMT_DEPENDENCY_COMPRESSION=1`
 - my ntdll's `WINE_HEAT_EVPOOL=1`, `WINE_HEAT_WAKE=one,skip`, `WINE_HEAT_LAZYCLOCK=1`,
   `WINE_HEAT_MSYNC_UNREG=1` and `WINE_HEAT_MSYNC_PORTFIX=1`
@@ -399,9 +411,9 @@ The settings map to these:
 | `coolworkers` | `WINE_HEAT_QOS=1=utility:<n>`, the first n ABOVE_NORMAL job workers at utility QoS |
 | `fastlocks` | `WINE_HEAT_SPIN=lock=20:game,event=30:game` |
 | `ncpu` | `WINENCPU`, bounded by `sysctl hw.logicalcpu` |
-| `uiscale` | the addon files, and `version=native,builtin` for `Gw2-64.exe` |
+| `uiscale` | the addon files. The `version=native,builtin` order it needs comes with the game's compatdb rules, not yet on this line |
 | `uiscale_size`, `uiscale_sans`, `uiscale_cinema` | the addon's ini: `scale`, `sans=cronos` or `keep`, `cinema=1` |
-| `rawmouse`, `mousespeed` | `RawMouseWhenCursorHidden` and `RawMouseGameControllerScale` for `Gw2-64.exe` in `user.reg` |
+| `rawmouse`, `mousespeed` | nothing on this line. The engine reads the mouse from GameController by itself |
 | `debug` | `DXMT_LOG_LEVEL=debug`, `WINE_HEAT_COUNT` and `WINEDEBUG=err+all,fixme-all` |
 
 The script writes registry settings straight into the bottle's `user.reg`, as SWTOR on Mac does.
@@ -419,7 +431,6 @@ sequenceDiagram
     participant X as Session watcher
     W->>P: Play
     P->>P: take the session lock
-    P->>P: put in new engine pieces if an update brought any
     P->>P: write registry and DXMT options
     P->>S: steam.exe -applaunch 1284210, with -silent once Steam remembers a login
     P->>X: start the watcher, hand it the lock
@@ -435,11 +446,11 @@ sequenceDiagram
 
 `gw2om.sh play` runs `steam.exe -applaunch 1284210 <launch options>` on the Steam route, adding
 `-silent` once Steam's `config/loginusers.vdf` has a user with `"RememberPassword" "1"`. On the
-ArenaNet route it runs `Gw2-64.exe <launch options>`. It also makes the Game Mode link, writes
-`session.env` and rotates the logs when no session runs.
+ArenaNet route it runs `Gw2-64.exe <launch options>`. It also writes `session.env` and rotates the
+logs when no session runs.
 
 One session runs at a time. The session's lock is a kernel `flock` on `.session.lock`, taken by the
-app's helper `helpers/sessionlock`. Play takes it before it updates engine files or registry settings, and passes it to the
+app's helper `helpers/sessionlock`. Play takes it before it writes registry settings, and passes it to the
 watcher, `gw2om.sh watch-session`, which it starts detached so the window can quit. The lock ends
 with the watcher, so nothing stale is left behind. After Play writes the first version of the
 `session` file, the watcher is its only writer. Others append requests to `session.req`: `join` from
@@ -505,11 +516,10 @@ and never writes the file.
 ## Game Mode
 
 macOS turns Game Mode on only for a process whose executable sits in a bundle with
-`LSSupportsGameMode`, and every Wine process runs Wine's loader. SWGL on Mac and my development
-setup solve it the same way. `gamemode/GW2.app`, bundle ID `cz.jandrly.gw2onmac.game`, holds an
-unsigned copy of the loader named `Gw2-64.exe` and an `ntdll.so` link. With `WINEDLLPATH` set,
-CrossOver's ntdll starts the game from `$TMPDIR/winetemp-…/Gw2-64.exe`, and Play points that path
-at the bundle.
+`LSSupportsGameMode`. On this engine every Wine process runs as the loader in `wine.app`, whose
+`Info.plist` carries `LSSupportsGameMode`, `GCSupportsGameMode` and the games category, so the app
+builds nothing and has nothing to switch. `status` prints `gamemode=engine`. Whether the game gets
+Game Mode when Steam starts it, rather than Launch Services, is still to be seen in play.
 
 ## Raw mouse-look in the driver
 
@@ -557,50 +567,12 @@ points the download elsewhere for tests.
 
 ## Engine updates
 
-When an app update has new engine pieces, `status` says `graphics=update` and *This Mac* shows
-*DXMT · updates at Play*. The pieces are the 18 files `component_list` names: DXMT's PE DLLs for
-both architectures, `winemetal.so` and its records, `ntdll.so`, `wineserver`, `winemac.so`, both
-`winemac.drv` and `win32u.so`. Each live file must be one of these:
-
-- this version's file from the app, or its staged build before the release signs it. That's
-  `components/INVENTORY`, which `build.sh` writes, so an engine set up from the same unsigned build
-  also counts.
-- 0.1.0's, from pinned hashes in `OLD_COMPONENTS`. Each file has its staged hash and its hash in the
-  notarized DMG. In 0.1.0 the Mac driver's PE sides were still the engine's own.
-- from 0.1.1 on, a file named in the engine's own record of what the app put in,
-  `engine/.gw2om-components`.
-
-A file that matches none of these, because it's damaged, someone else's or missing, makes
-`graphics=other`. The app says *needs Repair* and never overwrites such a file without it. Play
-never starts the game on a set with a missing piece. An engine that already has this version's
-pieces is `graphics=yes`, and Play only brings the manifest up to this version.
-
-The update runs only inside a Play that holds the session's lock and the install lock, with no Wine
-of the bottle running. Another Play during that time starts nothing and says to try again.
-
-```mermaid
-flowchart TD
-    stage["Copy every new file to new/<br/>and compare it"] --> backup["Back up each live file to old/<br/>copy, compare, rename"]
-    backup --> commit["Write the committing mark"]
-    commit --> move["Rename each new file into place"]
-    move --> check["Compare every file again"]
-    check --> done["Write the record and manifest<br/>remove the journal"]
-    stage -->|"fails"| clean["Remove the journal<br/>engine unchanged"]
-    backup -->|"fails"| clean
-    move -->|"fails"| rollback["Put the backups back<br/>engine as before"]
-    check -->|"fails"| rollback
-    move -->|"killed or power lost"| next["The journal stays<br/>the next Play finishes the update"]
-```
-
-The journal lives in `engine/.gw2om-update`. A backup only counts once it's renamed into its slot,
-so a half-written one never does. An engine's own file also keeps its `.stock` copy, as at install.
-After an interruption the engine counts as `update`, the game doesn't start on a half-replaced set,
-and the next Play finishes the job.
+The app puts nothing into the engine, so an app update has nothing to change in it. A new engine
+comes with new pins in `gw2om.sh`, and Repair or *Reinstall the engine* unpacks it.
 
 ### The install lock
 
-`.lock` holds its owner's pid and keeps installs, repairs, uninstalls, settings changes and updates
-apart. Creating it, taking over one whose process is gone, and removing it all happen under
+`.lock` holds its owner's pid and keeps installs, repairs, uninstalls and settings changes apart. Creating it, taking over one whose process is gone, and removing it all happen under
 `.lock-claim`, a kernel lock taken through the same `sessionlock` helper. Only the owner removes
 the lock. `.lock-claim` lives in the logs folder, which Uninstall keeps, so it's always the same
 file. Each contender holds the claim only for those steps and releases it before anything else runs,
@@ -623,70 +595,34 @@ last session from DXMT's own log lines:
 
 ## Building
 
-You need Xcode 27, for the macOS 27 SDK. The app targets macOS 26.0.
+You need Xcode 27, for the macOS 27 SDK. The app targets macOS 26.4, as the engine does.
 
 ```sh
-scripts/stage-components.sh    # copy DXMT, my Wine pieces, the Mac driver and the addon into prebuilt/
+scripts/stage-components.sh    # copy the interface addon into prebuilt/
 ./build.sh                     # build dist/GW2 on Mac arm64.app, ad-hoc signed
 ```
 
-**Where the binaries come from.** I build DXMT and the four Wine pieces, `ntdll.so`,
-`wineserver`, `winemac.so` and `win32u.so`, in my private development workspace, whose build
-scripts aren't in this repository. `stage-components.sh` copies them from `GW2_ON_MAC_WORKSPACE`,
-by default `../gw2-on-mac` next to this checkout. The builds the app ships are
-`work/dxmt-rollback/e02a4d6-install`, `work/heat/install-r7c`, `work/winemac/install-km` and
-`work/ui-scale/build`. `DXMT_INSTALL`, `HEAT_INSTALL`, `WINEMAC_INSTALL` and `UISCALE_BUILD`
-override them. The script changes nothing in the workspace. Git ignores `prebuilt/`. What it
-checks differs per component:
+On this branch the app bundles one component, the interface addon. 0.1.x's DXMT fork and Wine
+pieces stay on `main`; `build.sh` doesn't need them and `stage-components.sh` doesn't stage them.
 
-- The Wine binaries must match the sha256 in their build records, `VERSION` and
-  `WINESERVER.txt`. For ntdll and the Mac driver, the script also checks the records' patch hashes
-  against this repository's [`patches/`](patches). It compares existing workspace copies of
-  `ntdll-heat.patch`, `wineserver-msync-unregister.patch` and the Mac driver patches with this
-  repository's copies.
-- DXMT's files must all be there. Its `VERSION` holds only the revision, `v0.80-441-ge02a4d6`.
-- The addon's `version.dll` and `gw2-ui-scale.ini` must be there, and the DLL must carry the
-  addon's marker string.
+**Where the addon comes from.** `stage-components.sh` copies `version.dll` and
+`gw2-ui-scale.ini` from `GW2_ON_MAC_WORKSPACE`, by default `../gw2-on-mac` next to this checkout,
+at `work/ui-scale/build`. `UISCALE_BUILD` overrides that. The DLL must carry the addon's marker
+string. The script changes nothing in the workspace. Git ignores `prebuilt/`.
 
 **Without the workspace.** A checkout without my workspace, like a GitHub runner, can't copy
-anything, so `stage-components.sh` downloads the same `prebuilt/` as one archive instead. It does
-that when `GW2_ON_MAC_WORKSPACE` doesn't exist, or with `--fetch`. The archive is a pre-release of
-this repository, tagged `components-<date>`. [`prebuilt.lock`](prebuilt.lock) pins its tag, file
-name and sha256, and the script refuses a download or cached copy with another sha256 before it
-unpacks anything. The archive holds only what the app already ships, the binaries and their
-records and licences. `build.sh` then checks it like any other `prebuilt/`.
+anything, so `stage-components.sh` downloads 0.1.x's components archive instead and keeps only its
+`ui-scale/`. It does that when `GW2_ON_MAC_WORKSPACE` doesn't exist, or with `--fetch`. The archive
+is a pre-release of this repository, tagged `components-<date>`. [`prebuilt.lock`](prebuilt.lock)
+pins its tag, file name and sha256, and the script refuses a download or cached copy with another
+sha256 before it unpacks anything. `build.sh` then checks it like any other `prebuilt/`.
 
-When the components change, I stage from the workspace, build and test as usual, then publish a
-new archive:
+`--pack <tag>` makes such an archive from `prebuilt/` and writes `prebuilt.lock` for it; README.md
+on `main` says how I publish one.
 
-```sh
-scripts/stage-components.sh --pack components-2026-11-11   # release/<tag>/…tar.xz, and a new prebuilt.lock
-gh release create components-2026-11-11 --prerelease --latest=false --target main \
-  --title "Components 2026-11-11 (for CI, not an app release)" --notes "prebuilt/ for the Checks workflow" \
-  release/components-2026-11-11/gw2-on-mac-components-2026-11-11.tar.xz
-```
-
-and commit `prebuilt.lock` with the change. It has to stay a pre-release: installed apps read
-`releases/latest`, and a pre-release never becomes that. `site.yml` skips pre-releases too.
-
-**Their source.** The complete corresponding source is public, under LGPL-2.1-or-later. DXMT is
-[jdrly/dxmt at `e02a4d6`](https://github.com/jdrly/dxmt/tree/e02a4d6). The Wine pieces are
-[athei/wine `d23b397`](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0)
-(also as an [archive in jdrly/wine-engine](https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-d23b39774528237cafe49f9a073286f854b779c0-source.tar.gz)),
-which is CodeWeavers' CrossOver 26.3 source with athei's patches and the engine's own source, plus
-these patches:
-
-- [`ntdll-msync-alert-fd.patch`](patches/ntdll-msync-alert-fd.patch), from SWTOR on Mac
-- [`ntdll-heat.patch`](patches/ntdll-heat.patch)
-- [`wineserver-msync-unregister.patch`](patches/wineserver-msync-unregister.patch)
-- [`winemac-gw2-launcher.patch`](patches/winemac-gw2-launcher.patch)
-- SWTOR on Mac's keyboard and mouse patches for the Mac driver, unchanged:
-  `winemac-physical-keys.patch`, `winemac-swgl-relative-mouse.patch`,
-  `winemac-swgl-input-thread.patch` and `winemac-swtor-mouse.patch`
-
-They're configured as the engine is. The Wine pieces' build records, also in the app under
-`Resources/Licenses`, name their sources, patches and sha256. DXMT's record names its revision,
-and the commit above is its source. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+**The engine's source** is athei's: [athei/mach9](https://github.com/athei/mach9) and the
+repositories its release page lists, each under its own licence. The app doesn't bundle or change
+any of it. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 **The interface addon** is this repository's own code in [`addon/ui-scale`](addon/ui-scale).
 `scripts/build-addon.sh` builds `version.dll` with Homebrew's mingw-w64 (`brew install mingw-w64`)
@@ -694,7 +630,7 @@ into `work/ui-scale/build` and runs its native test. Staging still takes the wor
 the same source, which differs only in link timestamps.
 
 **What build.sh does.** It checks `prebuilt/` again, compiles `src/native/*.swift` for arm64 and the
-`procpaths` and `sessionlock` helpers, and bundles the components, fonts, art and licences. It
+`procpaths` and `sessionlock` helpers, and bundles the addon, fonts, art and licences. It
 downloads Sparkle at a pinned version and sha256, and compiles the Icon Composer icon
 `src/AppIcon.icon` with actool into `Assets.car` and a fallback `AppIcon.icns`.
 

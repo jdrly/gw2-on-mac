@@ -5,14 +5,15 @@ That covers the app in `src/native`, `gw2om.sh`, `collect-logs.sh`, `session-rep
 `procpaths`, `sessionlock`, the build, test and release scripts, and the interface addon
 `version.dll` from [`addon/ui-scale`](addon/ui-scale).
 
-The patches to Wine in [`patches/`](patches) are changes to Wine, so they're under Wine's
-LGPL-2.1-or-later. Three are mine: `ntdll-heat.patch`, `wineserver-msync-unregister.patch` and
+The patches to Wine in [`patches/`](patches) belong to 0.1.x. This app doesn't build or ship them.
+They're changes to Wine, so they're under Wine's LGPL-2.1-or-later. Three are mine: `ntdll-heat.patch`, `wineserver-msync-unregister.patch` and
 `winemac-gw2-launcher.patch`. Three come from SWTOR on Mac: `ntdll-msync-alert-fd.patch`,
 `winemac-physical-keys.patch` and `winemac-swtor-mouse.patch`. Two are SWGL on Mac's,
 `winemac-swgl-relative-mouse.patch` and `winemac-swgl-input-thread.patch`, as SWTOR on Mac
 carries them.
 
-The app bundles a few components and downloads the Wine engine at install time. It never bundles
+The app bundles a few components and downloads the Wine engine at install time. On this line it
+bundles no part of Wine or DXMT. It never bundles
 Guild Wars 2, its installer, its launcher, its files or Steam, and never downloads them from
 anywhere but their publishers. Steam's installer comes from Valve's CDN. The game comes from Steam,
 or from ArenaNet's own installer, which you download from ArenaNet's site.
@@ -21,9 +22,6 @@ or from ArenaNet's own installer, which you download from ArenaNet's site.
 
 | Component | Where in the app | License | License text in the app |
 |---|---|---|---|
-| **DXMT** `v0.80-441-ge02a4d6`, the [jdrly/dxmt](https://github.com/jdrly/dxmt) fork of [3Shain/dxmt](https://github.com/3Shain/dxmt) (Feifan He for CodeWeavers, and contributors), built in my development workspace, see below | `Contents/Resources/components/dxmt/` (`d3d11.dll`, `dxgi.dll`, `d3d10core.dll`, `winemetal.dll` for x86_64 and i386, `winemetal.so`) | LGPL-2.1-or-later. Complete source: [jdrly/dxmt at `e02a4d6`](https://github.com/jdrly/dxmt/tree/e02a4d6) | `Resources/Licenses/dxmt/LICENSE`, `COPYING.LIB` |
-| **Wine's ntdll and wineserver** (the x86_64 unix `ntdll.so` and `wineserver`) from the Wine sources of the app's engine: CodeWeavers' CrossOver 26.3 sources (<https://www.codeweavers.com/crossover/source>) with athei's patches, [athei/wine `d23b397`](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0) (also as an [archive in jdrly/wine-engine](https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-d23b39774528237cafe49f9a073286f854b779c0-source.tar.gz)), changed by SWTOR on Mac's [`patches/ntdll-msync-alert-fd.patch`](patches/ntdll-msync-alert-fd.patch), [`patches/ntdll-heat.patch`](patches/ntdll-heat.patch) and [`patches/wineserver-msync-unregister.patch`](patches/wineserver-msync-unregister.patch) (dappermint/winecx `8df1826853`), configured and built at -O0 as the engine | `Contents/Resources/components/heat/` | LGPL-2.1-or-later. Complete source: those sources plus the patches (also in the app) | `Resources/Licenses/wine/COPYING.LIB`, `LICENSE`, the patches, `ntdll-VERSION.txt`, `wineserver-VERSION.txt` |
-| **Wine's Mac driver and win32u** (the x86_64 unix `winemac.so` and `win32u.so`, and the Mac driver's x86_64 and i386 PE sides `winemac.drv`) from the same sources, the Mac driver changed by [`patches/winemac-gw2-launcher.patch`](patches/winemac-gw2-launcher.patch) (the launcher's flashing), [`patches/winemac-physical-keys.patch`](patches/winemac-physical-keys.patch) (game keys by keyboard position, which the app doesn't turn on), [`patches/winemac-swgl-relative-mouse.patch`](patches/winemac-swgl-relative-mouse.patch), [`patches/winemac-swgl-input-thread.patch`](patches/winemac-swgl-input-thread.patch) and [`patches/winemac-swtor-mouse.patch`](patches/winemac-swtor-mouse.patch) (raw mouse-look), in that order; `win32u.so` with its layered-window drawing built at -O2 | `Contents/Resources/components/winemac/` | LGPL-2.1-or-later. Complete source: those sources plus the patches | `Resources/Licenses/wine/COPYING.LIB`, `LICENSE`, the five `winemac-*.patch`, `winemac-win32u-VERSION.txt` |
 | **Sparkle** 2.10.0, <https://sparkle-project.org> (app updates, off in builds without a feed; with bsdiff, sais, and other notices) | `Contents/Frameworks/Sparkle.framework` | MIT | `Resources/Licenses/sparkle/LICENSE` |
 | **Cinzel** (variable, `wght` 400 to 900), copyright 2020 The Cinzel Project Authors, <https://github.com/NDISCOVER/Cinzel>, from [google/fonts `ofl/cinzel`](https://github.com/google/fonts/tree/main/ofl/cinzel) (`Cinzel[wght].ttf`, sha256 `f4d83d34…2a4e0f34`), unmodified | `Contents/Resources/Fonts/Cinzel-Variable.ttf` | SIL Open Font License 1.1 | `Resources/Licenses/fonts/Cinzel-OFL.txt` |
 | **Marcellus**, copyright 2012 Brian J. Bonislawsky DBA Astigmatic (AOETI), from [google/fonts `ofl/marcellus`](https://github.com/google/fonts/tree/main/ofl/marcellus) (`Marcellus-Regular.ttf`, sha256 `1cf0cd10…4abb2f81`), unmodified | `Contents/Resources/Fonts/Marcellus-Regular.ttf` | SIL Open Font License 1.1 | `Resources/Licenses/fonts/Marcellus-OFL.txt` |
@@ -33,16 +31,11 @@ or from ArenaNet's own installer, which you download from ArenaNet's site.
 The artwork is my design's own, made for GW2 on Mac. That's the ink strokes behind the header,
 the painting and the app icon's ensō. The app has no ArenaNet or NCSOFT logo, font or art in it.
 
-The bundled DXMT, Wine and addon binaries aren't in this repository. Today only my private
-development workspace builds them. `scripts/stage-components.sh` copies them from that
-workspace's `work/` folder into the ignored `prebuilt/`. It checks the Wine pieces against their
-build records and this repository's `patches/`. The workspace is `GW2_ON_MAC_WORKSPACE`, by default
-`../gw2-on-mac`. Their complete corresponding source is public. It's the pinned upstreams named
-above, jdrly/dxmt `e02a4d6` and athei/wine `d23b397` with CodeWeavers' CrossOver 26.3 sources and
-athei's patches, plus the patches in [`patches/`](patches). The app also carries those patches in
-`Resources/Licenses/wine/` with the Wine pieces' build records. The addon's source is
-[`addon/ui-scale`](addon/ui-scale), and `scripts/build-addon.sh` builds it. `build.sh` downloads
-Sparkle at a pinned version and sha256.
+The addon's binary isn't in this repository. `scripts/stage-components.sh` copies it from my
+development workspace's `work/` folder into the ignored `prebuilt/`, or takes it from the components
+archive that `prebuilt.lock` pins. The workspace is `GW2_ON_MAC_WORKSPACE`, by default
+`../gw2-on-mac`. Its source is [`addon/ui-scale`](addon/ui-scale), and `scripts/build-addon.sh`
+builds it. `build.sh` downloads Sparkle at a pinned version and sha256.
 
 ## Downloaded at install time
 
@@ -51,15 +44,12 @@ onto your Mac from their publishers:
 
 | Component | Source | License |
 |---|---|---|
-| **Wine engine** `cx-26.3.0-8`: Wine 11.0 from CodeWeavers' CrossOver 26.3 sources with athei's patches (athei/wine, commit `d23b397`), built and bundled by athei, the engine SWTOR on Mac and SWGL on Mac use. athei's release of it is gone, so I host the same file. The app checks it against its pinned size and sha256 | [jdrly/wine-engine cx-26.3.0-8](https://github.com/jdrly/wine-engine/releases/tag/cx-26.3.0-8), with its source, [`wine-d23b397…-source.tar.gz`](https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-d23b39774528237cafe49f9a073286f854b779c0-source.tar.gz) (athei/wine [`d23b397`](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0)) | LGPL-2.1-or-later ([Wine](https://www.winehq.org); CrossOver sources: <https://www.codeweavers.com/crossover/source>) |
-| Inside that engine, as athei bundled it: its libraries in `lib/external`, DXMT v0.80, mtld3d, x87sidecar and Apple's D3DMetal (Game Porting Toolkit redistributables) | the same release | each component's own license, as published there. GW2 on Mac draws with its own DXMT build instead of the engine's, and turns x87sidecar off |
+| **Wine engine**, athei's Mach9 0.3.1, `wine-v0.3.1-macos-arm64.tar.xz`: an arm64 Wine 11.21 that runs x86_64 Windows code with FEX. Its release page lists what it's built from: Wine `athei/wine@53def89293a` (wine-11.21-37), FEX `9d4fa4b46b1`, DXMT `athei/dxmt@d903db89036`, Mesa `b9a4007c72c`, vkd3d-proton `364e47ac08c` and GStreamer 1.28.8. The loader `wine.app` is signed by its author with Developer ID and notarized. The app checks the archive against its pinned size and sha256, and the loader against its sha256 and signature | [athei/mach9 v0.3.1](https://github.com/athei/mach9/releases/tag/v0.3.1), with the sources of each component in the repositories it names | each component's own license, as published by its project. Wine is LGPL-2.1-or-later |
 | **Steam** (the Windows client, Steam route only): Valve's `SteamSetup.exe` | `https://cdn.akamai.steamstatic.com/client/installer/SteamSetup.exe` (Valve) | Valve's Steam Subscriber Agreement |
 
-The installer leaves out the engine's SDK, meaning its headers, Wine's tests and man pages, and
-changes its copy of the engine in two places. The bundled DXMT goes over the engine's
-`lib/wine/dxgi/dxmt` tree, where the engine's `d3d10.dll` and `d3d10_1.dll` stay. The bundled
-`ntdll.so`, `wineserver`, `winemac.so`, the `x86_64-windows` and `i386-windows` `winemac.drv` and
-`win32u.so` replace the engine's, which stay next to them as `<name>.stock`.
+The installer leaves out the engine's SDK, meaning its headers, its x86_64 link libraries, Wine's
+tests and man pages, and takes the quarantine attribute off what it unpacks. It changes nothing
+else in the engine. No file of mine goes into it, and nothing inside `wine.app` is touched.
 
 ## Trademarks
 
