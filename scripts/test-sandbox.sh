@@ -869,8 +869,9 @@ wait $p1 $p2; started; watcher_up; steam_up
 check "two Plays at once: one watcher, the other joined" eval '[ "$(watchers)" = 1 ] && watcher_runs && [ "$(sess replay)" = 1 ]'
 game_session
 check "  Steam quits once" eval 'watch_done && [ "$(sess result)" = quit ] && [ "$(grep -c "steam.exe -shutdown" "$STANDIN_LOG")" = 1 ]'
-rm -f "$BIG"
-check "the usual build again: set dxmt fork replaces the bigger one (oldfork)" eval 'g set dxmt fork >/dev/null && dxgi_is fork && [ ! -e "$ENG/lib/wine/dxgi/dxmt/real-size.bin" ]'
+# (a tree with a file more than the component still counts as mine: the file goes from both)
+rm -f "$BIG" "$ENG/lib/wine/dxgi/dxmt/real-size.bin"
+check "the usual build again, in the component and the engine's tree" eval 'dxgi_is fork && [ "$(st dxmt_tree)" = fork ]'
 
 # the lock is the kernel's (flock): a lock file a dead watcher left holds nothing
 echo "left behind" >"$AD/.session.lock"
