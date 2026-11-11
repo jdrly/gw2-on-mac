@@ -99,6 +99,12 @@ jobs:
           if [ "$PUBLISH" = true ] && [ "$GITHUB_REF" != refs/heads/arm64 ]; then
             fail "Dev builds are published from arm64 only, not $GITHUB_REF; run it with publish false"
           fi
+          # A tag that exists stops a publishing run here, before the builds (release.sh --adhoc checks
+          # it again); a dry run only says so
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$VERSION" --silent 2>/dev/null; then
+            [ "$PUBLISH" != true ] || fail "The tag v$VERSION already exists; give a higher version"
+            echo "::notice title=Version::The tag v$VERSION already exists; a publishing run would refuse this version"
+          fi
           { echo "dxmt_commit=$DXMT_COMMIT"; echo "version=$VERSION"; echo "publish=$PUBLISH"; } | tee -a "$GITHUB_OUTPUT"
 
   components:
@@ -142,12 +148,12 @@ jobs:
             # The artifact of the fork's GW2 run for the push of that commit
             IFS=$'\t' read -r run status conclusion html < <(gh api \
               "repos/$DXMT_REPO/actions/workflows/gw2.yml/runs?head_sha=$DXMT_COMMIT&event=push&per_page=1" \
-              --jq '.workflow_runs[0] // {} | [.id, .status, .conclusion // "none", .html_url] | @tsv')
+              --jq '.workflow_runs[0] | select(.) | [.id, .status, .conclusion // "none", .html_url] | @tsv')
             [ -n "$run" ] || fail "$DXMT_REPO has no release asset $name.tar.xz and no GW2 run for the push of $DXMT_COMMIT"
             [ "$status" = completed ] || fail "The GW2 run for $DXMT_COMMIT, $html, is $status. Start this again when it has finished."
             [ "$conclusion" = success ] || fail "The GW2 run for $DXMT_COMMIT, $html, ended $conclusion"
             IFS=$'\t' read -r id digest expired < <(gh api "repos/$DXMT_REPO/actions/runs/$run/artifacts?name=$name" \
-              --jq '.artifacts[0] // {} | [.id, .digest // "none", .expired] | @tsv')
+              --jq '.artifacts[0] | select(.) | [.id, .digest // "none", .expired] | @tsv')
             [ -n "$id" ] || fail "$html has no artifact $name"
             [ "$expired" = false ] || fail "The artifact $name of $html has expired; the release asset (jdrly/dxmt#194) has to come first"
             [[ $digest == sha256:* ]] || fail "GitHub reports no sha256 for the artifact $name of $html"
