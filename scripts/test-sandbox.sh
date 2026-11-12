@@ -757,14 +757,24 @@ if mine; then
   check "all three on: each entry, in the table's order" rules_are heat-all
   check "  a dry run of Play prints the game's rule with them" eval '[ "$(dry_rule)" = "$(g rules | head -1)" ]'
   # A VERSION with a switches: line (heat_in_file): an entry whose variable it doesn't name stays
-  # out, and its row is greyed; the app's own VERSION back after
+  # out, and its row is greyed. The app reads the first switches: line, so the narrowed line
+  # replaces any the VERSION has. Twice: from the staged VERSION as it is (a pull request's ntdll.so
+  # has no switches: line), and from that VERSION with the full line of my d831f80 build added
+  # (the dev build's ntdll.so has one). The staged VERSION back after
   cp "$COMP/ntdll/VERSION" "$SANDBOX/ntdll-VERSION.keep"
-  echo "switches: WINE_HEAT_COUNT WINE_HEAT_EXE WINE_HEAT_LOG WINE_HEAT_MSYNC_UNREG WINE_HEAT_WAKE" >>"$COMP/ntdll/VERSION"
-  check "a file whose VERSION lists WINE_HEAT_WAKE and WINE_HEAT_MSYNC_UNREG only: event pool and fast locks stay out" rules_are jobwakes
-  check "  event pool and fast locks greyed, saying so; set refused" \
-    eval '[ "$(sett jobwakes_state)" = ok ] && [ "$(sett eventpool_state)" = "off:My Wine build in this app (jdrly/wine ${MYWINE_COMMIT:0:11}) doesn'"'"'t have this switch." ] && [ "$(sett fastlocks_state)" = "$(sett eventpool_state)" ] && ! "$G" set fastlocks off >/dev/null 2>&1'
+  for from in "the staged VERSION" "a VERSION with every switch"; do
+    cp "$SANDBOX/ntdll-VERSION.keep" "$SANDBOX/ntdll-VERSION.from"
+    [ "$from" = "the staged VERSION" ] ||
+      echo "switches: WINE_HEAT_COUNT WINE_HEAT_EVPOOL WINE_HEAT_EXE WINE_HEAT_LOG WINE_HEAT_MSYNC_UNREG WINE_HEAT_PROF WINE_HEAT_PROF_HZ WINE_HEAT_PROF_THREADS WINE_HEAT_SPIN WINE_HEAT_SPIN_PAUSE WINE_HEAT_WAKE" >>"$SANDBOX/ntdll-VERSION.from"
+    { grep -v '^switches:' "$SANDBOX/ntdll-VERSION.from"
+      echo "switches: WINE_HEAT_COUNT WINE_HEAT_EXE WINE_HEAT_LOG WINE_HEAT_MSYNC_UNREG WINE_HEAT_WAKE"; } >"$COMP/ntdll/VERSION"
+    check "from $from, a VERSION that lists WINE_HEAT_WAKE and WINE_HEAT_MSYNC_UNREG only: event pool and fast locks stay out" rules_are jobwakes
+    check "  event pool and fast locks greyed, saying so; set refused" \
+      eval '[ "$(sett jobwakes_state)" = ok ] && [ "$(sett eventpool_state)" = "off:My Wine build in this app (jdrly/wine ${MYWINE_COMMIT:0:11}) doesn'"'"'t have this switch." ] && [ "$(sett fastlocks_state)" = "$(sett eventpool_state)" ] && ! "$G" set fastlocks off >/dev/null 2>&1'
+    cp "$SANDBOX/ntdll-VERSION.from" "$COMP/ntdll/VERSION"
+    check "  $from again: all three" rules_are heat-all
+  done
   cp "$SANDBOX/ntdll-VERSION.keep" "$COMP/ntdll/VERSION"
-  check "  its own VERSION again (no switches: line): all three" rules_are heat-all
   g set debug on >/dev/null; g set wine engine >/dev/null
   out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
   check "wine engine, every switch and Debug logging on: no WINE_HEAT_* in the rules or in a dry run of Play" \
