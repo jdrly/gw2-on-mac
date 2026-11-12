@@ -13,8 +13,8 @@
 #                  started with), the interface addon's logs, and while the game runs a new
 #                  vmmap-<date>-<time>.txt (gw2om.sh vmmap: FEX's code buffers and the footprint),
 #                  next to those of earlier presses
-#   settings.conf, state, install-manifest.json, dxmt.conf, compatdb.rules and compatdb.local, the
-#                  app's VERSIONS
+#   settings.conf, state, install-manifest.json, dxmt.conf, compatdb.rules, compatdb.local and
+#                  a development build's dev-switches.conf, the app's VERSIONS
 #   session-report.txt  the last game session in short (session-report.sh)
 #   game-logs/     the game's and Steam's own logs, with game_rules: ArenaNet.log (crash entries;
 #                  their computer, account and address fields taken out), the game's graphics
@@ -42,6 +42,8 @@ set -u
 APP_NAME="GW2 on Mac"
 APP_FOLDER="GW2 on Mac arm64"
 RES="$(cd "$(dirname "$0")" && pwd)"
+# release or dev (build.sh's app.properties, as gw2om.sh reads it)
+CHANNEL="$(sed -n 's/^channel=//p' "$RES/app.properties" 2>/dev/null || true)"
 ROOT="${GW2_ON_MAC_ROOT:-}"
 H="${ROOT:+$ROOT/home}"
 H="${H:-$HOME}"
@@ -364,6 +366,8 @@ ls -t "$LOGS"/heat-[0-9]*.log 2>/dev/null | head -3 | while IFS= read -r f; do
   add_log "$LOGS/heat-requests-${f##*/heat-}" 5000000
 done
 for f in settings.conf state install-manifest.json dxmt.conf compatdb.rules compatdb.local; do add "$APPDIR/$f"; done
+# (a release reads no dev-switches.conf, even one a development build left)
+[ "$CHANNEL" != dev ] || add "$APPDIR/dev-switches.conf"
 add "$RES/VERSIONS"
 # the game's and Steam's own logs (game_rules)
 add_log "$GW2_APPDATA/ArenaNet.log" 5000000 game-logs game

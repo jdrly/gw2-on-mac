@@ -19,7 +19,8 @@
 # gcmouse=false), which ntdll.so ran (LIB_wine: mine with its commit, or the engine's own) and its
 # switches (the WINE_HEAT_* entries of the game's rule), which winemac.so ran (LIB_macdrv) and its
 # switches (WINE_MACDRV_* and WINE_WIN32U_*), and which FEX ran (LIB_fex: mine with its commit, or
-# the engine's own) and its switches (the FEX_* entries of the game's rule). With Debug logging my
+# the engine's own) and its switches (the FEX_* entries of the game's rule), and in a development
+# build which lines of dev-switches.conf the rule had (DEV_SWITCHES). With Debug logging my
 # ntdll.so writes its counters to heat-<pid>.log in the logs folder: the report reads the newest
 # one written since the session started, and from it the game thread's row, the thread with the most semaphore releases
 # (it hands the job workers their jobs: about 49,000 a second, the workers a few thousand). Next to
@@ -534,7 +535,7 @@ fex_report() {
 }
 
 report() {  # <log>
-  local s ran=""
+  local s ran="" s_dev
   s=$(summary "$1")
   echo "Session: $1 (the last of $(get "$s" sessions) in it)"
   if [ -f "$LOGS/session.env" ] && [ "$(dirname "$1")" = "$LOGS" ]; then
@@ -549,6 +550,11 @@ report() {  # <log>
       echo "Mouse the game had: the pointer's movement, as Wine does it (gcmouse=false)"
     else
       echo "Mouse the game had: the mouse's own counts from GameController (the engine's built-in rule)"
+    fi
+    # (a development build's: the lines of dev-switches.conf the game's rule had)
+    if grep -q '^DEV_SWITCHES=' "$LOGS/session.env"; then
+      s_dev=$(sed -n 's/^DEV_SWITCHES=//p' "$LOGS/session.env" | head -1)
+      echo "Dev switches that were on (dev-switches.conf): ${s_dev:-none}"
     fi
     wine_report "$(get "$s" gpu_frames)"
     fex_report

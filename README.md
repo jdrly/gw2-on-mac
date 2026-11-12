@@ -187,6 +187,13 @@ greyed, so no file held a choice of mine. Version 2 resets `dxmt`, `wine` and `m
 files would have had no row to show it. A key `settings.conf` still has but the app no longer
 knows, such as `coolworkers`, is read by nothing and gone at the next write.
 
+A development build starts with every switch on, since I debug from everything on backwards. Once,
+by a line `dev_version=` in `settings.conf` (`DEV_ROWS` in `gw2om.sh`, read the way
+`SETTINGS_RESETS` is), it turns on *Job wakes*, *Event pool*, *Faster locks*, *Launcher frames*,
+*Shader warming*, *MetalFX for Subsample*, *Raw mouse-look* and `fex=mine`, which takes effect in a
+build that carries my FEX. A row I turn off afterwards stays off. The switches without a row are in
+`dev-switches.conf` ([The game's environment](#the-games-environment)). A release reads neither.
+
 Four keys have no row: `dxmt`, `wine` and `macdrv` pick my DXMT fork, my `ntdll.so` and my
 `winemac.so` (`fork`, `mine`, `mine`) or the engine's own (`engine`), and `fex` picks my FEX
 (`mine`) or the engine's own (`engine`, the default). They are for my comparisons from Terminal,
@@ -309,7 +316,7 @@ nothing in `/Applications` besides itself.
 |---|---|---|
 | `~/Library/Application Support/GW2 on Mac arm64/engine/` | the Wine engine as it ships, without its SDK, about 1 GB, with my DXMT fork's tree in `lib/wine/dxgi/dxmt` and my `ntdll.so` and `winemac.so` in `lib/wine/aarch64-unix`, and after `set fex mine` my FEX's three files, the engine's own next to each | removed |
 | `…/GW2 on Mac arm64/bottle/` | the game's Wine prefix with Steam, the game's files and the game's settings. About 75 GB, or no extra space for a clone of files on the same disk | removed, with the game |
-| `…/GW2 on Mac arm64/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `compatdb.rules`, `compatdb.local`, `session`, `session.req`, `.session.lock` | settings, install state, what was installed, DXMT's options, the game's compatdb rules and my own, the current game session and its lock | removed |
+| `…/GW2 on Mac arm64/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `compatdb.rules`, `compatdb.local`, `dev-switches.conf`, `session`, `session.req`, `.session.lock` | settings, install state, what was installed, DXMT's options, the game's compatdb rules and my own, a development build's switches, the current game session and its lock | removed |
 | `~/Library/Caches/GW2 on Mac arm64/downloads/` | the engine archive, `SteamSetup.exe`, a copy of `Gw2Setup-64.exe` | removed |
 | `~/Library/Caches/GW2 on Mac arm64/fork/dxmt/` | my DXMT fork's caches (`DXMT_CACHE_DIR`): `Gw2-64.exe/` holds the game's shaders, recorded pipelines and pipeline archives, and the other processes keep theirs next to it | removed. *Reset the shader cache* in Settings empties it too |
 | `~/Library/Caches/GW2 on Mac arm64/dxmt/Gw2-64.exe/` | the engine's own DXMT's shader cache for the game, where 0.2.0-dev.1 kept it, apart from my fork's, which translates shaders differently. Other processes keep theirs where the engine's DXMT puts it by default | removed, and emptied by *Reset the shader cache* |
@@ -655,6 +662,25 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   the driver's `VERSION` doesn't list on its `switches:` line stays out, as for my `ntdll.so`.
 - The `FEX_*` entries are rows of `FEX_SWITCHES` ([My FEX](#my-fex)), after all of the above, and
   `CefHost.exe`'s rule unsets each. The table is empty today.
+- In a development build, the lines of `dev-switches.conf` in the app's folder come next, one
+  `env=` field each, and `CefHost.exe`'s rule unsets each. The file has one `NAME=value` a line,
+  with a comment above it: the piece that reads it, its issue, and `played` or `unplayed` (whether
+  a session of the game has run with it). A line I comment out or delete is off, and a line I add
+  goes in as it is. Install, Repair and Play write the file from the table `DEV_SWITCHES` in
+  `gw2om.sh` when its version is newer than the file's `version=` line: a switch the file doesn't
+  name yet, not even commented out, is added at the end, on, and nothing else changes. The table
+  has every switch of my forks that is off by default, at the value that turns its new behaviour
+  on, apart from diagnostics, anything that can cap the frame rate below 60 (DXMT's lower thread
+  priorities and `DXMT_BG_POLICY=occlusion` among them), values only I can choose and the rows'
+  own variables. A row whose variable a line of the file sets, *Faster locks* with the file's
+  `WINE_HEAT_SPIN`, is greyed while that line is there, since the file's entry wins. A line of the table goes in only while the file of mine that
+  reads it is in place and has the switch: the `switches:` line of my `ntdll.so`'s,
+  `winemac.so`'s or FEX's `VERSION` (a `VERSION` without that line names none). My `win32u.so` comes in my Mac driver's build, but nothing
+  of the app puts it into the engine yet, so its lines stay out. My DXMT fork's build has no such
+  record: the app looks for the name in the DLLs of the fork's tree in the engine, where each
+  switch it reads is a string. That tree can be an earlier build while Steam still runs with it.
+  `FEX_DYNAMICL1CACHE` is FEX's own and goes in with either FEX. The log says at each start what
+  stays out and why, and `status` prints `dev_switches=` and `dev_switches_out=`.
 - A `compatdb.local` that I put in the app's folder is appended as it is, for trying FEX switches
   such as `exe=Gw2-64.exe;env=FEX_HOSTFEATURES=disableavx`. Nothing in the app writes it, and
   Collect Logs includes it.
@@ -900,6 +926,8 @@ last session from DXMT's own log lines:
   40 a second, since the game draws with Metal
 - "FEX that ran": my FEX with its commit or the engine's own, and the `FEX_*` entries of the game's
   rule
+- in a development build, the lines of `dev-switches.conf` the game's rule had (`DEV_SWITCHES` in
+  `session.env`)
 - for each `vmmap` file taken since the session started: the minutes in, the footprint and FEX's
   code buffers by size, as "16M full, 32M full, 64M 25.4M resident; FEX has thrown its code away 2
   times"
@@ -1122,6 +1150,15 @@ Without one, those checks are skipped. It covers:
   a real copy from an attached disk image when `hdiutil` can attach one, a forced copy
   (`GW2_ON_MAC_IMPORT_COPY`), the free-space refusal (`GW2_ON_MAC_FREE_KB`), the refusal while the
   game runs, and that the sources never change
+- a development build's switches, last. The checks above run with them off
+  (`GW2_ON_MAC_DEV_SWITCHES=off`). These run two copies of the app's `Resources`, one with
+  `channel=dev` and one without a channel, in roots of their own: a development build's fresh
+  install with every switch of the table in `dev-switches.conf` and the rows on, the rule with
+  each line whose file has the switch and none whose file hasn't, status, `session.env`, the log
+  and the session report, a line commented out or added, the engine's own DXMT, a second start
+  that changes nothing, an update that adds a newer switch and keeps the rest, a row turned off
+  that stays off, a release that writes no file and reads none, and a release's install updated
+  by a development build
 
 `scripts/ui-render.sh` renders every window state, light and dark, headlessly into
 `work/app-renders/`. Nothing shows on screen and the app never activates. With the exports of

@@ -238,6 +238,10 @@ unset GW2_ON_MAC_DRY_RUN GW2_ON_MAC_ALLOW_WINE GW2_ON_MAC_SIGNER GW2_ON_MAC_MACO
 # the session's watcher (play starts it), with its times shortened: a 2 s grace, 2 s for Steam to
 # quit, a look every 0.2 s (the 15 minutes for the game to appear only in the timeout check)
 export GW2_ON_MAC_WATCH_GRACE=2 GW2_ON_MAC_WATCH_QUITWAIT=2 GW2_ON_MAC_WATCH_POLL=0.2 GW2_ON_MAC_WATCH_TIMEOUT=60
+# A development build's switches (the rows on once, dev-switches.conf) off for every check but those
+# of their own section at the end: the others check the app as a release sets it up, apart from
+# Debug logging's default
+export GW2_ON_MAC_DEV_SWITCHES=off
 ok "stand-in engine ($GW2_ON_MAC_ENGINE_SIZE bytes) and SteamSetup.exe"
 
 # --- Dry runs change nothing
@@ -2388,6 +2392,198 @@ check "a copy without the free space is refused" eval '[ "$rc" != 0 ] && has <(e
 check "  and leaves nothing behind" eval '[ ! -e "$AD/engine" ] && [ ! -e "$AD/bottle" ] && [ ! -e "$AD/state" ] && [ ! -e "$AD/.lock" ]'
 check "the sources never changed" sources_unchanged
 check "0.1's folders: still the same checksum" [ "$(o1sum)" = "$O1SUM" ]
+
+section "A development build's switches (dev-switches.conf)"
+# Two copies of the app's Resources, each entry a link to the app's, but gw2om.sh (a copy: its
+# folder is what it reads as the app's) and app.properties: DEVR's says channel=dev, a development
+# build; RELR's has no channel line, a release. A root of their own: DROOT for a development
+# build's fresh install, RROOT for a release's install, which the development build then updates.
+res_copy() { # <dir> [<channel line>]
+  local f
+  mkdir -p "$1"
+  for f in "$APP/Contents/Resources"/*; do ln -s "$f" "$1/${f##*/}"; done
+  rm -f "$1/gw2om.sh" "$1/app.properties"
+  cp "$APP/Contents/Resources/gw2om.sh" "$1/gw2om.sh"
+  { grep -v '^channel=' "$APP/Contents/Resources/app.properties"; [ -z "${2:-}" ] || echo "$2"; } >"$1/app.properties"
+}
+DEVR="$SANDBOX/res-dev" RELR="$SANDBOX/res-release" DROOT="$SANDBOX/devroot" RROOT="$SANDBOX/relroot"
+res_copy "$DEVR" channel=dev
+res_copy "$RELR"
+dg() { GW2OM="$DEVR/gw2om.sh" GW2_ON_MAC_ROOT="$DROOT" GW2_ON_MAC_DEV_SWITCHES='' "$G" "$@"; }
+rg() { GW2OM="$RELR/gw2om.sh" GW2_ON_MAC_ROOT="$RROOT" GW2_ON_MAC_DEV_SWITCHES='' "$G" "$@"; }
+dgr() { GW2OM="$DEVR/gw2om.sh" GW2_ON_MAC_ROOT="$RROOT" GW2_ON_MAC_DEV_SWITCHES='' "$G" "$@"; }
+DAD="$DROOT/home/Library/Application Support/$APP_FOLDER" DLOGS="$DROOT/home/Library/Logs/$APP_FOLDER"
+RAD="$RROOT/home/Library/Application Support/$APP_FOLDER"
+DEVF="$DAD/dev-switches.conf" RDEVF="$RAD/dev-switches.conf"
+# The table's rows, "<piece> <NAME=value>", and its version, read from gw2om.sh
+DEVTABLE=$(sed -n '/^DEV_SWITCHES="$/,/^"$/p' "$APP/Contents/Resources/gw2om.sh" | awk 'NF > 4 { print $2, $5 }')
+DEVVER=$(sed -n '/^DEV_SWITCHES="$/,/^"$/p' "$APP/Contents/Resources/gw2om.sh" | awk 'NF > 4 && $1 > v { v = $1 } END { print v + 0 }')
+table_pieces() { local p; [ "$DEVVER" -ge 1 ] || return 1; for p in wine macdrv win32u fex fexany dxmt; do printf '%s\n' "$DEVTABLE" | grep -q "^$p " || return 1; done; }
+check "the table has switches of each piece" table_pieces
+# The components' records, narrowed: my ntdll.so names WINE_HEAT_SPIN, my winemac.so
+# WINE_MACDRV_VIEW of the Mac driver's four, my FEX FEX_INITIALCODEBUFFERMB of its two (the staged
+# VERSIONs back at the end). My DXMT fork has no record: the names in its DLLs, read here with grep
+DEVKEEP="$SANDBOX/dev-versions"
+mkdir -p "$DEVKEEP"
+dev_switches_line() { # <component> <names...>
+  local k=$1
+  shift
+  [ -f "$COMP/$k/VERSION" ] || return 0
+  [ -f "$DEVKEEP/$k" ] || cp "$COMP/$k/VERSION" "$DEVKEEP/$k"
+  { grep -v '^switches:' "$DEVKEEP/$k"; echo "switches: $*"; } >"$COMP/$k/VERSION"
+}
+dev_switches_line ntdll WINE_HEAT_COUNT WINE_HEAT_EVPOOL WINE_HEAT_LOG WINE_HEAT_MSYNC_UNREG WINE_HEAT_SPIN WINE_HEAT_WAKE
+dev_switches_line macdrv WINE_MACDRV_SURFACE WINE_MACDRV_VIEW
+dev_switches_line fex FEX_INITIALCODEBUFFERMB
+DXNAMES=$(find "$COMP/dxmt/aarch64-windows" -type f -name '*.dll' -exec grep -aoh 'DXMT_[A-Z0-9_]*' {} + 2>/dev/null | LC_ALL=C sort -u)
+# dev_expect: the table's lines the game's rule should have with those records, in the table's order
+dev_expect() {
+  local piece e n
+  printf '%s\n' "$DEVTABLE" | while read -r piece e; do
+    n=${e%%=*}
+    case "$piece" in
+      wine) mine || continue ;;
+      macdrv) drv && [ "$n" = WINE_MACDRV_VIEW ] || continue ;;
+      win32u) continue ;;
+      fex) fexb && [ "$n" = FEX_INITIALCODEBUFFERMB ] || continue ;;
+      dxmt) printf '%s\n' "$DXNAMES" | grep -qx "$n" || continue ;;
+    esac
+    echo "$e"
+  done
+}
+# game_tail, cef_tail: the end the game's rule and CefHost.exe's have for dev_expect's lines
+game_tail() { dev_expect | sed 's/^/;env=/' | tr -d '\n'; }
+cef_tail() { dev_expect | sed 's/=.*/=/; s/^/;env=/' | tr -d '\n'; }
+rows_on() { # <settings.conf>: the rows of a development build on, once (dev_version=1)
+  local k
+  for k in dev_version=1 jobwakes=on eventpool=on fastlocks=on launcherframes=on warm=on metalfx=on rawmouse=on fex=mine; do
+    grep -qx "$k" "$1" || return 1
+  done
+}
+ends_with() { case "$1" in *"$2") return 0 ;; esac; return 1; }
+# comments_ok <file>: each switch line under a comment that names its piece and its issue and says
+# played or unplayed
+comments_ok() {
+  awk '/^[A-Z]/ { n++; if (prev !~ /^# .* \(.*\), (played|unplayed): /) bad = 1 } { prev = $0 } END { exit bad || !n }' "$1"
+}
+# no_dxmt_lines: none of the table's DXMT_* lines in the rules
+no_dxmt_lines() {
+  local piece e r
+  r=$(dg rules)
+  printf '%s\n' "$DEVTABLE" | while read -r piece e; do
+    [ "$piece" != dxmt ] || ! printf '%s\n' "$r" | grep -q "env=${e%%=*}=" || exit 1
+  done
+}
+
+: >"$STANDIN_LOG"
+out=$(dg install steam 2>&1) && rc=0 || rc=$?
+check "a development build's fresh install: dev-switches.conf, version= first, every switch of the table on, in its order" \
+  eval '[ "$rc" = 0 ] && [ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && [ "$(grep "^[A-Z]" "$DEVF" | grep -v "^version=")" = "$(printf "%s\n" "$DEVTABLE" | cut -d" " -f2)" ]'
+check "  each under a comment that names its piece and its issue and says played or unplayed" comments_ok "$DEVF"
+check "  the rows on, once: settings.conf at dev_version=1" rows_on "$DAD/settings.conf"
+check "  and the install said both" eval 'echo "$out" | grep -q "^Development build: the switch rows on, once: jobwakes=on " && echo "$out" | grep -q "^dev-switches.conf: version $DEVVER, switched on: "'
+if mine; then
+  check "  Faster locks greyed while the file's WINE_HEAT_SPIN line sets it, set refused" \
+    eval '[ "$(dg settings | sed -n "s/^fastlocks_state=//p")" = "off:Set in dev-switches.conf (WINE_HEAT_SPIN). Take its line out there to use this row." ] && ! dg set fastlocks off >/dev/null 2>&1'
+  sed -i '' 's/^WINE_HEAT_SPIN=/#WINE_HEAT_SPIN=/' "$DEVF"
+  check "  that line commented out: the row works again" eval '[ "$(dg settings | sed -n "s/^fastlocks_state=//p")" = ok ]'
+  sed -i '' 's/^#WINE_HEAT_SPIN=/WINE_HEAT_SPIN=/' "$DEVF"
+fi
+if fexb; then
+  check "  my FEX in the engine (fex=mine)" eval '[ "$(dg status | sed -n "s/^fex_file=//p")" = mine ]'
+fi
+check "the game's rule: the lines whose file has the switch, after the rows' entries; unset for CefHost.exe" \
+  eval 'ends_with "$(dg rules | head -1)" "$(game_tail)" && ends_with "$(dg rules | sed -n 2p)" "$(cef_tail)"'
+if mine; then
+  check "  the rows' WINE_HEAT_SPIN first, then the file's" eval 'dg rules | head -1 | grep -q ";env=WINE_HEAT_SPIN=lock=20:game,event=30:game;.*;env=WINE_HEAT_SPIN=lock=20:game,event=30:game,sem=5:game"'
+fi
+out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
+check "  a dry run of Play prints that rule, and each line it leaves out with why" \
+  eval 'echo "$out" | grep -qxF "[dry-run] rule $(dg rules | head -1)" && echo "$out" | grep -qxF "[dry-run] dev-switches.conf leaves out WINE_WIN32U_SETCURSOR=shm (my win32u.so isn'"'"'t in the engine)" && { ! drv || echo "$out" | grep -qxF "[dry-run] dev-switches.conf leaves out WINE_MACDRV_CLIP=changes (my winemac.so doesn'"'"'t have it)"; }'
+check "  and doesn't write the file again" eval '! echo "$out" | grep -q "dev-switches.conf: version"'
+check "status lists the lines in the rule, and those left out" \
+  eval '[ "$(dg status | sed -n "s/^dev_switches=//p")" = "$(dev_expect | tr "\n" " " | sed "s/ \$//")" ] && dg status | sed -n "s/^dev_switches_out=//p" | grep -q "WINE_WIN32U_PEEK_YIELD=off (my win32u.so isn'"'"'t in the engine)"'
+check "the install's start of Steam: session.env names the lines in the rule, install.log those left out" \
+  eval '[ "$(sed -n "s/^DEV_SWITCHES=//p" "$DLOGS/session.env")" = "$(dev_expect | tr "\n" " " | sed "s/ \$//")" ] && grep -q "dev-switches.conf: left out WINE_WIN32U_SETCURSOR=shm (my win32u.so isn'"'"'t in the engine)" "$DLOGS/install.log"'
+printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60\n' >"$DLOGS/Gw2-64_d3d11.log"
+# (the report to a file first: a grep -q on its pipe would end it with a broken pipe, which
+# pipefail counts as the check's failure)
+GW2_ON_MAC_ROOT="$DROOT" "$APP/Contents/Resources/session-report.sh" >"$CHECKS/devreport.txt" 2>&1
+check "  the session report's header prints them" \
+  eval 'grep -qxF "Dev switches that were on (dev-switches.conf): $(dev_expect | tr "\n" " " | sed "s/ \$//")" "$CHECKS/devreport.txt"'
+sed -i '' 's/^FEX_DYNAMICL1CACHE=/#FEX_DYNAMICL1CACHE=/' "$DEVF"
+echo "MY_OWN_SWITCH=1" >>"$DEVF"
+check "a line commented out is gone from the rule and status; a line I added is in, after the others" \
+  eval '! dg rules | grep -q FEX_DYNAMICL1CACHE && ! dg status | grep "^dev_switches=" | grep -q FEX_DYNAMICL1CACHE && dg rules | head -1 | grep -q ";env=MY_OWN_SWITCH=1\$"'
+dg set dxmt engine >/dev/null
+check "  the engine's own DXMT: no DXMT_* line in the rule, each left out saying so" \
+  eval 'no_dxmt_lines && dg status | sed -n "s/^dev_switches_out=//p" | grep -q "DXMT_PRESENT_QUEUE=pace (my DXMT fork isn'"'"'t in the engine)"'
+dg set dxmt fork >/dev/null
+# My DXMT fork's tree in the engine is what's read, not this app's build: it can be an earlier
+# build while Steam runs with it. Its DLLs replaced by one without a name, then by one with only
+# DXMT_PRESENT_QUEUE (the tree back after)
+DTREE="$DAD/engine/lib/wine/dxgi/dxmt/aarch64-windows"
+rm -rf "$SANDBOX/dtree.keep" && cp -Rp "$DTREE" "$SANDBOX/dtree.keep"
+for f in "$DTREE"/*.dll; do echo "an earlier build" >"$f"; done
+check "an earlier build of my DXMT fork in the engine: its DXMT_* lines out, saying so" \
+  eval '! dg status | grep "^dev_switches=" | grep -q DXMT_ && dg status | sed -n "s/^dev_switches_out=//p" | grep -q "DXMT_PRESENT_QUEUE=pace (my DXMT fork doesn'"'"'t have it)"'
+printf 'x\0DXMT_PRESENT_QUEUE\0' >"$DTREE/d3d11.dll"
+check "  one that has DXMT_PRESENT_QUEUE: that line in, the others out" \
+  eval 'dg status | grep "^dev_switches=" | grep -q DXMT_PRESENT_QUEUE=pace && dg status | sed -n "s/^dev_switches_out=//p" | grep -q "DXMT_PRESENTER_FREE=1 (my DXMT fork doesn'"'"'t have it)"'
+rm -rf "$DTREE" && cp -Rp "$SANDBOX/dtree.keep" "$DTREE"
+if mine; then
+  # (a VERSION without a switches: line names nothing for a development build's lines)
+  grep -v '^switches:' "$DEVKEEP/ntdll" >"$COMP/ntdll/VERSION"
+  check "my ntdll.so's VERSION without a switches: line: WINE_HEAT_SPIN's line out, saying so" \
+    eval 'dg status | sed -n "s/^dev_switches_out=//p" | grep -q "WINE_HEAT_SPIN=lock=20:game,event=30:game,sem=5:game (my ntdll.so doesn'"'"'t have it)"'
+  dev_switches_line ntdll WINE_HEAT_COUNT WINE_HEAT_EVPOOL WINE_HEAT_LOG WINE_HEAT_MSYNC_UNREG WINE_HEAT_SPIN WINE_HEAT_WAKE
+fi
+cp "$DEVF" "$SANDBOX/devf.keep"
+cp "$DAD/settings.conf" "$SANDBOX/devsettings.keep"
+out=$(dg repair 2>&1)
+check "a second start (Repair) changes neither file and adds nothing" \
+  eval 'same "$DEVF" "$SANDBOX/devf.keep" && same "$DAD/settings.conf" "$SANDBOX/devsettings.keep" && ! echo "$out" | grep -q -e "switched on" -e "rows on"'
+# An update: the file one version older (version=0 stands for it), with the commented-out line, my
+# own line, and DXMT_COMPILE_DEMAND and its comment deleted (a switch newer than the file)
+sed -i '' -e 's/^version=.*/version=0/' -e '/DXMT_COMPILE_DEMAND/d' -e '/compile service.s declared policy/d' "$DEVF"
+out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
+check "Play with the file older than the table: it would write the file (dry run)" \
+  eval 'echo "$out" | grep -qxF "[dry-run] write $DEVF" && echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: DXMT_COMPILE_DEMAND=1"'
+dg repair >/dev/null 2>&1
+check "  updated: the newer switch at the end, on, under its comment; the commented-out line and mine kept" \
+  eval '[ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && [ "$(tail -1 "$DEVF")" = DXMT_COMPILE_DEMAND=1 ] && tail -2 "$DEVF" | head -1 | grep -q "^# my DXMT fork " && grep -qx "#FEX_DYNAMICL1CACHE=0" "$DEVF" && ! grep -qx "FEX_DYNAMICL1CACHE=0" "$DEVF" && grep -qx MY_OWN_SWITCH=1 "$DEVF"'
+dg set metalfx off >/dev/null
+dg repair >/dev/null 2>&1
+check "a row I turn off stays off through the next update" eval 'grep -qx metalfx=off "$DAD/settings.conf" && grep -qx dev_version=1 "$DAD/settings.conf"'
+
+# A release: no file, its defaults; a file there anyway changes nothing
+out=$(rg install steam 2>&1) && rc=0 || rc=$?
+check "a release's install: no dev-switches.conf, the rows at their defaults, no dev_version" \
+  eval '[ "$rc" = 0 ] && [ ! -e "$RDEVF" ] && grep -qx fastlocks=off "$RAD/settings.conf" && grep -qx launcherframes=off "$RAD/settings.conf" && grep -qx fex=engine "$RAD/settings.conf" && ! grep -q "^dev_version=" "$RAD/settings.conf"'
+rules_before=$(rg rules)
+cp "$DEVF" "$RDEVF"
+check "  dev-switches.conf there by hand: the rules, status and a dry run of Play don't read it" \
+  eval '[ "$(rg rules)" = "$rules_before" ] && [ -z "$(rg status | sed -n "s/^dev_switches=//p")" ] && ! GW2_ON_MAC_DRY_RUN=1 rg play 2>&1 | grep -q -e MY_OWN_SWITCH -e "dev-switches.conf"'
+rm -f "$RDEVF"
+# The release's install, rows off and no file, updated by a development build
+rg set rawmouse off >/dev/null
+out=$(dgr repair 2>&1)
+check "a development build over it: the rows on once (raw mouse-look too), the file written" \
+  eval 'rows_on "$RAD/settings.conf" && [ "$(head -1 "$RDEVF")" = "version=$DEVVER" ] && echo "$out" | grep -q "^Development build: the switch rows on, once: "'
+cp "$RDEVF" "$SANDBOX/rdevf.keep"
+cp "$RAD/settings.conf" "$SANDBOX/rsettings.keep"
+out=$(dgr repair 2>&1)
+check "  a second start changes nothing" eval 'same "$RDEVF" "$SANDBOX/rdevf.keep" && same "$RAD/settings.conf" "$SANDBOX/rsettings.keep" && ! echo "$out" | grep -q -e "switched on" -e "rows on"'
+dgr set rawmouse off >/dev/null
+dgr repair >/dev/null 2>&1
+check "  raw mouse-look off afterwards stays off" eval 'grep -qx rawmouse=off "$RAD/settings.conf"'
+mkdir -p "$SANDBOX/relzip"
+zip=$(GW2_ON_MAC_ROOT="$RROOT" "$RELR/collect-logs.sh" "$SANDBOX/relzip" 2>/dev/null | tail -1)
+unzip -l "$zip" >"$SANDBOX/relzip.txt" 2>&1
+check "a release's Collect Logs leaves out the dev-switches.conf a development build left" \
+  eval '[ -f "$RDEVF" ] && [ -f "$zip" ] && grep -q settings.conf "$SANDBOX/relzip.txt" && ! grep -q dev-switches.conf "$SANDBOX/relzip.txt"'
+for k in ntdll macdrv fex; do [ ! -f "$DEVKEEP/$k" ] || cp "$DEVKEEP/$k" "$COMP/$k/VERSION"; done
+rm -rf "$DROOT" "$RROOT" "$DEVR" "$RELR"
 
 echo
 echo "$pass passed, $fail failed"
