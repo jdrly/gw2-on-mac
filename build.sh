@@ -11,10 +11,11 @@
 #   Contents/Resources/components/     dxmt/ (my DXMT fork, jdrly/dxmt, built for the engine),
 #                                      which gw2om.sh puts into the engine's DXMT tree, ntdll/ (my
 #                                      ntdll.so, jdrly/wine, built for the engine; only if staged)
-#                                      and macdrv/ (my Mac driver's winemac.so, the same; only if
-#                                      staged), which it puts into the engine next to the engine's
-#                                      own, fex/ (my FEX, jdrly/FEX, built for the engine; only if
-#                                      staged), which it puts there after `set fex mine`, and
+#                                      and macdrv/ (my Mac driver's winemac.so, and win32u.so when
+#                                      its build has one, the same; only if staged), which it puts
+#                                      into the engine next to the engine's own, fex/ (my FEX,
+#                                      jdrly/FEX, built for the engine; only if staged), which it
+#                                      puts there after `set fex mine`, and
 #                                      ui-scale/ (the interface addon), which it puts into the game
 #                                      folder, staged in prebuilt/ by scripts/stage-components.sh
 #   Contents/Resources/helpers/procpaths  every process's real executable (gw2om.sh's process
@@ -225,6 +226,8 @@ if [ -n "$MACDRV_COMMIT" ]; then
   cp "$P/macdrv/winemac.so" "$P/macdrv/VERSION" "$P/macdrv/LICENSE" "$P/macdrv/COPYING.LIB" "$C/macdrv/"
   chmod 644 "$C/macdrv/VERSION" "$C/macdrv/LICENSE" "$C/macdrv/COPYING.LIB"
   chmod 755 "$C/macdrv/winemac.so"
+  # (win32u.so, when my Mac driver's build has one: gw2om.sh switches the two as one set)
+  if [ -f "$P/macdrv/win32u.so" ]; then cp "$P/macdrv/win32u.so" "$C/macdrv/" && chmod 755 "$C/macdrv/win32u.so"; fi
 fi
 if [ -n "$FEX_BUILD" ]; then
   for f in $FEX_FILES; do mkdir -p "$C/fex/$(dirname "$f")" && cp "$P/fex/$f" "$C/fex/$f" && chmod 644 "$C/fex/$f"; done

@@ -314,7 +314,7 @@ nothing in `/Applications` besides itself.
 
 | Path | What | Uninstall |
 |---|---|---|
-| `~/Library/Application Support/GW2 on Mac arm64/engine/` | the Wine engine as it ships, without its SDK, about 1 GB, with my DXMT fork's tree in `lib/wine/dxgi/dxmt` and my `ntdll.so` and `winemac.so` in `lib/wine/aarch64-unix`, and after `set fex mine` my FEX's three files, the engine's own next to each | removed |
+| `~/Library/Application Support/GW2 on Mac arm64/engine/` | the Wine engine as it ships, without its SDK, about 1 GB, with my DXMT fork's tree in `lib/wine/dxgi/dxmt` and my `ntdll.so` and `winemac.so` (with `win32u.so` when my driver's build has one) in `lib/wine/aarch64-unix`, and after `set fex mine` my FEX's three files, the engine's own next to each | removed |
 | `…/GW2 on Mac arm64/bottle/` | the game's Wine prefix with Steam, the game's files and the game's settings. About 75 GB, or no extra space for a clone of files on the same disk | removed, with the game |
 | `…/GW2 on Mac arm64/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `compatdb.rules`, `compatdb.local`, `dev-switches.conf`, `session`, `session.req`, `.session.lock` | settings, install state, what was installed, DXMT's options, the game's compatdb rules and my own, a development build's switches, the current game session and its lock | removed |
 | `~/Library/Caches/GW2 on Mac arm64/downloads/` | the engine archive, `SteamSetup.exe`, a copy of `Gw2Setup-64.exe` | removed |
@@ -400,15 +400,15 @@ in a browser and put into the downloads folder by hand carries it, and `tar` cop
 file. The loader is notarized and would pass, the engine's ad hoc signed libraries would not. Then
 it removes the SDK, which nothing reads at run time: `include/`, `lib/wine/tests/`,
 `lib/wine/x86_64-windows/` and `share/man/`. Last it checks the build, which means the sha256 of the loader
-`lib/wine/aarch64-unix/wine.app/Contents/MacOS/wine`, of `ntdll.so`, of `winemac.so` and of
-FEX's three files, and `codesign --verify --strict` on `wine.app` with Mach9's team `WLKUUJD25W`
+`lib/wine/aarch64-unix/wine.app/Contents/MacOS/wine`, of `ntdll.so`, of `winemac.so`, of
+`win32u.so` and of FEX's three files, and `codesign --verify --strict` on `wine.app` with Mach9's team `WLKUUJD25W`
 and the identifier `app.mach9.loader`. That reads the signature and starts nothing.
 
-The app writes nothing into the engine afterwards but its DXMT tree, `ntdll.so`, `winemac.so` and
-FEX's three files, and nothing at all inside `wine.app`. The loader is signed with an embedded
+The app writes nothing into the engine afterwards but its DXMT tree, `ntdll.so`, `winemac.so`,
+`win32u.so` and FEX's three files, and nothing at all inside `wine.app`. The loader is signed with an embedded
 provisioning profile, and a re-signed, edited or copied loader exits. The check of the engine's
-`ntdll.so`, `winemac.so` and FEX files takes each where it is, in place or next to mine as
-`<file>.engine`.
+`ntdll.so`, `winemac.so`, `win32u.so` and FEX files takes each where it is, in place or next to
+mine as `<file>.engine`.
 
 ### The DXMT tree
 
@@ -469,7 +469,7 @@ the engine's own is neither in place nor next to it. Repair then unpacks the eng
 *This Mac* panel's Engine cell shows `Wine 11.21 · d831f80` when my `ntdll.so` and `winemac.so`
 from one build are in place, the engine's title with both of its own, and the engine's name with
 the other file, such as `Mach9 0.3.1 · ntdll d831f80` or `Mach9 0.3.1 · another winemac`, when
-only one is mine.
+only one is mine. A Mac driver set cut short shows as `winemac and win32u mixed`.
 
 The app tells my file from the engine's by comparing it with `components/ntdll/ntdll.so`, not by
 the fork's hash, because a release signed with my Developer ID changes the file's bytes. The
@@ -500,8 +500,22 @@ so Steam's windows run my file with every switch unset. With `macdrv` at `engine
 none of them and greys the rows that need them. Today that is *Launcher frames*.
 
 A build of the app without my file has no `components/macdrv`. It leaves the engine's own in place,
-and greys *Launcher frames*. My Wine fork's archive for the driver holds
-`winemac.so` only; `win32u.so` comes with a later step.
+and greys *Launcher frames*.
+
+My Wine fork's archive for the driver also holds my `win32u.so` when that commit changed a function
+of it. `win32u.so` is the layer every process that draws or handles input calls, and it calls into
+the driver, so the two come from one tree and must never load from two builds. The app installs
+them as one set under the same setting: both mine or both the engine's own. The engine's own
+`win32u.so` goes aside as `win32u.so.engine`, pinned by its sha256, `e7b0d6a0…` (2,370,520
+bytes). A switch copies my files next to theirs first and then renames file by file, so a switch
+cut short leaves a mix: `macdrv_file=mix`, which the next switch finishes and Play never starts
+on. While Steam still runs, Play says to quit it. When one of the engine's own files is gone,
+`macdrv_ready=other`, Play refuses and Repair unpacks the engine again. `status` also prints
+`win32u_bundled` (`yes` when this app's build has one) and `win32u_file` (the engine's
+`win32u.so` now: `mine`, `engine`, `other` or `none`). A driver build without `win32u.so`
+installs `winemac.so` alone and puts the engine's own `win32u.so` back if an earlier build of
+mine left its own there. Its switches are `WINE_WIN32U_*` entries, gated by the same `switches:`
+line of the driver's `VERSION`.
 
 ### My FEX
 
@@ -675,8 +689,8 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   own variables. A row whose variable a line of the file sets, *Faster locks* with the file's
   `WINE_HEAT_SPIN`, is greyed while that line is there, since the file's entry wins. A line of the table goes in only while the file of mine that
   reads it is in place and has the switch: the `switches:` line of my `ntdll.so`'s,
-  `winemac.so`'s or FEX's `VERSION` (a `VERSION` without that line names none). My `win32u.so` comes in my Mac driver's build, but nothing
-  of the app puts it into the engine yet, so its lines stay out. My DXMT fork's build has no such
+  `winemac.so`'s or FEX's `VERSION` (a `VERSION` without that line names none). My `win32u.so`'s
+  lines need it in place with my `winemac.so`, as one set. My DXMT fork's build has no such
   record: the app looks for the name in the DLLs of the fork's tree in the engine, where each
   switch it reads is a string. That tree can be an earlier build while Steam still runs with it.
   `FEX_DYNAMICL1CACHE` is FEX's own and goes in with either FEX. The log says at each start what
@@ -983,9 +997,11 @@ place. `build.sh` refuses a `prebuilt/ntdll` that doesn't match its record.
 
 **Where my winemac.so comes from.** The same workflow builds it from the same commit and publishes
 it next to the `ntdll` archive as `macdrv-arm64-<commit>.tar.xz` (#57): `winemac.so`, `VERSION`,
-`COPYING.LIB` and `LICENSE`, with `winemac.so: sha256 <the file's>` in `VERSION`. Staging takes it
-from `work/macdrv-arm64/install` (`MACDRV_BUILD`) into `prebuilt/macdrv` with the same checks, and
-`MACDRV_COMMIT` asks for a commit as `WINE_COMMIT` does. `build.sh` refuses a `prebuilt/macdrv`
+`COPYING.LIB` and `LICENSE`, with `winemac.so: sha256 <the file's>` in `VERSION`, and `win32u.so`
+with its own `win32u.so: sha256` line when the build has one. Staging takes them from
+`work/macdrv-arm64/install` (`MACDRV_BUILD`) into `prebuilt/macdrv` with the same checks for each
+file, refuses a `VERSION` that names a `win32u.so` the archive lacks, and `MACDRV_COMMIT` asks for
+a commit as `WINE_COMMIT` does. `build.sh` refuses a `prebuilt/macdrv`
 that doesn't match its record.
 
 **Where my FEX comes from.** My FEX fork's `GW2` workflow builds it for this engine (#109) and
@@ -1081,8 +1097,9 @@ Mac. It has read-only access and no secrets, and its actions are pinned by commi
   stand-in for each it lacks. It also checks that `build.sh` refuses a DXMT file, an `ntdll.so` or
   a `winemac.so` that doesn't match its record, a file the record doesn't name and a changed
   `version.dll`, and `stage-components.sh` a changed archive. It stages an `ntdll.so` and a
-  `winemac.so` from pinned downloads in their assets' layout (signed dylibs built on the runner, as
-  `file://` URLs) and refuses each under another sha256.
+  `winemac.so` with a `win32u.so` from pinned downloads in their assets' layout (signed dylibs
+  built on the runner, as `file://` URLs), refuses each under another sha256, and refuses a Mac
+  driver archive whose `VERSION` names a `win32u.so` it lacks.
 - `sandbox`: `test-sandbox.sh` on that build. Without my workspace, the ArenaNet route and the real
   arcdps are skipped, and each skip shows as a notice on the run.
 - `renders`: `ui-render.sh`, with the PNGs as the run's `renders` artifact. A runner has no design
@@ -1117,6 +1134,12 @@ Without one, those checks are skipped. It covers:
 - my `winemac.so` the same way, switched apart from `ntdll.so`, with the `WINE_MACDRV_*` entry in
   the rules and none while the engine's own is chosen, `macsurface` in `WINEDEBUG`, and the
   report's `macsurface` line from a stand-in `wine.log`
+- my `winemac.so` and `win32u.so` as one set, with a stand-in `win32u.so` when the build has
+  none: both in and both back byte for byte, a switch cut short after each of its renames finished
+  by the next, Play refusing a mix while Steam runs and finishing it once Steam has quit, a mix it
+  can't finish refused until Repair, a driver build without `win32u.so` putting the engine's own
+  back, and the `WINE_WIN32U_*` lines of `dev-switches.conf` in a dry run of Play only while my
+  `win32u.so` is in place
 - raw mouse-look's registry values, which go to `Gw2-64.exe` only and never set `PhysicalKeyboard`,
   and registry writes waiting while a session holds the lock
 - arcdps on and off from a stand-in deltaconnected.com, set by `GW2_ON_MAC_ARCDPS_URL` to a
@@ -1222,8 +1245,8 @@ gh release download v0.2.0-dev.5 -R jdrly/gw2-on-mac -p '*.dmg' -D ~/Downloads
   GitHub's digest. A commit that isn't on the branch or has no asset is refused. Without
   `wine_commit` the app has no `ntdll.so` of mine and leaves the engine's own in place.
 - My `winemac.so` comes only with `macdrv_commit`, the same way: the asset
-  `macdrv-arm64-<commit>.tar.xz`. The two commits are separate inputs, so a build can carry either
-  file without the other.
+  `macdrv-arm64-<commit>.tar.xz`, with my `win32u.so` when the archive has one. The two commits are
+  separate inputs, so a build can carry my `ntdll.so` or my Mac driver without the other.
 - My FEX comes only with `fex_commit`, a commit on my FEX fork's `gw2-on-mac`: the release asset
   `fex-arm64-<commit>.tar.xz` of jdrly/FEX's `arm64-builds`, checked against GitHub's digest.
   Without it the app has no FEX of mine. With it the app still starts on the engine's own FEX until

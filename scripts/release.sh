@@ -50,7 +50,8 @@
 #                                    DXMT_COMMIT, if set, must be the commit the bundled DXMT names,
 #                                    WINE_COMMIT and MACDRV_COMMIT, if set, the commit the
 #                                    bundled ntdll.so's and winemac.so's VERSION names, with the
-#                                    file's sha256, and FEX_COMMIT, if set, the commit my bundled
+#                                    file's sha256 (and win32u.so's when that VERSION names one),
+#                                    and FEX_COMMIT, if set, the commit my bundled
 #                                    FEX's VERSION names, with its DLL's sha256.
 #   scripts/release.sh --adhoc --no-release the same without the pre-release
 #
@@ -220,9 +221,9 @@ package() {
     # Inside out: the process lister and the session's lock (helpers/procpaths, sessionlock), my
     # DXMT fork's winemetal.so (gw2om.sh puts it into the engine's DXMT tree, where Wine loads it;
     # every Mach-O of a notarized app is signed; the PE DLLs are not Mach-O), my ntdll.so,
-    # winemac.so and FEX's libarm64ecfex.so if the app has them (the engine's loader has library
-    # validation off, so it loads them with my signature too; the app tells each from the engine's
-    # own by its bytes, not by the fork's hash), Sparkle in its
+    # winemac.so, win32u.so and FEX's libarm64ecfex.so if the app has them (the engine's loader has
+    # library validation off, so it loads them with my signature too; the app tells each from the
+    # engine's own by its bytes, not by the fork's hash), Sparkle in its
     # documented order (Autoupdate, Updater.app, the framework, each with the hardened runtime and
     # no --deep; build.sh removed its XPC services), then the app (app.plist: no exceptions). The
     # engine is downloaded at install time, signed by its author, and nothing goes inside wine.app.
@@ -232,6 +233,7 @@ package() {
     sign "$APP/Contents/Resources/components/dxmt/aarch64-unix/winemetal.so"
     [ ! -f "$APP/Contents/Resources/components/ntdll/ntdll.so" ] || sign "$APP/Contents/Resources/components/ntdll/ntdll.so"
     [ ! -f "$APP/Contents/Resources/components/macdrv/winemac.so" ] || sign "$APP/Contents/Resources/components/macdrv/winemac.so"
+    [ ! -f "$APP/Contents/Resources/components/macdrv/win32u.so" ] || sign "$APP/Contents/Resources/components/macdrv/win32u.so"
     [ ! -f "$APP/Contents/Resources/components/fex/aarch64-unix/libarm64ecfex.so" ] || sign "$APP/Contents/Resources/components/fex/aarch64-unix/libarm64ecfex.so"
     fw="$APP/$FW_REL"
     sign "$fw/Versions/B/Autoupdate"
@@ -292,6 +294,10 @@ check_dmg() {
     { grep -qx "commit: $MACDRV_COMMIT" "$n/VERSION" 2>/dev/null && [ -f "$n/winemac.so" ] &&
       grep -qx "winemac.so: sha256 $(shasum -a 256 "$n/winemac.so" | cut -d' ' -f1)" "$n/VERSION"; } ||
     err="The DMG's app bundles no winemac.so of commit $MACDRV_COMMIT with the sha256 its VERSION names"
+  # (and win32u.so, when that build's VERSION names one)
+  [ -n "$err" ] || [ -z "${MACDRV_COMMIT:-}" ] || ! grep -q '^win32u\.so: sha256 ' "$n/VERSION" ||
+    { [ -f "$n/win32u.so" ] && grep -qx "win32u.so: sha256 $(shasum -a 256 "$n/win32u.so" | cut -d' ' -f1)" "$n/VERSION"; } ||
+    err="The DMG's app bundles no win32u.so with the sha256 its VERSION names"
   n="$a/Contents/Resources/components/fex"
   [ -n "$err" ] || [ -z "${FEX_COMMIT:-}" ] ||
     { grep -qx "commit: $FEX_COMMIT" "$n/VERSION" 2>/dev/null && [ -f "$n/aarch64-windows/libarm64ecfex.dll" ] &&

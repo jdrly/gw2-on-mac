@@ -363,6 +363,8 @@ func renderAll(_ dir: URL, exports: URL?) async {
       ("ready-fex", [:], "Wine 11.21 · d831f80 · FEX bff3f7c", "DXMT 0.80 · 2483559"),
       ("ready-engine", ["fex_file": "mine", "fex_commit": "bff3f7c3686b"], "\(engine) · FEX bff3f7c", "DXMT · d903db8"),
       ("ready-fex", ["fex_file": "mix", "fex_commit": ""], "Wine 11.21 · d831f80", "DXMT 0.80 · 2483559"),
+      ("ready", ["macdrv_file": "mix", "macdrv_commit": ""], "ntdll d831f80 · winemac and win32u mixed", "DXMT 0.80 · 2483559"),
+      ("ready-engine", ["macdrv_file": "mix", "macdrv_commit": ""], "Mach9 0.3.1 · winemac and win32u mixed", "DXMT · d903db8"),
     ]
     for (state, extra, wantWine, wantDXMT) in cases {
       let s = installer(state).status.merging(extra) { $1 }

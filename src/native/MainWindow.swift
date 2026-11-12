@@ -431,13 +431,18 @@ struct ThisMac: View {
   // Both mine from one build: "Wine 11.21 · d831f80", the release and commit of my build. Both the
   // engine's own: the engine's title. One of mine or another file next to the engine's own:
   // "Mach9 0.3.1 · ntdll d831f80", "Mach9 0.3.1 · another winemac". Two that aren't one build of
-  // mine: each with its commit, or "another".
+  // mine: each with its commit, or "another". My Mac driver's winemac.so and win32u.so, which
+  // switch as one set, half mine and half the engine's own (macdrv_file mix): "winemac and win32u
+  // mixed".
   private static func wineFiles(_ s: [String: String], engine: String) -> String {
     let short = engine.components(separatedBy: " · ").first ?? engine
     let libs = [("wine", "ntdll"), ("macdrv", "winemac")]
     let commit = { (key: String) in String((s["\(key)_commit"] ?? "").prefix(7)) }
-    let named = libs.filter { s["\($0.0)_file"] == "mine" || s["\($0.0)_file"] == "other" }
-    let each = named.map { s["\($0.0)_file"] == "mine" ? "\($0.1) \(commit($0.0))" : "another \($0.1)" }
+    let named = libs.filter { ["mine", "other", "mix"].contains(s["\($0.0)_file"] ?? "") }
+    let each = named.map {
+      s["\($0.0)_file"] == "mine" ? "\($0.1) \(commit($0.0))"
+        : s["\($0.0)_file"] == "mix" ? "\($0.1) and win32u mixed" : "another \($0.1)"
+    }
     if named.isEmpty { return engine }
     if named.count == 1 { return "\(short) · \(each[0])" }
     if s["wine_file"] == "mine", s["macdrv_file"] == "mine", commit("wine") == commit("macdrv") {

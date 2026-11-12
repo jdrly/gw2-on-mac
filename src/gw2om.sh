@@ -3,9 +3,10 @@
 # on Mac it changes no existing install: it creates its own Wine engine and bottle and installs the
 # game through Steam or ArenaNet's own installer. On this line the engine is Mach9's arm64 Wine as
 # it ships, with three exceptions: its DXMT tree is my DXMT fork's (components/dxmt), its ntdll.so
-# is my Wine build's (components/ntdll), and its winemac.so my Mac driver's (components/macdrv),
-# the engine's own kept next to each (`set dxmt engine`, `set wine engine` and `set macdrv engine`
-# switch back, for comparisons from Terminal; the Settings window has no row for them). A fourth,
+# is my Wine build's (components/ntdll), and its winemac.so, with win32u.so when the build has one,
+# my Mac driver's (components/macdrv), the engine's own kept next to each (`set dxmt engine`, `set
+# wine engine` and `set macdrv engine` switch back, for comparisons from Terminal; the Settings
+# window has no row for them). A fourth,
 # my FEX (components/fex), goes in only after `set fex mine` from Terminal, the engine's own kept
 # next to it too; a development build sets it once, with every other switch of mine (DEV_ROWS,
 # dev-switches.conf). Nothing goes inside wine.app.
@@ -31,8 +32,8 @@
 #   gw2om.sh stop-waiting      the window stops following the game's download (the engine and
 #                              the bottle stay; Install picks up from there)
 #   gw2om.sh repair            the engine (unpacked again if it isn't the expected one), its DXMT
-#                              tree, ntdll.so, winemac.so and FEX as the settings ask, the bottle's
-#                              settings; keeps the game and the settings
+#                              tree, ntdll.so, winemac.so (and win32u.so) and FEX as the settings
+#                              ask, the bottle's settings; keeps the game and the settings
 #   gw2om.sh uninstall         removes everything this app created: the bottle (with the game in
 #                              it), the engine, the settings, its caches (DXMT's in them); logs
 #                              stay
@@ -80,7 +81,8 @@
 #                              archive (a stand-in whose bin/wine only pretends)
 #   GW2_ON_MAC_ENGINE_CHECKS=0 don't check the unpacked engine's files against the real engine's
 #   GW2_ON_MAC_ENGINE_LOADER_SHA256, GW2_ON_MAC_ENGINE_NTDLL_SHA256, GW2_ON_MAC_ENGINE_WINEMAC_SHA256,
-#   GW2_ON_MAC_ENGINE_D3D11_SHA256, GW2_ON_MAC_ENGINE_WINEMETAL_SHA256,
+#   GW2_ON_MAC_ENGINE_WIN32U_SHA256, GW2_ON_MAC_ENGINE_D3D11_SHA256,
+#   GW2_ON_MAC_ENGINE_WINEMETAL_SHA256,
 #   GW2_ON_MAC_ENGINE_FEX_DLL_SHA256, GW2_ON_MAC_ENGINE_FEX_SO_SHA256   a stand-in engine's own
 #                              files (engine_matches, graphics, unix_lib, fex_file)
 #   GW2_ON_MAC_FEX_SWITCHES    rows for FEX_SWITCHES, whose table is empty until a switch of mine
@@ -137,15 +139,16 @@ ENGINE_WINE=53def89293a   # athei/wine, wine-11.21-37
 ENGINE_FEX=9d4fa4b46b1
 ENGINE_DXMT=d903db89036   # athei/dxmt
 # Checked after unpacking (engine_matches): the loader, a signed app bundle that every Wine process
-# runs as (nothing may change inside it: a copied or re-signed loader exits), and ntdll.so and
-# winemac.so, which also tell the engine's own from mine (unix_lib). The DXMT tree's d3d11.dll and
-# winemetal.so tell the engine's own DXMT from mine (dxmt_tree).
+# runs as (nothing may change inside it: a copied or re-signed loader exits), and ntdll.so,
+# winemac.so and win32u.so, which also tell the engine's own from mine (unix_lib). The DXMT tree's
+# d3d11.dll and winemetal.so tell the engine's own DXMT from mine (dxmt_tree).
 ENGINE_LOADER_APP=lib/wine/aarch64-unix/wine.app
 ENGINE_LOADER_SHA256=fac8babc821737c25483679e179f2e61e9dd2c43e3122decb1a77c5870dbeb99
 ENGINE_LOADER_ID=app.mach9.loader
 ENGINE_TEAM=WLKUUJD25W
 ENGINE_NTDLL_SHA256=a0df4d34bc4918886606bcf9d04c9f853c521636fcbf3b6cce08e8c11b74e787
 ENGINE_WINEMAC_SHA256=ae468edce407781dbd19a7ac8aad68844a212688dd4132748341c492a0986b2f
+ENGINE_WIN32U_SHA256=e7b0d6a0800d31e9dbafda66493cee4bb64469de9946d202a3ba3d0958d6f1e2
 ENGINE_D3D11_SHA256=49099142c39d2aa066527d0f1a573d61e3177d317e638b4f7f1457978a61b8df
 ENGINE_WINEMETAL_SHA256=c28171fd25beb364d01c097a5546e2bba9780d34641acb65ad7b63fec985c64f
 # FEX's ARM64EC half, which tells the engine's own from mine (fex_file): lib/wine/aarch64-windows/
@@ -183,6 +186,7 @@ if [ -n "$ROOT" ]; then
   ENGINE_LOADER_SHA256="${GW2_ON_MAC_ENGINE_LOADER_SHA256:-$ENGINE_LOADER_SHA256}"
   ENGINE_NTDLL_SHA256="${GW2_ON_MAC_ENGINE_NTDLL_SHA256:-$ENGINE_NTDLL_SHA256}"
   ENGINE_WINEMAC_SHA256="${GW2_ON_MAC_ENGINE_WINEMAC_SHA256:-$ENGINE_WINEMAC_SHA256}"
+  ENGINE_WIN32U_SHA256="${GW2_ON_MAC_ENGINE_WIN32U_SHA256:-$ENGINE_WIN32U_SHA256}"
   ENGINE_D3D11_SHA256="${GW2_ON_MAC_ENGINE_D3D11_SHA256:-$ENGINE_D3D11_SHA256}"
   ENGINE_WINEMETAL_SHA256="${GW2_ON_MAC_ENGINE_WINEMETAL_SHA256:-$ENGINE_WINEMETAL_SHA256}"
   ENGINE_FEX_DLL_SHA256="${GW2_ON_MAC_ENGINE_FEX_DLL_SHA256:-$ENGINE_FEX_DLL_SHA256}"
@@ -643,13 +647,13 @@ apply_registry() {
 #
 # The keys are 0.1.x's, so settings.conf reads the same on both lines, and dxmt (fork: my DXMT
 # fork; engine: the engine's own, to compare), wine (mine: my ntdll.so; engine: the engine's own),
-# macdrv (mine: my winemac.so; engine: the engine's own), fex (mine: my FEX; engine: the engine's
-# own, the default), and jobwakes, launcherframes and eventpool (rows of HEAT_SWITCHES, as
-# fastlocks is). dxmt, wine, macdrv and fex have no row in the Settings window: they are for my
-# comparisons from Terminal (gw2om.sh set …). On this engine some of the
-# keys need pieces of mine that come in later steps: setting_state says so, the Settings window
-# greys them with the reason, set refuses them, and they keep what settings.conf says without an
-# effect.
+# macdrv (mine: my winemac.so, and my win32u.so when its build has one; engine: the engine's own),
+# fex (mine: my FEX; engine: the engine's own, the default), and jobwakes, launcherframes and
+# eventpool (rows of HEAT_SWITCHES, as fastlocks is). dxmt, wine, macdrv and fex have no row in the
+# Settings window: they are for my comparisons from Terminal (gw2om.sh set …). On this engine some
+# of the keys need pieces of mine that come in later steps: setting_state says so, the Settings
+# window greys them with the reason, set refuses them, and they keep what settings.conf says without
+# an effect.
 SETTING_KEYS="retina fpscap metalfx hud warm fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam dxmt wine jobwakes macdrv launcherframes eventpool fex"
 # settings.conf's version, its line settings_version=. Install and Repair write every key with its
 # value, so a file holds the defaults it was written with, as if I had chosen them. A default that
@@ -1033,8 +1037,8 @@ fex_entries() {
 #   wine    my ntdll.so, its VERSION's switches: line (switch_named; a VERSION without the line
 #           names none)
 #   macdrv  my winemac.so, the same
-#   win32u  my win32u.so, which comes in the same build as my winemac.so and on its switches:
-#           line. Nothing of the app puts it into the engine yet, so its lines stay out.
+#   win32u  my win32u.so, which comes in the same build as my winemac.so, when that build has one,
+#           and on its switches: line: in place only with my winemac.so, as one set (unix_lib)
 #   fex     my FEX, its VERSION's switches: line (fex_in_version)
 #   fexany  FEX's own option, which the engine's FEX has too: always
 #   dxmt    my DXMT fork. Its build carries no record of its switches: the app looks for the
@@ -1164,7 +1168,7 @@ dev_lines() {
         case "$piece" in
           wine) [ "$wine" = mine ] ;;
           macdrv) [ "$macdrv" = mine ] ;;
-          win32u) [ -f "$COMP/macdrv/win32u.so" ] && cmp -s "$COMP/macdrv/win32u.so" "$UNIX_DIR/win32u.so" ;;
+          win32u) [ "$macdrv" = mine ] && [ -f "$COMP/macdrv/win32u.so" ] ;;
         esac || why="$(dev_piece_label "$piece") isn't in the engine"
         [ -n "$why" ] || switch_named "$l" || why="$(dev_piece_label "$piece") doesn't have it" ;;
       fex)
@@ -1199,15 +1203,17 @@ write_rules() {
 engine_ok() { [ -x "$ENG/bin/wine" ] && [ "$(cat "$ENG/.gw2om-source" 2>/dev/null || true)" = "$ENGINE_SHA256" ]; }
 
 # engine_matches <dir>: the unpacked engine is the expected build: its loader's sha256, the
-# engine's own ntdll.so and winemac.so (in place, or next to mine as <file>.engine: every row of
-# unix_lib) and FEX's three files (the same, FEX_FILES), and wine.app's signature (codesign reads
-# it and starts nothing): valid, by Mach9's team, with the loader's identifier
+# engine's own ntdll.so, winemac.so and win32u.so (in place, or next to mine as <file>.engine: every
+# file of unix_lib's rows) and FEX's three files (the same, FEX_FILES), and wine.app's signature
+# (codesign reads it and starts nothing): valid, by Mach9's team, with the loader's identifier
 engine_matches() {
-  local app="$1/$ENGINE_LOADER_APP" info k u="$1/lib/wine/aarch64-unix"
+  local app="$1/$ENGINE_LOADER_APP" info k f u="$1/lib/wine/aarch64-unix"
   [ "$(sha256 "$app/Contents/MacOS/wine" 2>/dev/null)" = "$ENGINE_LOADER_SHA256" ] || return 1
   for k in $UNIX_LIBS; do
     unix_lib "$k"
-    [ "$(sha256 "$u/$LIB" 2>/dev/null)" = "$LIB_SHA" ] || [ "$(sha256 "$u/$LIB.engine" 2>/dev/null)" = "$LIB_SHA" ] || return 1
+    for f in $LIB_FILES; do
+      [ "$(sha256 "$u/$f" 2>/dev/null)" = "$(lib_pin "$f")" ] || [ "$(sha256 "$u/$f.engine" 2>/dev/null)" = "$(lib_pin "$f")" ] || return 1
+    done
   done
   for k in $FEX_FILES; do
     [ "$(sha256 "$1/lib/wine/$k" 2>/dev/null)" = "$(fex_pin "$k")" ] || [ "$(sha256 "$1/lib/wine/$k.engine" 2>/dev/null)" = "$(fex_pin "$k")" ] || return 1
@@ -1342,106 +1348,175 @@ dxmt_switch() {
   say "DXMT: $(dxmt_label "$want") draws the game$([ "$want" = fork ] && echo ", the engine's own kept next to it")"
 }
 
-# --- My unix libraries: single files of the engine's lib/wine/aarch64-unix that a build of mine
-# replaces, each with a setting of its own (mine|engine). One row each in unix_lib:
-#   <setting>) LIB=<file> LIB_COMP=<its folder in components/> LIB_SHA=<the engine's file's sha256>
-# The engine's own file moves aside once, as <file>.engine, and only when its sha256 is the pin's;
-# mine is copied in from the components. Every process of the bottle loads the same file, Steam's
-# too, so it changes only while no session runs or starts (apply_engine_files). A build of the app
-# without my file (no components/<folder>) leaves the engine's own in place and greys the setting.
+# --- My unix libraries: files of the engine's lib/wine/aarch64-unix that a build of mine replaces,
+# each key with a setting of its own (mine|engine). One row each in unix_lib:
+#   <setting>) LIB=<its main file> LIB_FILES=<the set's files> LIB_COMP=<its folder in components/>
+# wine is ntdll.so alone. macdrv is my Mac driver's winemac.so and, when its build has one, my
+# win32u.so: win32u.so calls into the driver, the two come from one tree, and a pair from two
+# builds must never load together, so they switch as one set, both mine or both the engine's own. A
+# build of my Mac driver without win32u.so (one before jdrly/wine#61, or one whose compare lists
+# none of its functions) has winemac.so alone, and the engine's own win32u.so stays in place.
+# Each engine's own file moves aside once, as <file>.engine, and only when its sha256 is the pin's
+# (lib_pin); mine is copied in from the components. Every process of the bottle loads the same
+# files, Steam's too, so they change only while no session runs or starts (apply_engine_files). A
+# build of the app without my file (no components/<folder>) leaves the engine's own in place and
+# greys the setting.
 UNIX_LIBS="wine macdrv"
 UNIX_DIR="$ENG/lib/wine/aarch64-unix"
+# unix_lib <key> also sets LIB_SET, the set's files this app has a build of (LIB first), and
+# LIB_NAME, what the log calls them ("winemac.so and win32u.so")
 unix_lib() {
   case "$1" in
-    wine) LIB=ntdll.so LIB_COMP="$COMP/ntdll" LIB_SHA=$ENGINE_NTDLL_SHA256 ;;
-    macdrv) LIB=winemac.so LIB_COMP="$COMP/macdrv" LIB_SHA=$ENGINE_WINEMAC_SHA256 ;;
+    wine) LIB=ntdll.so LIB_FILES=ntdll.so LIB_COMP="$COMP/ntdll" ;;
+    macdrv) LIB=winemac.so LIB_FILES="winemac.so win32u.so" LIB_COMP="$COMP/macdrv" ;;
     *) return 1 ;;
+  esac
+  LIB_SET=$LIB
+  [ "$1" != macdrv ] || [ ! -f "$LIB_COMP/win32u.so" ] || LIB_SET="$LIB win32u.so"
+  LIB_NAME=${LIB_SET// / and }
+}
+# lib_pin <file>: the engine's own file's sha256
+lib_pin() {
+  case "$1" in
+    ntdll.so) echo "$ENGINE_NTDLL_SHA256" ;;
+    winemac.so) echo "$ENGINE_WINEMAC_SHA256" ;;
+    win32u.so) echo "$ENGINE_WIN32U_SHA256" ;;
   esac
 }
 # lib_bundled <key>: this app carries my build of it
 lib_bundled() { unix_lib "$1" && [ -f "$LIB_COMP/$LIB" ]; }
 # lib_commit <key>: the commit of my build in this app (its VERSION's "commit:" line)
 lib_commit() { unix_lib "$1"; sed -n 's/^commit: //p' "$LIB_COMP/VERSION" 2>/dev/null | head -1; }
-# lib_file <key> <path>: what <path> is: mine (this app's build), engine (the engine's own, by the
-# pin), other (another build of mine, from an earlier version of the app, or anything else), none
-lib_file() {
-  unix_lib "$1"
+# lib_one <file> <path>: what <path> is, for one file of the set unix_lib last named: mine (this
+# app's build of <file>), engine (the engine's own, by the pin), other (another build of mine, from
+# an earlier version of the app, or anything else), none
+lib_one() {
   if [ ! -f "$2" ]; then echo none
-  elif [ -f "$LIB_COMP/$LIB" ] && cmp -s "$LIB_COMP/$LIB" "$2"; then echo mine
-  elif [ "$(sha256 "$2")" = "$LIB_SHA" ]; then echo engine
+  elif [ -f "$LIB_COMP/$1" ] && cmp -s "$LIB_COMP/$1" "$2"; then echo mine
+  elif [ "$(sha256 "$2")" = "$(lib_pin "$1")" ]; then echo engine
   else echo other
   fi
 }
-# lib_want <key>: the file the setting asks for (engine without my build in the app)
+# lib_target <file> <mine|engine>: what <file> is in that set: mine for a file of LIB_SET, the
+# engine's own for the rest
+lib_target() { if [ "$2" = mine ] && in_list "$1" "$LIB_SET"; then echo mine; else echo engine; fi; }
+# lib_file <key>: the set in the engine: mine or engine when every file is, none when none is there
+# (between the renames of a single file), other when its main file is another build of mine and
+# the rest are that build's or the engine's own (an earlier version of the app), mix otherwise (a
+# switch cut short, or my file next to the engine's own other half). A file this app has no build
+# of counts only when it isn't the engine's own.
+lib_file() {
+  local f t first=yes m=yes e=yes n=yes o=yes
+  unix_lib "$1"
+  for f in $LIB_FILES; do
+    t=$(lib_one "$f" "$UNIX_DIR/$f")
+    [ "$t" = "$(lib_target "$f" mine)" ] || m=no
+    [ "$t" = engine ] || e=no
+    if [ "$t" != engine ] || in_list "$f" "$LIB_SET"; then [ "$t" = none ] || n=no; fi
+    if [ -n "$first" ]; then [ "$t" = other ] || o=no; first=""
+    elif [ "$t" != other ] && [ "$t" != engine ]; then o=no
+    fi
+  done
+  if [ $e = yes ]; then echo engine
+  elif [ $m = yes ]; then echo mine
+  elif [ $n = yes ]; then echo none
+  elif [ $o = yes ]; then echo other
+  else echo mix
+  fi
+}
+# lib_want <key>: the set the setting asks for (engine without my build in the app)
 lib_want() { if lib_bundled "$1" && [ "$(setting "$1")" = mine ]; then echo mine; else echo engine; fi; }
-# lib_in_use <key>: the file the next process loads (mine, engine or other; without an engine, or
-# between lib_switch's renames, the one it will be)
+# lib_in_use <key>: the set the next process loads (lib_file; without an engine, or between a
+# single file's renames, the one it will be)
 lib_in_use() {
   local f
-  unix_lib "$1"
-  f=$(lib_file "$1" "$UNIX_DIR/$LIB")
+  f=$(lib_file "$1")
   if [ "$f" = none ]; then lib_want "$1"; else echo "$f"; fi
 }
-# lib_commit_of <key> <mine|engine|other|none>: that file's commit (mine: my build's; engine: the
+# lib_commit_of <key> <mine|engine|other|mix|none>: that set's commit (mine: my build's; engine: the
 # engine's Wine)
 lib_commit_of() { case "$2" in mine) lib_commit "$1" ;; engine) echo "$ENGINE_WINE" ;; esac; }
-# lib_release_of <key> <mine|engine|other|none>: the Wine release my build is on (11.21 from the
+# lib_release_of <key> <mine|engine|other|mix|none>: the Wine release my build is on (11.21 from the
 # first line of its VERSION, git describe: wine-11.21-…-g<commit>); empty for the others
 lib_release_of() {
   unix_lib "$1"
   [ "$2" != mine ] || head -1 "$LIB_COMP/VERSION" 2>/dev/null | grep -oE 'wine-[0-9]+(\.[0-9]+)+' | head -1 | cut -c6- || true
 }
-# lib_label <key> <mine|engine|other>: what the window and the log call it
+# lib_label <key> <mine|engine|mix|other>: what the window and the log call it
 lib_label() {
   unix_lib "$1"
   case "$2" in
-    mine) echo "my $LIB (jdrly/wine $(lib_commit "$1" | cut -c1-11))" ;;
-    engine) echo "the engine's own $LIB (athei/wine $ENGINE_WINE)" ;;
+    mine) echo "my $LIB_NAME (jdrly/wine $(lib_commit "$1" | cut -c1-11))" ;;
+    engine) echo "the engine's own $LIB_NAME (athei/wine $ENGINE_WINE)" ;;
+    mix) echo "a mix of mine and the engine's own ${LIB_FILES// / and }" ;;
     *) echo "another $LIB" ;;
   esac
 }
-# lib_state <key>: yes (the file the setting asks for is in place), switch (it is not, and the
-# engine's own is there to make it from: apply_engine_files puts it in at the next chance), other
-# (the engine's own is nowhere: Repair unpacks the engine again), no (no engine)
-lib_state() {
-  local cur
+# lib_kept <key>: each of the engine's own files of the set is in place or next to it as
+# <file>.engine
+lib_kept() {
+  local f
   unix_lib "$1"
+  for f in $LIB_FILES; do
+    [ "$(lib_one "$f" "$UNIX_DIR/$f")" = engine ] || [ "$(lib_one "$f" "$UNIX_DIR/$f.engine")" = engine ] || return 1
+  done
+}
+# lib_state <key>: yes (the set the setting asks for is in place), switch (it is not, and the
+# engine's own files are there to make it from: apply_engine_files puts it in at the next chance),
+# other (one of the engine's own is nowhere: Repair unpacks the engine again), no (no engine)
+lib_state() {
   [ -x "$ENG/bin/wine" ] || { echo no; return; }
-  cur=$(lib_file "$1" "$UNIX_DIR/$LIB")
-  if [ "$cur" = "$(lib_want "$1")" ]; then echo yes
-  elif [ "$cur" = engine ] || [ "$(lib_file "$1" "$UNIX_DIR/$LIB.engine")" = engine ]; then echo switch
+  if [ "$(lib_file "$1")" = "$(lib_want "$1")" ]; then echo yes
+  elif lib_kept "$1"; then echo switch
   else echo other
   fi
 }
-# lib_switch <key>: the file the setting asks for into place (the caller has made sure that no
-# session runs or starts). Mine is copied next to it first ($LIB.new); the engine's own goes aside
-# as $LIB.engine when it is the one in place; then mine comes in. Back to the engine's own is one
-# rename. Interrupted, the old file or the new one is in place, or none between the two renames,
-# and the next switch puts the asked-for one in.
-lib_switch() {
-  local want cur f
+# lib_neither <key>: the warning for lib_state other
+lib_neither() {
   unix_lib "$1"
-  f="$UNIX_DIR/$LIB"
+  if [ "$LIB_SET" = "$LIB" ]; then echo "The engine's $LIB is neither its own nor mine. Click Repair."
+  else echo "The engine's $LIB_NAME are neither its own nor mine. Click Repair."
+  fi
+}
+# lib_switch <key>: the set the setting asks for into place (the caller has made sure that no
+# session runs or starts). To mine: my files copied next to theirs (<file>.new) first, then, file by
+# file, the engine's own aside as <file>.engine when it is the one in place, and mine in. To the
+# engine's own: a rename a file. A file already right is left as it is, so the next switch finishes
+# one cut short; until then the set is a mix, which Play never starts on.
+lib_switch() {
+  local want cur f p todo=""
+  unix_lib "$1"
   want=$(lib_want "$1")
-  cur=$(lib_file "$1" "$f")
+  cur=$(lib_file "$1")
+  # (copies a switch to mine cut short left, whichever way this one goes)
+  for f in $LIB_FILES; do [ ! -e "$UNIX_DIR/$f.new" ] || run rm -f "$UNIX_DIR/$f.new"; done
   [ "$cur" != "$want" ] || return 0
-  if [ "$cur" != engine ] && [ "$(lib_file "$1" "$f.engine")" != engine ]; then
+  if ! lib_kept "$1"; then
     # (lib_state says other: Play and set say Repair)
-    log "$LIB: neither the engine's file nor $LIB.engine is the engine's own; $(lib_label "$1" "$want") waits for Repair"
+    log "$LIB_NAME: the engine's own isn't in place or next to it for each; $(lib_label "$1" "$want") waits for Repair"
     return 0
   fi
-  if [ "$want" = engine ]; then
-    run mv -f "$f.engine" "$f"
-    say "$LIB: $(lib_label "$1" engine) is in the engine"
-    return 0
+  [ "$cur" != mix ] || say "${LIB_FILES// / and }: $(lib_label "$1" mix) in the engine, a switch cut short; finishing the switch to $(lib_label "$1" "$want")"
+  for f in $LIB_FILES; do [ "$(lib_one "$f" "$UNIX_DIR/$f")" = "$(lib_target "$f" "$want")" ] || todo="$todo $f"; done
+  for f in $todo; do
+    [ "$(lib_target "$f" "$want")" = mine ] || continue
+    run cp -p "$LIB_COMP/$f" "$UNIX_DIR/$f.new"
+    # (cp -p copies the quarantine attribute of an app copied out of a browser's download)
+    [ -n "$DRY" ] || xattr -d com.apple.quarantine "$UNIX_DIR/$f.new" 2>/dev/null || true
+  done
+  for f in $todo; do
+    p="$UNIX_DIR/$f"
+    if [ "$(lib_target "$f" "$want")" = engine ]; then
+      run mv -f "$p.engine" "$p"
+    else
+      [ "$(lib_one "$f" "$p")" != engine ] || run mv -f "$p" "$p.engine"
+      run mv -f "$p.new" "$p"
+    fi
+  done
+  if [ "$want" = engine ]; then say "$LIB_NAME: $(lib_label "$1" engine) $([ "$LIB_SET" = "$LIB" ] && echo is || echo are) in the engine"
+  elif [ "$LIB_SET" = "$LIB" ]; then say "$LIB: $(lib_label "$1" mine) is in the engine, the engine's own kept next to it as $LIB.engine"
+  else say "$LIB_NAME: $(lib_label "$1" mine) are in the engine, the engine's own kept next to each as <file>.engine"
   fi
-  run rm -f "$f.new"
-  run cp -p "$LIB_COMP/$LIB" "$f.new"
-  # (cp -p copies the quarantine attribute of an app copied out of a browser's download)
-  [ -n "$DRY" ] || xattr -d com.apple.quarantine "$f.new" 2>/dev/null || true
-  [ "$cur" != engine ] || run mv -f "$f" "$f.engine"
-  run mv -f "$f.new" "$f"
-  say "$LIB: $(lib_label "$1" mine) is in the engine, the engine's own kept next to it as $LIB.engine"
 }
 
 # --- FEX: my build (components/fex, jdrly/FEX built for this engine) or the engine's own
@@ -2249,12 +2324,11 @@ status() {
   echo "dxmt_version=$DXMT_VERSION"
   echo "dxmt_release=$DXMT_RELEASE"
   echo "dxmt_commit=$DXMT_COMMIT"
-  # (each of my unix libraries: the setting, the file Settings asks for (lib_state), the one in the
-  # engine now (mine, engine, other, none) with its commit and, if mine, its Wine release, and my
-  # build's commit in this app)
+  # (each of my unix libraries: the setting, the set Settings asks for (lib_state), the one in the
+  # engine now (mine, engine, other, mix, none) with its commit and, if mine, its Wine release, and
+  # my build's commit in this app)
   for k in $UNIX_LIBS; do
-    unix_lib "$k"
-    f=$(lib_file "$k" "$UNIX_DIR/$LIB")
+    f=$(lib_file "$k")
     echo "$k=$(setting "$k")"
     echo "${k}_ready=$(lib_state "$k")"
     echo "${k}_file=$f"
@@ -2262,6 +2336,11 @@ status() {
     echo "${k}_release=$(lib_release_of "$k" "$f")"
     echo "${k}_build=$(lib_commit "$k")"
   done
+  # (my Mac driver's win32u.so: whether this app's build has one, and the engine's win32u.so now:
+  # mine, engine, other or none)
+  unix_lib macdrv
+  echo "win32u_bundled=$(in_list win32u.so "$LIB_SET" && echo yes || echo no)"
+  echo "win32u_file=$(lib_one win32u.so "$UNIX_DIR/win32u.so")"
   # (FEX the same way: the setting, its state, the FEX in the engine now (mine, engine, mix, other)
   # with its commit, and my build's commit in this app)
   f=$(fex_in_use)
@@ -2347,8 +2426,7 @@ cmd_set() {
   esac
   if in_list "$key" "$UNIX_LIBS"; then
     apply_engine_files
-    unix_lib "$key"
-    [ "$(lib_state "$key")" != other ] || warn "The engine's $LIB is neither its own nor mine. Click Repair."
+    [ "$(lib_state "$key")" != other ] || warn "$(lib_neither "$key")"
   fi
   if [ "$key" = fex ]; then
     apply_engine_files
@@ -2440,6 +2518,7 @@ write_manifest() {
   "loader_sha256": "$ENGINE_LOADER_SHA256",
   "ntdll_sha256": "$ENGINE_NTDLL_SHA256",
   "winemac_sha256": "$ENGINE_WINEMAC_SHA256",
+  "win32u_sha256": "$ENGINE_WIN32U_SHA256",
   "dxmt_d3d11_sha256": "$ENGINE_D3D11_SHA256",
   "winemetal_sha256": "$ENGINE_WINEMETAL_SHA256",
   "fex_dll_sha256": "$ENGINE_FEX_DLL_SHA256",
@@ -2564,9 +2643,12 @@ launch() {
       # the sha256 of the file as it is in the engine)
       for k in $UNIX_LIBS; do
         unix_lib "$k"
-        f=$(lib_file "$k" "$UNIX_DIR/$LIB")
+        f=$(lib_file "$k")
         echo "LIB_$k=$LIB $f $(lib_commit_of "$k" "$f") $(sha256 "$UNIX_DIR/$LIB" 2>/dev/null || true)"
       done
+      # (and my Mac driver's other file, win32u.so: <mine|engine|other|none> <sha256>)
+      unix_lib macdrv
+      echo "LIB_win32u=win32u.so $(lib_one win32u.so "$UNIX_DIR/win32u.so") $(sha256 "$UNIX_DIR/win32u.so" 2>/dev/null || true)"
       # (the FEX it loads: mine <commit> <sha256 of xtajit64.dll in the engine>, or engine; Play
       # starts no session on anything else)
       if [ "$(fex_in_place)" = mine ]; then
@@ -3131,11 +3213,20 @@ cmd_play() {
       switch) echo "@notice Steam is still running with $(dxmt_label "$(dxmt_in_use)"); quit Steam to switch to $(dxmt_label "$(setting dxmt)")." ;;
       *) warn "The engine's DXMT is neither its own nor mine. Click Repair." ;;
     esac
+    # (winemac.so and win32u.so of two builds never load together: no session on a mix, nor on
+    # another build of my Mac driver, whose win32u.so nothing can prove is its pair: an earlier
+    # version of the app may have been cut short between the two)
     for k in $UNIX_LIBS; do
       unix_lib "$k"
-      case "$(lib_state "$k")" in
-        switch) echo "@notice Steam is still running with $(lib_label "$k" "$(lib_in_use "$k")"); quit Steam to switch to $(lib_label "$k" "$(lib_want "$k")")." ;;
-        other) warn "The engine's $LIB is neither its own nor mine. Click Repair." ;;
+      case "$(lib_state "$k")/$(lib_file "$k")" in
+        other/mix) die "The engine's ${LIB_FILES// / and } are a mix of mine and its own. Click Repair." ;;
+        switch/mix) die "The engine's ${LIB_FILES// / and } are a mix of mine and its own, a switch cut short. Quit Steam and click Play again to finish it." ;;
+        other/other) [ "$LIB_FILES" = "$LIB" ] || die "The engine's ${LIB_FILES// / and } are neither its own nor mine. Click Repair."
+          warn "$(lib_neither "$k")" ;;
+        switch/other) [ "$LIB_FILES" = "$LIB" ] || die "The engine's $LIB is another build of mine, and nothing proves its win32u.so is that build's. Quit Steam and click Play again to put this build's in."
+          echo "@notice Steam is still running with $(lib_label "$k" "$(lib_in_use "$k")"); quit Steam to switch to $(lib_label "$k" "$(lib_want "$k")")." ;;
+        switch/*) echo "@notice Steam is still running with $(lib_label "$k" "$(lib_in_use "$k")"); quit Steam to switch to $(lib_label "$k" "$(lib_want "$k")")." ;;
+        other/*) warn "$(lib_neither "$k")" ;;
       esac
     done
     # (FEX runs every instruction of the game: never a session on a mix of two builds' files)
