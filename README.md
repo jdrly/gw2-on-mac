@@ -692,7 +692,10 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   has every switch of my forks that is off by default, at the value that turns its new behaviour
   on, apart from diagnostics, anything that can cap the frame rate below 60 (DXMT's lower thread
   priorities and `DXMT_BG_POLICY=occlusion` among them), values only I can choose and the rows'
-  own variables. A row whose variable a line of the file sets, *Faster locks* with the file's
+  own variables. `DXMT_MTL4_PRESENT=mtl3` (jdrly/dxmt#227) is in to hunt the Metal 4 cursor
+  stutter, and acts only with the *Metal* row at Metal 4, like the other `DXMT_MTL4_*` lines.
+  `DXMT_MTL4_LAYER_SET` (jdrly/dxmt#226) stays out: I turn that one on by hand, never with
+  `DXMT_MTL4_PRESENT`, so a change in play has one cause. A row whose variable a line of the file sets, *Faster locks* with the file's
   `WINE_HEAT_SPIN`, is greyed while that line is there, since the file's entry wins. A line of the table goes in only while the file of mine that
   reads it is in place and has the switch: the `switches:` line of my `ntdll.so`'s,
   `winemac.so`'s or FEX's `VERSION` (a `VERSION` without that line names none). My `win32u.so`'s

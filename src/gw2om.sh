@@ -1075,7 +1075,9 @@ fex_entries() {
 # greyed while the line is there (dev_sets): the file's entry comes later in the rule and wins. A fork's issues are
 # jdrly/<fork>#n, the app's #n. Unplayed: no session of the game has run with it. My fork's Metal 4
 # switches (DXMT_MTL4_*) stay in with the Metal row at Metal 3, where they do nothing, so my lines
-# last through a switch of Metal; their comments say so.
+# last through a switch of Metal; their comments say so. DXMT_MTL4_PRESENT=mtl3 is in for the Metal 4
+# cursor stutter (jdrly/dxmt#223); DXMT_MTL4_LAYER_SET (jdrly/dxmt#226), its other suspect, stays out:
+# I turn that diagnostic on by hand, so a change in play has one cause.
 DEV_SWITCHES="
 1 wine #14,#45 unplayed WINE_HEAT_SPIN=lock=20:game,event=30:game,sem=5:game the Faster locks row's two spins, and the job workers spin 5 µs on their semaphore before they sleep. While this line is here, its value replaces the row's.
 1 macdrv #62 unplayed WINE_MACDRV_VIEW=changes a window's view frame goes to the main thread only when it changed
@@ -1096,6 +1098,7 @@ DEV_SWITCHES="
 1 dxmt jdrly/dxmt#5 played DXMT_PSO_ARCHIVE=1 Metal binary archives of the pipelines, looked up in the last 4 sessions' archives
 1 dxmt jdrly/dxmt#75 unplayed DXMT_PSO_GENERATIONS=1 the archives published as generations instead of one file a session
 1 dxmt jdrly/dxmt#73 unplayed DXMT_COMPILE_DEMAND=1 the compile service's declared policy (Shader warming turns it on too)
+2 dxmt jdrly/dxmt#227 unplayed DXMT_MTL4_PRESENT=mtl3 only with the Metal row at Metal 4, nothing on Metal 3: each frame is presented the Metal 3 way, through a Metal 3 command buffer, and everything else stays on Metal 4
 "
 DEV_SWITCHES_VERSION=$(printf '%s\n' "$DEV_SWITCHES" | awk 'NF && $1 > v { v = $1 } END { print v + 0 }')
 # dev_piece_label <piece>: what the file and the log call it
