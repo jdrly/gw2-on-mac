@@ -955,7 +955,8 @@ done
 echo "profile" >"$LOGS/heat-prof-9404.log"
 # (a stand-in for macOS's vmmap, $ROOT/bin/vmmap: it notes the pid it was given and prints an
 # excerpt of the first 0.2 session's, with FEX's three code buffers among other regions)
-{ printf '#!/bin/bash\necho "$1" >>"%s/vmmap.args"\ncat <<'"'"'MAP'"'"'\n' "$SANDBOX"; cat <<'EOF'; echo MAP; } >"$SANDBOX/bin/vmmap"
+# (with the file vmmap.hang it hangs instead)
+{ printf '#!/bin/bash\necho "$1" >>"%s/vmmap.args"\n[ ! -e "%s/vmmap.hang" ] || exec sleep 60\ncat <<'"'"'MAP'"'"'\n' "$SANDBOX" "$SANDBOX"; cat <<'EOF'; echo MAP; } >"$SANDBOX/bin/vmmap"
 Process:         Gw2-64.exe [70549]
 Path:            /Users/*/Library/Application Support/GW2 on Mac arm64/*/wine.app/Contents/MacOS/wine
 Load Address:    0x104508000
@@ -1342,6 +1343,16 @@ check "Collect Logs while the game runs: a vmmap of the game, in the logs folder
   eval '[ "$(cat "$SANDBOX/vmmap.args" 2>/dev/null)" = "$gp" ] && vf=$(ls "$LOGS"/vmmap-*.txt) && [ -f "$Z/logs/${vf##*/}" ] &&
     has "$Z/session-report.txt" "^vmmap at .*; FEX has thrown its code away 2 times$"'
 rm -f "$LOGS"/vmmap-*.txt "$SANDBOX/vmmap.args"
+: >"$SANDBOX/vmmap.hang"
+t0=$(date +%s)
+out=$(GW2_ON_MAC_VMMAP_TIMEOUT=1 g vmmap 2>&1) && rc=0 || rc=$?
+t1=$(date +%s)
+vf=$(ls "$LOGS"/vmmap-*.txt 2>/dev/null | head -1)
+check "a vmmap that hangs: ended after the deadline, the command fails and the file says why" \
+  eval '[ "$rc" != 0 ] && [ $((t1 - t0)) -lt 10 ] && echo "$out" | grep -q "^@error vmmap hadn.t finished after 1 s" &&
+    [ "$(sed -n 2p "$vf")" = "vmmap failed: it hadn'"'"'t finished after 1 s, so it was ended" ]'
+check "  the hanging stand-in is gone" sh -c "! ps -axww -o args= | grep -q '^sleep 60$'"
+rm -f "$LOGS"/vmmap-*.txt "$SANDBOX/vmmap.args" "$SANDBOX/vmmap.hang"
 mv -f "$SANDBOX/session.env.keep" "$LOGS/session.env"
 kill $gp 2>/dev/null || true; wait $gp 2>/dev/null || true
 rm -f "$ENG/bin/Gw2-64.exe"
