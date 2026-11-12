@@ -1288,8 +1288,8 @@ EOF
     [ "$(table --from 2 --to 12 | head -2 | tr '\n' '|')" = "Server requests of thread 00a4, the game thread, in heat-requests-4242.log from 2.0 to 12.0 s: blocks wholly inside 1, covering 5.0 s; each count, then a second in brackets|  get_message 300 (60.0), 0.600 ms (0.120)|" ]
   check "  a log of this format: no game thread table, workers line or other thread's requests" \
     eval '[ "$("$APP/Contents/Resources/session-report.sh" 2>&1 | grep -cE "^(The game thread|The workers|Server requests)")" = 1 ]'
-  check "  no fex lines in the blocks, no FEX_SILENTLOG=0 in the rule: nothing of FEX's" \
-    eval '! "$APP/Contents/Resources/session-report.sh" 2>&1 | grep -qE "^(FEX|Memory ordering)"'
+  check "  no fex lines in the blocks, no FEX_SILENTLOG=0 in the rule: no FEX counters or memory ordering line (FEX that ran, from the record, stays)" \
+    eval '! "$APP/Contents/Resources/session-report.sh" 2>&1 | grep -qE "^(FEX.s counters|FEX didn.t say|Memory ordering)"'
   # (the same blocks with FEX's counters, in the line my ntdll.so writes per jdrly/gw2-on-mac#111;
   # no real session has them yet. The game thread compiles 2.5 s in its first block and little in
   # the next two, with #117's four counts in the second; the other thread got no slot)
@@ -1308,7 +1308,7 @@ FEX's counters of thread 00a4, the game thread, in heat-requests-4242.log from 0
   Also, in all: sigbus 0, float 4, dcache_hit 0, dcache_miss 0, dcache_ms 0.000, tso_switches 4, native_exits 120, code_buffer_moves 1, l1_resizes 0
 FEX's counters of thread 0024, another thread: none, FEX had no slot left for it (36 in use). Its stats have room for about 36 threads and can't grow on macOS.
 EOF
-  fex() { "$APP/Contents/Resources/session-report.sh" "$@" 2>&1 | awk '/^FEX/ { p = 1; print; next } p && /^  / { print; next } { p = 0 }'; }
+  fex() { "$APP/Contents/Resources/session-report.sh" "$@" 2>&1 | awk '/^FEX.s counters/ { p = 1; print; next } p && /^  / { print; next } { p = 0 }'; }
   check "  with fex lines: the request table as before" diff "$SANDBOX/requests.want" <(table)
   check "  FEX's counters of the game thread in the heat log's run, the names the report doesn't know as they are, and the thread without a slot" \
     diff "$SANDBOX/fex.want" <(fex)
