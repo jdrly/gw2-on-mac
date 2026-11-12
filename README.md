@@ -206,7 +206,7 @@ file while both rows were greyed, so no file held a choice of mine.
 | | Launch options | `launchopts` | none | arguments for `Gw2-64.exe`, using letters, digits and `-_.:=,/+` |
 | | Quit GW2 on Mac after launching | | off | the app quits once Play has started Steam or the game |
 | Mouse | Raw mouse-look | `rawmouse` | on | on, the game's raw input is the mouse's own counts from GameController; off, it is the pointer's movement, see below |
-| | Mouse-look speed | `mousespeed` | 1× | greyed: the engine gives the game the mouse's own counts. A speed factor comes with #59 if I need one |
+| | Mouse-look speed | `mousespeed` | 1× | greyed: the engine gives the game the mouse's own counts. Use the game's own camera settings for the speed |
 | Updates | Check automatically | `updates` | on | Sparkle checks for new versions. Off in development builds, which have no update feed |
 | Troubleshooting | Debug logging | `debug` | off | DXMT's log at `debug` and Wine's errors, for a bug report, at some cost in performance. With my `winemac.so`, also its `macsurface` lines for `Gw2-64.exe`. On in development builds |
 

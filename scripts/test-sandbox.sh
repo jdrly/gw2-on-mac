@@ -439,7 +439,7 @@ if mine; then
   g set fastlocks off >/dev/null
 fi
 check "  rawmouse ok; mousespeed greyed: the engine sends the mouse's own counts" \
-  eval '[ "$(sett rawmouse_state)" = ok ] && [ "$(sett mousespeed_state)" = "off:The engine gives the game the mouse'"'"'s own counts. A speed factor comes with #59 if I need one." ]'
+  eval '[ "$(sett rawmouse_state)" = ok ] && [ "$(sett mousespeed_state)" = "off:The engine gives the game the mouse'"'"'s own counts. Use the game'"'"'s own camera settings for the speed." ]'
 check "  ok for the ones my DXMT fork brings back: metalfx, warm; dxmt=fork by default" \
   [ "$(sett metalfx_state)/$(sett warm_state)/$(sett dxmt)/$(sett dxmt_state)" = ok/ok/fork/ok ]
 check "  the larger interface's settings and arcdps carry a note" \

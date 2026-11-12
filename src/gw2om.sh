@@ -693,7 +693,7 @@ setting_state() {
   case "$1" in
     metalfx|warm) if [ "$(setting dxmt)" = fork ]; then echo ok; else echo "off:Needs my DXMT fork (Graphics › DXMT)."; fi ;;
     coolworkers) echo "off:Not in my Wine build yet. It comes once big crowds hold 60 FPS without it." ;;
-    mousespeed) echo "off:The engine gives the game the mouse's own counts. A speed factor comes with #59 if I need one." ;;
+    mousespeed) echo "off:The engine gives the game the mouse's own counts. Use the game's own camera settings for the speed." ;;
     gamemode) echo "off:The engine's loader is a Game Mode app. Nothing to switch." ;;
     wine) if lib_bundled wine; then echo ok; else echo "off:This build of the app has no Wine build of mine."; fi ;;
     macdrv) if lib_bundled macdrv; then echo ok; else echo "off:This build of the app has no Mac driver of mine."; fi ;;
@@ -710,7 +710,7 @@ setting_state() {
 # setting_note <key>: what the window shows under a setting that works but is untested here
 setting_note() {
   case "$1" in
-    uiscale|uiscale_size|uiscale_sans) echo "Untested on this engine. #27." ;;
+    uiscale|uiscale_size|uiscale_sans) echo "Untested on this engine." ;;
     uiscale_cinema|arcdps) echo "A code patch, untested under FEX." ;;
   esac
 }

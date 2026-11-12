@@ -270,10 +270,10 @@ func settings(_ extra: [String: String] = [:]) -> GameSettings {
 // sandbox suite pins them there): the greyed rows with their reasons, the untested notes
 let engineStates: [String: String] = [
   "coolworkers_state": "off:Not in my Wine build yet. It comes once big crowds hold 60 FPS without it.",
-  "mousespeed_state": "off:The engine gives the game the mouse's own counts. A speed factor comes with #59 if I need one.",
+  "mousespeed_state": "off:The engine gives the game the mouse's own counts. Use the game's own camera settings for the speed.",
   "gamemode_state": "off:The engine's loader is a Game Mode app. Nothing to switch.",
-  "uiscale_note": "Untested on this engine. #27.", "uiscale_size_note": "Untested on this engine. #27.",
-  "uiscale_sans_note": "Untested on this engine. #27.", "uiscale_cinema_note": "A code patch, untested under FEX.",
+  "uiscale_note": "Untested on this engine.", "uiscale_size_note": "Untested on this engine.",
+  "uiscale_sans_note": "Untested on this engine.", "uiscale_cinema_note": "A code patch, untested under FEX.",
   "arcdps_note": "A code patch, untested under FEX.",
 ]
 
