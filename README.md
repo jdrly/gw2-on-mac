@@ -481,10 +481,16 @@ cached downloads, logs and `dxmt.conf`.
 1. **The engine.** Check macOS, download, unpack, take the quarantine off, remove the SDK, check
    the build, then put my DXMT fork into its DXMT tree and my `ntdll.so` and `winemac.so` in
    place, as above.
-2. **The bottle.** `wineboot`, then `settings.conf`, `dxmt.conf` and three values in `user.reg`,
-   the ones Mach9's own launcher writes: `RetinaMode` under `Software\Wine\Mac Driver`,
-   `EmulateModeset=Y` under `Software\Wine\X11 Driver` and `ShowCrashDialog=dword:0` under
-   `Software\Wine\WineDbg`.
+2. **The bottle.** `wineboot`, then `settings.conf`, `dxmt.conf` and three values in `user.reg`:
+   `RetinaMode` under `Software\Wine\Mac Driver`, `EmulateModeset=N` under
+   `Software\Wine\X11 Driver` and `ShowCrashDialog=dword:0` under `Software\Wine\WineDbg`.
+   Mach9's own launcher writes `EmulateModeset=Y`. 0.1.x never writes it, and I write `N`, so a
+   bottle with `Y` from an earlier 0.2 build gets `N` at its next start without a running session
+   ([#90](https://github.com/jdrly/gw2-on-mac/issues/90)). With `Y`, moving the cursor made the
+   frame interval saw between 16.7 and 33 ms, where 0.1.x stays at 16.7. Wine fakes the game's
+   mode set and drops its gamma ramp, so macOS flips the game's frames straight to the display,
+   and each cursor update holds a frame back by a refresh. The game's Gamma slider did nothing
+   either. A value I set under `AppDefaults` for `Gw2-64.exe` stays as it is.
 3. **Steam or ArenaNet's installer.** Steam's `SteamSetup.exe` comes from Valve's CDN and runs with
    `/S`. ArenaNet's installer goes through `gw2om.sh check-setup` first, which uses only macOS's
    `/usr/bin/openssl`. The file must be a PE x86_64 executable. Its Authenticode signature must be
