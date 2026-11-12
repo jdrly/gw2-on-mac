@@ -172,9 +172,9 @@ their values, which do nothing here. `gw2om.sh settings` prints `<key>_state=ok`
 `<key>_state=off:<reason>` for every key, and a `<key>_note` for the ones that work but are
 untested on this engine.
 
-A switch of my `ntdll.so` is also greyed when the file in this app doesn't have it, which the
-file's `VERSION` says with a line `switches: <variable> …`. A `VERSION` without that line greys
-nothing.
+A switch of my `ntdll.so` or my `winemac.so` is also greyed when the file in this app doesn't
+have it, which the file's `VERSION` says with a line `switches: <variable> …`. A `VERSION` without
+that line greys nothing.
 
 `settings.conf` has a line `settings_version=`. Install and Repair write every key with its value,
 so the file holds the defaults it was written with. When a default changes for the files that
@@ -215,7 +215,7 @@ place.
 | | Launch options | `launchopts` | none | arguments for `Gw2-64.exe`, using letters, digits and `-_.:=,/+` |
 | | Quit GW2 on Mac after launching | | off | the app quits once Play has started Steam or the game |
 | Mouse | Raw mouse-look | `rawmouse` | on | on, the game's raw input is the mouse's own counts from GameController; off, it is the pointer's movement, see below |
-| | Mouse-look speed | `mousespeed` | 1× | greyed: the engine gives the game the mouse's own counts. Use the game's own camera settings for the speed |
+| | Mouse-look speed | `mousespeed` | 1× | a factor on the mouse's own counts, from 0.5× to 3×, which my `winemac.so` applies before the game gets them (`WINE_MACDRV_MOUSE_SCALE`). The game's own camera settings apply on top. Greyed while *Raw mouse-look* is off, while the engine's own `winemac.so` is chosen, or while my file in this app doesn't have the switch |
 | Updates | Check automatically | `updates` | on | Sparkle checks for new versions. Off in development builds, which have no update feed |
 | Troubleshooting | Debug logging | `debug` | off | DXMT's log at `debug` and Wine's errors, for a bug report, at some cost in performance. With my `winemac.so`, also its `macsurface` lines for `Gw2-64.exe`. On in development builds |
 
@@ -228,8 +228,9 @@ program by a built-in rule, so with the setting on the game's rule says nothing 
 With it off the rule gets `gcmouse=false`, and the game's raw input is the pointer's movement, as
 Wine does it. The pointer keeps moving under the hidden cursor either way, and the game moves it
 back. The rule is written at each game start, so the change needs no closed Steam, and the session
-report names which mouse the game had. *Mouse-look speed* stays greyed: 0.1.x's speed factor was a
-piece of my own driver, which this engine doesn't have.
+report names which mouse the game had. *Mouse-look speed* multiplies those counts in my
+`winemac.so`, with 0.1.x's values. On 0.1.x it was a factor on the pointer's speed, so the same
+value can turn the camera at another speed here.
 
 ### Larger interface
 
@@ -591,7 +592,9 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
 - The `WINE_MACDRV_*` entries are my `winemac.so`'s, rows of the same table. Each goes in only
   while my driver is in place, whatever `wine` says, and `CefHost.exe`'s rule unsets it. *Launcher
   frames* writes `WINE_MACDRV_SURFACE=copy,skip`, after the `WINE_HEAT_*` switches and before the
-  counters. The comma needs no escape.
+  counters. The comma needs no escape. *Mouse-look speed* writes `WINE_MACDRV_MOUSE_SCALE` with
+  its value after that, and nothing at 1 or while *Raw mouse-look* is off. An entry whose variable
+  the driver's `VERSION` doesn't list on its `switches:` line stays out, as for my `ntdll.so`.
 - A `compatdb.local` that I put in the app's folder is appended as it is, for trying FEX switches
   such as `exe=Gw2-64.exe;env=FEX_HOSTFEATURES=disableavx`. Nothing in the app writes it, and
   Collect Logs includes it.

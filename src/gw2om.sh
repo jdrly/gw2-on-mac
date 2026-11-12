@@ -650,8 +650,8 @@ SETTINGS_RESETS="
 "
 SETTINGS_VERSION=$(printf '%s\n' "$SETTINGS_RESETS" | awk 'NF { v = $1 } END { print v + 0 }')
 FPS_CAPS="off 30 40 60 120"
-# Mouse-look speed (mousespeed): RawMouseGameControllerScale on 0.1.x, a factor on the macOS
-# pointer's speed (SWTOR on Mac's MOUSE_SPEEDS)
+# Mouse-look speed (mousespeed): 0.1.x's values, there RawMouseGameControllerScale, a factor on
+# the macOS pointer's speed (SWTOR on Mac's MOUSE_SPEEDS); here a factor on GameController's counts
 MOUSE_SPEEDS="0.5 0.75 1 1.25 1.5 1.75 2 2.5 3"
 # CPUs the game sees (ncpu): 2 up to this Mac's logical CPUs, or all
 CPU_MAX="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 8)"
@@ -705,22 +705,23 @@ setting() { # <key>: its value, or the default
 # setting_state <key>: ok, or off:<reason> for a setting this engine can't do yet (the one table of
 # them; settings prints it, the window greys the row and shows the reason, set refuses the key)
 setting_state() {
-  local l n
+  local e l n
+  if [ "$1" = mousespeed ] && [ "$(setting rawmouse)" != on ]; then echo "off:Needs Raw mouse-look, which is off."; return; fi
   case "$1" in
     metalfx|warm) if [ "$(setting dxmt)" = fork ]; then echo ok; else echo "off:Needs my DXMT fork, and the engine's own DXMT is chosen."; fi ;;
-    mousespeed) echo "off:The engine gives the game the mouse's own counts. Use the game's own camera settings for the speed." ;;
     gamemode) echo "off:The engine's loader is a Game Mode app. Nothing to switch." ;;
     wine) if lib_bundled wine; then echo ok; else echo "off:This build of the app has no Wine build of mine."; fi ;;
     macdrv) if lib_bundled macdrv; then echo ok; else echo "off:This build of the app has no Mac driver of mine."; fi ;;
     *)
-      l=$(switch_lib "$(switch_entry "$1")")
+      e=$(switch_entry "$1") l=$(switch_lib "$e")
       if [ -z "$l" ]; then echo ok
       elif [ "$(lib_want "$l")" != mine ]; then
         if [ "$l" = macdrv ]; then n="my Mac driver"; else n="my Wine build"; fi
         if lib_bundled "$l"; then echo "off:Needs $n, and the engine's own $LIB is chosen."
         else echo "off:Needs $n, which this build of the app doesn't have."
         fi
-      elif [ "$l" != wine ] || heat_in_file "$(switch_entry "$1")"; then echo ok
+      elif switch_in_file "$e"; then echo ok
+      elif [ "$l" = macdrv ]; then echo "off:My Mac driver in this app (jdrly/wine $(lib_commit macdrv | cut -c1-11)) doesn't have this switch."
       else echo "off:My Wine build in this app (jdrly/wine $(lib_commit wine | cut -c1-11)) doesn't have this switch."
       fi ;;
   esac
@@ -856,10 +857,14 @@ EOF
 # The game's switches in my Wine builds (jdrly/wine; they act on them in Gw2-64.exe only, which is
 # the launcher too), one row per setting: "<setting> <entry>". The entry goes into the game's rule
 # while the setting isn't off and the file that reads it is mine (heat_entries): WINE_HEAT_* my
-# ntdll.so (wine), WINE_MACDRV_* and WINE_WIN32U_* my Mac driver (macdrv; switch_lib). A WINE_HEAT_*
-# entry also needs my ntdll.so to have the switch (heat_in_file). A new switch is a new row.
+# ntdll.so (wine), WINE_MACDRV_* and WINE_WIN32U_* my Mac driver (macdrv; switch_lib). The entry
+# also needs that file to have the switch (switch_in_file). An entry ending in = takes the
+# setting's value, and stays out at the setting's default. A new switch is a new row.
 #   launcherframes  my winemac.so hands Cocoa a copy of each frame of a window it draws with GDI,
 #                   such as the launcher's, and skips a frame equal to the last (#57)
+#   mousespeed      my winemac.so multiplies GameController's mouse counts by the factor before
+#                   the game gets them; only while Raw mouse-look is on, as with it off the game
+#                   doesn't get those counts
 #   wine            no setting of its own: WINE_HEAT_MSYNC_UNREG=1 goes in whenever my ntdll.so is
 #                   in place, as 0.1.x always sets it (#44)
 HEAT_SWITCHES="
@@ -868,17 +873,19 @@ eventpool WINE_HEAT_EVPOOL=1
 fastlocks WINE_HEAT_SPIN=lock=20:game,event=30:game
 wine WINE_HEAT_MSYNC_UNREG=1
 launcherframes WINE_MACDRV_SURFACE=copy,skip
+mousespeed WINE_MACDRV_MOUSE_SCALE=
 "
 # switch_entry <setting>: its row's entry, or nothing; switch_lib <entry>: the unix_lib key whose
 # file reads it, or nothing for no entry
 switch_entry() { printf '%s\n' "$HEAT_SWITCHES" | awk -v k="$1" '$1 == k { print $2 }'; }
 switch_lib() { case "$1" in '') ;; WINE_MACDRV_*|WINE_WIN32U_*) echo macdrv ;; *) echo wine ;; esac; }
-# heat_in_file <entry>: my ntdll.so in this app reads the entry's variable. Its VERSION names the
-# commit, not the switches, and a commit can't tell which of them it has. So the answer comes from
-# a line "switches: <variable> …" (every WINE_HEAT_* variable the file reads) when VERSION has one,
-# and is yes when it hasn't.
-heat_in_file() {
+# switch_in_file <entry>: the file of mine in this app that reads the entry (switch_lib: my ntdll.so
+# or my winemac.so) reads its variable. Its VERSION names the commit, not the switches, and a
+# commit can't tell which of them it has. So the answer comes from a line "switches: <variable> …"
+# (every switch variable the file reads) when VERSION has one, and is yes when it hasn't.
+switch_in_file() {
   local f="$COMP/ntdll/VERSION"
+  [ "$(switch_lib "$1")" != macdrv ] || f="$COMP/macdrv/VERSION"
   grep -q '^switches:' "$f" 2>/dev/null || return 0
   in_list "${1%%=*}" "$(sed -n 's/^switches://p' "$f" | head -1)"
 }
@@ -887,11 +894,14 @@ heat_in_file() {
 # mine and, with Debug logging and my ntdll.so, its counters (WINE_HEAT_COUNT), which it writes to
 # the logs folder as heat-<pid>.log every 5 s. None of a file while the engine's own is in place.
 heat_entries() {
-  local k e wine macdrv
+  local k e v wine macdrv
   wine=$(lib_in_use wine) macdrv=$(lib_in_use macdrv)
   printf '%s\n' "$HEAT_SWITCHES" | while read -r k e; do
-    [ -n "$k" ] && [ "$(setting "$k")" != off ] || continue
-    if [ "$(switch_lib "$e")" = macdrv ]; then [ "$macdrv" = mine ] || continue; else [ "$wine" = mine ] && heat_in_file "$e" || continue; fi
+    [ -n "$k" ] && v=$(setting "$k") && [ "$v" != off ] || continue
+    case "$e" in *=) [ "$v" != "$(setting_default "$k")" ] || continue; e=$e$v ;; esac
+    [ "$k" != mousespeed ] || [ "$(setting rawmouse)" = on ] || continue
+    if [ "$(switch_lib "$e")" = macdrv ]; then [ "$macdrv" = mine ] || continue; else [ "$wine" = mine ] || continue; fi
+    switch_in_file "$e" || continue
     cdb_value "$e"; echo
   done
   if [ "$wine" = mine ] && [ "$(setting debug)" = on ]; then echo WINE_HEAT_COUNT=1; echo "WINE_HEAT_LOG=$(cdb_value "$LOGS")"; fi
