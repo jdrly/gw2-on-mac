@@ -281,6 +281,10 @@ with what I need for a bug report:
 - the game's `ArenaNet.log` and `GFXSettings.Gw2-64.exe.xml`
 - Steam's bootstrap, content, gameprocess and shader logs
 - crash reports from the last 7 days, GPU errors from the last 2 hours, and `system-info.txt`
+- while the game runs, `vmmap-<date>-<time>.txt`: how much memory the game uses and how full
+  FEX's code buffers are, from macOS's `vmmap`. The game stands still while `vmmap` reads its
+  memory, and the file's first line says for how long. Without a running game nothing of this
+  happens.
 
 On the way into the zip it removes account, persona and Mac names, Steam IDs, e-mail addresses,
 home folders, tokens and the crash logs' machine, account and address fields. `Local.dat`, Steam's
@@ -824,6 +828,19 @@ last session from DXMT's own log lines:
 - which `winemac.so` ran and its switches, and with Debug logging the last `macsurface` line of
   the launcher's window from `wine.log`. The launcher's is the window with the most flushes, about
   40 a second, since the game draws with Metal
+- for each `vmmap` file taken since the session started: the minutes in, the footprint and FEX's
+  code buffers by size, as "16M full, 32M full, 64M 25.4M resident; FEX has thrown its code away 2
+  times"
+
+`gw2om.sh vmmap` takes such a file from Terminal, and Collect Logs takes one too while the game
+runs. It runs `/usr/bin/vmmap` only on the `Gw2-64.exe` of this app's engine, the one `status`
+names as `game_pid`, and keeps of its output the header through `Physical footprint (peak)`, the
+regions that are `rwx/rwx` and the summary. FEX's code buffers are the process's only `rwx/rwx`
+regions. FEX starts a new one twice the size, up to 128 MB, each time it throws its code away, so
+the largest is the one in use and every other one is a discard. The full region list of an 8 GB
+game is about 50,000 lines, and nothing reads it. `vmmap` stops the game while it reads it, so
+nothing takes one on a timer. The file's first line has the game's pid, its seconds since start
+and how long `vmmap` took, which is the longest the game can have stood still.
 
 # Development
 

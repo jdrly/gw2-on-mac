@@ -65,6 +65,8 @@
 #   gw2om.sh fetch-engine      downloads and verifies the engine into the cache
 #   gw2om.sh env               the game's environment as play would set it (for Terminal)
 #   gw2om.sh rules             the compatdb rules play would write (for Terminal)
+#   gw2om.sh vmmap             while the game runs: FEX's code buffers and the footprint from
+#                              macOS's vmmap, into the logs folder (cmd_vmmap; Collect Logs too)
 #
 # Environment:
 #   GW2_ON_MAC_ROOT=/abs/dir   sandbox for tests: the app's files, logs and caches all live under
@@ -91,6 +93,7 @@
 #   GW2_ON_MAC_FREE_KB=<n>     the free space the app's disk reports (KB)
 #   GW2_ON_MAC_WATCH_TIMEOUT, GW2_ON_MAC_WATCH_GRACE, GW2_ON_MAC_WATCH_QUITWAIT,
 #   GW2_ON_MAC_WATCH_POLL      watch-session's times in seconds (900, 30, 20, 2)
+#   GW2_ON_MAC_VMMAP_TIMEOUT   how long vmmap may take before it is ended, in seconds (60)
 #
 # Lines for the app start with "@": "@phase <n>" (the timeline: install 1 engine, 2 bottle,
 # 3 Steam or ArenaNet's installer, 4 the game's download, 5 finishing touches; install import
@@ -3021,6 +3024,67 @@ cmd_end_leftovers() {
   esac
 }
 
+# vmmap: the game's memory as macOS's vmmap reads it, for FEX's code buffers (the process's only
+# regions that are rwx/rwx; how many says how often FEX threw its code away) and the footprint.
+# Only for this bottle's Gw2-64.exe, proc_list's game. vmmap stops the game while it reads it, so
+# it runs only when I ask: this command, or Collect Logs. It writes $LOGS/vmmap-<date>-<time>.txt:
+#   Gw2-64.exe pid <pid>, running <s> s, vmmap took <s> s (the game stood still for at most that long)
+# then vmmap's header through "Physical footprint (peak)", the region list's column line with its
+# rwx/rwx regions only, and the summary from "==== Summary" on; or a line "vmmap failed …". A vmmap
+# that hasn't finished after VMMAP_TIMEOUT s gets TERM, and KILL 5 s later, so Collect Logs always
+# ends; I don't know whether macOS lets the game go on at once when vmmap dies while it holds it
+# stopped. In a sandbox the vmmap is $ROOT/bin/vmmap (a test's), and without one nothing runs.
+VMMAP=/usr/bin/vmmap
+VMMAP_TIMEOUT=60
+VMMAP_GRACE=5
+if [ -n "$ROOT" ]; then VMMAP="$ROOT/bin/vmmap" VMMAP_TIMEOUT="${GW2_ON_MAC_VMMAP_TIMEOUT:-$VMMAP_TIMEOUT}"; fi
+cmd_vmmap() {
+  local pid secs f t took vp wd st=0
+  pid=$(proc_list | awk '$1 == "game" { print $2; exit }')
+  [ -n "$pid" ] || { echo "@done Guild Wars 2 isn't running, so there is no vmmap to take."; return 0; }
+  [ -x "$VMMAP" ] || die "No $VMMAP to run."
+  # (ps's elapsed time: [[dd-]hh:]mm:ss)
+  secs=$(ps -o etime= -p "$pid" 2>/dev/null | awk '{ n = split($1, a, /[-:]/); s = a[n] + 60 * a[n - 1]
+    if (n > 2) s += 3600 * a[n - 2]; if (n > 3) s += 86400 * a[n - 3]; print s }')
+  mkdir -p "$LOGS"
+  f="$LOGS/vmmap-$(date +%Y%m%d-%H%M%S).txt"
+  t=$(mktemp -d)
+  "$VMMAP" "$pid" >"$t/out" 2>"$t/err" </dev/null &
+  vp=$!
+  # (the deadline, as collect-logs.sh's gpu_errors has it: the mark says it ran out of time, and goes
+  # again if the TERM finds no vmmap to end)
+  ( sleep "$VMMAP_TIMEOUT" && : >"$t/timeout" && { kill "$vp" || { rm -f "$t/timeout"; exit 0; }; } &&
+    sleep "$VMMAP_GRACE" && kill -KILL "$vp" ) </dev/null >/dev/null 2>&1 &
+  wd=$!
+  TIMEFORMAT=%R
+  { time wait "$vp"; } 2>"$t/time" || st=$?
+  # vmmap has ended: end the watchdog wherever it is, so it never signals that pid again
+  kill -STOP "$wd" 2>/dev/null || true
+  pkill -KILL -P "$wd" 2>/dev/null || true
+  kill -KILL "$wd" 2>/dev/null || true
+  wait "$wd" 2>/dev/null || true
+  took=$(tail -1 "$t/time")
+  { echo "Gw2-64.exe pid $pid, running ${secs:-?} s, vmmap took $took s (the game stood still for at most that long)"
+    if [ -e "$t/timeout" ]; then
+      echo "vmmap failed: it hadn't finished after $VMMAP_TIMEOUT s, so it was ended"
+    elif [ "$st" != 0 ]; then
+      echo "vmmap failed with status $st: $(head -3 "$t/err" | tr '\n' ' ')"
+    else
+      # (a header without the peak line ends at 40 lines: never the whole region list)
+      LC_ALL=C awk '
+        !head { print; if (/^Physical footprint \(peak\):/ || NR >= 40) head = 1; next }
+        /^==== Summary/ { summary = 1; print "" }
+        summary { print; next }
+        /^REGION TYPE/ { print ""; print; next }
+        / rwx\/rwx / { print }' "$t/out"
+    fi
+  } >"$f"
+  [ ! -e "$t/timeout" ] || { rm -rf "$t"; die "vmmap hadn't finished after $VMMAP_TIMEOUT s, so it was ended (see $f)."; }
+  rm -rf "$t"
+  [ "$st" = 0 ] || die "vmmap failed with status $st (see $f)."
+  echo "@done $f"
+}
+
 cmd_fetch_engine() {
   open_log
   log "---- fetch-engine $ENGINE_URL"
@@ -3051,5 +3115,6 @@ case "${1:-}" in
   fetch-engine) cmd_fetch_engine ;;
   env) cmd_env ;;
   rules) rules_text; [ ! -f "$RULES_LOCAL" ] || cat "$RULES_LOCAL" ;;
+  vmmap) cmd_vmmap ;;
   *) sed -n '2,/^# Environment/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 2 ;;
 esac
