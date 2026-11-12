@@ -769,7 +769,7 @@ so Wine and Steam never inherit it. A contender waits up to 5 seconds for the cl
 Collect Logs is SWTOR on Mac's `collect-logs.sh` adapted to this app's files, with the same
 redaction, crash reports, unified-log GPU errors and leak check.
 
-The session report, `Resources/session-report.sh [--keep] [log]` or `--compare A B`, sums up the
+The session report, `Resources/session-report.sh [--keep] [--from S] [--to S] [log]` or `--compare A B`, sums up the
 last session from DXMT's own log lines:
 
 - frame rate as median, 10th percentile and minimum, frame times, hitches and DXMT's share of them
@@ -778,6 +778,13 @@ last session from DXMT's own log lines:
 - which `ntdll.so` ran and its switches, and with Debug logging the game thread's row of the
   session's heat log, a second. The game thread is the thread with the most semaphore releases: it
   hands the job workers their jobs, about 49,000 a second, and the workers make a few thousand
+- the same thread's server requests from `heat-requests-<pid>.log`, which my `ntdll.so` writes
+  next to the heat log: its twelve busiest requests by count with their time, and the
+  `set_cursor`, `get_message`, `message` and `set_queue_mask` splits, as totals and a second. My
+  dumper appends the game thread's block every 5 seconds and at exit, and the report sums the game thread's blocks that
+  lie wholly inside the heat log's run, or inside `--from <s> --to <s>` (seconds since the game
+  started). It says how many blocks it counted and the seconds they cover, so a block across an
+  edge shows as missing time
 - which `winemac.so` ran and its switches, and with Debug logging the last `macsurface` line of
   the launcher's window from `wine.log`. The launcher's is the window with the most flushes, about
   40 a second, since the game draws with Metal

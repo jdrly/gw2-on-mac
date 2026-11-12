@@ -4,12 +4,14 @@
 # hitches (and DXMT's share of them), shader and pipeline compile waits, shader warming,
 # presentation, Metal 4. As SWTOR on Mac's session report, for DXMT's lines.
 #
-#   session-report.sh [--keep] [Gw2-64_d3d11.log]   one session (default: the current log; the
-#                                                   last session in it)
+#   session-report.sh [--keep] [--from S] [--to S] [Gw2-64_d3d11.log]
+#                                  one session (default: the current log; the last session in it)
 #   session-report.sh --compare A.log B.log          two sessions side by side (before/after)
 #
 #   --keep  also save the log as the logs folder's sessions/Gw2-64_d3d11-<date>.log: the
 #           log is rotated at every game start, so keep the sessions to compare
+#   --from S, --to S  the interval of the server request table, in seconds since the game
+#           started (default: the heat log's whole run)
 #
 # Which DXMT ran (my fork, or the engine's own, which writes none of the lines below) comes from
 # the session's record, logs/session.env (DXMT_TREE, DXMT_FORK), for the current log, and so do
@@ -19,7 +21,11 @@
 # its switches (WINE_MACDRV_* and WINE_WIN32U_*). With Debug logging my ntdll.so writes its
 # counters to heat-<pid>.log in the logs folder: the report reads the newest one written since the
 # session started, and from it the game thread's row, the thread with the most semaphore releases
-# (it hands the job workers their jobs: about 49,000 a second, the workers a few thousand). My Mac
+# (it hands the job workers their jobs: about 49,000 a second, the workers a few thousand). Next to
+# it, heat-requests-<pid>.log has blocks of the game thread's server requests, each the change since
+# that thread's last block ("requests thread <tid> from <s> to <s> time <epoch>", jdrly/wine#15):
+# the report sums that thread's blocks that lie wholly inside the interval and prints its twelve
+# busiest requests and the set_cursor, get_message and set_queue_mask splits, a second too. My Mac
 # driver writes its macsurface lines to wine.log for Gw2-64.exe ("hwnd <h> ...: <n> flushes, ..."
 # every 600 flushes of a window): the report prints the last line of the window with the most
 # flushes, which is the launcher's (it flushes about 40 times a second; the game draws with Metal).
@@ -37,13 +43,17 @@ set -euo pipefail
 # The app's name and its logs folder's (as gw2om.sh's)
 APP_NAME="GW2 on Mac arm64"
 
-usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
-KEEP="" COMPARE=""
+KEEP="" COMPARE="" FROM=0 TO=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --keep) KEEP=1; shift ;;
     --compare) COMPARE=1; shift ;;
+    --from|--to)
+      case "${2:-}" in ''|.|*[!0-9.]*|*.*.*) usage ;; esac
+      if [ "$1" = --from ]; then FROM=$2; else TO=$2; fi
+      shift 2 ;;
     -h|--help) usage ;;
     -*) usage ;;
     *) break ;;
@@ -143,18 +153,51 @@ lib_report() {
   echo "Its switches: ${switches:-none}"
 }
 
-# wine_report: the ntdll.so the session loaded and its switches (session.env), and the game
-# thread's row of the session's heat log, a second
+# wine_report: the ntdll.so the session loaded and its switches (session.env), the game thread's
+# row of the session's heat log, a second, and that thread's server requests in --from..--to from
+# heat-requests-<pid>.log, when there is one
 wine_report() {
-  local heat
+  local heat req
   lib_report wine "my Wine build" 'WINE_HEAT_' || return 0
   heat=$(ls -t "$LOGS"/heat-[0-9]*.log 2>/dev/null | head -1 || true)
   [ -n "$heat" ] && [ "$heat" -nt "$LOGS/session.env" ] || return 0
-  LC_ALL=C awk -v name="$(basename "$heat")" '
-    NR == 1 { for (i = 1; i < NF; i++) if ($i == "seconds") secs = $(i + 1) + 0; next }
-    $1 == "thread" {
+  req="$LOGS/heat-requests-$(basename "$heat" | sed 's/^heat-//')"
+  [ -f "$req" ] || req=""
+  LC_ALL=C awk -v name="$(basename "$heat")" -v from="$FROM" -v to="$TO" '
+    FILENAME == ARGV[1] && FNR == 1 { for (i = 1; i < NF; i++) if ($i == "seconds") secs = $(i + 1) + 0; next }
+    FILENAME == ARGV[1] && $1 == "thread" {
       r = 0; for (i = 3; i < NF; i += 2) if ($i == "release") r = $(i + 1) + 0
       if (row == "" || r > most) { most = r; row = $0 }
+    }
+    FILENAME == ARGV[1] { next }
+    # heat-requests-<pid>.log: the game thread is the heat log row, read by now
+    FNR == 1 {
+      reqname = FILENAME; sub(/.*\//, "", reqname); split(row, g, " "); game = g[2]
+      # (without --to, the heat log run: the dump writes the heat log just before the block and
+      # both round to a tenth)
+      if (to == "") { to = secs; end = secs + 0.15 } else { to += 0; end = to }
+      from += 0
+    }
+    $1 == "requests" {
+      take = ($2 == "thread" && $3 == game && $5 + 0 >= from && $7 + 0 <= end)
+      if (take) { blocks++; covered += $7 - $5 }
+      next
+    }
+    !take { next }
+    $1 == "req" { if (!($2 in rn)) names[++nnames] = $2; rn[$2] += $3; rt[$2] += $4; next }
+    $1 == "message" { if (!($2 in mn)) msgs[++nmsgs] = $2; mn[$2] += $3; next }
+    $1 == "set_cursor" || $1 == "get_message" || $1 == "set_queue_mask" {
+      for (i = 2; i < NF; i += 2) { k = $1 " " $i; if (!(k in sn)) splits[++nsplits] = k; sn[k] += $(i + 1) }
+    }
+    # <n> and <n> a second
+    function rate(n) { return sprintf("%.0f (%.1f)", n, covered > 0 ? n / covered : 0) }
+    # the line of split <s>: its counters in the log order
+    function split_line(s,    i, k, out) {
+      out = ""
+      for (i = 1; i <= nsplits; i++) if (index(splits[i], s " ") == 1) {
+        k = splits[i]; sub(/^[^ ]* /, "", k); out = out (out == "" ? "" : ", ") k " " rate(sn[splits[i]])
+      }
+      if (out != "") print "  " s ": " out
     }
     END {
       if (row == "" || secs <= 0) exit
@@ -164,7 +207,29 @@ wine_report() {
         out = out sprintf("%s%s %.0f", out == "" ? "" : ", ", k, f[i + 1] / secs)
       }
       printf "Heat log %s (%.0f s): the game thread, thread %s (the most releases), a second: %s\n", name, secs, f[2], out
-    }' "$heat"
+      if (reqname == "") exit
+      printf "Server requests of thread %s, the game thread, in %s from %.1f to %.1f s: blocks wholly inside %d, covering %.1f s; each count, then a second in brackets\n", \
+        game, reqname, from, to, blocks, covered
+      # the twelve busiest, by count (the first seen first on a tie)
+      for (j = 1; j <= 12; j++) {
+        b = ""; for (i = 1; i <= nnames; i++) if (!(names[i] in done) && (b == "" || rn[names[i]] > rn[b])) b = names[i]
+        if (b == "") break
+        done[b] = 1
+        printf "  %s %s, %.3f ms (%.3f)\n", b, rate(rn[b]), rt[b], (covered > 0 ? rt[b] / covered : 0)
+      }
+      split_line("set_cursor")
+      split_line("get_message")
+      # the ten busiest messages of the replies, then those the log calls unlisted
+      out = ""
+      for (j = 1; j <= 10; j++) {
+        b = ""; for (i = 1; i <= nmsgs; i++) if (msgs[i] != "unlisted" && !(msgs[i] in mdone) && (b == "" || mn[msgs[i]] > mn[b])) b = msgs[i]
+        if (b == "") break
+        mdone[b] = 1; out = out (out == "" ? "" : ", ") b " " rate(mn[b])
+      }
+      if ("unlisted" in mn) out = out (out == "" ? "" : ", ") "unlisted " rate(mn["unlisted"])
+      if (out != "") print "  message: " out
+      split_line("set_queue_mask")
+    }' "$heat" ${req:+"$req"}
 }
 
 # macdrv_report: the winemac.so the session loaded and its switches (session.env), and the last
