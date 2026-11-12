@@ -1009,6 +1009,21 @@ else
   check "  and which winemac.so ran: the engine's own, no switches" \
     eval '[ "$(grep -A1 "^winemac.so that ran: " "$Z/session-report.txt" | tr "\n" "|")" = "winemac.so that ran: the engine'"'"'s own, athei/wine $ENGINE_WINE|Its switches: none|" ]'
 fi
+# (DXMT's wait field is count, the window's total and its longest: two windows with waits and one
+# without, which adds nothing)
+printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60
+info:  COMPILE variants=10 air=0/0 pso=1/15 built=2 failed=0 build=shader:0/0.0 pipeline:2/30.0 queue=0/0 threads=2 wait=13x 109.6/21.1 slow=0
+info:  COMPILE variants=5 air=0/0 pso=1/15 built=1 failed=0 build=shader:0/0.0 pipeline:1/9.0 queue=0/0 threads=2 wait=0x 0.0/0.0 slow=0
+info:  COMPILE variants=3 air=0/0 pso=1/15 built=1 failed=0 build=shader:0/0.0 pipeline:1/12.0 queue=0/0 threads=2 wait=3x 31.4/18.9 slow=0
+' >"$SANDBOX/compile_d3d11.log"
+out=$("$APP/Contents/Resources/session-report.sh" "$SANDBOX/compile_d3d11.log" 2>&1)
+check "the session report adds up DXMT's compile waits as its log gives them, and the longest" \
+  has <(echo "$out") "^Compiles: 18 shader variants, 4 pipelines built, 0 failed; DXMT's encode thread waited 16 times, about 141 ms in all, the longest 21.1 ms$"
+out=$("$APP/Contents/Resources/session-report.sh" --compare "$SANDBOX/compile_d3d11.log" "$SANDBOX/compile_d3d11.log" 2>&1 |
+  awk '/^compile_wait/ { print $1, $2, $3 }' | tr '\n' '|')
+check "  and --compare prints the same three numbers for both sessions" \
+  [ "$out" = "compile_waits 16 16|compile_wait_ms 141 141|compile_wait_max 21.1 21.1|" ]
+rm -f "$SANDBOX/compile_d3d11.log"
 cp "$LOGS/session.env" "$SANDBOX/session.env.keep"
 sed -i '' -e 's/^DXMT_TREE=.*/DXMT_TREE=engine/' -e 's/^RULE=exe=Gw2-64.exe;/&gcmouse=false;/' "$LOGS/session.env"
 echo "info:  Using feature level D3D_FEATURE_LEVEL_11_1" >"$LOGS/engine-only_d3d11.log"
