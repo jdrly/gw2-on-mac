@@ -388,28 +388,55 @@ check "stage=finished" [ "$(st stage)" = finished ]
 check "DXMT's cache folder" [ -d "$DXMT_CACHE" ]
 
 section "Settings"
-check "defaults: warm on, coolworkers 3, fastlocks on, ncpu 8, uiscale off, cinematic dialogue off" \
-  [ "$(sett warm)$(sett coolworkers)$(sett fastlocks)$(sett ncpu)$(sett uiscale)$(sett uiscale_cinema)" = on3on8offoff ]
+check "defaults: warm on, coolworkers off, fastlocks off, ncpu 8, uiscale off, cinematic dialogue off" \
+  [ "$(sett warm)$(sett coolworkers)$(sett fastlocks)$(sett ncpu)$(sett uiscale)$(sett uiscale_cinema)" = onoffoff8offoff ]
+check "  settings.conf of a fresh install: settings_version=1, fastlocks and coolworkers off" \
+  eval 'grep -qx settings_version=1 "$AD/settings.conf" && grep -qx fastlocks=off "$AD/settings.conf" && grep -qx coolworkers=off "$AD/settings.conf"'
+
 check "default: Steam in the background on" [ "$(sett steambg)" = on ]
 check "default: Quit Steam when the game quits on" [ "$(sett quitsteam)" = on ]
-check "settings: a state for each of the 25 keys" [ "$(g settings | grep -cE '^[a-z_]+_state=(ok|off:.+)$')" = 25 ]
-# (greyed: the ones a later step brings, and those that need a file of mine this app hasn't)
-OFF="coolworkers fastlocks gamemode mousespeed "
+check "settings: a state for each of the 26 keys" [ "$(g settings | grep -cE '^[a-z_]+_state=(ok|off:.+)$')" = 26 ]
+# (greyed: the ones a later step brings, and those that need a file of mine this app hasn't, in
+# SETTING_KEYS' order)
+OFF="coolworkers "
+mine || OFF="${OFF}fastlocks "
+OFF="${OFF}gamemode mousespeed "
 mine || OFF="${OFF}wine jobwakes "
 drv || OFF="${OFF}macdrv launcherframes "
-check "  off: coolworkers, fastlocks (3), mousespeed (#59), gamemode$(mine || echo ", wine and jobwakes")$(drv || echo ", macdrv and launcherframes")" \
+mine || OFF="${OFF}eventpool "
+check "  off: coolworkers (#46), mousespeed (#59), gamemode$(mine || echo ", wine and its switches")$(drv || echo ", macdrv and launcherframes")" \
   [ "$(g settings | sed -n 's/^\([a-z_]*\)_state=off:.*/\1/p' | tr '\n' ' ')" = "$OFF" ]
 if mine; then
-  check "  wine=mine and jobwakes=on by default, both ok" [ "$(sett wine)/$(sett wine_state)/$(sett jobwakes)/$(sett jobwakes_state)" = mine/ok/on/ok ]
+  check "  wine=mine, jobwakes and eventpool on and fastlocks off by default, all ok" \
+    [ "$(sett wine)/$(sett wine_state)/$(sett jobwakes)/$(sett jobwakes_state)/$(sett eventpool)/$(sett eventpool_state)/$(sett fastlocks)/$(sett fastlocks_state)" = mine/ok/on/ok/on/ok/off/ok ]
 else
-  check "  with their reasons; set wine engine and set jobwakes off refused" \
-    eval '[ "$(sett wine_state)" = "off:This build of the app has no Wine build of mine." ] && [ "$(sett jobwakes_state)" = "off:Needs my Wine build (Graphics › Wine)." ] && ! "$G" set wine engine >/dev/null 2>&1 && ! "$G" set jobwakes off >/dev/null 2>&1'
+  check "  with their reasons; set wine engine and set jobwakes, eventpool and fastlocks refused" \
+    eval '[ "$(sett wine_state)" = "off:This build of the app has no Wine build of mine." ] && [ "$(sett jobwakes_state)" = "off:Needs my Wine build (Graphics › Wine)." ] && [ "$(sett eventpool_state)" = "$(sett jobwakes_state)" ] && [ "$(sett fastlocks_state)" = "$(sett jobwakes_state)" ] && ! "$G" set wine engine >/dev/null 2>&1 && ! "$G" set jobwakes off >/dev/null 2>&1 && ! "$G" set eventpool off >/dev/null 2>&1 && ! "$G" set fastlocks on >/dev/null 2>&1'
 fi
 if drv; then
   check "  macdrv=mine and launcherframes=off by default, both ok" [ "$(sett macdrv)/$(sett macdrv_state)/$(sett launcherframes)/$(sett launcherframes_state)" = mine/ok/off/ok ]
 else
   check "  with their reasons; set macdrv engine and set launcherframes on refused" \
     eval '[ "$(sett macdrv_state)" = "off:This build of the app has no Mac driver of mine." ] && [ "$(sett launcherframes_state)" = "off:Needs my Mac driver (Graphics › Mac driver)." ] && ! "$G" set macdrv engine >/dev/null 2>&1 && ! "$G" set launcherframes on >/dev/null 2>&1'
+fi
+# settings.conf's version (SETTINGS_RESETS): a file from before version 1 holds the fastlocks=on
+# and coolworkers=3 the arm64 line wrote while both rows were greyed; they read off
+cp "$AD/settings.conf" "$SANDBOX/settings.fresh"
+sed -i '' -e '/^settings_version=/d' -e 's/^fastlocks=.*/fastlocks=on/' -e 's/^coolworkers=.*/coolworkers=3/' "$AD/settings.conf"
+out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
+check "a settings.conf without settings_version, fastlocks=on and coolworkers=3: both read off" \
+  eval '[ "$(sett fastlocks)/$(sett coolworkers)" = off/off ] && ! g rules | grep -q WINE_HEAT_SPIN && ! echo "$out" | grep -q WINE_HEAT_SPIN'
+g set hud on >/dev/null; g set hud off >/dev/null
+check "  the next write keeps that and writes settings_version=1" \
+  eval 'grep -qx settings_version=1 "$AD/settings.conf" && grep -qx fastlocks=off "$AD/settings.conf" && grep -qx coolworkers=off "$AD/settings.conf"'
+sed -i '' -e 's/^settings_version=.*/settings_version=0/' -e 's/^fastlocks=.*/fastlocks=on/' "$AD/settings.conf"
+check "  settings_version=0 and fastlocks=on: reads off" [ "$(sett fastlocks)" = off ]
+cp "$SANDBOX/settings.fresh" "$AD/settings.conf"
+if mine; then
+  g set fastlocks on >/dev/null; g set hud on >/dev/null; g set hud off >/dev/null
+  check "  set fastlocks on in a file with the line: stays on through later writes" \
+    eval '[ "$(sett fastlocks)" = on ] && grep -qx fastlocks=on "$AD/settings.conf" && grep -qx settings_version=1 "$AD/settings.conf"'
+  g set fastlocks off >/dev/null
 fi
 check "  rawmouse ok; mousespeed greyed: the engine sends the mouse's own counts" \
   eval '[ "$(sett rawmouse_state)" = ok ] && [ "$(sett mousespeed_state)" = "off:The engine gives the game the mouse'"'"'s own counts. A speed factor comes with #59 if I need one." ]'
@@ -419,13 +446,13 @@ check "  the larger interface's settings and arcdps carry a note" \
   [ "$(g settings | sed -n 's/^\([a-z_]*\)_note=.*/\1/p' | tr '\n' ' ')" = "uiscale uiscale_size uiscale_sans uiscale_cinema arcdps " ]
 out=$(g set coolworkers 5 2>&1) && rc=0 || rc=$?
 check "set coolworkers 5: refused with the step 3 reason" eval '[ "$rc" = 1 ] && [ "$out" = "@error Need my Wine changes. Come with step 3." ]'
-for k in fastlocks=off mousespeed=2.5 gamemode=off; do
+for k in mousespeed=2.5 gamemode=off; do
   check "set ${k%%=*} ${k#*=}: refused" sh -c "! '$G' set ${k%%=*} ${k#*=} >/dev/null"
 done
-sed -i '' 's/^fastlocks=on$/fastlocks=off/' "$AD/settings.conf"
+sed -i '' 's/^coolworkers=off$/coolworkers=5/' "$AD/settings.conf"
 g set hud on >/dev/null; g set hud off >/dev/null
-check "  a greyed key keeps what settings.conf says (fastlocks=off by hand), and does nothing" eval '[ "$(sett fastlocks)" = off ] && grep -qx fastlocks=off "$AD/settings.conf"'
-sed -i '' 's/^fastlocks=off$/fastlocks=on/' "$AD/settings.conf"
+check "  a greyed key keeps what settings.conf says (coolworkers=5 by hand), and does nothing" eval '[ "$(sett coolworkers)" = 5 ] && grep -qx coolworkers=5 "$AD/settings.conf"'
+sed -i '' 's/^coolworkers=5$/coolworkers=off/' "$AD/settings.conf"
 check "warm on: DXMT_WARM=all; off: none" sh -c "'$G' env | grep -qx DXMT_WARM=all && '$G' set warm off >/dev/null && ! '$G' env | grep -q DXMT_WARM && '$G' set warm on >/dev/null"
 check "set metalfx on: DXMT_SUBSAMPLE_METALFX=1" sh -c "'$G' set metalfx on >/dev/null && '$G' env | grep -qx DXMT_SUBSAMPLE_METALFX=1 && '$G' set metalfx off >/dev/null && ! '$G' env | grep -q DXMT_SUBSAMPLE"
 # the engine's own DXMT, and back (nothing runs: the tree swaps at once)
@@ -558,7 +585,7 @@ check "set launchopts -maploadinfo" g set launchopts "-maploadinfo"
 check "launchopts with a ; refused" sh -c "! '$G' set launchopts '-x; rm -rf /' >/dev/null"
 check "unknown value refused (exit 2)" sh -c "'$G' set fpscap 45 >/dev/null; [ \$? = 2 ]"
 check "unknown key refused" sh -c "! '$G' set colour red >/dev/null"
-check "settings.conf has every key" [ "$(grep -c '=' "$AD/settings.conf")" = 25 ]
+check "settings.conf has every key and settings_version" [ "$(grep -c '=' "$AD/settings.conf")" = 27 ]
 
 section "The larger interface (addon)"
 GD="$STEAM/steamapps/common/Guild Wars 2"
@@ -679,8 +706,8 @@ section "The game's compatdb rules (compatdb.rules)"
 # compatdb-core; there the sandbox's home is /Users/me
 FIX="$ROOT/scripts/compatdb-check/rules"
 rules_are() { g rules | sed "s|$H|/Users/me|g" | cmp -s - "$FIX/$1.rules"; }
-# (job wakes off, as everything else, until the checks of my ntdll.so's switches below)
-! mine || g set jobwakes off >/dev/null
+# (the engine's own ntdll.so, so no WINE_HEAT_* entry, until the checks of my ntdll.so's switches below)
+! mine || g set wine engine >/dev/null
 check "everything off: the cache path for the game, taken away from CefHost.exe" rules_are off
 g set hud on >/dev/null
 check "the HUD on: metal_hud=true for the game, false for CefHost.exe" rules_are hud
@@ -710,35 +737,56 @@ check "the engine's own DXMT: the game's shader cache is that DXMT's own" rules_
 g set dxmt fork >/dev/null
 # My ntdll.so's switches (HEAT_SWITCHES): after the cache path, taken away from CefHost.exe again
 if mine; then
+  # dry_rule: the game's rule a dry run of Play prints, which has to be the rules' first line
+  dry_rule() { GW2_ON_MAC_DRY_RUN=1 g play 2>&1 | sed -n 's/^\[dry-run\] rule \(exe=Gw2-64\.exe;.*\)/\1/p'; }
+  g set wine mine >/dev/null; g set jobwakes off >/dev/null; g set eventpool off >/dev/null
+  check "my ntdll.so, every switch off: WINE_HEAT_MSYNC_UNREG=1 alone, unset for CefHost.exe" rules_are heat-off
+  check "  a dry run of Play prints the game's rule with it" eval '[ "$(dry_rule)" = "$(g rules | head -1)" ]'
   g set jobwakes on >/dev/null
   check "job wakes on: WINE_HEAT_WAKE=one,skip for the game, unset for CefHost.exe" rules_are jobwakes
-  out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
-  check "  a dry run of Play prints the game's rule with it" eval 'echo "$out" | grep -qxF "[dry-run] rule $(g rules | head -1)" && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;.*;env=WINE_HEAT_WAKE=one,skip$"'
+  check "  a dry run of Play prints the game's rule with it" eval '[ "$(dry_rule)" = "$(g rules | head -1)" ]'
   g set debug on >/dev/null
   check "  with Debug logging: the counters too, written to the logs folder" rules_are jobwakes-debug
-  g set debug off >/dev/null; g set jobwakes off >/dev/null
+  g set debug off >/dev/null; g set jobwakes off >/dev/null; g set eventpool on >/dev/null
+  check "event pool on: WINE_HEAT_EVPOOL=1 for the game, unset for CefHost.exe" rules_are eventpool
+  check "  a dry run of Play prints the game's rule with it" eval '[ "$(dry_rule)" = "$(g rules | head -1)" ]'
+  g set eventpool off >/dev/null; g set fastlocks on >/dev/null
+  check "fast locks on: WINE_HEAT_SPIN=lock=20:game,event=30:game for the game, unset for CefHost.exe" rules_are fastlocks
+  check "  a dry run of Play prints the game's rule with it" eval '[ "$(dry_rule)" = "$(g rules | head -1)" ]'
+  g set jobwakes on >/dev/null; g set eventpool on >/dev/null
+  check "all three on: each entry, in the table's order" rules_are heat-all
+  check "  a dry run of Play prints the game's rule with them" eval '[ "$(dry_rule)" = "$(g rules | head -1)" ]'
+  # A VERSION with a switches: line (heat_in_file): an entry whose variable it doesn't name stays
+  # out, and its row is greyed; the app's own VERSION back after
+  cp "$COMP/ntdll/VERSION" "$SANDBOX/ntdll-VERSION.keep"
+  echo "switches: WINE_HEAT_COUNT WINE_HEAT_EXE WINE_HEAT_LOG WINE_HEAT_MSYNC_UNREG WINE_HEAT_WAKE" >>"$COMP/ntdll/VERSION"
+  check "a file whose VERSION lists WINE_HEAT_WAKE and WINE_HEAT_MSYNC_UNREG only: event pool and fast locks stay out" rules_are jobwakes
+  check "  event pool and fast locks greyed, saying so; set refused" \
+    eval '[ "$(sett jobwakes_state)" = ok ] && [ "$(sett eventpool_state)" = "off:My Wine build in this app (jdrly/wine ${MYWINE_COMMIT:0:11}) doesn'"'"'t have this switch." ] && [ "$(sett fastlocks_state)" = "$(sett eventpool_state)" ] && ! "$G" set fastlocks off >/dev/null 2>&1'
+  cp "$SANDBOX/ntdll-VERSION.keep" "$COMP/ntdll/VERSION"
+  check "  its own VERSION again (no switches: line): all three" rules_are heat-all
+  g set debug on >/dev/null; g set wine engine >/dev/null
   out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
-  check "job wakes off: no WINE_HEAT_* in the rules or in a dry run of Play" eval 'rules_are off && ! echo "$out" | grep -q WINE_HEAT_'
-  g set jobwakes on >/dev/null; g set debug on >/dev/null; g set wine engine >/dev/null
-  out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
-  check "wine engine, job wakes and Debug logging on: no WINE_HEAT_* in the rules or in a dry run of Play" \
+  check "wine engine, every switch and Debug logging on: no WINE_HEAT_* in the rules or in a dry run of Play" \
     eval '! g rules | grep -q WINE_HEAT_ && ! echo "$out" | grep -q WINE_HEAT_ && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=[^;]*$"'
-  g set debug off >/dev/null; g set wine mine >/dev/null; g set jobwakes off >/dev/null
+  g set debug off >/dev/null; g set wine mine >/dev/null; g set jobwakes off >/dev/null; g set eventpool off >/dev/null; g set fastlocks off >/dev/null
 else
   out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
   check "no ntdll.so of mine, job wakes on by default: no WINE_HEAT_* in the rules or in a dry run of Play" \
     eval 'rules_are off && ! echo "$out" | grep -q WINE_HEAT_'
 fi
-# My Mac driver's switch (a row of HEAT_SWITCHES too): the same place, by its own file
+# My Mac driver's switch (a row of HEAT_SWITCHES too): the same place, by its own file (with the
+# engine's own ntdll.so, but where a check needs mine)
+! mine || g set wine engine >/dev/null
 if drv; then
   g set launcherframes on >/dev/null
   check "launcher frames on: WINE_MACDRV_SURFACE=copy,skip for the game, unset for CefHost.exe" rules_are launcherframes
   out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
   check "  a dry run of Play prints the game's rule with it" eval 'echo "$out" | grep -qxF "[dry-run] rule $(g rules | head -1)" && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;.*;env=WINE_MACDRV_SURFACE=copy,skip$"'
   if mine; then
-    g set jobwakes on >/dev/null; g set debug on >/dev/null
-    check "  with job wakes and Debug logging: both files' switches in the table's order, then the counters" rules_are launcherframes-jobwakes-debug
-    g set debug off >/dev/null; g set jobwakes off >/dev/null
+    g set wine mine >/dev/null; g set jobwakes on >/dev/null; g set debug on >/dev/null
+    check "  with my ntdll.so, job wakes and Debug logging: both files' switches in the table's order, then the counters" rules_are launcherframes-jobwakes-debug
+    g set debug off >/dev/null; g set jobwakes off >/dev/null; g set wine engine >/dev/null
   fi
   g set launcherframes off >/dev/null
   out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
@@ -748,9 +796,9 @@ if drv; then
   check "macdrv engine with launcher frames on: no WINE_MACDRV_* in the rules or in a dry run of Play" \
     eval 'rules_are off && ! echo "$out" | grep -q WINE_MACDRV_ && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=[^;]*$"'
   if mine; then
-    g set jobwakes on >/dev/null
+    g set wine mine >/dev/null; g set jobwakes on >/dev/null
     check "  and my ntdll.so's switches stay, apart from it" rules_are jobwakes
-    g set jobwakes off >/dev/null
+    g set jobwakes off >/dev/null; g set wine engine >/dev/null
   fi
   g set macdrv mine >/dev/null; g set launcherframes off >/dev/null
 else
@@ -760,16 +808,17 @@ else
     eval 'rules_are off && ! echo "$out" | grep -q WINE_MACDRV_'
   sed -i '' 's/^launcherframes=.*/launcherframes=off/' "$AD/settings.conf"
 fi
-# A home with odd characters, in a fresh root: its settings.conf (job wakes and Debug logging off)
+! mine || g set wine mine >/dev/null
+# A home with odd characters, in a fresh root: its settings.conf (the engine's ntdll.so, Debug logging off)
 # is all there is in it
 ODD="$SANDBOX/a%b;c$(printf '\t')d é"
 ODD_CONF="$ODD/home/Library/Application Support/$APP_NAME/settings.conf"
-mkdir -p "${ODD_CONF%/*}" && printf 'jobwakes=off\ndebug=off\n' >"$ODD_CONF"
+mkdir -p "${ODD_CONF%/*}" && printf 'wine=engine\ndebug=off\n' >"$ODD_CONF"
 odd_rules_are() { GW2_ON_MAC_ROOT="$ODD" "$G" rules | sed "s|$SANDBOX/a%25b%3Bc%09d é/home|/Users/a%25b%3Bc%09d é|g" | cmp -s - "$FIX/$1.rules"; }
 odd_only_conf() { [ "$(cd "$ODD" && find . | LC_ALL=C sort | tr '\n' '|')" = ".|./home|./home/Library|./home/Library/Application Support|./home/Library/Application Support/$APP_NAME|./home/Library/Application Support/$APP_NAME/settings.conf|" ]; }
 check "a home with %, ; and a tab: escaped as %XX, the é as it is" eval 'odd_rules_are escaped && odd_only_conf'
 if mine; then
-  printf 'jobwakes=on\ndebug=on\n' >"$ODD_CONF"
+  printf 'jobwakes=on\neventpool=off\ndebug=on\n' >"$ODD_CONF"
   check "  with job wakes and Debug logging on: the logs folder escaped the same way" eval 'odd_rules_are escaped-heat && odd_only_conf'
 fi
 rm -rf "$ODD"
@@ -784,8 +833,8 @@ check "dry-run play: the engine's variables, the app's files, my DXMT fork's swi
 check "  none of 0.1.x's Wine variables in the environment (my ntdll.so's switches are in the rules)" \
   eval '! echo "$out" | sed -n "s/^\[dry-run\]   //p" | grep -qE "WINE_HEAT_|ROSETTA_X87_PATH|WINEDLLPATH|WINE_COMPATDB=|MTL_HUD"'
 cp "$SANDBOX/settings.keep" "$AD/settings.conf"
-# (job wakes on again, its default, for the sessions below)
-! mine || g set jobwakes on >/dev/null
+# (job wakes and the event pool on again, their defaults, for the sessions below)
+! mine || { g set jobwakes on >/dev/null; g set eventpool on >/dev/null; }
 
 section "Play"
 : >"$STANDIN_LOG"
@@ -800,8 +849,8 @@ check "  session.env records the engine, its commits, the settings, the environm
 check "  and which DXMT the session loads: my fork, its build" \
   eval 'has "$LOGS/session.env" "^DXMT_TREE=fork$" && [ "$(sed -n "s/^DXMT_FORK=//p" "$LOGS/session.env")" = "$(head -1 "$COMP/dxmt/VERSION")" ] && has "$LOGS/session.env" "^SETTING_dxmt=fork$"'
 if mine; then
-  check "  and which ntdll.so: mine, its commit and the sha256 of the file in the engine; job wakes in the game's rule" \
-    eval '[ "$(sed -n "s/^LIB_wine=//p" "$LOGS/session.env")" = "ntdll.so mine $MYWINE_COMMIT $(shasum -a 256 "$COMP/ntdll/ntdll.so" | cut -d" " -f1)" ] && grep -q "^RULE=exe=Gw2-64.exe;.*;env=WINE_HEAT_WAKE=one,skip$" "$LOGS/session.env"'
+  check "  and which ntdll.so: mine, its commit and the sha256 of the file in the engine; its switches in the game's rule" \
+    eval '[ "$(sed -n "s/^LIB_wine=//p" "$LOGS/session.env")" = "ntdll.so mine $MYWINE_COMMIT $(shasum -a 256 "$COMP/ntdll/ntdll.so" | cut -d" " -f1)" ] && grep -q "^RULE=exe=Gw2-64.exe;.*;env=WINE_HEAT_WAKE=one,skip;env=WINE_HEAT_EVPOOL=1;env=WINE_HEAT_MSYNC_UNREG=1$" "$LOGS/session.env"'
 else
   check "  and which ntdll.so: the engine's own, no WINE_HEAT_* in the rules" \
     eval '[ "$(sed -n "s/^LIB_wine=//p" "$LOGS/session.env")" = "ntdll.so engine $ENGINE_WINE $GW2_ON_MAC_ENGINE_NTDLL_SHA256" ] && ! grep -q WINE_HEAT_ "$LOGS/session.env"'
@@ -836,7 +885,7 @@ check "  and says which DXMT ran: my fork, its build" has "$Z/session-report.txt
 check "  and which mouse the game had: GameController's (raw mouse-look on)" has "$Z/session-report.txt" "^Mouse the game had: the mouse's own counts from GameController"
 if mine; then
   check "  and which ntdll.so ran, with its switches" \
-    eval 'has "$Z/session-report.txt" "^ntdll.so that ran: my Wine build, jdrly/wine ${MYWINE_COMMIT:0:11} (sha256 " && has "$Z/session-report.txt" "^Its switches: WINE_HEAT_WAKE=one,skip$"'
+    eval 'has "$Z/session-report.txt" "^ntdll.so that ran: my Wine build, jdrly/wine ${MYWINE_COMMIT:0:11} (sha256 " && has "$Z/session-report.txt" "^Its switches: WINE_HEAT_WAKE=one,skip WINE_HEAT_EVPOOL=1 WINE_HEAT_MSYNC_UNREG=1$"'
   # (a heat log of the session: three threads, the game thread the one with the most releases)
   printf 'heat pid 4242 exe Gw2-64.exe mode count one skip seconds 10.0 threads 3\ntotal release 520000 wake_skipped 410000 wake_one 1 wake_none 3\nthread 0024 release 20000 wake_skipped 1000 wake_one 19000 wake_none 0 server_ms 0.5\nthread 00a4 release 490000 wake_skipped 410000 wake_one 80000 wake_none 3 server 70 server_ms 0.2\nthread 00b0 release 10000 wake_skipped 0 wake_one 1 wake_none 0 server_ms 0.1\n' >"$LOGS/heat-4242.log"
   touch -t 202601010000 "$LOGS/session.env"

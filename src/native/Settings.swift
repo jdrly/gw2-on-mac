@@ -408,6 +408,9 @@ struct SettingsView: View {
         SettingRow("Job wakes", "Each job the game hands out wakes one sleeping worker, and none when no worker sleeps. Without it, every hand-out wakes all of them.", off: off("jobwakes")) {
           InkSwitch(isOn: settings.toggle("jobwakes"))
         }
+        SettingRow("Event pool", "The game creates and closes about 2,500 events a second. The pool reuses closed ones instead of asking the Wine server for each.", off: off("eventpool")) {
+          InkSwitch(isOn: settings.toggle("eventpool"))
+        }
         SettingRow("Faster locks", "Short waits before the game thread sleeps on a busy lock or job group.", off: off("fastlocks")) {
           InkSwitch(isOn: settings.toggle("fastlocks"))
         }
