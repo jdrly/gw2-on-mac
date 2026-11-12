@@ -616,11 +616,22 @@ apply_registry() {
 #
 # The keys are 0.1.x's, so settings.conf reads the same on both lines, and dxmt (fork: my DXMT
 # fork; engine: the engine's own, to compare), wine (mine: my ntdll.so; engine: the engine's own),
-# macdrv (mine: my winemac.so; engine: the engine's own), and jobwakes and launcherframes (rows of
-# HEAT_SWITCHES). On this engine some of them need pieces of mine that
+# macdrv (mine: my winemac.so; engine: the engine's own), and jobwakes, launcherframes and eventpool
+# (rows of HEAT_SWITCHES, as fastlocks is). On this engine some of them need pieces of mine that
 # come in later steps: setting_state says so, the Settings window greys them with the reason, set
 # refuses them, and they keep what settings.conf says without an effect.
-SETTING_KEYS="retina fpscap metalfx hud warm coolworkers fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam dxmt wine jobwakes macdrv launcherframes"
+SETTING_KEYS="retina fpscap metalfx hud warm coolworkers fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam dxmt wine jobwakes macdrv launcherframes eventpool"
+# settings.conf's version, its line settings_version=. Install and Repair write every key with its
+# value, so a file holds the defaults it was written with, as if I had chosen them. A default that
+# changes for the files that exist gets a row here, "<version> <keys>": in a file older than
+# <version> (or without the line) those keys read as their defaults, and the next write of the
+# file (set, Install, Repair) keeps that and writes this version. Version 1: fastlocks and
+# coolworkers start off on this line (#45, #46). Until then the arm64 line wrote on and 3 into
+# every file, while their rows were greyed and set refused them, so no file holds a choice of mine.
+SETTINGS_RESETS="
+1 fastlocks coolworkers
+"
+SETTINGS_VERSION=$(printf '%s\n' "$SETTINGS_RESETS" | awk 'NF { v = $1 } END { print v + 0 }')
 FPS_CAPS="off 30 40 60 120"
 # Mouse-look speed (mousespeed): RawMouseGameControllerScale on 0.1.x, a factor on the macOS
 # pointer's speed (SWTOR on Mac's MOUSE_SPEEDS)
@@ -630,12 +641,11 @@ CPU_MAX="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 8)"
 UI_SCALES="1.5 1.75 1.8 2.0"
 setting_default() {
   case "$1" in
-    retina|warm|fastlocks|uiscale_sans|gamemode|rawmouse|updates|steambg|quitsteam|jobwakes) echo on ;;
-    metalfx|hud|uiscale|uiscale_cinema|launcherframes) echo off ;;
+    retina|warm|uiscale_sans|gamemode|rawmouse|updates|steambg|quitsteam|jobwakes|eventpool) echo on ;;
+    metalfx|hud|uiscale|uiscale_cinema|launcherframes|fastlocks|coolworkers) echo off ;;
     mousespeed) echo 1 ;;
     debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
     fpscap) echo off ;;
-    coolworkers) echo 3 ;;
     ncpu) echo 8 ;;
     uiscale_size) echo 1.75 ;;
     launchopts) echo "" ;;
@@ -645,7 +655,7 @@ setting_default() {
 }
 setting_valid() { # <key> <value>
   case "$1" in
-    retina|metalfx|hud|warm|fastlocks|uiscale|uiscale_sans|uiscale_cinema|gamemode|rawmouse|updates|debug|steambg|quitsteam|jobwakes|launcherframes)
+    retina|metalfx|hud|warm|fastlocks|uiscale|uiscale_sans|uiscale_cinema|gamemode|rawmouse|updates|debug|steambg|quitsteam|jobwakes|launcherframes|eventpool)
       [ "$2" = on ] || [ "$2" = off ] ;;
     mousespeed) in_list "$2" "$MOUSE_SPEEDS" ;;
     fpscap) in_list "$2" "$FPS_CAPS" ;;
@@ -660,9 +670,17 @@ setting_valid() { # <key> <value>
     *) false ;;
   esac
 }
+# setting_reset <key>: settings.conf is older than a reset of <key>'s default (SETTINGS_RESETS)
+setting_reset() {
+  local v
+  in_list "$1" "$SETTINGS_RESETS" || return 1
+  v=$(sed -n 's/^settings_version=//p' "$SETTINGS" | tail -1)
+  case "$v" in ''|*[!0-9]*) v=0 ;; esac
+  printf '%s\n' "$SETTINGS_RESETS" | awk -v k="$1" -v v="$v" 'NF && $1 > v { for (i = 2; i <= NF; i++) if ($i == k) f = 1 } END { exit !f }'
+}
 setting() { # <key>: its value, or the default
   local v
-  if [ -f "$SETTINGS" ] && grep -q "^$1=" "$SETTINGS"; then
+  if [ -f "$SETTINGS" ] && grep -q "^$1=" "$SETTINGS" && ! setting_reset "$1"; then
     v=$(sed -n "s/^$1=//p" "$SETTINGS" | tail -1)
     if setting_valid "$1" "$v"; then echo "$v"; return; fi
   fi
@@ -674,16 +692,18 @@ setting_state() {
   local l
   case "$1" in
     metalfx|warm) if [ "$(setting dxmt)" = fork ]; then echo ok; else echo "off:Needs my DXMT fork (Graphics › DXMT)."; fi ;;
-    coolworkers|fastlocks) echo "off:Need my Wine changes. Come with step 3." ;;
+    coolworkers) echo "off:Need my Wine changes. Come with step 3." ;;
     mousespeed) echo "off:The engine gives the game the mouse's own counts. A speed factor comes with #59 if I need one." ;;
     gamemode) echo "off:The engine's loader is a Game Mode app. Nothing to switch." ;;
     wine) if lib_bundled wine; then echo ok; else echo "off:This build of the app has no Wine build of mine."; fi ;;
     macdrv) if lib_bundled macdrv; then echo ok; else echo "off:This build of the app has no Mac driver of mine."; fi ;;
     *)
       l=$(switch_lib "$(switch_entry "$1")")
-      if [ -z "$l" ] || [ "$(lib_want "$l")" = mine ]; then echo ok
-      elif [ "$l" = macdrv ]; then echo "off:Needs my Mac driver (Graphics › Mac driver)."
-      else echo "off:Needs my Wine build (Graphics › Wine)."
+      if [ -z "$l" ]; then echo ok
+      elif [ "$(lib_want "$l")" != mine ]; then
+        if [ "$l" = macdrv ]; then echo "off:Needs my Mac driver (Graphics › Mac driver)."; else echo "off:Needs my Wine build (Graphics › Wine)."; fi
+      elif [ "$l" != wine ] || heat_in_file "$(switch_entry "$1")"; then echo ok
+      else echo "off:My Wine build in this app (jdrly/wine $(lib_commit wine | cut -c1-11)) doesn't have this switch."
       fi ;;
   esac
 }
@@ -702,6 +722,7 @@ write_settings() { # [<key> <value>]: settings.conf with every key, one of them 
     echo "$k=$v"
   done | {
     echo "# $APP_NAME settings (change them in the app: $APP_NAME > Settings…)"
+    echo "settings_version=$SETTINGS_VERSION"
     cat
   } | put "$SETTINGS" 644
 }
@@ -817,18 +838,32 @@ EOF
 # The game's switches in my Wine builds (jdrly/wine; they act on them in Gw2-64.exe only, which is
 # the launcher too), one row per setting: "<setting> <entry>". The entry goes into the game's rule
 # while the setting isn't off and the file that reads it is mine (heat_entries): WINE_HEAT_* my
-# ntdll.so (wine), WINE_MACDRV_* and WINE_WIN32U_* my Mac driver (macdrv; switch_lib). A new switch
-# is a new row.
+# ntdll.so (wine), WINE_MACDRV_* and WINE_WIN32U_* my Mac driver (macdrv; switch_lib). A WINE_HEAT_*
+# entry also needs my ntdll.so to have the switch (heat_in_file). A new switch is a new row.
 #   launcherframes  my winemac.so hands Cocoa a copy of each frame of a window it draws with GDI,
 #                   such as the launcher's, and skips a frame equal to the last (#57)
+#   wine            no setting of its own: WINE_HEAT_MSYNC_UNREG=1 goes in whenever my ntdll.so is
+#                   in place, as 0.1.x always sets it (#44)
 HEAT_SWITCHES="
 jobwakes WINE_HEAT_WAKE=one,skip
+eventpool WINE_HEAT_EVPOOL=1
+fastlocks WINE_HEAT_SPIN=lock=20:game,event=30:game
+wine WINE_HEAT_MSYNC_UNREG=1
 launcherframes WINE_MACDRV_SURFACE=copy,skip
 "
 # switch_entry <setting>: its row's entry, or nothing; switch_lib <entry>: the unix_lib key whose
 # file reads it, or nothing for no entry
 switch_entry() { printf '%s\n' "$HEAT_SWITCHES" | awk -v k="$1" '$1 == k { print $2 }'; }
 switch_lib() { case "$1" in '') ;; WINE_MACDRV_*|WINE_WIN32U_*) echo macdrv ;; *) echo wine ;; esac; }
+# heat_in_file <entry>: my ntdll.so in this app reads the entry's variable. Its VERSION names the
+# commit, not the switches, and a commit can't tell which of them it has. So the answer comes from
+# a line "switches: <variable> …" (every WINE_HEAT_* variable the file reads) when VERSION has one,
+# and is yes when it hasn't.
+heat_in_file() {
+  local f="$COMP/ntdll/VERSION"
+  grep -q '^switches:' "$f" 2>/dev/null || return 0
+  in_list "${1%%=*}" "$(sed -n 's/^switches://p' "$f" | head -1)"
+}
 # heat_entries: the entries for the game's rule, one a line and already through cdb_value (a
 # newline in the logs folder's path can't split one): the switches that are on and whose file is
 # mine and, with Debug logging and my ntdll.so, its counters (WINE_HEAT_COUNT), which it writes to
@@ -838,7 +873,7 @@ heat_entries() {
   wine=$(lib_in_use wine) macdrv=$(lib_in_use macdrv)
   printf '%s\n' "$HEAT_SWITCHES" | while read -r k e; do
     [ -n "$k" ] && [ "$(setting "$k")" != off ] || continue
-    if [ "$(switch_lib "$e")" = macdrv ]; then [ "$macdrv" = mine ] || continue; else [ "$wine" = mine ] || continue; fi
+    if [ "$(switch_lib "$e")" = macdrv ]; then [ "$macdrv" = mine ] || continue; else [ "$wine" = mine ] && heat_in_file "$e" || continue; fi
     cdb_value "$e"; echo
   done
   if [ "$wine" = mine ] && [ "$(setting debug)" = on ]; then echo WINE_HEAT_COUNT=1; echo "WINE_HEAT_LOG=$(cdb_value "$LOGS")"; fi

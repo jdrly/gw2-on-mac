@@ -12,9 +12,9 @@ them, and a setting switches back to each. It changes nothing you already have i
 > **This is the `arm64` branch.** It builds *GW2 on Mac arm64*, the development app for 0.2,
 > which moves the game to an arm64 Wine engine. 0.1.x runs CrossOver 26.3 under Rosetta with my
 > DXMT fork and my Wine pieces. This app puts my DXMT fork, built for the arm64 engine, into its
-> engine, and the first of my Wine pieces for it: an `ntdll.so` with job wakes and a
-> `winemac.so` with the launcher's frame copies. A build made without one of those files leaves
-> the engine's own in place. It has its own name, bundle id
+> engine, and my Wine pieces for it: an `ntdll.so` with job wakes, the event pool, the msync fix
+> and fast locks, and a `winemac.so` with the launcher's frame copies. A build made without one of
+> those files leaves the engine's own in place. It has its own name, bundle id
 > (`cz.jandrly.gw2onmac.arm64`) and folders, so it installs next to GW2 on Mac 0.1.x and shares
 > nothing with it. The name is `APP_NAME` at the top of `src/gw2om.sh`, `collect-logs.sh` and
 > `session-report.sh`, and `appName` in `src/native/App.swift`. It has no updates, and 0.1.x stays
@@ -168,6 +168,17 @@ their values, which do nothing here. `gw2om.sh settings` prints `<key>_state=ok`
 `<key>_state=off:<reason>` for every key, and a `<key>_note` for the ones that work but are
 untested on this engine.
 
+A switch of my `ntdll.so` is also greyed when the file in this app doesn't have it, which the
+file's `VERSION` says with a line `switches: <variable> …`. A `VERSION` without that line greys
+nothing.
+
+`settings.conf` has a line `settings_version=`. Install and Repair write every key with its value,
+so the file holds the defaults it was written with. When a default changes for the files that
+exist, `SETTINGS_RESETS` in `gw2om.sh` names the key and a new version, and a file older than
+that reads the key as its new default until the next write keeps it. Version 1 resets
+`fastlocks` and `coolworkers` to `off`. Before it, the arm64 line wrote `on` and `3` into every
+file while both rows were greyed, so no file held a choice of mine.
+
 | Pane | Setting | Key | Default | What it does |
 |---|---|---|---|---|
 | Graphics | Retina | `retina` | on | draws at your display's full resolution, at some cost in frame rate |
@@ -181,8 +192,9 @@ untested on this engine.
 | Performance | Shader warming | `warm` | on | builds the pipelines the last sessions used before the game asks for them. Greyed while the engine's own DXMT is chosen |
 | | CPUs the game sees | `ncpu` | 8 | from 2 up to your Mac's logical CPUs, or all. The game starts one job worker per CPU, minus one |
 | | Job wakes | `jobwakes` | on | a job the game hands out wakes one sleeping worker, and none when no worker sleeps (`WINE_HEAT_WAKE=one,skip`). Greyed while the engine's own `ntdll.so` is chosen |
-| | Faster locks | `fastlocks` | on | greyed: needs my Wine changes, which come with step 3 |
-| | Cooler job workers | `coolworkers` | 3 | greyed: needs my Wine changes, which come with step 3 |
+| | Event pool | `eventpool` | on | closed events are kept and handed out again, without a request to the Wine server (`WINE_HEAT_EVPOOL=1`). Greyed while the engine's own `ntdll.so` is chosen |
+| | Faster locks | `fastlocks` | off | short spins before the game thread sleeps on a busy lock, a job group or an event (`WINE_HEAT_SPIN=lock=20:game,event=30:game`). Greyed while the engine's own `ntdll.so` is chosen |
+| | Cooler job workers | `coolworkers` | off | greyed: needs my Wine changes, which come with step 3 |
 | Interface | Larger interface | `uiscale` | off | my interface addon, see below. Untested on this engine |
 | | Interface Size "Larger" | `uiscale_size` | 1.75 | the addon's scale: 1.5, 1.75, 1.8 or 2.0 |
 | | Small text in Cronos | `uiscale_sans` | on | chat, the tracker and labels have no larger font, so the addon draws them in Cronos at the larger size |
@@ -546,9 +558,12 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
 - The `WINE_HEAT_*` entries are my `ntdll.so`'s switches, which it acts on in `Gw2-64.exe` only.
   They follow the cache path, one `env=` field each, and only while my file is in place. The table
   `HEAT_SWITCHES` in `gw2om.sh` has one row per setting, `<key> <entry>`: *Job wakes* writes
-  `WINE_HEAT_WAKE=one,skip`. Debug logging adds `WINE_HEAT_COUNT=1` and `WINE_HEAT_LOG` with the
-  logs folder, where my file writes `heat-<pid>.log` every 5 seconds. `CefHost.exe`'s rule unsets
-  each of them again with an empty value.
+  `WINE_HEAT_WAKE=one,skip`, *Event pool* `WINE_HEAT_EVPOOL=1` and *Faster locks*
+  `WINE_HEAT_SPIN=lock=20:game,event=30:game`. `WINE_HEAT_MSYNC_UNREG=1` has no setting and goes
+  in whenever my file is in place, as on 0.1.x. An entry whose variable the file's `VERSION`
+  doesn't list on its `switches:` line stays out. Debug logging adds `WINE_HEAT_COUNT=1` and
+  `WINE_HEAT_LOG` with the logs folder, where my file writes `heat-<pid>.log` every 5 seconds.
+  `CefHost.exe`'s rule unsets each of them again with an empty value.
 - The `WINE_MACDRV_*` entries are my `winemac.so`'s, rows of the same table. Each goes in only
   while my driver is in place, whatever `wine` says, and `CefHost.exe`'s rule unsets it. *Launcher
   frames* writes `WINE_MACDRV_SURFACE=copy,skip`, after the `WINE_HEAT_*` switches and before the
