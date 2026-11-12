@@ -64,6 +64,10 @@ skip() { echo "  skip   $* (this app has no ntdll.so of mine)"; }
 if [ -f "$COMP/macdrv/winemac.so" ]; then MYDRV=mine; else MYDRV=engine; fi
 MYDRV_COMMIT="$(sed -n 's/^commit: //p' "$COMP/macdrv/VERSION" 2>/dev/null || true)"
 drv() { [ "$MYDRV" = mine ]; }
+# my winemac.so has the mouse-look factor: its VERSION's switches: line names it, or it has no such
+# line (the checks' stand-in). A dev build from before the factor lists WINE_MACDRV_SURFACE alone
+scale() { drv && { ! grep -q '^switches:' "$COMP/macdrv/VERSION" || in_switches WINE_MACDRV_MOUSE_SCALE; }; }
+in_switches() { sed -n 's/^switches://p' "$COMP/macdrv/VERSION" | head -1 | tr ' ' '\n' | grep -qx "$1"; }
 skipdrv() { echo "  skip   $* (this app has no winemac.so of mine)"; }
 mkdir -p "$H"
 # Another DXMT setup's caches in the per-user cache folder, which the app must never touch: a
@@ -403,11 +407,11 @@ check "settings: a state for each of the 25 keys" [ "$(g settings | grep -cE '^[
 OFF=""
 mine || OFF="${OFF}fastlocks "
 OFF="${OFF}gamemode "
-drv || OFF="${OFF}mousespeed "
+scale || OFF="${OFF}mousespeed "
 mine || OFF="${OFF}wine jobwakes "
 drv || OFF="${OFF}macdrv launcherframes "
 mine || OFF="${OFF}eventpool "
-check "  off: gamemode$(mine || echo ", wine and its switches")$(drv || echo ", macdrv, launcherframes and mousespeed")" \
+check "  off: gamemode$(mine || echo ", wine and its switches")$(drv || echo ", macdrv and launcherframes")$(scale || echo ", mousespeed")" \
   [ "$(g settings | sed -n 's/^\([a-z_]*\)_state=off:.*/\1/p' | tr '\n' ' ')" = "$OFF" ]
 if mine; then
   check "  wine=mine, jobwakes and eventpool on and fastlocks off by default, all ok" \
@@ -417,7 +421,13 @@ else
     eval '[ "$(sett wine_state)" = "off:This build of the app has no Wine build of mine." ] && [ "$(sett jobwakes_state)" = "off:Needs my Wine build, which this build of the app doesn'"'"'t have." ] && [ "$(sett eventpool_state)" = "$(sett jobwakes_state)" ] && [ "$(sett fastlocks_state)" = "$(sett jobwakes_state)" ] && ! "$G" set wine engine >/dev/null 2>&1 && ! "$G" set jobwakes off >/dev/null 2>&1 && ! "$G" set eventpool off >/dev/null 2>&1 && ! "$G" set fastlocks on >/dev/null 2>&1'
 fi
 if drv; then
-  check "  macdrv=mine, launcherframes=off and mousespeed=1 by default, all ok" [ "$(sett macdrv)/$(sett macdrv_state)/$(sett launcherframes)/$(sett launcherframes_state)/$(sett mousespeed)/$(sett mousespeed_state)" = mine/ok/off/ok/1/ok ]
+  check "  macdrv=mine and launcherframes=off by default, both ok; mousespeed=1" [ "$(sett macdrv)/$(sett macdrv_state)/$(sett launcherframes)/$(sett launcherframes_state)/$(sett mousespeed)" = mine/ok/off/ok/1 ]
+  if scale; then
+    check "  mousespeed ok" [ "$(sett mousespeed_state)" = ok ]
+  else
+    check "  mousespeed greyed: my winemac.so's VERSION doesn't list its switch" \
+      [ "$(sett mousespeed_state)" = "off:My Mac driver in this app (jdrly/wine ${MYDRV_COMMIT:0:11}) doesn't have this switch." ]
+  fi
 else
   check "  with their reasons; set macdrv engine, set launcherframes on and set mousespeed 1.5 refused" \
     eval '[ "$(sett macdrv_state)" = "off:This build of the app has no Mac driver of mine." ] && [ "$(sett launcherframes_state)" = "off:Needs my Mac driver, which this build of the app doesn'"'"'t have." ] && [ "$(sett mousespeed_state)" = "$(sett launcherframes_state)" ] && ! "$G" set macdrv engine >/dev/null 2>&1 && ! "$G" set launcherframes on >/dev/null 2>&1 && ! "$G" set mousespeed 1.5 >/dev/null 2>&1'
@@ -821,7 +831,12 @@ if drv; then
   g set launcherframes off >/dev/null
   out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
   check "launcher frames off: no WINE_MACDRV_* in the rules or in a dry run of Play" eval 'rules_are off && ! echo "$out" | grep -q WINE_MACDRV_'
-  # Mouse-look speed: a factor other than 1 is an entry with the value, after launcher frames'
+  # Mouse-look speed: a factor other than 1 is an entry with the value, after launcher frames'. With
+  # a VERSION whose switches: line names it (switch_in_file), as the staged driver may be a build from
+  # before it; the staged VERSION back at the end
+  cp "$COMP/macdrv/VERSION" "$SANDBOX/macdrv-VERSION.keep"
+  drv_switches() { { grep -v '^switches:' "$SANDBOX/macdrv-VERSION.keep"; echo "switches: $*"; } >"$COMP/macdrv/VERSION"; }
+  drv_switches WINE_MACDRV_MOUSE_SCALE WINE_MACDRV_SURFACE
   g set mousespeed 1.5 >/dev/null
   check "mouse-look speed 1.5: WINE_MACDRV_MOUSE_SCALE=1.5 for the game, unset for CefHost.exe" rules_are mousespeed
   out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
@@ -832,16 +847,12 @@ if drv; then
   out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
   check "  raw mouse-look off: no WINE_MACDRV_* in the rules or in a dry run of Play" eval '! g rules | grep -q WINE_MACDRV_ && ! echo "$out" | grep -q WINE_MACDRV_'
   g set rawmouse on >/dev/null
-  # The VERSION's switches: line (switch_in_file) for my Mac driver: today's builds name
-  # WINE_MACDRV_SURFACE alone, a build with the factor names WINE_MACDRV_MOUSE_SCALE too. The staged
-  # VERSION back after
-  cp "$COMP/macdrv/VERSION" "$SANDBOX/macdrv-VERSION.keep"
-  { grep -v '^switches:' "$SANDBOX/macdrv-VERSION.keep"; echo "switches: WINE_MACDRV_SURFACE"; } >"$COMP/macdrv/VERSION"
+  # A build from before the factor names WINE_MACDRV_SURFACE alone
+  drv_switches WINE_MACDRV_SURFACE
   check "a VERSION that lists WINE_MACDRV_SURFACE only: mouse-look speed greyed, saying so, set refused, its entry out" \
     eval '[ "$(sett mousespeed_state)" = "off:My Mac driver in this app (jdrly/wine ${MYDRV_COMMIT:0:11}) doesn'"'"'t have this switch." ] && [ "$(sett launcherframes_state)" = ok ] && ! "$G" set mousespeed 2 >/dev/null 2>&1 && rules_are off'
-  { grep -v '^switches:' "$SANDBOX/macdrv-VERSION.keep"; echo "switches: WINE_MACDRV_MOUSE_SCALE WINE_MACDRV_SURFACE"; } >"$COMP/macdrv/VERSION"
+  drv_switches WINE_MACDRV_MOUSE_SCALE WINE_MACDRV_SURFACE
   check "  one that lists WINE_MACDRV_MOUSE_SCALE too: ok, and the entry back" eval '[ "$(sett mousespeed_state)" = ok ] && rules_are mousespeed'
-  cp "$SANDBOX/macdrv-VERSION.keep" "$COMP/macdrv/VERSION"
   g set mousespeed 1 >/dev/null
   out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
   check "mouse-look speed 1: no WINE_MACDRV_* in the rules or in a dry run of Play" \
@@ -857,6 +868,7 @@ if drv; then
     g set jobwakes off >/dev/null; g set wine engine >/dev/null
   fi
   g set macdrv mine >/dev/null; g set launcherframes off >/dev/null; g set mousespeed 1 >/dev/null
+  cp "$SANDBOX/macdrv-VERSION.keep" "$COMP/macdrv/VERSION"
 else
   sed -i '' -e 's/^launcherframes=.*/launcherframes=on/' -e 's/^mousespeed=.*/mousespeed=1.5/' "$AD/settings.conf"
   out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
