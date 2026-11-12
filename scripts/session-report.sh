@@ -207,13 +207,16 @@ wine_report() {
       next
     }
     !take { next }
-    $1 == "req" { k = t SUBSEP $2; if (!(k in rn)) names[t, ++nnames[t]] = $2; rn[k] += $3; rt[k] += $4; srv[t] += $4; next }
+    $1 == "req" { k = t SUBSEP $2; if (!(k in rn)) names[t, ++nnames[t]] = $2; rn[k] += $3; rt[k] += $4; next }
     $1 == "message" { k = t SUBSEP $2; if (!(k in mn)) msgs[t, ++nmsgs[t]] = $2; mn[k] += $3; next }
     $1 == "set_cursor" || $1 == "get_message" || $1 == "set_queue_mask" {
       for (i = 2; i < NF; i += 2) { k = t SUBSEP $1 " " $i; if (!(k in sn)) splits[t, ++nsplits[t]] = $1 " " $i; sn[k] += $(i + 1) }
       next
     }
-    $1 == "counters" && t == game { for (i = 2; i < NF; i += 2) bc[$i] += $(i + 1) }
+    # (server_ms ranks the other threads: the req lines are only the twelve busiest by count)
+    $1 == "counters" {
+      for (i = 2; i < NF; i += 2) { if (t == game) bc[$i] += $(i + 1); if ($i == "server_ms") srv[t] += $(i + 1) }
+    }
     # <n> and <n> a second in <c> seconds
     function rate(n, c) { return sprintf("%.0f (%.1f)", n, c > 0 ? n / c : 0) }
     # the line of thread <t>s split <s>: its counters in the log order
@@ -279,7 +282,8 @@ wine_report() {
     }
     # the game thread table: its counters and timers a second and a frame, and the sleeps by length
     function game_table(    i, m, how, src, tm) {
-      useblk = (range != "" && reqname != "")
+      useblk = (range != "")
+      if (useblk && reqname == "") { printf "The game thread, thread %s (%s): no server requests log, so no table for --from and --to\n", game, who(game); return }
       sec = (useblk ? covered[game] : secs)
       if (frames > 0 && !useblk) { fr = frames; how = "counted by DXMT" } else { fr = rn[game, "select"] + 0; how = "by the game\047s socket poll" }
       src = "from the heat log totals, which include loading"
