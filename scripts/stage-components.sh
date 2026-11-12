@@ -25,8 +25,8 @@
 # NTDLL_BUILD=work/ntdll-mach9/install (jdrly/wine's asset ntdll-mach9-<commit>.tar.xz, unpacked;
 # without it no ntdll/) and UISCALE_BUILD=work/ui-scale/build (relative to the workspace, or
 # absolute). It refuses a DXMT build or an ntdll.so for another engine than src/gw2om.sh's
-# ENGINE_SHA256, a winemetal.so or ntdll.so without a valid signature, an ntdll.so that isn't the
-# file its VERSION names, and, with DXMT_COMMIT or WINE_COMMIT set, a build of another commit (or,
+# ENGINE_SHA256, an ntdll.so built on another base than its ENGINE_WINE, a winemetal.so or ntdll.so
+# without a valid signature, an ntdll.so that isn't the file its VERSION names, and, with DXMT_COMMIT or WINE_COMMIT set, a build of another commit (or,
 # for WINE_COMMIT, none). STAGED_FROM replaces "the development workspace" in the first line of
 # prebuilt/STAGED (the dev build workflow names the fork's commit and where its files came from).
 #
@@ -64,6 +64,9 @@ lock_get() { sed -n "s/^$1=//p" "$LOCK"; }
 # The engine gw2om.sh installs: the DXMT and ntdll.so builds name its tarball's sha256
 engine_sha="$(sed -n 's/^ENGINE_SHA256=\([0-9a-f]*\).*/\1/p' "$ROOT/src/gw2om.sh")"
 [ -n "$engine_sha" ] || die "no ENGINE_SHA256 in src/gw2om.sh"
+# and the commit of athei/wine it was built from, which my ntdll.so's VERSION names as its base
+engine_wine="$(sed -n 's/^ENGINE_WINE=\([0-9a-f]*\).*/\1/p' "$ROOT/src/gw2om.sh")"
+[ -n "$engine_wine" ] || die "no ENGINE_WINE in src/gw2om.sh"
 # record <dir>: <dir>/SHA256SUMS, every file's sha256 (shasum -c reads it)
 record() {
   (cd "$1" && find . -type f ! -name 'SHA256SUMS*' | sed 's|^\./||' | LC_ALL=C sort | while read -r f; do
@@ -71,13 +74,14 @@ record() {
   done) >"$1/SHA256SUMS.new"
   mv "$1/SHA256SUMS.new" "$1/SHA256SUMS"
 }
-# check_ntdll <dir>: my ntdll.so build in <dir> is for this engine, of WINE_COMMIT if that is set,
-# the file its VERSION names, and has a valid signature (the linker's: nothing signs it again before
-# the engine loads it)
+# check_ntdll <dir>: my ntdll.so build in <dir> is for this engine and on its Wine, of WINE_COMMIT if
+# that is set, the file its VERSION names, and has a valid signature (the linker's: nothing signs it
+# again before the engine loads it)
 check_ntdll() {
   local f
   for f in $NTDLL_FILES; do need "$1/$f"; done
   grep -q "^engine: .*sha256 $engine_sha" "$1/VERSION" || die "$1/VERSION names another engine than ENGINE_SHA256 ($engine_sha)"
+  grep -q "^base: $engine_wine" "$1/VERSION" || die "$1/VERSION names another base than ENGINE_WINE ($engine_wine)"
   [ -z "${WINE_COMMIT:-}" ] || grep -qx "commit: $WINE_COMMIT" "$1/VERSION" || die "$1/VERSION is not commit $WINE_COMMIT"
   grep -qx "ntdll.so: sha256 $(sha "$1/ntdll.so")" "$1/VERSION" || die "$1/ntdll.so is not the file its VERSION names"
   codesign --verify "$1/ntdll.so" || die "$1/ntdll.so has no valid signature"

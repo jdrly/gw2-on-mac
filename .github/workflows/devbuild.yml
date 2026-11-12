@@ -2,14 +2,20 @@
 # pre-release v<version>, signed ad hoc and not notarized (no secret, no Developer ID). I download it
 # with `gh release download`, which sets no quarantine attribute.
 #
-#   plan        the DXMT commit (a full sha on jdrly/dxmt's gw2-on-mac, by default its head) and the
-#               version (by default build.sh's)
+#   plan        the DXMT commit (a full sha on jdrly/dxmt's gw2-on-mac, by default its head), the Wine
+#               commit (a full sha on jdrly/wine's gw2-on-mac, by default none) and the version (by
+#               default build.sh's)
 #   components  my DXMT fork's build of that commit: the release asset dxmt-mach9-<commit>.tar.xz of
 #               jdrly/dxmt's mach9-builds, checked against the digest GitHub reports, or else the
 #               artifact dxmt-mach9-<commit> of the fork's GW2 run for it, fetched with this run's
 #               own token. The interface addon built here by scripts/build-addon.sh. Both staged by
 #               scripts/stage-components.sh, which refuses another commit, another engine or a
-#               winemetal.so without a valid signature; the refusals are proved on copies.
+#               winemetal.so without a valid signature; the refusals are proved on copies. With a
+#               Wine commit, my ntdll.so: the release asset ntdll-mach9-<commit>.tar.xz of
+#               jdrly/wine's mach9-builds, checked against the digest GitHub reports, which
+#               stage-components.sh refuses for another commit, another base or engine, a file its
+#               VERSION doesn't name or no valid signature, proved on copies too. Without one the app
+#               has no ntdll.so of mine and leaves the engine's own in place.
 #   checks      the Checks workflow's jobs (lint, compatdb, build, sandbox, renders, addon) with those
 #               components and that version
 #   package     scripts/release.sh --adhoc on the app the build job made (it never builds again):
@@ -18,9 +24,9 @@
 #               job may write to the repository. Its refusals are proved on copies first.
 #
 # Run by hand on arm64: gh workflow run devbuild.yml --ref arm64 [-f dxmt_commit=<sha>]
-# [-f version=X.Y.Z-dev.N] [-f publish=false]. A pull request that changes the build's scripts or
-# workflows runs it with publish false; a dry run keeps the DMG and the record as an artifact for 7
-# days.
+# [-f wine_commit=<sha>] [-f version=X.Y.Z-dev.N] [-f publish=false]. A pull request that changes
+# the build's scripts or workflows runs it with publish false and no wine_commit; a dry run keeps
+# the DMG and the record as an artifact for 7 days.
 name: Dev build
 
 on:
@@ -28,6 +34,10 @@ on:
     inputs:
       dxmt_commit:
         description: A full sha on jdrly/dxmt's gw2-on-mac; empty is the branch's head
+        type: string
+        default: ""
+      wine_commit:
+        description: A full sha on jdrly/wine's gw2-on-mac for my ntdll.so; empty is none (the engine's own)
         type: string
         default: ""
       version:
@@ -63,6 +73,8 @@ defaults:
 env:
   DXMT_REPO: jdrly/dxmt
   DXMT_BRANCH: gw2-on-mac
+  WINE_REPO: jdrly/wine
+  WINE_BRANCH: gw2-on-mac
 
 jobs:
   plan:
@@ -70,6 +82,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       dxmt_commit: ${{ steps.plan.outputs.dxmt_commit }}
+      wine_commit: ${{ steps.plan.outputs.wine_commit }}
       version: ${{ steps.plan.outputs.version }}
       publish: ${{ steps.plan.outputs.publish }}
     steps:
@@ -77,22 +90,27 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: The DXMT commit and the version
+      - name: The DXMT and Wine commits and the version
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
           DXMT_COMMIT: ${{ inputs.dxmt_commit }}
+          WINE_COMMIT: ${{ inputs.wine_commit }}
           VERSION: ${{ inputs.version }}
           PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
         run: |
           fail() { echo "::error::$*"; exit 1; }
+          # on_branch <input> <repo> <branch> <commit>: a full sha on the branch, which is that commit
+          # or ahead of it. A pull request's head that the squash left behind is not.
+          on_branch() {
+            local status
+            [[ $4 =~ ^[0-9a-f]{40}$ ]] || fail "$1 is not a full sha: $4"
+            status="$(gh api "repos/$2/compare/$4...$3" --jq .status)" || fail "$2 has no commit $4"
+            case "$status" in ahead|identical) ;; *) fail "$4 is not on $2's $3 ($status)" ;; esac
+          }
           [ -n "$DXMT_COMMIT" ] || DXMT_COMMIT="$(gh api "repos/$DXMT_REPO/branches/$DXMT_BRANCH" --jq .commit.sha)"
-          [[ $DXMT_COMMIT =~ ^[0-9a-f]{40}$ ]] || fail "dxmt_commit is not a full sha: $DXMT_COMMIT"
-          # On the branch: the branch is that commit or ahead of it. A pull request's head that the
-          # squash left behind is not.
-          status="$(gh api "repos/$DXMT_REPO/compare/$DXMT_COMMIT...$DXMT_BRANCH" --jq .status)" ||
-            fail "$DXMT_REPO has no commit $DXMT_COMMIT"
-          case "$status" in ahead|identical) ;; *) fail "$DXMT_COMMIT is not on $DXMT_REPO's $DXMT_BRANCH ($status)" ;; esac
+          on_branch dxmt_commit "$DXMT_REPO" "$DXMT_BRANCH" "$DXMT_COMMIT"
+          [ -z "$WINE_COMMIT" ] || on_branch wine_commit "$WINE_REPO" "$WINE_BRANCH" "$WINE_COMMIT"
           # shellcheck disable=SC2016 # (build.sh's line, literally)
           [ -n "$VERSION" ] || VERSION="$(sed -n 's/^APP_VERSION=${GW2_ON_MAC_VERSION:-\(.*\)}$/\1/p' build.sh)"
           [[ $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+-dev\.[0-9]+$ ]] || fail "version is not X.Y.Z-dev.N: $VERSION"
@@ -105,7 +123,7 @@ jobs:
             [ "$PUBLISH" != true ] || fail "The tag v$VERSION already exists; give a higher version"
             echo "::notice title=Version::The tag v$VERSION already exists; a publishing run would refuse this version"
           fi
-          { echo "dxmt_commit=$DXMT_COMMIT"; echo "version=$VERSION"; echo "publish=$PUBLISH"; } | tee -a "$GITHUB_OUTPUT"
+          { echo "dxmt_commit=$DXMT_COMMIT"; echo "wine_commit=$WINE_COMMIT"; echo "version=$VERSION"; echo "publish=$PUBLISH"; } | tee -a "$GITHUB_OUTPUT"
 
   components:
     needs: plan
@@ -114,6 +132,7 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
       DXMT_COMMIT: ${{ needs.plan.outputs.dxmt_commit }}
+      WINE_COMMIT: ${{ needs.plan.outputs.wine_commit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -190,20 +209,83 @@ jobs:
           refuse "VERSION names another engine" "$other"
           grep -q 'names another engine than ENGINE_SHA256' "$RUNNER_TEMP/stage.txt"
 
+      # Unpacked where stage-components.sh looks (work/ntdll-mach9/install); with WINE_COMMIT set it
+      # stages this build or fails
+      - name: My ntdll.so for the commit
+        if: env.WINE_COMMIT != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          name="ntdll-mach9-$WINE_COMMIT" dl="$RUNNER_TEMP/ntdll" dir=work/ntdll-mach9/install
+          mkdir -p "$dl" "$dir"
+          asset="$(gh api "repos/$WINE_REPO/releases/tags/mach9-builds" \
+            --jq ".assets[] | select(.name == \"$name.tar.xz\") | [.browser_download_url, .digest] | @tsv")" ||
+            fail "Could not read $WINE_REPO's mach9-builds release"
+          [ -n "$asset" ] || fail "$WINE_REPO's mach9-builds has no asset $name.tar.xz"
+          IFS=$'\t' read -r url digest <<<"$asset"
+          [[ $digest == sha256:* ]] || fail "GitHub reports no sha256 for $url"
+          curl -fL --retry 3 --no-progress-meter -o "$dl/$name.tar.xz" "$url"
+          sha="$(shasum -a 256 "$dl/$name.tar.xz" | cut -d' ' -f1)"
+          [ "sha256:$sha" = "$digest" ] || fail "$url is $sha, GitHub reports $digest"
+          tar -xJf "$dl/$name.tar.xz" -C "$dir"
+          find "$dir" -type f | LC_ALL=C sort
+          grep -E '^(wine-|commit:|base:|engine:|ntdll.so:)' "$dir/VERSION"
+          { echo "WINE_FROM=$WINE_REPO $WINE_COMMIT, release asset $url"; echo "WINE_ARCHIVE_SHA256=$sha"; } >>"$GITHUB_ENV"
+
       - name: The interface addon
         run: |
           brew install mingw-w64
           scripts/build-addon.sh
           echo "MINGW=$(x86_64-w64-mingw32-gcc --version | head -1)" >>"$GITHUB_ENV"
 
+      # On copies, with the addon there: stage-components.sh checks my ntdll.so after the DXMT and
+      # the addon, and before it writes anything
+      - name: stage-components.sh refuses an ntdll.so of another commit, base or engine, another file or no valid signature
+        if: env.WINE_COMMIT != ''
+        run: |
+          refuse() { # <message> <ntdll dir> <what it took>
+            if GW2_ON_MAC_WORKSPACE="$PWD" NTDLL_BUILD="$2" scripts/stage-components.sh >"$RUNNER_TEMP/stage.txt" 2>&1; then
+              echo "::error::stage-components.sh took an ntdll.so $3"; exit 1
+            fi
+            cat "$RUNNER_TEMP/stage.txt"
+            grep -qF "$1" "$RUNNER_TEMP/stage.txt"
+          }
+          copy() { rm -rf "$RUNNER_TEMP/ntdll-copy" && cp -R work/ntdll-mach9/install "$RUNNER_TEMP/ntdll-copy" && echo "$RUNNER_TEMP/ntdll-copy"; }
+          zero=0000000000000000000000000000000000000000
+          c="$(copy)"
+          sed -i '' "s/^commit: .*/commit: $zero/" "$c/VERSION"
+          refuse "is not commit $WINE_COMMIT" "$c" "whose VERSION names another commit"
+          c="$(copy)"
+          sed -i '' "s/^base: .*/base: $zero/" "$c/VERSION"
+          refuse "names another base than ENGINE_WINE" "$c" "whose VERSION names another base"
+          c="$(copy)"
+          sed -i '' -E "s/^(engine: .*sha256 )[0-9a-f]{64}/\1$zero${zero:0:24}/" "$c/VERSION"
+          refuse "names another engine than ENGINE_SHA256" "$c" "whose VERSION names another engine"
+          c="$(copy)"
+          printf x >>"$c/ntdll.so"
+          refuse "is not the file its VERSION names" "$c" "that isn't the file its VERSION names"
+          # (VERSION names the unsigned file, so only the signature is wrong)
+          c="$(copy)"
+          codesign --remove-signature "$c/ntdll.so"
+          sed -i '' "s/^ntdll.so: sha256 .*/ntdll.so: sha256 $(shasum -a 256 "$c/ntdll.so" | cut -d' ' -f1)/" "$c/VERSION"
+          refuse "has no valid signature" "$c" "that codesign --verify rejects"
+
       - name: Stage
         run: |
-          GW2_ON_MAC_WORKSPACE="$PWD" STAGED_FROM="$DXMT_FROM; the addon built on this runner" scripts/stage-components.sh
+          GW2_ON_MAC_WORKSPACE="$PWD" STAGED_FROM="$DXMT_FROM; ${WINE_FROM:+$WINE_FROM; }the addon built on this runner" scripts/stage-components.sh
           mkdir -p "$RUNNER_TEMP/components"
           tar -cf "$RUNNER_TEMP/components/prebuilt.tar" prebuilt
           { echo "dxmt $DXMT_COMMIT"
             echo "dxmt from $DXMT_FROM"
             echo "dxmt archive sha256 $DXMT_ARCHIVE_SHA256"
+            if [ -n "$WINE_COMMIT" ]; then
+              echo "wine $WINE_COMMIT"
+              echo "wine from $WINE_FROM"
+              echo "wine archive sha256 $WINE_ARCHIVE_SHA256"
+            else
+              echo "wine none: the engine's own ntdll.so"
+            fi
             echo "ui-scale built with $MINGW"; } >"$RUNNER_TEMP/components/components.txt"
           cat "$RUNNER_TEMP/components/components.txt"
 
@@ -234,6 +316,7 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
       DXMT_COMMIT: ${{ needs.plan.outputs.dxmt_commit }}
+      WINE_COMMIT: ${{ needs.plan.outputs.wine_commit }}
       VERSION: ${{ needs.plan.outputs.version }}
       PUBLISH: ${{ needs.plan.outputs.publish }}
     steps:
@@ -263,7 +346,8 @@ jobs:
             { echo "::error::The build job's app is not version $VERSION"; exit 1; }
 
       # release-notes/<version>.md when the commit has it, otherwise notes in its form: the commits,
-      # and the fork's changes since the DXMT of the previous dev build that has a record
+      # the DXMT fork's changes since the DXMT of the previous dev build that has a record, and my
+      # ntdll.so's commit or none
       - name: Release notes
         env:
           GH_TOKEN: ${{ github.token }}
@@ -272,8 +356,14 @@ jobs:
           if [ ! -f "$notes" ]; then
             notes="$RUNNER_TEMP/notes.md"
             app="$(git rev-parse HEAD)"
-            short="${DXMT_COMMIT:0:7}"
+            short="${DXMT_COMMIT:0:7}" wshort="${WINE_COMMIT:0:7}"
             changes=""
+            if [ -n "$WINE_COMMIT" ]; then
+              wine=" and my \`ntdll.so\` at \`$wshort\`"
+              ntdll="[\`$wshort\`](https://github.com/$WINE_REPO/commit/$WINE_COMMIT) of my Wine fork's \`$WINE_BRANCH\`, in place of the engine's own."
+            else
+              wine="" ntdll="None in this build: the engine's own \`ntdll.so\` stays in place."
+            fi
             prev="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isPrerelease \
               --jq '[.[] | select(.isPrerelease and (.tagName | test("-dev\\.")))][0].tagName // ""')"
             if [ -n "$prev" ] && gh release download "$prev" --repo "$GITHUB_REPOSITORY" --pattern '*.build.txt' --output "$RUNNER_TEMP/prev.build.txt" 2>/dev/null; then
@@ -287,10 +377,13 @@ jobs:
             cat >"$notes" <<EOF
           ## $APP_NAME $VERSION (development build)
 
-          The app at \`${app:0:7}\` with my DXMT fork at \`$short\`, built on GitHub's runners.
+          The app at \`${app:0:7}\` with my DXMT fork at \`$short\`$wine, built on GitHub's runners.
 
           ### My DXMT fork at \`$short\`
           [\`$short\`](https://github.com/$DXMT_REPO/commit/$DXMT_COMMIT) of the fork's \`$DXMT_BRANCH\`.$changes
+
+          ### My ntdll.so
+          $ntdll
 
           ### Support
           GW2 on Mac is an unofficial project. ArenaNet and NCSOFT don't make, endorse or support it, and
@@ -318,6 +411,7 @@ jobs:
             echo
             echo "prebuilt/dxmt/SHA256SUMS:"; cat prebuilt/dxmt/SHA256SUMS
             echo
+            if [ -f prebuilt/ntdll/SHA256SUMS ]; then echo "prebuilt/ntdll/SHA256SUMS:"; cat prebuilt/ntdll/SHA256SUMS; echo; fi
             echo "VERSIONS:"; cat "$app/Contents/Resources/VERSIONS"
           } >"$record"
           echo "BUILD_RECORD=$record" >>"$GITHUB_ENV"

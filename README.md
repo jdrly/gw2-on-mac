@@ -766,7 +766,8 @@ pre-release `mach9-builds`: `ntdll.so`, `VERSION`, `COPYING.LIB` and `LICENSE`. 
 lines `commit: <full sha>`, `engine: … sha256 <the engine tarball's>` and `ntdll.so: sha256 <the
 file's>`. `stage-components.sh` copies it, unpacked, from `work/ntdll-mach9/install` in the
 workspace (`NTDLL_BUILD` overrides it) and writes `prebuilt/ntdll/SHA256SUMS`. It refuses a build
-for another engine than `ENGINE_SHA256`, an `ntdll.so` that isn't the file its `VERSION` names or
+for another engine than `ENGINE_SHA256` or on another base than `ENGINE_WINE` (`VERSION`'s `base:`
+line), an `ntdll.so` that isn't the file its `VERSION` names or
 has no valid signature, and with `WINE_COMMIT` set, a build of another commit or none. Without a
 build and without `WINE_COMMIT` it stages no `ntdll/`, and the app leaves the engine's own in
 place. `build.sh` refuses a `prebuilt/ntdll` that doesn't match its record.
@@ -795,9 +796,9 @@ builds the addon with `scripts/build-addon.sh` into `work/ui-scale/build`, and s
 the checkout as `GW2_ON_MAC_WORKSPACE`. Staging refuses a DXMT build whose `VERSION` names another
 engine than `ENGINE_SHA256` in `src/gw2om.sh`, or a `winemetal.so` without a valid signature, and
 with `DXMT_COMMIT` set, a build of another commit. `STAGED_FROM` puts the fork's commit and where
-its files came from into the first line of `prebuilt/STAGED`. My `ntdll.so` reaches the dev build
-through #50, which fetches the fork's asset into `work/ntdll-mach9/install`; until then a dev build
-has none.
+its files came from into the first line of `prebuilt/STAGED`. With a Wine commit it fetches my
+fork's `ntdll.so` asset into `work/ntdll-mach9/install` and stages it with `WINE_COMMIT` set;
+without one a dev build has none.
 
 **The engine's source** is athei's: [athei/mach9](https://github.com/athei/mach9) and the
 repositories its release page lists, each under its own licence. The app doesn't bundle any of it,
@@ -815,7 +816,7 @@ fonts, art and licences. It
 downloads Sparkle at a pinned version and sha256, and compiles the Icon Composer icon
 `src/AppIcon.icon` with actool into `Assets.car` and a fallback `AppIcon.icns`.
 
-- `GW2_ON_MAC_VERSION` sets the version, 0.2.0-dev.4 by default. `X.Y.Z-dev.N` makes a development build,
+- `GW2_ON_MAC_VERSION` sets the version, 0.2.0-dev.5 by default. `X.Y.Z-dev.N` makes a development build,
   as in SWTOR on Mac.
 - `GW2_ON_MAC_FEED_URL` and `GW2_ON_MAC_ED_PUBLIC_KEY` turn updates on. Without them Sparkle stays
   off, which is normal for local builds.
@@ -959,9 +960,9 @@ publishes it as the pre-release `v<version>`:
 
 ```sh
 gh workflow run devbuild.yml --ref arm64                    # DXMT at the fork's head, build.sh's version
-gh workflow run devbuild.yml --ref arm64 -f dxmt_commit=<sha> -f version=0.2.0-dev.5
+gh workflow run devbuild.yml --ref arm64 -f dxmt_commit=<sha> -f wine_commit=<sha> -f version=0.2.0-dev.6
 gh workflow run devbuild.yml --ref arm64 -f publish=false   # a dry run: the DMG as an artifact, 7 days
-gh release download v0.2.0-dev.4 -R jdrly/gw2-on-mac -p '*.dmg' -D ~/Downloads
+gh release download v0.2.0-dev.5 -R jdrly/gw2-on-mac -p '*.dmg' -D ~/Downloads
 ```
 
 - DXMT is my fork's build of a commit on its `gw2-on-mac`: the release asset
@@ -969,15 +970,22 @@ gh release download v0.2.0-dev.4 -R jdrly/gw2-on-mac -p '*.dmg' -D ~/Downloads
   or until that exists, the artifact `dxmt-mach9-<commit>` of the fork's `GW2` run, fetched with
   the run's own token. A commit that isn't on the branch, or whose run hasn't finished green, is
   refused.
+- My `ntdll.so` comes only with `wine_commit`, a commit on my Wine fork's `gw2-on-mac`: the
+  release asset `ntdll-mach9-<commit>.tar.xz` of jdrly/wine's `mach9-builds`, checked against
+  GitHub's digest. A commit that isn't on the branch or has no asset is refused. Without
+  `wine_commit` the app has no `ntdll.so` of mine and leaves the engine's own in place.
 - The addon is built on the runner from the commit, with Homebrew's mingw-w64.
 - Checks' jobs run on that build: `lint`, `compatdb`, `build`, `sandbox` and `renders`, and
   `addon` builds the addon a second time, as on a pull request. Then `release.sh --adhoc` packages
   the app the `build` job made and never builds it again.
 - The notes are `release-notes/<version>.md` when the commit has one. Otherwise the run writes
-  them: the app's and the fork's commits, and a link to the fork's changes since the previous dev
-  build's DXMT.
+  them: the app's and the forks' commits, and a link to the DXMT fork's changes since the previous
+  dev build's DXMT. The record names all three commits.
 - The run proves its refusals on copies: the stand-in DXMT and `ntdll.so`, a `VERSION` with another
-  commit or another engine, a version below `build.sh`'s and a tag that exists.
+  commit or another engine, a version below `build.sh`'s and a tag that exists. With
+  `wine_commit`, also an `ntdll.so` whose `VERSION` names another commit, base or engine, one that
+  isn't the file its `VERSION` names and one without a valid signature. `release.sh` checks that
+  the DMG's app has that commit's `ntdll.so` with the sha256 its `VERSION` names.
 - A pull request that changes the workflow, `checks.yml`, `build.sh`, `release.sh`,
   `stage-components.sh`, `build-addon.sh` or `app-files.sh` runs it with `publish` false.
 

@@ -137,7 +137,7 @@ jobs:
           retention-days: 7
 
       # The refusals change the files this job has finished with. A dev build has no archive, and
-      # until #50 no ntdll.so of mine.
+      # my ntdll.so only with its wine_commit.
       - name: build.sh refuses a changed component, stage-components.sh a changed archive
         env:
           ARCHIVE: ${{ inputs.components == '' }}
@@ -169,7 +169,9 @@ jobs:
           mkdir -p "$nt/files"
           echo 'int gw2om_check;' | clang -x c -dynamiclib -o "$nt/files/ntdll.so" -
           engine_sha="$(sed -n 's/^ENGINE_SHA256=\([0-9a-f]*\).*/\1/p' src/gw2om.sh)"
+          engine_wine="$(sed -n 's/^ENGINE_WINE=\([0-9a-f]*\).*/\1/p' src/gw2om.sh)"
           { echo "wine-11.21-0-g0000000"; echo "commit: 1111111111111111111111111111111111111111"
+            echo "base: $engine_wine"
             echo "engine: Mach9 v0.3.1 (wine-v0.3.1-macos-arm64.tar.xz, sha256 $engine_sha)"
             echo "ntdll.so: sha256 $(shasum -a 256 "$nt/files/ntdll.so" | cut -d' ' -f1)"; } >"$nt/files/VERSION"
           echo "LGPL" >"$nt/files/COPYING.LIB" && echo "Wine's LICENSE" >"$nt/files/LICENSE"
