@@ -609,7 +609,8 @@ The session report, `Resources/session-report.sh [--keep] [log]` or `--compare A
 last session from DXMT's own log lines:
 
 - frame rate as median, 10th percentile and minimum, frame times, hitches and DXMT's share of them
-- shader compiles and the render thread's waits for them
+- shader compiles and DXMT's encode thread's waits for them: how many, their total and the
+  longest
 - shader warming, presentation and Metal 4 errors
 
 # Development
