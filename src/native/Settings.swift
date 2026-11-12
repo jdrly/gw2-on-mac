@@ -165,12 +165,6 @@ final class GameSettings {
   static let frameCaps: [(String, String)] = [
     ("off", "Off"), ("30", "30 fps"), ("40", "40 fps"), ("60", "60 fps"), ("120", "120 fps"),
   ]
-  // DXMT: my fork (components/dxmt) or the engine's own, kept next to it (gw2om.sh apply_dxmt)
-  static let dxmts: [(String, String)] = [("fork", "My fork"), ("engine", "The engine's")]
-  // Wine: my ntdll.so (components/ntdll) or the engine's own, kept next to it (gw2om.sh unix_lib)
-  static let wines: [(String, String)] = [("mine", "My build"), ("engine", "The engine's")]
-  // Mac driver: my winemac.so (components/macdrv) or the engine's own, kept next to it (unix_lib)
-  static let macdrvs: [(String, String)] = [("mine", "My build"), ("engine", "The engine's")]
   // CPUs the game sees: 2 up to this Mac's logical CPUs (gw2om.sh settings: cpus, sysctl
   // hw.logicalcpu), or all
   var cpuCount: Int { Int(values["cpus"] ?? "") ?? ProcessInfo.processInfo.processorCount }
@@ -356,11 +350,6 @@ struct SettingsView: View {
     settings.values["\(key)_note"].flatMap { $0.isEmpty ? nil : $0 }
   }
 
-  private var workers: Int {
-    let n = settings.values["ncpu"] ?? "8"
-    return max(1, (Int(n) ?? ProcessInfo.processInfo.activeProcessorCount) - 1)
-  }
-
   @ViewBuilder private func pane(_ pane: SettingsPane) -> some View {
     switch pane {
     case .graphics:
@@ -371,15 +360,6 @@ struct SettingsView: View {
         SettingRow("Frame cap", "A steady cap paced by Metal, at a divisor of your display's refresh. Use it with the game's own vsync.") {
           InkPopup(selection: settings.choice("fpscap", "off"), options: GameSettings.frameCaps)
         }
-        SettingRow("DXMT", "What draws the game, and Steam's windows with it: my DXMT fork (Metal 4, shader warming, MetalFX), or the engine's own to compare. Switches while Steam is closed.") {
-          InkPopup(selection: settings.choice("dxmt", "fork"), options: GameSettings.dxmts)
-        }
-        SettingRow("Wine", "Which ntdll.so every Wine process loads, Steam's too: my build, with the switches under Performance, or the engine's own to compare. Switches while Steam is closed.", off: off("wine")) {
-          InkPopup(selection: settings.choice("wine", "mine"), options: GameSettings.wines)
-        }
-        SettingRow("Mac driver", "Which winemac.so draws every Wine window, Steam's too: my build, with Launcher frames, or the engine's own to compare. Switches while Steam is closed.", off: off("macdrv")) {
-          InkPopup(selection: settings.choice("macdrv", "mine"), options: GameSettings.macdrvs)
-        }
       }
       SettingsGroup {
         SettingRow("MetalFX for Subsample", "With the game's Render Sampling set to Subsample, MetalFX upscales the 3D scene and the interface stays sharp. Experimental.", off: off("metalfx")) {
@@ -388,7 +368,7 @@ struct SettingsView: View {
         SettingRow("Metal HUD", "Apple's overlay with the frame rate and frame times, over the game.") {
           InkSwitch(isOn: settings.toggle("hud"))
         }
-        // (a switch of my Mac driver: Graphics › Mac driver)
+        // (a switch of my Mac driver)
         SettingRow("Launcher frames", "The launcher's window gets a copy of each frame, and a frame equal to the last is skipped. Against a launcher that flickers.", off: off("launcherframes")) {
           InkSwitch(isOn: settings.toggle("launcherframes"))
         }
@@ -403,7 +383,7 @@ struct SettingsView: View {
           InkPopup(selection: settings.choice("ncpu", "8"), options: settings.cpuCounts)
         }
       }
-      // (the switches of my Wine build: Graphics › Wine)
+      // (the switches of my Wine build)
       SettingsGroup {
         SettingRow("Job wakes", "Each job the game hands out wakes one sleeping worker, and none when no worker sleeps. Without it, every hand-out wakes all of them.", off: off("jobwakes")) {
           InkSwitch(isOn: settings.toggle("jobwakes"))
@@ -413,10 +393,6 @@ struct SettingsView: View {
         }
         SettingRow("Faster locks", "Short waits before the game thread sleeps on a busy lock or job group.", off: off("fastlocks")) {
           InkSwitch(isOn: settings.toggle("fastlocks"))
-        }
-        SettingRow("Cooler job workers", "Moves some of the game's job workers to the efficiency cores. Saves power; all of them can cost frames in big crowds.", off: off("coolworkers")) {
-          InkPopup(selection: settings.choice("coolworkers", "off"),
-                   options: [("off", "Off")] + (1...workers).map { ("\($0)", "\($0) of \(workers)") })
         }
       }
 

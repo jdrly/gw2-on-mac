@@ -176,16 +176,22 @@ nothing.
 so the file holds the defaults it was written with. When a default changes for the files that
 exist, `SETTINGS_RESETS` in `gw2om.sh` names the key and a new version, and a file older than
 that reads the key as its new default until the next write keeps it. Version 1 resets
-`fastlocks` and `coolworkers` to `off`. Before it, the arm64 line wrote `on` and `3` into every
-file while both rows were greyed, so no file held a choice of mine.
+`fastlocks` to `off`. Before it, the arm64 line wrote `on` into every file while its row was
+greyed, so no file held a choice of mine. Version 2 resets `dxmt`, `wine` and `macdrv` to `fork`,
+`mine` and `mine`, because their rows left Settings with it, and a bottle on the engine's own
+files would have had no row to show it. A key `settings.conf` still has but the app no longer
+knows, such as `coolworkers`, is read by nothing and gone at the next write.
+
+Three keys have no row: `dxmt`, `wine` and `macdrv` pick my DXMT fork, my `ntdll.so` and my
+`winemac.so` (`fork`, `mine`, `mine`) or the engine's own (`engine`). They are for my comparisons
+from Terminal, with `gw2om.sh set`. The rows that need one of my files are greyed while the
+engine's own is chosen, and the main window's *Engine* and *Graphics* checks name the files in
+place.
 
 | Pane | Setting | Key | Default | What it does |
 |---|---|---|---|---|
 | Graphics | Retina | `retina` | on | draws at your display's full resolution, at some cost in frame rate |
 | | Frame cap | `fpscap` | off | a steady cap paced by Metal at 30, 40, 60 or 120. Use it with the game's own vsync |
-| | DXMT | `dxmt` | `fork` | `fork`: my DXMT fork draws the game, and Steam's windows with it. `engine`: the engine's own, to compare. The engine's DXMT tree switches while no session runs, else at the next start after Steam has quit ([The DXMT tree](#the-dxmt-tree)) |
-| | Wine | `wine` | `mine` | `mine`: every Wine process loads my `ntdll.so`, Steam's too. `engine`: the engine's own, to compare. Greyed in a build without my file. The file switches while no session runs, else at the next start after Steam has quit ([My ntdll.so](#my-ntdllso)) |
-| | Mac driver | `macdrv` | `mine` | `mine`: every Wine window is drawn by my `winemac.so`, Steam's too. `engine`: the engine's own, to compare, apart from *Wine*. Greyed in a build without my file. Switches like *Wine* ([My winemac.so](#my-winemacso)) |
 | | MetalFX for Subsample | `metalfx` | off | MetalFX upscales the 3D scene of the game's Subsample render sampling. Greyed while the engine's own DXMT is chosen |
 | | Metal HUD | `hud` | off | Apple's overlay with frame rate and frame times, over the game only and not over Steam's windows |
 | | Launcher frames | `launcherframes` | off | the launcher's window gets a copy of each frame, and a frame equal to the last is skipped (`WINE_MACDRV_SURFACE=copy,skip`). Against a launcher that flickers. Greyed while the engine's own `winemac.so` is chosen |
@@ -194,7 +200,6 @@ file while both rows were greyed, so no file held a choice of mine.
 | | Job wakes | `jobwakes` | on | a job the game hands out wakes one sleeping worker, and none when no worker sleeps (`WINE_HEAT_WAKE=one,skip`). Greyed while the engine's own `ntdll.so` is chosen |
 | | Event pool | `eventpool` | on | closed events are kept and handed out again, without a request to the Wine server (`WINE_HEAT_EVPOOL=1`). Greyed while the engine's own `ntdll.so` is chosen |
 | | Faster locks | `fastlocks` | off | short spins before the game thread sleeps on a busy lock, a job group or an event (`WINE_HEAT_SPIN=lock=20:game,event=30:game`). Greyed while the engine's own `ntdll.so` is chosen |
-| | Cooler job workers | `coolworkers` | off | greyed: not in my Wine build yet. It comes once big crowds hold 60 FPS without it |
 | Interface | Larger interface | `uiscale` | off | my interface addon, see below. Untested on this engine |
 | | Interface Size "Larger" | `uiscale_size` | 1.75 | the addon's scale: 1.5, 1.75, 1.8 or 2.0 |
 | | Small text in Cronos | `uiscale_sans` | on | chat, the tracker and labels have no larger font, so the addon draws them in Cronos at the larger size |
@@ -323,7 +328,7 @@ Storage, stays where it is.
 ## Known limits
 
 - My DXMT fork has no vkd3d-proton swap-chain bridge, so D3D12 programs can't present through it.
-  Guild Wars 2, Steam and their CEF windows are D3D11. *Settings › Graphics › DXMT* goes back to the
+  Guild Wars 2, Steam and their CEF windows are D3D11. `gw2om.sh set dxmt engine` goes back to the
   engine's own DXMT, which has it.
 - I've installed and played through the app since 2026-11-04, on the Steam route with my existing
   game files imported, and I now play on the published 0.1.1. A fresh Steam download and
@@ -446,7 +451,7 @@ engine's loader has library validation off, so it loads the file either way. `Re
 names the file's sha256 as built, and `session.env` the sha256 of the file in the engine.
 
 A build of the app without my file has no `components/ntdll`. It leaves the engine's own in place,
-and greys *Wine* and the switches that need my file.
+and greys the switches that need my file.
 
 The code is written for more than one file: `unix_lib` in `gw2om.sh` has one row per file, with its
 setting, its folder in `components/` and the engine's pinned sha256. The second row is my Mac
@@ -468,7 +473,7 @@ so Steam's windows run my file with every switch unset. With `macdrv` at `engine
 none of them and greys the rows that need them. Today that is *Launcher frames*.
 
 A build of the app without my file has no `components/macdrv`. It leaves the engine's own in place,
-and greys *Mac driver* and *Launcher frames*. My Wine fork's archive for the driver holds
+and greys *Launcher frames*. My Wine fork's archive for the driver holds
 `winemac.so` only; `win32u.so` comes with a later step.
 
 ## Installing, step by step

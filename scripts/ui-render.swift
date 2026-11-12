@@ -256,7 +256,7 @@ func session(_ state: String) -> Installer.LaunchSession {
 func settings(_ extra: [String: String] = [:]) -> GameSettings {
   let s = GameSettings()
   s.preview(["installed": "yes", "running": "no", "retina": "on", "fpscap": "off", "metalfx": "off", "hud": "off",
-             "warm": "on", "coolworkers": "off", "fastlocks": "off", "ncpu": "8", "uiscale": "off", "uiscale_addon": "off",
+             "warm": "on", "fastlocks": "off", "ncpu": "8", "uiscale": "off", "uiscale_addon": "off",
              "uiscale_size": "1.75", "uiscale_sans": "on", "uiscale_cinema": "off", "gamemode": "on", "launchopts": "",
              "route": "steam", "updates": "off", "debug": "off", "steambg": "on", "quitsteam": "on", "cpus": "12",
              "steam_login": "no", "rawmouse": "on", "mousespeed": "1", "dxmt": "fork", "wine": "mine", "jobwakes": "on",
@@ -269,7 +269,6 @@ func settings(_ extra: [String: String] = [:]) -> GameSettings {
 // The states and notes gw2om.sh settings prints on this line (setting_state, setting_note; the
 // sandbox suite pins them there): the greyed rows with their reasons, the untested notes
 let engineStates: [String: String] = [
-  "coolworkers_state": "off:Not in my Wine build yet. It comes once big crowds hold 60 FPS without it.",
   "mousespeed_state": "off:The engine gives the game the mouse's own counts. Use the game's own camera settings for the speed.",
   "gamemode_state": "off:The engine's loader is a Game Mode app. Nothing to switch.",
   "uiscale_note": "Untested on this engine.", "uiscale_size_note": "Untested on this engine.",

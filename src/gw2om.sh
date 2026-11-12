@@ -4,7 +4,8 @@
 # game through Steam or ArenaNet's own installer. On this line the engine is Mach9's arm64 Wine as
 # it ships, with three exceptions: its DXMT tree is my DXMT fork's (components/dxmt), its ntdll.so
 # is my Wine build's (components/ntdll), and its winemac.so my Mac driver's (components/macdrv),
-# the engine's own kept next to each (Settings › Graphics › DXMT, Wine and Mac driver switch back).
+# the engine's own kept next to each (`set dxmt engine`, `set wine engine` and `set macdrv engine`
+# switch back, for comparisons from Terminal; the Settings window has no row for them).
 # Nothing goes inside wine.app.
 #
 #   gw2om.sh status            KEY=VALUE lines describing this Mac (what the window shows)
@@ -624,19 +625,25 @@ apply_registry() {
 # The keys are 0.1.x's, so settings.conf reads the same on both lines, and dxmt (fork: my DXMT
 # fork; engine: the engine's own, to compare), wine (mine: my ntdll.so; engine: the engine's own),
 # macdrv (mine: my winemac.so; engine: the engine's own), and jobwakes, launcherframes and eventpool
-# (rows of HEAT_SWITCHES, as fastlocks is). On this engine some of them need pieces of mine that
-# come in later steps: setting_state says so, the Settings window greys them with the reason, set
-# refuses them, and they keep what settings.conf says without an effect.
-SETTING_KEYS="retina fpscap metalfx hud warm coolworkers fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam dxmt wine jobwakes macdrv launcherframes eventpool"
+# (rows of HEAT_SWITCHES, as fastlocks is). dxmt, wine and macdrv have no row in the Settings
+# window: they are for my comparisons from Terminal (gw2om.sh set …). On this engine some of the
+# keys need pieces of mine that come in later steps: setting_state says so, the Settings window
+# greys them with the reason, set refuses them, and they keep what settings.conf says without an
+# effect.
+SETTING_KEYS="retina fpscap metalfx hud warm fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam dxmt wine jobwakes macdrv launcherframes eventpool"
 # settings.conf's version, its line settings_version=. Install and Repair write every key with its
 # value, so a file holds the defaults it was written with, as if I had chosen them. A default that
 # changes for the files that exist gets a row here, "<version> <keys>": in a file older than
 # <version> (or without the line) those keys read as their defaults, and the next write of the
-# file (set, Install, Repair) keeps that and writes this version. Version 1: fastlocks and
-# coolworkers start off on this line (#45, #46). Until then the arm64 line wrote on and 3 into
-# every file, while their rows were greyed and set refused them, so no file holds a choice of mine.
+# file (set, Install, Repair) keeps that and writes this version. Version 1: fastlocks starts off
+# on this line (#45). Until then the arm64 line wrote on into every file, while its row was greyed
+# and set refused it, so no file holds a choice of mine. (It reset coolworkers too, a key since
+# removed: write_settings leaves out a line whose key isn't in SETTING_KEYS.) Version 2: dxmt, wine
+# and macdrv back to fork, mine and mine, once, as their rows leave the Settings window, so no
+# bottle stays on the engine's files with no row that shows it. A later set from Terminal stays.
 SETTINGS_RESETS="
-1 fastlocks coolworkers
+1 fastlocks
+2 dxmt wine macdrv
 "
 SETTINGS_VERSION=$(printf '%s\n' "$SETTINGS_RESETS" | awk 'NF { v = $1 } END { print v + 0 }')
 FPS_CAPS="off 30 40 60 120"
@@ -649,7 +656,7 @@ UI_SCALES="1.5 1.75 1.8 2.0"
 setting_default() {
   case "$1" in
     retina|warm|uiscale_sans|gamemode|rawmouse|updates|steambg|quitsteam|jobwakes|eventpool) echo on ;;
-    metalfx|hud|uiscale|uiscale_cinema|launcherframes|fastlocks|coolworkers) echo off ;;
+    metalfx|hud|uiscale|uiscale_cinema|launcherframes|fastlocks) echo off ;;
     mousespeed) echo 1 ;;
     debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
     fpscap) echo off ;;
@@ -668,7 +675,6 @@ setting_valid() { # <key> <value>
     fpscap) in_list "$2" "$FPS_CAPS" ;;
     ncpu) [ "$2" = all ] || { case "$2" in ''|*[!0-9]*) false ;; *) [ "$2" -ge 2 ] && [ "$2" -le "$CPU_MAX" ] ;; esac; } ;;
     uiscale_size) in_list "$2" "$UI_SCALES" ;;
-    coolworkers) [ "$2" = off ] || { case "$2" in ''|*[!0-9]*) false ;; *) [ "$2" -ge 1 ] && [ "$2" -le 15 ] ;; esac; } ;;
     # Gw2-64.exe's arguments: words of letters, digits and -_.:=,/+ only (nothing a shell or Wine
     # would take for something else)
     launchopts) case "$2" in *[!A-Za-z0-9\ _.:=,/+-]*) false ;; *) [ ${#2} -le 200 ] ;; esac ;;
@@ -696,10 +702,9 @@ setting() { # <key>: its value, or the default
 # setting_state <key>: ok, or off:<reason> for a setting this engine can't do yet (the one table of
 # them; settings prints it, the window greys the row and shows the reason, set refuses the key)
 setting_state() {
-  local l
+  local l n
   case "$1" in
-    metalfx|warm) if [ "$(setting dxmt)" = fork ]; then echo ok; else echo "off:Needs my DXMT fork (Graphics › DXMT)."; fi ;;
-    coolworkers) echo "off:Not in my Wine build yet. It comes once big crowds hold 60 FPS without it." ;;
+    metalfx|warm) if [ "$(setting dxmt)" = fork ]; then echo ok; else echo "off:Needs my DXMT fork, and the engine's own DXMT is chosen."; fi ;;
     mousespeed) echo "off:The engine gives the game the mouse's own counts. Use the game's own camera settings for the speed." ;;
     gamemode) echo "off:The engine's loader is a Game Mode app. Nothing to switch." ;;
     wine) if lib_bundled wine; then echo ok; else echo "off:This build of the app has no Wine build of mine."; fi ;;
@@ -708,7 +713,10 @@ setting_state() {
       l=$(switch_lib "$(switch_entry "$1")")
       if [ -z "$l" ]; then echo ok
       elif [ "$(lib_want "$l")" != mine ]; then
-        if [ "$l" = macdrv ]; then echo "off:Needs my Mac driver (Graphics › Mac driver)."; else echo "off:Needs my Wine build (Graphics › Wine)."; fi
+        if [ "$l" = macdrv ]; then n="my Mac driver"; else n="my Wine build"; fi
+        if lib_bundled "$l"; then echo "off:Needs $n, and the engine's own $LIB is chosen."
+        else echo "off:Needs $n, which this build of the app doesn't have."
+        fi
       elif [ "$l" != wine ] || heat_in_file "$(switch_entry "$1")"; then echo ok
       else echo "off:My Wine build in this app (jdrly/wine $(lib_commit wine | cut -c1-11)) doesn't have this switch."
       fi ;;

@@ -390,54 +390,70 @@ check "stage=finished" [ "$(st stage)" = finished ]
 check "DXMT's cache folder" [ -d "$DXMT_CACHE" ]
 
 section "Settings"
-check "defaults: warm on, coolworkers off, fastlocks off, ncpu 8, uiscale off, cinematic dialogue off" \
-  [ "$(sett warm)$(sett coolworkers)$(sett fastlocks)$(sett ncpu)$(sett uiscale)$(sett uiscale_cinema)" = onoffoff8offoff ]
-check "  settings.conf of a fresh install: settings_version=1, fastlocks and coolworkers off" \
-  eval 'grep -qx settings_version=1 "$AD/settings.conf" && grep -qx fastlocks=off "$AD/settings.conf" && grep -qx coolworkers=off "$AD/settings.conf"'
+check "defaults: warm on, fastlocks off, ncpu 8, uiscale off, cinematic dialogue off" \
+  [ "$(sett warm)$(sett fastlocks)$(sett ncpu)$(sett uiscale)$(sett uiscale_cinema)" = onoff8offoff ]
+check "  settings.conf of a fresh install: settings_version=2, fastlocks off, dxmt fork, wine and macdrv mine" \
+  eval 'grep -qx settings_version=2 "$AD/settings.conf" && grep -qx fastlocks=off "$AD/settings.conf" && grep -qx dxmt=fork "$AD/settings.conf" && grep -qx wine=mine "$AD/settings.conf" && grep -qx macdrv=mine "$AD/settings.conf"'
 
 check "default: Steam in the background on" [ "$(sett steambg)" = on ]
 check "default: Quit Steam when the game quits on" [ "$(sett quitsteam)" = on ]
-check "settings: a state for each of the 26 keys" [ "$(g settings | grep -cE '^[a-z_]+_state=(ok|off:.+)$')" = 26 ]
+check "settings: a state for each of the 25 keys" [ "$(g settings | grep -cE '^[a-z_]+_state=(ok|off:.+)$')" = 25 ]
 # (greyed: the ones a later step brings, and those that need a file of mine this app hasn't, in
 # SETTING_KEYS' order)
-OFF="coolworkers "
+OFF=""
 mine || OFF="${OFF}fastlocks "
 OFF="${OFF}gamemode mousespeed "
 mine || OFF="${OFF}wine jobwakes "
 drv || OFF="${OFF}macdrv launcherframes "
 mine || OFF="${OFF}eventpool "
-check "  off: coolworkers (#46), mousespeed (#59), gamemode$(mine || echo ", wine and its switches")$(drv || echo ", macdrv and launcherframes")" \
+check "  off: mousespeed (#59), gamemode$(mine || echo ", wine and its switches")$(drv || echo ", macdrv and launcherframes")" \
   [ "$(g settings | sed -n 's/^\([a-z_]*\)_state=off:.*/\1/p' | tr '\n' ' ')" = "$OFF" ]
 if mine; then
   check "  wine=mine, jobwakes and eventpool on and fastlocks off by default, all ok" \
     [ "$(sett wine)/$(sett wine_state)/$(sett jobwakes)/$(sett jobwakes_state)/$(sett eventpool)/$(sett eventpool_state)/$(sett fastlocks)/$(sett fastlocks_state)" = mine/ok/on/ok/on/ok/off/ok ]
 else
   check "  with their reasons; set wine engine and set jobwakes, eventpool and fastlocks refused" \
-    eval '[ "$(sett wine_state)" = "off:This build of the app has no Wine build of mine." ] && [ "$(sett jobwakes_state)" = "off:Needs my Wine build (Graphics › Wine)." ] && [ "$(sett eventpool_state)" = "$(sett jobwakes_state)" ] && [ "$(sett fastlocks_state)" = "$(sett jobwakes_state)" ] && ! "$G" set wine engine >/dev/null 2>&1 && ! "$G" set jobwakes off >/dev/null 2>&1 && ! "$G" set eventpool off >/dev/null 2>&1 && ! "$G" set fastlocks on >/dev/null 2>&1'
+    eval '[ "$(sett wine_state)" = "off:This build of the app has no Wine build of mine." ] && [ "$(sett jobwakes_state)" = "off:Needs my Wine build, which this build of the app doesn'"'"'t have." ] && [ "$(sett eventpool_state)" = "$(sett jobwakes_state)" ] && [ "$(sett fastlocks_state)" = "$(sett jobwakes_state)" ] && ! "$G" set wine engine >/dev/null 2>&1 && ! "$G" set jobwakes off >/dev/null 2>&1 && ! "$G" set eventpool off >/dev/null 2>&1 && ! "$G" set fastlocks on >/dev/null 2>&1'
 fi
 if drv; then
   check "  macdrv=mine and launcherframes=off by default, both ok" [ "$(sett macdrv)/$(sett macdrv_state)/$(sett launcherframes)/$(sett launcherframes_state)" = mine/ok/off/ok ]
 else
   check "  with their reasons; set macdrv engine and set launcherframes on refused" \
-    eval '[ "$(sett macdrv_state)" = "off:This build of the app has no Mac driver of mine." ] && [ "$(sett launcherframes_state)" = "off:Needs my Mac driver (Graphics › Mac driver)." ] && ! "$G" set macdrv engine >/dev/null 2>&1 && ! "$G" set launcherframes on >/dev/null 2>&1'
+    eval '[ "$(sett macdrv_state)" = "off:This build of the app has no Mac driver of mine." ] && [ "$(sett launcherframes_state)" = "off:Needs my Mac driver, which this build of the app doesn'"'"'t have." ] && ! "$G" set macdrv engine >/dev/null 2>&1 && ! "$G" set launcherframes on >/dev/null 2>&1'
 fi
 # settings.conf's version (SETTINGS_RESETS): a file from before version 1 holds the fastlocks=on
-# and coolworkers=3 the arm64 line wrote while both rows were greyed; they read off
+# and coolworkers=3 the arm64 line wrote while both rows were greyed; fastlocks reads off, and
+# coolworkers, no longer a key, is read by nothing
 cp "$AD/settings.conf" "$SANDBOX/settings.fresh"
-sed -i '' -e '/^settings_version=/d' -e 's/^fastlocks=.*/fastlocks=on/' -e 's/^coolworkers=.*/coolworkers=3/' "$AD/settings.conf"
+sed -i '' -e '/^settings_version=/d' -e 's/^fastlocks=.*/fastlocks=on/' "$AD/settings.conf"
+echo coolworkers=3 >>"$AD/settings.conf"
 out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
-check "a settings.conf without settings_version, fastlocks=on and coolworkers=3: both read off" \
-  eval '[ "$(sett fastlocks)/$(sett coolworkers)" = off/off ] && ! g rules | grep -q WINE_HEAT_SPIN && ! echo "$out" | grep -q WINE_HEAT_SPIN'
+check "a settings.conf without settings_version, fastlocks=on and coolworkers=3: fastlocks reads off" \
+  eval '[ "$(sett fastlocks)" = off ] && ! g settings | grep -q coolworkers && ! g rules | grep -q WINE_HEAT_SPIN && ! echo "$out" | grep -q WINE_HEAT_SPIN'
 g set hud on >/dev/null; g set hud off >/dev/null
-check "  the next write keeps that and writes settings_version=1" \
-  eval 'grep -qx settings_version=1 "$AD/settings.conf" && grep -qx fastlocks=off "$AD/settings.conf" && grep -qx coolworkers=off "$AD/settings.conf"'
+check "  the next write keeps that, writes settings_version=2 and leaves coolworkers out" \
+  eval 'grep -qx settings_version=2 "$AD/settings.conf" && grep -qx fastlocks=off "$AD/settings.conf" && ! grep -q coolworkers "$AD/settings.conf"'
 sed -i '' -e 's/^settings_version=.*/settings_version=0/' -e 's/^fastlocks=.*/fastlocks=on/' "$AD/settings.conf"
 check "  settings_version=0 and fastlocks=on: reads off" [ "$(sett fastlocks)" = off ]
+# a file at version 1 with the engine's own DXMT, ntdll.so and winemac.so chosen, from the rows
+# version 2 took out of the window: fork, mine and mine, once
+cp "$SANDBOX/settings.fresh" "$AD/settings.conf"
+sed -i '' -e 's/^settings_version=.*/settings_version=1/' -e 's/^dxmt=.*/dxmt=engine/' -e 's/^wine=.*/wine=engine/' -e 's/^macdrv=.*/macdrv=engine/' "$AD/settings.conf"
+echo coolworkers=off >>"$AD/settings.conf"
+check "settings_version=1 with dxmt, wine and macdrv engine and a coolworkers line: read fork, mine, mine" \
+  [ "$(sett dxmt)/$(sett wine)/$(sett macdrv)/$(st graphics)" = fork/mine/mine/yes ]
+g set hud on >/dev/null; g set hud off >/dev/null
+check "  the next write keeps them, writes settings_version=2 and leaves coolworkers out" \
+  eval 'grep -qx settings_version=2 "$AD/settings.conf" && grep -qx dxmt=fork "$AD/settings.conf" && grep -qx wine=mine "$AD/settings.conf" && grep -qx macdrv=mine "$AD/settings.conf" && ! grep -q coolworkers "$AD/settings.conf"'
+sed -i '' 's/^dxmt=.*/dxmt=engine/' "$AD/settings.conf"
+g set hud on >/dev/null; g set hud off >/dev/null
+check "  only once: dxmt=engine in a file at version 2 stays through later writes" \
+  eval '[ "$(sett dxmt)" = engine ] && grep -qx dxmt=engine "$AD/settings.conf" && grep -qx settings_version=2 "$AD/settings.conf"'
 cp "$SANDBOX/settings.fresh" "$AD/settings.conf"
 if mine; then
   g set fastlocks on >/dev/null; g set hud on >/dev/null; g set hud off >/dev/null
   check "  set fastlocks on in a file with the line: stays on through later writes" \
-    eval '[ "$(sett fastlocks)" = on ] && grep -qx fastlocks=on "$AD/settings.conf" && grep -qx settings_version=1 "$AD/settings.conf"'
+    eval '[ "$(sett fastlocks)" = on ] && grep -qx fastlocks=on "$AD/settings.conf" && grep -qx settings_version=2 "$AD/settings.conf"'
   g set fastlocks off >/dev/null
 fi
 check "  rawmouse ok; mousespeed greyed: the engine sends the mouse's own counts" \
@@ -447,14 +463,14 @@ check "  ok for the ones my DXMT fork brings back: metalfx, warm; dxmt=fork by d
 check "  the larger interface's settings and arcdps carry a note" \
   [ "$(g settings | sed -n 's/^\([a-z_]*\)_note=.*/\1/p' | tr '\n' ' ')" = "uiscale uiscale_size uiscale_sans uiscale_cinema arcdps " ]
 out=$(g set coolworkers 5 2>&1) && rc=0 || rc=$?
-check "set coolworkers 5: refused with its reason" eval '[ "$rc" = 1 ] && [ "$out" = "@error Not in my Wine build yet. It comes once big crowds hold 60 FPS without it." ]'
+check "set coolworkers 5: refused as an unknown setting" eval '[ "$rc" = 2 ] && [ "$out" = "@error Unknown setting: coolworkers=5" ]'
 for k in mousespeed=2.5 gamemode=off; do
   check "set ${k%%=*} ${k#*=}: refused" sh -c "! '$G' set ${k%%=*} ${k#*=} >/dev/null"
 done
-sed -i '' 's/^coolworkers=off$/coolworkers=5/' "$AD/settings.conf"
+sed -i '' 's/^gamemode=on$/gamemode=off/' "$AD/settings.conf"
 g set hud on >/dev/null; g set hud off >/dev/null
-check "  a greyed key keeps what settings.conf says (coolworkers=5 by hand), and does nothing" eval '[ "$(sett coolworkers)" = 5 ] && grep -qx coolworkers=5 "$AD/settings.conf"'
-sed -i '' 's/^coolworkers=5$/coolworkers=off/' "$AD/settings.conf"
+check "  a greyed key keeps what settings.conf says (gamemode=off by hand), and does nothing" eval '[ "$(sett gamemode)" = off ] && grep -qx gamemode=off "$AD/settings.conf"'
+sed -i '' 's/^gamemode=off$/gamemode=on/' "$AD/settings.conf"
 check "warm on: DXMT_WARM=all; off: none" sh -c "'$G' env | grep -qx DXMT_WARM=all && '$G' set warm off >/dev/null && ! '$G' env | grep -q DXMT_WARM && '$G' set warm on >/dev/null"
 check "set metalfx on: DXMT_SUBSAMPLE_METALFX=1" sh -c "'$G' set metalfx on >/dev/null && '$G' env | grep -qx DXMT_SUBSAMPLE_METALFX=1 && '$G' set metalfx off >/dev/null && ! '$G' env | grep -q DXMT_SUBSAMPLE"
 # the engine's own DXMT, and back (nothing runs: the tree swaps at once)
@@ -463,7 +479,7 @@ check "set dxmt engine: the engine's own tree is the active one, mine waits next
   eval '[ "$rc" = 0 ] && dxgi_is engine && [ -f "$ENG/lib/wine/dxgi/dxmt.fork/.gw2om-dxmt" ] && [ "$(st graphics)/$(st dxmt_tree)" = yes/engine ] && ! echo "$out" | grep -q Repair'
 check "  it says which" has <(echo "$out") "^DXMT: the engine's own DXMT (athei/dxmt d903db89036) draws the game"
 check "  warming and MetalFX greyed with the reason; set warm refused" \
-  eval '[ "$(sett warm_state)" = "off:Needs my DXMT fork (Graphics › DXMT)." ] && [ "$(sett metalfx_state)" = "$(sett warm_state)" ] && ! "$G" set warm off >/dev/null 2>&1'
+  eval '[ "$(sett warm_state)" = "off:Needs my DXMT fork, and the engine'"'"'s own DXMT is chosen." ] && [ "$(sett metalfx_state)" = "$(sett warm_state)" ] && ! "$G" set warm off >/dev/null 2>&1'
 check "  none of the fork's variables in the environment" sh -c "! '$G' env | grep -qE 'DXMT_(CACHE_DIR|WARM|DEPENDENCY_COMPRESSION|SUBSAMPLE|STATS)'"
 check "  the game's shader cache: the engine's DXMT's own" has <(g rules) "^exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=$DXMT_CACHE_ENGINE\(;env=WINE_HEAT_[^;]*\)*$"
 check "  wine.app untouched" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
@@ -491,7 +507,7 @@ if mine; then
     eval '[ "$rc" = 0 ] && ntdll_is engine && [ "$(st wine_ready)/$(st wine_file)/$(st wine_commit)" = "yes/engine/$ENGINE_WINE" ] && ! echo "$out" | grep -q Repair'
   check "  it says which" has <(echo "$out") "^ntdll.so: the engine's own ntdll.so (athei/wine $ENGINE_WINE) is in the engine$"
   check "  job wakes greyed with the reason; set jobwakes refused" \
-    eval '[ "$(sett jobwakes_state)" = "off:Needs my Wine build (Graphics › Wine)." ] && ! "$G" set jobwakes off >/dev/null 2>&1'
+    eval '[ "$(sett jobwakes_state)" = "off:Needs my Wine build, and the engine'"'"'s own ntdll.so is chosen." ] && ! "$G" set jobwakes off >/dev/null 2>&1'
   check "  wine.app and the DXMT trees untouched" eval '[ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ] && dxgi_is fork'
   out=$(g set wine mine 2>&1) && rc=0 || rc=$?
   check "set wine mine: mine again, the engine's own next to it as it ships" \
@@ -523,7 +539,7 @@ if drv; then
     eval '[ "$rc" = 0 ] && winemac_is engine && ntdll_is $MYWINE && [ "$(st macdrv_ready)/$(st macdrv_file)/$(st macdrv_commit)/$(st wine_file)" = "yes/engine/$ENGINE_WINE/$MYWINE" ] && ! echo "$out" | grep -q Repair'
   check "  it says which" has <(echo "$out") "^winemac.so: the engine's own winemac.so (athei/wine $ENGINE_WINE) is in the engine$"
   check "  launcher frames greyed with the reason; set launcherframes refused" \
-    eval '[ "$(sett launcherframes_state)" = "off:Needs my Mac driver (Graphics › Mac driver)." ] && ! "$G" set launcherframes on >/dev/null 2>&1'
+    eval '[ "$(sett launcherframes_state)" = "off:Needs my Mac driver, and the engine'"'"'s own winemac.so is chosen." ] && ! "$G" set launcherframes on >/dev/null 2>&1'
   out=$(g set macdrv mine 2>&1) && rc=0 || rc=$?
   check "set macdrv mine: mine again, the engine's own next to it as it ships, ntdll.so as it was" \
     eval '[ "$rc" = 0 ] && winemac_is mine && ntdll_is $MYWINE && [ "$(st macdrv_ready)/$(st macdrv_file)/$(st macdrv_commit)" = "yes/mine/$MYDRV_COMMIT" ] && [ "$(sett launcherframes_state)" = ok ]'
@@ -587,7 +603,7 @@ check "set launchopts -maploadinfo" g set launchopts "-maploadinfo"
 check "launchopts with a ; refused" sh -c "! '$G' set launchopts '-x; rm -rf /' >/dev/null"
 check "unknown value refused (exit 2)" sh -c "'$G' set fpscap 45 >/dev/null; [ \$? = 2 ]"
 check "unknown key refused" sh -c "! '$G' set colour red >/dev/null"
-check "settings.conf has every key and settings_version" [ "$(grep -c '=' "$AD/settings.conf")" = 27 ]
+check "settings.conf has every key and settings_version" [ "$(grep -c '=' "$AD/settings.conf")" = 26 ]
 
 section "The larger interface (addon)"
 GD="$STEAM/steamapps/common/Guild Wars 2"
@@ -821,11 +837,11 @@ else
   sed -i '' 's/^launcherframes=.*/launcherframes=off/' "$AD/settings.conf"
 fi
 ! mine || g set wine mine >/dev/null
-# A home with odd characters, in a fresh root: its settings.conf (the engine's ntdll.so, Debug logging off)
-# is all there is in it
+# A home with odd characters, in a fresh root: its settings.conf (the engine's ntdll.so, Debug logging off,
+# at settings_version 2 so wine=engine isn't reset) is all there is in it
 ODD="$SANDBOX/a%b;c$(printf '\t')d é"
 ODD_CONF="$ODD/home/Library/Application Support/$APP_NAME/settings.conf"
-mkdir -p "${ODD_CONF%/*}" && printf 'wine=engine\ndebug=off\n' >"$ODD_CONF"
+mkdir -p "${ODD_CONF%/*}" && printf 'settings_version=2\nwine=engine\ndebug=off\n' >"$ODD_CONF"
 odd_rules_are() { GW2_ON_MAC_ROOT="$ODD" "$G" rules | sed "s|$SANDBOX/a%25b%3Bc%09d é/home|/Users/a%25b%3Bc%09d é|g" | cmp -s - "$FIX/$1.rules"; }
 odd_only_conf() { [ "$(cd "$ODD" && find . | LC_ALL=C sort | tr '\n' '|')" = ".|./home|./home/Library|./home/Library/Application Support|./home/Library/Application Support/$APP_NAME|./home/Library/Application Support/$APP_NAME/settings.conf|" ]; }
 check "a home with %, ; and a tab: escaped as %XX, the é as it is" eval 'odd_rules_are escaped && odd_only_conf'
