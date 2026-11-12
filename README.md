@@ -780,8 +780,8 @@ last session from DXMT's own log lines:
   hands the job workers their jobs, about 49,000 a second, and the workers make a few thousand
 - the same thread's server requests from `heat-requests-<pid>.log`, which my `ntdll.so` writes
   next to the heat log: its twelve busiest requests by count with their time, and the
-  `set_cursor`, `get_message`, `message` and `set_queue_mask` splits, as totals and a second. The
-  file has a block per thread every 5 seconds, and the report sums the game thread's blocks that
+  `set_cursor`, `get_message`, `message` and `set_queue_mask` splits, as totals and a second. My
+  dumper appends the game thread's block every 5 seconds and at exit, and the report sums the game thread's blocks that
   lie wholly inside the heat log's run, or inside `--from <s> --to <s>` (seconds since the game
   started). It says how many blocks it counted and the seconds they cover, so a block across an
   edge shows as missing time

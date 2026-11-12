@@ -51,7 +51,7 @@ while [ $# -gt 0 ]; do
     --keep) KEEP=1; shift ;;
     --compare) COMPARE=1; shift ;;
     --from|--to)
-      case "${2:-}" in ''|*[!0-9.]*|*.*.*) usage ;; esac
+      case "${2:-}" in ''|.|*[!0-9.]*|*.*.*) usage ;; esac
       if [ "$1" = --from ]; then FROM=$2; else TO=$2; fi
       shift 2 ;;
     -h|--help) usage ;;

@@ -917,7 +917,7 @@ req get_message 300 0.600
 req set_cursor 10 0.200
 req select 5 0.050
 set_cursor handle 10 repeat 10 count 0 pos 0 clip 0 noclip 0
-get_message internal 0 other 300 none 100
+get_message internal 0 other 300 none 97
 message 0x8001 200
 message unlisted 3
 set_queue_mask poll 0 nopoll 0
@@ -937,7 +937,7 @@ Server requests of thread 00a4, the game thread, in heat-requests-4242.log from 
   set_queue_mask 50 (5.0), 0.100 ms (0.010)
   select 5 (0.5), 0.050 ms (0.005)
   set_cursor: handle 1010 (101.0), repeat 1000 (100.0), count 0 (0.0), pos 0 (0.0), clip 0 (0.0), noclip 0 (0.0)
-  get_message: internal 100 (10.0), other 400 (40.0), none 100 (10.0)
+  get_message: internal 100 (10.0), other 400 (40.0), none 97 (9.7)
   message: 0x8001 300 (30.0), 0x80001ff1 100 (10.0), unlisted 3 (0.3)
   set_queue_mask: poll 50 (5.0), nopoll 0 (0.0)
 EOF
