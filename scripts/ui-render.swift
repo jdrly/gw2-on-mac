@@ -128,6 +128,7 @@ func installer(_ state: String) -> Installer {
     "wine_build": "d831f808236c",
     "macdrv": "mine", "macdrv_ready": "yes", "macdrv_file": "mine", "macdrv_commit": "d831f808236c", "macdrv_release": "11.21",
     "macdrv_build": "d831f808236c",
+    "fex": "engine", "fex_ready": "yes", "fex_file": "engine", "fex_commit": "9d4fa4b46b1", "fex_build": "bff3f7c3686b",
     "macos": "27.2", "macos_min": "26.4", "macos_ok": "yes",
     "arch": "arm64", "installed": "yes", "installed_version": "0.2.0-dev.2", "engine_installed": "yes", "graphics": "yes",
     "gamemode": "engine", "route": "steam", "steam": "yes", "game": "yes", "stage": "finished",
@@ -152,6 +153,9 @@ func installer(_ state: String) -> Installer {
   case "ready-other":
     // another ntdll.so (an earlier build of mine) that the next Play replaces, next to my winemac.so
     st = st.merging(["wine_ready": "switch", "wine_file": "other", "wine_commit": "", "wine_release": ""]) { $1 }
+  case "ready-fex":
+    // my FEX in the engine (set fex mine from Terminal), next to my ntdll.so and winemac.so
+    st = st.merging(["fex": "mine", "fex_file": "mine", "fex_commit": "bff3f7c3686b"]) { $1 }
   case "ready-repair":
     // an earlier version's install whose engine graphics aren't the engine's own: Repair
     st["graphics"] = "other"; st["installed_version"] = "0.2.0-dev.0"
@@ -304,6 +308,7 @@ func renderAll(_ dir: URL, exports: URL?) async {
     ("main-ready-engine-light", "ready-engine", false, nil),
     ("main-ready-mixed-light", "ready-mixed", false, nil),
     ("main-ready-other-light", "ready-other", false, nil),
+    ("main-ready-fex-light", "ready-fex", false, nil),
     ("main-fresh-old-macos-light", "fresh-old-macos", false, nil),
     ("main-choose-dark", "choose", true, nil),
     ("main-installing-dark", "installing", true, nil),
@@ -355,6 +360,9 @@ func renderAll(_ dir: URL, exports: URL?) async {
       ("ready", other.merging(["macdrv_file": "other", "macdrv_commit": ""]) { $1 },
        "another ntdll · another winemac", "DXMT 0.80 · 2483559"),
       ("ready", ["wine_release": "", "dxmt_release": ""], "Wine · d831f80", "DXMT · 2483559"),
+      ("ready-fex", [:], "Wine 11.21 · d831f80 · FEX bff3f7c", "DXMT 0.80 · 2483559"),
+      ("ready-engine", ["fex_file": "mine", "fex_commit": "bff3f7c3686b"], "\(engine) · FEX bff3f7c", "DXMT · d903db8"),
+      ("ready-fex", ["fex_file": "mix", "fex_commit": ""], "Wine 11.21 · d831f80", "DXMT 0.80 · 2483559"),
     ]
     for (state, extra, wantWine, wantDXMT) in cases {
       let s = installer(state).status.merging(extra) { $1 }

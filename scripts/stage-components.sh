@@ -19,6 +19,15 @@
 #                       line's engine (#57), from the same commit's run: the same files with
 #                       "winemac.so: sha256" in its VERSION. gw2om.sh puts winemac.so into the
 #                       engine, the engine's own kept next to it. Optional, as ntdll/ is.
+#   prebuilt/fex/       my FEX (jdrly/FEX, MIT, with the notices of what it links) built for
+#                       this line's engine (#110), its ARM64EC half in the engine's layout:
+#                       aarch64-windows/libarm64ecfex.dll and aarch64-unix/libarm64ecfex.so, with
+#                       VERSION (its "commit:", "base:", "engine:" and "<file>: sha256" lines name
+#                       the fork's commit, the engine's FEX commit it starts from, the engine's
+#                       tarball and the files as built; "switches:" the FEX_* options my commits
+#                       add), LICENSE and NOTICES, and SHA256SUMS, the record this script writes.
+#                       gw2om.sh puts it into the engine after `set fex mine`, the engine's own
+#                       kept next to it. Its WoW64 half is not staged. Optional, as ntdll/ is.
 #   prebuilt/ui-scale/  the interface-scale addon, version.dll and gw2-ui-scale.ini (the app's
 #                       own code, addon/ui-scale; scripts/build-addon.sh builds the same thing)
 #
@@ -29,27 +38,29 @@
 # NTDLL_BUILD=work/ntdll-mach9/install (jdrly/wine's asset ntdll-mach9-<commit>.tar.xz, unpacked;
 # without it no ntdll/), MACDRV_BUILD=work/macdrv-mach9/install (its asset
 # macdrv-mach9-<commit>.tar.xz, unpacked; without it no macdrv/) and
-# UISCALE_BUILD=work/ui-scale/build (relative to the workspace, or absolute). It refuses a DXMT
-# build or a Wine build of mine for another engine than src/gw2om.sh's ENGINE_SHA256, a Wine build
-# on another base than its ENGINE_WINE, a winemetal.so, ntdll.so or winemac.so without a valid
-# signature, an ntdll.so or winemac.so that isn't the file its VERSION names, and, with DXMT_COMMIT,
-# WINE_COMMIT (ntdll.so) or MACDRV_COMMIT (winemac.so) set, a build of another commit (or, for the
-# two Wine ones, none). STAGED_FROM replaces "the development workspace" in the first line of
+# FEX_BUILD=work/fex-arm64/install (jdrly/FEX's asset fex-arm64-<commit>.tar.xz, unpacked; without
+# it no fex/) and UISCALE_BUILD=work/ui-scale/build (relative to the workspace, or absolute). It
+# refuses a DXMT build, a Wine build or a FEX build of mine for another engine than
+# src/gw2om.sh's ENGINE_SHA256, a Wine build on another base than its ENGINE_WINE, a FEX build on
+# another base than its ENGINE_FEX, a winemetal.so, ntdll.so, winemac.so or libarm64ecfex.so
+# without a valid signature, an ntdll.so, winemac.so or FEX file that isn't the file its VERSION
+# names, and, with DXMT_COMMIT, WINE_COMMIT (ntdll.so), MACDRV_COMMIT (winemac.so) or FEX_COMMIT
+# set, a build of another commit (or, for the Wine and FEX ones, none). STAGED_FROM replaces "the development workspace" in the first line of
 # prebuilt/STAGED (the dev build workflow names the fork's commit and where its files came from).
 #
 # Without the workspace (GitHub's runners), or with --fetch, it downloads the files instead, each
 # checked against its sha256 in prebuilt.lock before anything is unpacked: one archive, a
 # pre-release of this repository pinned by tag, file name and sha256, of which only ui-scale/ and
 # an arm64 dxmt/ are kept (0.1.x's archives have an x86_64 dxmt/, which isn't), and the archives of
-# my ntdll.so and my Mac driver, pinned by ntdll_url and ntdll_sha256, macdrv_url and
-# macdrv_sha256 when prebuilt.lock has them, checked as above. --pack <tag> makes that one archive
-# from prebuilt/ as staged, without ntdll/ and macdrv/, into release/<tag>/, and writes
-# prebuilt.lock for it, keeping its ntdll_ and macdrv_ lines; README.md (Building) says how I
-# publish it.
+# my ntdll.so, my Mac driver and my FEX, pinned by ntdll_url and ntdll_sha256, macdrv_url and
+# macdrv_sha256, fex_url and fex_sha256 when prebuilt.lock has them, checked as above. --pack <tag>
+# makes that one archive from prebuilt/ as staged, without ntdll/, macdrv/ and fex/, into
+# release/<tag>/, and writes prebuilt.lock for it, keeping its ntdll_, macdrv_ and fex_ lines;
+# README.md (Building) says how I publish it.
 #
-# --standin adds a stand-in for each of dxmt/, ntdll/ and macdrv/ that prebuilt/ lacks (files in the
-# layout of the fork's build that only name themselves), for the checks and the sandbox until
-# prebuilt.lock pins the real ones. build.sh takes them; scripts/release.sh refuses them.
+# --standin adds a stand-in for each of dxmt/, ntdll/, macdrv/ and fex/ that prebuilt/ lacks (files
+# in the layout of the fork's build that only name themselves), for the checks and the sandbox
+# until prebuilt.lock pins the real ones. build.sh takes them; scripts/release.sh refuses them.
 #
 #   scripts/stage-components.sh [--fetch | --pack <tag> | --standin]
 set -euo pipefail
@@ -112,6 +123,33 @@ copy_wine() {
   for f in $WK_FILE VERSION LICENSE COPYING.LIB; do cp "$2/$f" "$3/$f"; done
   record "$3"
 }
+# My FEX: its ARM64EC half from jdrly/FEX's archive (the WoW64 half isn't staged), and the record
+FEX_FILES="aarch64-windows/libarm64ecfex.dll aarch64-unix/libarm64ecfex.so"
+FEX_META="VERSION LICENSE NOTICES"
+engine_fex="$(sed -n 's/^ENGINE_FEX=\([0-9a-f]*\).*/\1/p' "$ROOT/src/gw2om.sh")"
+[ -n "$engine_fex" ] || die "no ENGINE_FEX in src/gw2om.sh"
+# check_fex <dir>: my FEX build in <dir> (jdrly/FEX's archive, unpacked) is for this engine and on
+# its FEX, of FEX_COMMIT if that is set, its files are the ones its VERSION names, and its .so has a
+# valid signature (the linker's: nothing signs it again before the engine loads it)
+check_fex() {
+  local f
+  for f in $FEX_FILES $FEX_META; do need "$1/$f"; done
+  grep -q "^engine: .*sha256 $engine_sha" "$1/VERSION" || die "$1/VERSION names another engine than ENGINE_SHA256 ($engine_sha)"
+  grep -q "^base: $engine_fex" "$1/VERSION" || die "$1/VERSION names another base than ENGINE_FEX ($engine_fex)"
+  [ -z "${FEX_COMMIT:-}" ] || grep -qx "commit: $FEX_COMMIT" "$1/VERSION" || die "$1/VERSION is not commit $FEX_COMMIT"
+  for f in $FEX_FILES; do
+    grep -qx "$f: sha256 $(sha "$1/$f")" "$1/VERSION" || die "$1/$f is not the file its VERSION names"
+  done
+  codesign --verify "$1/aarch64-unix/libarm64ecfex.so" || die "$1/aarch64-unix/libarm64ecfex.so has no valid signature"
+}
+# copy_fex <from> <to>: its files and their record
+copy_fex() {
+  local f
+  for f in $FEX_FILES $FEX_META; do mkdir -p "$2/$(dirname "$f")" && cp "$1/$f" "$2/$f"; done
+  record "$2"
+}
+# fex_line <dir>: its line in STAGED
+fex_line() { echo "fex $(sed -n 's/^commit: //p' "$1/VERSION") libarm64ecfex.dll $(sha "$1/aarch64-windows/libarm64ecfex.dll")"; }
 # fetch_pinned <url> <sha256>: the download, from .cache/<sha256>/ if it is there, checked against
 # the sha256 before anything uses it; prints its path
 fetch_pinned() {
@@ -134,10 +172,10 @@ if [ "${1:-}" = --pack ]; then
   ! grep -q '^stand-in' "$P/dxmt/VERSION" 2>/dev/null || die "$P/dxmt is the stand-in; stage the real one first"
   file="gw2-on-mac-$tag.tar.xz"
   mkdir -p "$ROOT/release/$tag"
-  # (my Wine builds are downloads of their own: the ntdll_ and macdrv_ lines stay)
-  wine_lines="$(grep -E '^(ntdll|macdrv)_' "$LOCK" 2>/dev/null || true)"
+  # (my Wine builds and my FEX are downloads of their own: the ntdll_, macdrv_ and fex_ lines stay)
+  wine_lines="$(grep -E '^(ntdll|macdrv|fex)_' "$LOCK" 2>/dev/null || true)"
   COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs --uid 0 --gid 0 --uname root --gname wheel \
-    --exclude ./ntdll --exclude ./macdrv -cJf "$ROOT/release/$tag/$file" -C "$P" .
+    --exclude ./ntdll --exclude ./macdrv --exclude ./fex -cJf "$ROOT/release/$tag/$file" -C "$P" .
   { sed -n '/^#/p' "$LOCK" 2>/dev/null || true
     echo "tag=$tag"
     echo "file=$file"
@@ -174,6 +212,18 @@ if [ "${1:-}" = --standin ]; then
     mv "$P/$k.new" "$P/$k"
     echo "$k stand-in by scripts/stage-components.sh --standin" >>"$P/STAGED"
   done
+  if [ ! -d "$P/fex" ]; then
+    rm -rf "$P/fex.new" && mkdir -p "$P/fex.new"
+    for f in $FEX_FILES $FEX_META; do mkdir -p "$P/fex.new/$(dirname "$f")" && echo "stand-in $f" >"$P/fex.new/$f"; done
+    { echo "stand-in FEX-2610-0-g0000000 (not a build: scripts/stage-components.sh --standin)"
+      echo "commit: 0000000000000000000000000000000000000000"
+      echo "switches:"
+      for f in $FEX_FILES; do echo "$f: sha256 $(sha "$P/fex.new/$f")"; done
+      echo "libarm64ecfex.dll: build id 0123456789abcdef0123456789abcdef age 1, SizeOfImage 0x426000"; } >"$P/fex.new/VERSION"
+    record "$P/fex.new"
+    mv "$P/fex.new" "$P/fex"
+    echo "fex stand-in by scripts/stage-components.sh --standin" >>"$P/STAGED"
+  fi
   cat "$P/STAGED"
   exit 0
 fi
@@ -182,7 +232,7 @@ if [ "${1:-}" = --fetch ] || [ ! -d "$WS" ]; then
   [ -f "$LOCK" ] || die "no workspace at $WS and no prebuilt.lock"
   tag="$(lock_get tag)" file="$(lock_get file)" want="$(lock_get sha256)"
   [ -n "$tag" ] && [ -n "$file" ] && [ -n "$want" ] || die "prebuilt.lock needs tag=, file= and sha256="
-  for k in $WINE_KINDS; do
+  for k in $WINE_KINDS fex; do
     url="$(lock_get "${k}_url")" sum="$(lock_get "${k}_sha256")"
     { [ -z "$url" ] && [ -z "$sum" ]; } || { [ -n "$url" ] && [ -n "$sum" ]; } ||
       die "prebuilt.lock needs ${k}_url= and ${k}_sha256= together"
@@ -206,6 +256,16 @@ if [ "${1:-}" = --fetch ] || [ ! -d "$WS" ]; then
     echo "$k $(sed -n 's/^commit: //p' "$P.wine/VERSION") $WK_FILE $(sha "$P.wine/$WK_FILE"), fetched ${url##*/} ($sum)" >>"$P.new/STAGED"
     rm -rf "$P.wine"
   done
+  url="$(lock_get fex_url)" sum="$(lock_get fex_sha256)"
+  if [ -n "$url" ]; then
+    fex_archive="$(fetch_pinned "$url" "$sum")"
+    rm -rf "$P.fex" && mkdir -p "$P.fex"
+    tar -xJf "$fex_archive" -C "$P.fex"
+    check_fex "$P.fex"
+    copy_fex "$P.fex" "$P.new/fex"
+    echo "$(fex_line "$P.fex"), fetched ${url##*/} ($sum)" >>"$P.new/STAGED"
+    rm -rf "$P.fex"
+  fi
   rm -rf "$P" && mv "$P.new" "$P"
   cat "$P/STAGED"
   [ -d "$P/dxmt" ] || echo "stage-components: $file has no arm64 DXMT; scripts/stage-components.sh --standin adds a stand-in" >&2
@@ -213,6 +273,7 @@ if [ "${1:-}" = --fetch ] || [ ! -d "$WS" ]; then
     wine_kind "$k"
     [ -d "$P/$k" ] || echo "stage-components: prebuilt.lock pins no $WK_FILE; scripts/stage-components.sh --standin adds a stand-in" >&2
   done
+  [ -d "$P/fex" ] || echo "stage-components: prebuilt.lock pins no FEX of mine; scripts/stage-components.sh --standin adds a stand-in" >&2
   exit 0
 fi
 
@@ -220,6 +281,7 @@ WS="$(cd "$WS" && pwd)"
 in_ws() { case "$1" in /*) echo "$1" ;; *) echo "$WS/$1" ;; esac; }
 DXMT_BUILD="$(in_ws "${DXMT_BUILD:-work/dxmt-arm64/install}")"
 UISCALE_BUILD="$(in_ws "${UISCALE_BUILD:-work/ui-scale/build}")"
+FEX_BUILD="$(in_ws "${FEX_BUILD:-work/fex-arm64/install}")"
 
 # DXMT: the PE DLLs and winemetal.so of one build always go together
 for f in $DXMT_FILES; do need "$DXMT_BUILD/$f"; done
@@ -240,6 +302,10 @@ for k in $WINE_KINDS; do
   elif [ -n "$WK_COMMIT" ]; then die "no $WK_FILE build at $b for commit $WK_COMMIT"
   fi
 done
+# My FEX, if there is a build of it (FEX_COMMIT asks for one)
+if [ -e "$FEX_BUILD" ]; then check_fex "$FEX_BUILD"
+elif [ -n "${FEX_COMMIT:-}" ]; then die "no FEX build at $FEX_BUILD for commit $FEX_COMMIT"
+fi
 
 rm -rf "$P.new" && mkdir -p "$P.new/dxmt"
 for f in $DXMT_FILES; do mkdir -p "$P.new/dxmt/$(dirname "$f")" && cp "$DXMT_BUILD/$f" "$P.new/dxmt/$f"; done
@@ -249,6 +315,7 @@ for k in $WINE_KINDS; do
   b="$(in_ws "$WK_BUILD")"
   [ ! -e "$b" ] || copy_wine "$k" "$b" "$P.new/$k"
 done
+[ ! -e "$FEX_BUILD" ] || copy_fex "$FEX_BUILD" "$P.new/fex"
 mkdir -p "$P.new/ui-scale" && cp "$UISCALE_BUILD"/{version.dll,gw2-ui-scale.ini} "$P.new/ui-scale/"
 # The record names the sources relative to the workspace (no home folder in it)
 rel() { echo "${1#"$WS"/}"; }
@@ -263,6 +330,9 @@ rel() { echo "${1#"$WS"/}"; }
       echo "$k none (no $(rel "$b")): the app leaves the engine's own $WK_FILE in place"
     fi
   done
+  if [ -e "$FEX_BUILD" ]; then echo "$(fex_line "$FEX_BUILD") from $(rel "$FEX_BUILD")"
+  else echo "fex none (no $(rel "$FEX_BUILD")): the app leaves the engine's own FEX in place"
+  fi
   echo "ui-scale $(sha "$UISCALE_BUILD/version.dll") from $(rel "$UISCALE_BUILD")"; } >"$P.new/STAGED"
 rm -rf "$P" && mv "$P.new" "$P"
 cat "$P/STAGED"

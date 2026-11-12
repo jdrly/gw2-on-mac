@@ -17,10 +17,11 @@
 # the session's record, logs/session.env (DXMT_TREE, DXMT_FORK), for the current log, and so do
 # which mouse the game had (its rule, RULE: GameController's counts, or the pointer's with
 # gcmouse=false), which ntdll.so ran (LIB_wine: mine with its commit, or the engine's own) and its
-# switches (the WINE_HEAT_* entries of the game's rule), and which winemac.so ran (LIB_macdrv) and
-# its switches (WINE_MACDRV_* and WINE_WIN32U_*). With Debug logging my ntdll.so writes its
-# counters to heat-<pid>.log in the logs folder: the report reads the newest one written since the
-# session started, and from it the game thread's row, the thread with the most semaphore releases
+# switches (the WINE_HEAT_* entries of the game's rule), which winemac.so ran (LIB_macdrv) and its
+# switches (WINE_MACDRV_* and WINE_WIN32U_*), and which FEX ran (LIB_fex: mine with its commit, or
+# the engine's own) and its switches (the FEX_* entries of the game's rule). With Debug logging my
+# ntdll.so writes its counters to heat-<pid>.log in the logs folder: the report reads the newest
+# one written since the session started, and from it the game thread's row, the thread with the most semaphore releases
 # (it hands the job workers their jobs: about 49,000 a second, the workers a few thousand). Next to
 # it, heat-requests-<pid>.log has blocks of the game thread's server requests, each the change since
 # that thread's last block ("requests thread <tid> from <s> to <s> time <epoch>", jdrly/wine#15):
@@ -515,6 +516,23 @@ vmmap_report() {
   done
 }
 
+# fex_report: the FEX the session ran (session.env's LIB_fex: mine <commit> <sha256>, or engine)
+# and the FEX_* entries of the game's rule
+fex_report() {
+  local lib f commit hash switches
+  lib=$(sed -n 's/^LIB_fex=//p' "$LOGS/session.env")
+  [ -n "$lib" ] || return 0
+  read -r f commit hash <<<"$lib"
+  case "$f" in
+    mine) echo "FEX that ran: my FEX, jdrly/FEX ${commit:0:11} (xtajit64.dll sha256 ${hash:0:12})" ;;
+    engine) echo "FEX that ran: the engine's own, athei/FEX $(sed -n 's/^ENGINE_FEX=//p' "$LOGS/session.env")" ;;
+    *) echo "FEX that ran: $f" ;;
+  esac
+  switches=$(sed -n 's/^RULE=exe=Gw2-64\.exe;//p' "$LOGS/session.env" | tr ';' '\n' |
+    sed -n -E 's/^env=(FEX_[A-Z0-9_]*=.*)/\1/p' | tr '\n' ' ' | sed 's/ $//')
+  echo "Its switches: ${switches:-none}"
+}
+
 report() {  # <log>
   local s ran=""
   s=$(summary "$1")
@@ -533,6 +551,7 @@ report() {  # <log>
       echo "Mouse the game had: the mouse's own counts from GameController (the engine's built-in rule)"
     fi
     wine_report "$(get "$s" gpu_frames)"
+    fex_report
     fex_tso_report
     macdrv_report
     vmmap_report

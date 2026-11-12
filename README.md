@@ -7,7 +7,8 @@ game's x86_64 code with FEX, used as it ships but for three parts: the game's Di
 Metal through my DXMT fork, built for this engine, which the app puts into the engine's DXMT tree,
 and every Wine process loads my builds of Wine's `ntdll.so` and of its Mac driver, `winemac.so`,
 which have switches for the game. The engine's own DXMT, `ntdll.so` and `winemac.so` stay next to
-them, and a setting switches back to each. It changes nothing you already have installed.
+them, and a setting switches back to each. A build can also carry my build of FEX, which goes in
+only when I choose it from Terminal. It changes nothing you already have installed.
 
 > **This is the `arm64` branch.** It builds *GW2 on Mac arm64*, the development app for 0.2,
 > which moves the game to an arm64 Wine engine. 0.1.x runs CrossOver 26.3 under Rosetta with my
@@ -186,11 +187,11 @@ greyed, so no file held a choice of mine. Version 2 resets `dxmt`, `wine` and `m
 files would have had no row to show it. A key `settings.conf` still has but the app no longer
 knows, such as `coolworkers`, is read by nothing and gone at the next write.
 
-Three keys have no row: `dxmt`, `wine` and `macdrv` pick my DXMT fork, my `ntdll.so` and my
-`winemac.so` (`fork`, `mine`, `mine`) or the engine's own (`engine`). They are for my comparisons
-from Terminal, with `gw2om.sh set`. The rows that need one of my files are greyed while the
-engine's own is chosen, and the main window's *Engine* and *Graphics* checks name the files in
-place.
+Four keys have no row: `dxmt`, `wine` and `macdrv` pick my DXMT fork, my `ntdll.so` and my
+`winemac.so` (`fork`, `mine`, `mine`) or the engine's own (`engine`), and `fex` picks my FEX
+(`mine`) or the engine's own (`engine`, the default). They are for my comparisons from Terminal,
+with `gw2om.sh set`. The rows that need one of my files are greyed while the engine's own is
+chosen, and the main window's *Engine* and *Graphics* checks name the files in place.
 
 | Pane | Setting | Key | Default | What it does |
 |---|---|---|---|---|
@@ -306,7 +307,7 @@ nothing in `/Applications` besides itself.
 
 | Path | What | Uninstall |
 |---|---|---|
-| `~/Library/Application Support/GW2 on Mac arm64/engine/` | the Wine engine as it ships, without its SDK, about 1 GB, with my DXMT fork's tree in `lib/wine/dxgi/dxmt` and my `ntdll.so` and `winemac.so` in `lib/wine/aarch64-unix`, the engine's own next to each | removed |
+| `~/Library/Application Support/GW2 on Mac arm64/engine/` | the Wine engine as it ships, without its SDK, about 1 GB, with my DXMT fork's tree in `lib/wine/dxgi/dxmt` and my `ntdll.so` and `winemac.so` in `lib/wine/aarch64-unix`, and after `set fex mine` my FEX's three files, the engine's own next to each | removed |
 | `…/GW2 on Mac arm64/bottle/` | the game's Wine prefix with Steam, the game's files and the game's settings. About 75 GB, or no extra space for a clone of files on the same disk | removed, with the game |
 | `…/GW2 on Mac arm64/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `compatdb.rules`, `compatdb.local`, `session`, `session.req`, `.session.lock` | settings, install state, what was installed, DXMT's options, the game's compatdb rules and my own, the current game session and its lock | removed |
 | `~/Library/Caches/GW2 on Mac arm64/downloads/` | the engine archive, `SteamSetup.exe`, a copy of `Gw2Setup-64.exe` | removed |
@@ -392,14 +393,15 @@ in a browser and put into the downloads folder by hand carries it, and `tar` cop
 file. The loader is notarized and would pass, the engine's ad hoc signed libraries would not. Then
 it removes the SDK, which nothing reads at run time: `include/`, `lib/wine/tests/`,
 `lib/wine/x86_64-windows/` and `share/man/`. Last it checks the build, which means the sha256 of the loader
-`lib/wine/aarch64-unix/wine.app/Contents/MacOS/wine`, of `ntdll.so` and of `winemac.so`, and
-`codesign --verify --strict` on `wine.app` with Mach9's team `WLKUUJD25W` and the identifier
-`app.mach9.loader`. That reads the signature and starts nothing.
+`lib/wine/aarch64-unix/wine.app/Contents/MacOS/wine`, of `ntdll.so`, of `winemac.so` and of
+FEX's three files, and `codesign --verify --strict` on `wine.app` with Mach9's team `WLKUUJD25W`
+and the identifier `app.mach9.loader`. That reads the signature and starts nothing.
 
-The app writes nothing into the engine afterwards but its DXMT tree, `ntdll.so` and `winemac.so`,
-and nothing at all inside `wine.app`. The loader is signed with an embedded provisioning profile,
-and a re-signed, edited or copied loader exits. The check of the engine's `ntdll.so` and
-`winemac.so` takes each where it is, in place or next to mine as `<file>.engine`.
+The app writes nothing into the engine afterwards but its DXMT tree, `ntdll.so`, `winemac.so` and
+FEX's three files, and nothing at all inside `wine.app`. The loader is signed with an embedded
+provisioning profile, and a re-signed, edited or copied loader exits. The check of the engine's
+`ntdll.so`, `winemac.so` and FEX files takes each where it is, in place or next to mine as
+`<file>.engine`.
 
 ### The DXMT tree
 
@@ -493,6 +495,44 @@ none of them and greys the rows that need them. Today that is *Launcher frames*.
 A build of the app without my file has no `components/macdrv`. It leaves the engine's own in place,
 and greys *Launcher frames*. My Wine fork's archive for the driver holds
 `winemac.so` only; `win32u.so` comes with a later step.
+
+### My FEX
+
+FEX runs every instruction of the game. Its x86_64 half is three files of the engine:
+`lib/wine/aarch64-windows/xtajit64.dll`, the name Wine loads for an x86_64 process,
+`libarm64ecfex.dll`, the same file under FEX's own name, and `lib/wine/aarch64-unix/libarm64ecfex.so`,
+which the DLL loads by name and calls by index, so the two have to come from one build. My build of
+them comes from my FEX fork, jdrly/FEX, and is in the app as `components/fex`: the DLL once, which
+the app puts in under both names, and the `.so`. The i386 half, `xtajit.dll`, which Steam's
+processes use, stays the engine's.
+
+The setting `fex` starts at `engine`: my FEX goes in only after `gw2om.sh set fex mine` from
+Terminal, and `gw2om.sh set fex engine` takes it out again. There is no row in the Settings window.
+The swap works as for my `ntdll.so`, while no session runs or starts: each of the engine's own
+files goes aside as `<file>.engine` once, and only when its sha256 is the pin's, `99eb322e…` for
+both DLL names and `0a3e7ea4…` for the `.so`. Three files in two folders can't change in one step,
+so the switch copies all three of mine next to theirs first and then renames them back to back.
+Back to the engine's own is three renames. A switch cut short leaves a mix of mine and the
+engine's, which the next switch or Play finishes, saying so in the log. Play never starts on a mix:
+if one is still there, or a file is neither mine nor the engine's, it refuses and says to Repair.
+Repair unpacks the engine again when one of the engine's own FEX files is neither in place nor
+next to mine.
+
+`status` prints `fex` (the setting), `fex_file` (`mine` or `engine` when all three files are,
+`mix`, or `other` when one is neither), `fex_commit`, `fex_build` (my build's commit in this app)
+and `fex_ready` (`yes`, `switch` or `other`, as for `wine_ready`). The *This Mac* panel's Engine
+cell adds `· FEX bff3f7c` while my FEX is in place. `session.env` gets `LIB_fex`: `mine <commit>
+<sha256 of xtajit64.dll>` or `engine`, and the session report prints which FEX ran.
+
+FEX's options are `FEX_*` variables, and a rule's `env=` sets them for the game. The table
+`FEX_SWITCHES` in `gw2om.sh` has one row per setting, `<key> <entry> <needs>`, where `<needs>` is
+`fork` for an option only my FEX has and `any` for one the engine's FEX has too. An entry goes into
+the game's rule while its setting isn't off and, for `fork`, while my FEX is in place and its
+`VERSION`'s `switches:` line names the variable. A setting whose FEX is missing is greyed with the
+reason, and `set` refuses it. The table is empty: each switch of mine adds its row.
+
+A build of the app without my FEX has no `components/fex`. `set fex mine` is refused with "This
+build carries no FEX of mine", and the engine's files are never touched.
 
 ## Installing, step by step
 
@@ -589,7 +629,11 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   `HEAT_SWITCHES` in `gw2om.sh` has one row per setting, `<key> <entry>`: *Job wakes* writes
   `WINE_HEAT_WAKE=one,skip`, *Event pool* `WINE_HEAT_EVPOOL=1` and *Faster locks*
   `WINE_HEAT_SPIN=lock=20:game,event=30:game`. `WINE_HEAT_MSYNC_UNREG=1` has no setting and goes
-  in whenever my file is in place, as on 0.1.x. An entry whose variable the file's `VERSION`
+  in whenever my file is in place, as on 0.1.x. `WINE_HEAT_PROF_FEX=<build id>:<age>:<SizeOfImage>`
+  tells my file's sampler which FEX it may read: it goes in while my FEX is in place too, with the
+  values its `VERSION` gives for `libarm64ecfex.dll`, since a build id can't say that a FEX is mine
+  and the app, which installed it, can. It needs my file's `switches:` line to name it; a file
+  without the line doesn't get it. Any other entry whose variable the file's `VERSION`
   doesn't list on its `switches:` line stays out. Debug logging adds `WINE_HEAT_COUNT=1` and
   `WINE_HEAT_LOG` with the logs folder, where my file writes `heat-<pid>.log` every 5 seconds,
   and `FEX_PROFILESTATS=1`, which makes FEX keep its counters per thread for my file to read.
@@ -609,6 +653,8 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   counters. The comma needs no escape. *Mouse-look speed* writes `WINE_MACDRV_MOUSE_SCALE` with
   its value after that, and nothing at 1 or while *Raw mouse-look* is off. An entry whose variable
   the driver's `VERSION` doesn't list on its `switches:` line stays out, as for my `ntdll.so`.
+- The `FEX_*` entries are rows of `FEX_SWITCHES` ([My FEX](#my-fex)), after all of the above, and
+  `CefHost.exe`'s rule unsets each. The table is empty today.
 - A `compatdb.local` that I put in the app's folder is appended as it is, for trying FEX switches
   such as `exe=Gw2-64.exe;env=FEX_HOSTFEATURES=disableavx`. Nothing in the app writes it, and
   Collect Logs includes it.
@@ -620,7 +666,7 @@ checks that it writes back byte for byte.
 
 A setting change that only changes the rules or `dxmt.conf` takes effect at the next game start.
 One that changes the environment, the registry or the engine's files (`ncpu`, `debug`, `retina`,
-`dxmt`, `wine`, `macdrv`) waits until Steam has
+`dxmt`, `wine`, `macdrv`, `fex`) waits until Steam has
 quit.
 
 The other settings:
@@ -666,7 +712,8 @@ sequenceDiagram
 ArenaNet route it runs `Gw2-64.exe <launch options>`. It also writes `session.env` and rotates the
 logs when no session runs. `session.env` records the engine and its Wine, FEX and DXMT commits, the
 `ntdll.so` and `winemac.so` the session loads (`LIB_wine`, `LIB_macdrv`: mine or the engine's,
-its commit and sha256), the settings, the environment and the rules.
+its commit and sha256), the FEX it loads (`LIB_fex`: `mine <commit> <sha256>` or `engine`), the
+settings, the environment and the rules.
 
 Play refuses while a `Gw2-64.exe` of another app runs, such as 0.1.x's or a Mach9.app's: one
 account, one login. While this bottle's game runs, Play brings it to the front instead. Every Wine
@@ -851,6 +898,8 @@ last session from DXMT's own log lines:
 - which `winemac.so` ran and its switches, and with Debug logging the last `macsurface` line of
   the launcher's window from `wine.log`. The launcher's is the window with the most flushes, about
   40 a second, since the game draws with Metal
+- "FEX that ran": my FEX with its commit or the engine's own, and the `FEX_*` entries of the game's
+  rule
 - for each `vmmap` file taken since the session started: the minutes in, the footprint and FEX's
   code buffers by size, as "16M full, 32M full, 64M 25.4M resident; FEX has thrown its code away 2
   times"
@@ -872,12 +921,13 @@ and how long `vmmap` took, which is the longest the game can have stood still.
 You need Xcode 27, for the macOS 27 SDK. The app targets macOS 26.4, as the engine does.
 
 ```sh
-scripts/stage-components.sh    # copy my DXMT fork, my ntdll.so and winemac.so and the addon into prebuilt/
+scripts/stage-components.sh    # copy my DXMT fork, my ntdll.so, winemac.so and FEX and the addon into prebuilt/
 ./build.sh                     # build dist/GW2 on Mac arm64.app, ad-hoc signed
 ```
 
-On this branch the app bundles four components: my DXMT fork built for the arm64 engine, my
-`ntdll.so` and my `winemac.so` built for it when there is one of each, and the interface addon. 0.1.x's Wine pieces stay on
+On this branch the app bundles five components: my DXMT fork built for the arm64 engine, my
+`ntdll.so`, my `winemac.so` and my FEX built for it when there is one of each, and the interface
+addon. 0.1.x's Wine pieces stay on
 `main`; `build.sh` doesn't need them and `stage-components.sh` doesn't stage them.
 
 **Where DXMT comes from.** The fork's CI builds it for this engine
@@ -910,6 +960,18 @@ from `work/macdrv-mach9/install` (`MACDRV_BUILD`) into `prebuilt/macdrv` with th
 `MACDRV_COMMIT` asks for a commit as `WINE_COMMIT` does. `build.sh` refuses a `prebuilt/macdrv`
 that doesn't match its record.
 
+**Where my FEX comes from.** My FEX fork's `GW2` workflow builds it for this engine (#109) and
+publishes each push to its `gw2-on-mac` as the asset `fex-arm64-<commit>.tar.xz` of jdrly/FEX's
+pre-release `arm64-builds`: `aarch64-windows/` with `libarm64ecfex.dll` and `libwow64fex.dll`,
+`aarch64-unix/` with their `.so` halves, `VERSION`, `LICENSE` (MIT) and `NOTICES`, the licences of
+what FEX links. `VERSION` has the lines `commit: <full sha>`, `switches: <FEX_* options>`, `base:
+<the engine's FEX commit>`, `engine: … sha256 <the engine tarball's>` and `<file>: sha256 <the
+file's>` for each file. `stage-components.sh` copies the x86_64 half, `VERSION`, `LICENSE` and
+`NOTICES` from `work/fex-arm64/install` (`FEX_BUILD`) into `prebuilt/fex`. It refuses a build for
+another engine than `ENGINE_SHA256` or on another base than `ENGINE_FEX`, a file that isn't the one
+its `VERSION` names, a `libarm64ecfex.so` without a valid signature, and with `FEX_COMMIT` set, a
+build of another commit or none. `build.sh` refuses a `prebuilt/fex` that doesn't match its record.
+
 **Where the addon comes from.** `stage-components.sh` copies `version.dll` and
 `gw2-ui-scale.ini` from `GW2_ON_MAC_WORKSPACE`, by default `../gw2-on-mac` next to this checkout,
 at `work/ui-scale/build`. `UISCALE_BUILD` overrides that. The DLL must carry the addon's marker
@@ -923,12 +985,12 @@ pins its tag, file name and sha256, and the script refuses a download or cached 
 sha256 before it unpacks anything. My `ntdll.so` is a download of its own: with `ntdll_url=` and
 `ntdll_sha256=` in `prebuilt.lock`, the script fetches jdrly/wine's asset, checks its sha256 the
 same way and stages it as from the workspace. My `winemac.so` is the same with `macdrv_url=` and
-`macdrv_sha256=`. `prebuilt.lock` pins neither today. `build.sh` then checks `prebuilt/` like any
-other.
+`macdrv_sha256=`, and my FEX with `fex_url=` and `fex_sha256=`. `prebuilt.lock` pins none of them
+today. `build.sh` then checks `prebuilt/` like any other.
 
-`--pack <tag>` makes such an archive from `prebuilt/` without `ntdll/` and `macdrv/` and writes
-`prebuilt.lock` for it, keeping its `ntdll_` and `macdrv_` lines; README.md on `main` says how I
-publish one.
+`--pack <tag>` makes such an archive from `prebuilt/` without `ntdll/`, `macdrv/` and `fex/` and
+writes `prebuilt.lock` for it, keeping its `ntdll_`, `macdrv_` and `fex_` lines; README.md on
+`main` says how I publish one.
 
 **In a dev build.** The Dev build workflow ([Releasing](#releasing)) takes neither my workspace nor
 the archive. It fetches my DXMT fork's build of the commit I name into `work/dxmt-arm64/install`,
@@ -939,12 +1001,15 @@ with `DXMT_COMMIT` set, a build of another commit. `STAGED_FROM` puts the fork's
 its files came from into the first line of `prebuilt/STAGED`. With a Wine commit it fetches my
 fork's `ntdll.so` asset into `work/ntdll-mach9/install` and stages it with `WINE_COMMIT` set;
 without one a dev build has none. A Mac driver commit does the same for `winemac.so`, into
-`work/macdrv-mach9/install` with `MACDRV_COMMIT`.
+`work/macdrv-mach9/install` with `MACDRV_COMMIT`, and a FEX commit for my FEX, from jdrly/FEX's
+`arm64-builds` into `work/fex-arm64/install` with `FEX_COMMIT`. A dev build with my FEX still
+starts on the engine's own: `fex` is `engine` until I set it.
 
 **The engine's source** is athei's: [athei/mach9](https://github.com/athei/mach9) and the
 repositories its release page lists, each under its own licence. The app doesn't bundle any of it,
-and changes only which DXMT tree, `ntdll.so` and `winemac.so` are active ([The DXMT
-tree](#the-dxmt-tree), [My ntdll.so](#my-ntdllso), [My winemac.so](#my-winemacso)). See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+and changes only which DXMT tree, `ntdll.so`, `winemac.so` and FEX are active ([The DXMT
+tree](#the-dxmt-tree), [My ntdll.so](#my-ntdllso), [My winemac.so](#my-winemacso), [My
+FEX](#my-fex)). See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 **The interface addon** is this repository's own code in [`addon/ui-scale`](addon/ui-scale).
 `scripts/build-addon.sh` builds `version.dll` with Homebrew's mingw-w64 (`brew install mingw-w64`)
@@ -1105,7 +1170,7 @@ publishes it as the pre-release `v<version>`:
 
 ```sh
 gh workflow run devbuild.yml --ref arm64                    # DXMT at the fork's head, build.sh's version
-gh workflow run devbuild.yml --ref arm64 -f dxmt_commit=<sha> -f wine_commit=<sha> -f macdrv_commit=<sha> -f version=0.2.0-dev.6
+gh workflow run devbuild.yml --ref arm64 -f dxmt_commit=<sha> -f wine_commit=<sha> -f macdrv_commit=<sha> -f fex_commit=<sha> -f version=0.2.0-dev.6
 gh workflow run devbuild.yml --ref arm64 -f publish=false   # a dry run: the DMG as an artifact, 7 days
 gh release download v0.2.0-dev.5 -R jdrly/gw2-on-mac -p '*.dmg' -D ~/Downloads
 ```
@@ -1122,18 +1187,22 @@ gh release download v0.2.0-dev.5 -R jdrly/gw2-on-mac -p '*.dmg' -D ~/Downloads
 - My `winemac.so` comes only with `macdrv_commit`, the same way: the asset
   `macdrv-mach9-<commit>.tar.xz`. The two commits are separate inputs, so a build can carry either
   file without the other.
+- My FEX comes only with `fex_commit`, a commit on my FEX fork's `gw2-on-mac`: the release asset
+  `fex-arm64-<commit>.tar.xz` of jdrly/FEX's `arm64-builds`, checked against GitHub's digest.
+  Without it the app has no FEX of mine. With it the app still starts on the engine's own FEX until
+  `gw2om.sh set fex mine`.
 - The addon is built on the runner from the commit, with Homebrew's mingw-w64.
 - Checks' jobs run on that build: `lint`, `compatdb`, `build`, `sandbox` and `renders`, and
   `addon` builds the addon a second time, as on a pull request. Then `release.sh --adhoc` packages
   the app the `build` job made and never builds it again.
 - The notes are `release-notes/<version>.md` when the commit has one. Otherwise the run writes
   them: the app's and the forks' commits, and a link to the DXMT fork's changes since the previous
-  dev build's DXMT. The record names all four commits.
-- The run proves its refusals on copies: the stand-in DXMT, `ntdll.so` and `winemac.so`, a
+  dev build's DXMT. The record names all five commits.
+- The run proves its refusals on copies: the stand-in DXMT, `ntdll.so`, `winemac.so` and FEX, a
   `VERSION` with another commit or another engine, a version below `build.sh`'s and a tag that
-  exists. With `wine_commit` or `macdrv_commit`, also a file of that build whose `VERSION` names
-  another commit, base or engine, one that isn't the file its `VERSION` names and one without a
-  valid signature. `release.sh` checks that the DMG's app has that commit's file with the sha256
+  exists. With `wine_commit`, `macdrv_commit` or `fex_commit`, also a build whose `VERSION` names
+  another commit, base or engine, a file that isn't the one its `VERSION` names and a `.so` without
+  a valid signature. `release.sh` checks that the DMG's app has that commit's file with the sha256
   its `VERSION` names.
 - A pull request that changes the workflow, `checks.yml`, `build.sh`, `release.sh`,
   `stage-components.sh`, `build-addon.sh` or `app-files.sh` runs it with `publish` false.
