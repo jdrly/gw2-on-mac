@@ -7,7 +7,8 @@
 # the engine's own kept next to each (`set dxmt engine`, `set wine engine` and `set macdrv engine`
 # switch back, for comparisons from Terminal; the Settings window has no row for them). A fourth,
 # my FEX (components/fex), goes in only after `set fex mine` from Terminal, the engine's own kept
-# next to it too. Nothing goes inside wine.app.
+# next to it too; a development build sets it once, with every other switch of mine (DEV_ROWS,
+# dev-switches.conf). Nothing goes inside wine.app.
 #
 #   gw2om.sh status            KEY=VALUE lines describing this Mac (what the window shows)
 #   gw2om.sh install steam     phases 1-4: engine, bottle, Steam from Valve, then Steam starts
@@ -217,6 +218,8 @@ DXMT_CONF="$APPDIR/dxmt.conf"
 # try); nothing of the app writes it.
 RULES="$APPDIR/compatdb.rules"
 RULES_LOCAL="$APPDIR/compatdb.local"
+# A development build's switches, one a line, that I take lines out of (DEV_SWITCHES)
+DEV_FILE="$APPDIR/dev-switches.conf"
 # The last Play's session (watch-session keeps it; key=value lines, SESSION_KEYS), the requests to
 # its watcher, and the lock that keeps one watcher per session (a file the watcher holds a flock on)
 SESSION="$APPDIR/session"
@@ -239,7 +242,7 @@ STEAM_DIR="$BOTTLE/drive_c/Program Files (x86)/Steam"
 STEAM_EXE='C:\Program Files (x86)\Steam\steam.exe'
 # What uninstall removes in APPDIR (the folder itself goes too once empty; gamemode is what a build
 # of this line before the Mach9 engine made)
-APP_FILES="engine bottle gamemode settings.conf state install-manifest.json dxmt.conf compatdb.rules compatdb.local engine.new bottle.new session session.req .session.lock"
+APP_FILES="engine bottle gamemode settings.conf state install-manifest.json dxmt.conf compatdb.rules compatdb.local dev-switches.conf engine.new bottle.new session session.req .session.lock"
 LOGFILE=/dev/null
 
 # --- Output and logging
@@ -663,6 +666,37 @@ SETTINGS_RESETS="
 2 dxmt wine macdrv
 "
 SETTINGS_VERSION=$(printf '%s\n' "$SETTINGS_RESETS" | awk 'NF { v = $1 } END { print v + 0 }')
+# A development build (CHANNEL=dev) starts with every switch on: I debug from everything on
+# backwards. Its rows that are switches go on once, by settings.conf's line dev_version=, as
+# SETTINGS_RESETS does for defaults: a row of DEV_ROWS, "<version> <key>=<value> ...", reads as
+# that value in a file older than <version> (or without the line), and the next write of the file
+# (dev_update, set, Install, Repair) keeps it and writes this version, so a row I turn off
+# afterwards stays off. fex=mine takes effect only in a build that carries my FEX (fex_want). A
+# release build reads none of it, and keeps the line as it is. The switches without a row are
+# in dev-switches.conf (DEV_SWITCHES).
+DEV_ROWS="
+1 jobwakes=on eventpool=on fastlocks=on launcherframes=on warm=on metalfx=on rawmouse=on fex=mine
+"
+DEV_ROWS_VERSION=$(printf '%s\n' "$DEV_ROWS" | awk 'NF { v = $1 } END { print v + 0 }')
+DEV_ROW_KEYS=$(printf '%s\n' "$DEV_ROWS" | awk '{ for (i = 2; i <= NF; i++) { sub(/=.*/, "", $i); print $i } }')
+# The sandbox's checks of the rest of the app turn this off (GW2_ON_MAC_DEV_SWITCHES=off): they
+# check a development build as a release would set it up, apart from Debug logging's default
+DEV_ON=""
+[ "$CHANNEL" != dev ] || DEV_ON=yes
+[ -z "$ROOT" ] || [ "${GW2_ON_MAC_DEV_SWITCHES:-}" != off ] || DEV_ON=""
+# dev_version: settings.conf's dev_version= (0 without one)
+dev_version() {
+  local v
+  v=$(sed -n 's/^dev_version=//p' "$SETTINGS" 2>/dev/null | tail -1)
+  case "$v" in ''|*[!0-9]*) echo 0 ;; *) echo "$v" ;; esac
+}
+# dev_row <key>: the value DEV_ROWS gives <key> while settings.conf is older than its row, or
+# nothing
+dev_row() {
+  [ -n "$DEV_ON" ] && in_list "$1" "$DEV_ROW_KEYS" || return 0
+  printf '%s\n' "$DEV_ROWS" | awk -v k="$1" -v v="$(dev_version)" \
+    'NF && $1 > v { for (i = 2; i <= NF; i++) if (index($i, k "=") == 1) r = substr($i, length(k) + 2) } END { if (r != "") print r }'
+}
 FPS_CAPS="off 30 40 60 120"
 # Mouse-look speed (mousespeed): 0.1.x's values, there RawMouseGameControllerScale, a factor on
 # the macOS pointer's speed (SWTOR on Mac's MOUSE_SPEEDS); here a factor on GameController's counts
@@ -711,6 +745,8 @@ setting_reset() {
 }
 setting() { # <key>: its value, or the default
   local v
+  v=$(dev_row "$1")
+  if [ -n "$v" ]; then echo "$v"; return; fi
   if [ -f "$SETTINGS" ] && grep -q "^$1=" "$SETTINGS" && ! setting_reset "$1"; then
     v=$(sed -n "s/^$1=//p" "$SETTINGS" | tail -1)
     if setting_valid "$1" "$v"; then echo "$v"; return; fi
@@ -752,7 +788,9 @@ setting_note() {
   esac
 }
 write_settings() { # [<key> <value>]: settings.conf with every key, one of them changed
-  local k v
+  local k v d
+  d=$(dev_version)
+  [ -z "$DEV_ON" ] || d=$DEV_ROWS_VERSION
   for k in $SETTING_KEYS; do
     v=$(setting "$k")
     if [ "$k" = "${1:-}" ]; then v=$2; fi
@@ -760,6 +798,7 @@ write_settings() { # [<key> <value>]: settings.conf with every key, one of them 
   done | {
     echo "# $APP_NAME settings (change them in the app: $APP_NAME > Settings…)"
     echo "settings_version=$SETTINGS_VERSION"
+    [ "$d" = 0 ] || echo "dev_version=$d"
     cat
   } | put "$SETTINGS" 644
 }
@@ -852,7 +891,8 @@ cdb_value() {
 #                      such file Wine loads its own (n,b).
 #   env                DXMT's shader cache in the app's cache folder (dxmt_cache: my fork's, or
 #                      the engine's DXMT's own), then the switches of my ntdll.so and my Mac
-#                      driver (heat_entries), then FEX's (fex_entries)
+#                      driver (heat_entries), then FEX's (fex_entries), then, in a development
+#                      build, the lines of dev-switches.conf (dev_entries)
 # CefHost.exe, which the game starts for its launcher and the Trading Post, inherits the game's
 # variables: the rule takes the cache path and the switches away from it again (an empty value
 # unsets a variable), and the HUD while it is on.
@@ -868,6 +908,7 @@ rules_text() {
   done <<EOF
 $(heat_entries)
 $(fex_entries)
+$(dev_entries)
 EOF
   echo "$game;env=DXMT_SHADER_CACHE_PATH=$(cdb_value "$(dxmt_cache)")$entries"
   echo "$cef;env=DXMT_SHADER_CACHE_PATH=$removed"
@@ -975,7 +1016,165 @@ fex_entries() {
     cdb_value "$e"; echo
   done
 }
-# write_rules: compatdb.rules from the settings, then compatdb.local as it is (a temporary file
+
+# --- dev-switches.conf: a development build's switches (DEV_ON)
+#
+# The forks merge each new behaviour with its switch off. A development build turns every one of
+# them on: the rows of DEV_ROWS once, and the rest from dev-switches.conf in the app's folder, one
+# NAME=value a line, which I take lines out of when something breaks. A line I comment out (#) or
+# delete is off. The game's rule gets every line left, after the rows' entries (dev_entries), and
+# CefHost.exe has them unset as it has the others. A line of the table below goes in only while
+# the file of mine that reads it is in place and has the switch:
+#   wine    my ntdll.so, its VERSION's switches: line (switch_in_file)
+#   macdrv  my winemac.so, the same
+#   win32u  my win32u.so, which comes in the same build as my winemac.so and on its switches:
+#           line. Nothing of the app puts it into the engine yet, so its lines stay out.
+#   fex     my FEX, its VERSION's switches: line (fex_in_version)
+#   fexany  FEX's own option, which the engine's FEX has too: always
+#   dxmt    my DXMT fork. Its build carries no record of its switches: the app looks for the
+#           variable's name in its DLLs (dxmt_names), where each switch it reads is a string.
+# A line that isn't in the table (one I added) goes in as it is. What stays out is said once in the
+# log at each start (launch), and status and the session report list what went in.
+#
+# The table, one switch a row: "<version> <piece> <issue> <played|unplayed> <NAME=value> <what it
+# does>". dev_update writes the file at install and when the table's version is newer than the
+# file's (its line version=): each row newer than the file whose variable the file doesn't name,
+# not even commented out, is added at the end, on. Nothing else in the file changes. A switch goes
+# in at the value that turns its new behaviour on. Not in it: diagnostics (Debug logging has
+# them), anything that can cap the frame rate below 60 (DXMT_PRESENT_QUEUE=two), a value only I
+# can choose (the mouse speed, DXMT_CHUNKS), a switch that brings back upstream's behaviour
+# (DXMT_DEPTH_PFV, DXMT_STENCIL_PFV), and the rows' own variables. A fork's issues are
+# jdrly/<fork>#n, the app's #n. Unplayed: no session of the game has run with it.
+DEV_SWITCHES="
+1 wine #14,#45 unplayed WINE_HEAT_SPIN=lock=20:game,event=30:game,sem=5:game the Faster locks row's two spins, and the job workers spin 5 µs on their semaphore before they sleep. While this line is here, its value replaces the row's.
+1 macdrv #62 unplayed WINE_MACDRV_VIEW=changes a window's view frame goes to the main thread only when it changed
+1 macdrv #62 unplayed WINE_MACDRV_CLIP=changes ClipCursor doesn't call the main thread for the rectangle it applied last
+1 macdrv #62 unplayed WINE_MACDRV_CALL=quiet after a call to the main thread, the event pipe holds a byte only if an event waits
+1 macdrv #62 unplayed WINE_MACDRV_DRAIN=fionread ProcessEvents asks the event pipe for its byte count instead of polling it
+1 win32u #61 unplayed WINE_WIN32U_SETCURSOR=shm SetCursor answers a repeated cursor from shared memory
+1 win32u #61 unplayed WINE_WIN32U_PEEK_YIELD=off an empty PeekMessage doesn't yield
+1 fex #112 unplayed FEX_INITIALCODEBUFFERMB=128 the first code buffer is 128 MB instead of 16
+1 fex #113 unplayed FEX_HARDWARETSOSYSCALLS=keep the hardware memory ordering stays on through Wine's system calls
+1 fexany #47 unplayed FEX_DYNAMICL1CACHE=0 a fixed L1 lookup cache instead of the dynamic one (16 MB of address space a thread)
+1 dxmt jdrly/dxmt#153 unplayed DXMT_MTL4_DEVICE_RESIDENCY=1 on Metal 4, pipelines and argument buffers stay in the device's residency set, out of each chunk's
+1 dxmt jdrly/dxmt#154 unplayed DXMT_MTL4_TIMESTAMP_REUSE=1 on Metal 4, timestamp queries read the chunk's last command buffer, with no empty one after it
+1 dxmt jdrly/dxmt#185 unplayed DXMT_PRESENTER_FREE=1 a swap chain's presenter is freed with its last reference
+1 dxmt jdrly/dxmt#157 unplayed DXMT_PRESENT_QUEUE=pace Present sleeps after a frame whose nextDrawable blocked (never two, which can latch 30 fps). Needs DXMT_STATS, on by default.
+1 dxmt jdrly/dxmt#159 unplayed DXMT_WARM_JOBS=2 with Shader warming, two speculative jobs at once while Metal's cache is cold
+1 dxmt jdrly/dxmt#147 unplayed DXMT_SKIP_SAME_SRV=1 SetShaderResources skips a slot that already holds the incoming view
+1 dxmt jdrly/dxmt#151 unplayed DXMT_THREAD_PRIORITY=utility DXMT's encode and finish threads at base priority 20 instead of time-critical
+1 dxmt jdrly/dxmt#152 unplayed DXMT_COMPILE_PRIORITY=utility the compile workers at base priority 20 instead of time-critical
+1 dxmt jdrly/dxmt#9 unplayed DXMT_RENDER_THREAD_PRIORITY=3 the game's render thread at HIGHEST and in the user-interactive QoS class
+1 dxmt jdrly/dxmt#15 unplayed DXMT_BG_POLICY=occlusion the background frame cap waits for the window to be hidden, not for another app to have the focus
+1 dxmt jdrly/dxmt#5 played DXMT_PSO_ARCHIVE=1 Metal binary archives of the pipelines, looked up in the last 4 sessions' archives
+1 dxmt jdrly/dxmt#75 unplayed DXMT_PSO_GENERATIONS=1 the archives published as generations instead of one file a session
+1 dxmt jdrly/dxmt#73 unplayed DXMT_COMPILE_DEMAND=1 the compile service's declared policy (Shader warming turns it on too)
+"
+DEV_SWITCHES_VERSION=$(printf '%s\n' "$DEV_SWITCHES" | awk 'NF && $1 > v { v = $1 } END { print v + 0 }')
+# dev_piece_label <piece>: what the file and the log call it
+dev_piece_label() {
+  case "$1" in
+    wine) echo "my ntdll.so" ;;
+    macdrv) echo "my winemac.so" ;;
+    win32u) echo "my win32u.so" ;;
+    fex) echo "my FEX" ;;
+    fexany) echo "FEX's own option" ;;
+    dxmt) echo "my DXMT fork" ;;
+  esac
+}
+# dev_file_version: dev-switches.conf's version= (0 without the file or the line)
+dev_file_version() {
+  local v
+  v=$(sed -n 's/^version=//p' "$DEV_FILE" 2>/dev/null | head -1)
+  case "$v" in ''|*[!0-9]*) echo 0 ;; *) echo "$v" ;; esac
+}
+# dev_update: in a development build, the rows of DEV_ROWS on once (settings.conf), and
+# dev-switches.conf written, or brought up to the table's version (the header above DEV_SWITCHES)
+dev_update() {
+  [ -n "$DEV_ON" ] || return 0
+  local v since piece ref played entry text added=""
+  if [ "$(dev_version)" -lt "$DEV_ROWS_VERSION" ]; then
+    say "Development build: the switch rows on, once: $(printf '%s\n' "$DEV_ROWS" | awk -v v="$(dev_version)" 'NF && $1 > v { for (i = 2; i <= NF; i++) { printf "%s%s", s, $i; s = " " } }')"
+    write_settings
+  fi
+  v=$(dev_file_version)
+  [ "$v" -lt "$DEV_SWITCHES_VERSION" ] || return 0
+  # (the rows newer than the file whose variable it doesn't name, not even commented out)
+  added=$(printf '%s\n' "$DEV_SWITCHES" | while read -r since piece ref played entry text; do
+    [ -n "$since" ] && [ "$since" -gt "$v" ] || continue
+    grep -qE "^[#[:space:]]*${entry%%=*}=" "$DEV_FILE" 2>/dev/null || echo "$entry"
+  done)
+  {
+    if [ ! -f "$DEV_FILE" ]; then
+      echo "version=$DEV_SWITCHES_VERSION"
+      echo "# My development switches ($APP_NAME, development builds only). One switch a line, NAME=value,"
+      echo "# with what it does above it: the piece that reads it, its issue, and whether a session of"
+      echo "# the game has run with it (played or unplayed). A line I comment out (#) or delete is off. The"
+      echo "# game gets every line left, while the file that reads it is in place and has the switch. A"
+      echo "# newer build adds its new switches at the end, on, and changes nothing else here."
+    elif grep -q '^version=' "$DEV_FILE"; then
+      sed "s/^version=.*/version=$DEV_SWITCHES_VERSION/" "$DEV_FILE"
+    else
+      echo "version=$DEV_SWITCHES_VERSION"
+      cat "$DEV_FILE"
+    fi
+    printf '%s\n' "$DEV_SWITCHES" | while read -r since piece ref played entry text; do
+      in_list "$entry" "$added" || continue
+      echo
+      echo "# $(dev_piece_label "$piece") ($ref), $played: $text"
+      echo "$entry"
+    done
+  } | put "$DEV_FILE" 644
+  say "dev-switches.conf: version $DEV_SWITCHES_VERSION, switched on: $(printf '%s' "${added:-nothing}" | tr '\n' ' ')"
+}
+# dxmt_names: the DXMT_* names in my DXMT fork's DLLs in this app, those the game loads
+# (aarch64-windows), one a line (every byte that can't be in a name splits them, so a name inside a
+# longer one doesn't count)
+dxmt_names() {
+  find "$COMP/dxmt/aarch64-windows" -type f -name '*.dll' -exec cat {} + 2>/dev/null | LC_ALL=C tr -c 'A-Z0-9_' '\n' |
+    LC_ALL=C grep -x 'DXMT_[A-Z0-9_]*' | LC_ALL=C sort -u || true
+}
+# dev_lines: dev-switches.conf's switch lines in a development build, one a line: "in NAME=value"
+# for one that goes into the game's rule, "out NAME=value <why>" for one that stays out
+dev_lines() {
+  [ -n "$DEV_ON" ] && [ -f "$DEV_FILE" ] || return 0
+  local l row piece wine macdrv fex dxmt dnames="" why
+  wine=$(lib_in_use wine) macdrv=$(lib_in_use macdrv) fex=$(fex_in_use) dxmt=$(dxmt_in_use)
+  [ "$dxmt" != fork ] || dnames=$(dxmt_names)
+  awk '/^[A-Za-z_][A-Za-z0-9_]*=/ && !/^version=/' "$DEV_FILE" | while IFS= read -r l; do
+    row=$(printf '%s\n' "$DEV_SWITCHES" | awk -v n="${l%%=*}" '{ e = $5; sub(/=.*/, "", e) } e == n { print $2; exit }')
+    # (a line of mine that isn't in the table: no piece, it goes in as it is)
+    piece=${row:-none} why=""
+    case "$piece" in
+      wine|macdrv|win32u)
+        case "$piece" in
+          wine) [ "$wine" = mine ] ;;
+          macdrv) [ "$macdrv" = mine ] ;;
+          win32u) [ -f "$COMP/macdrv/win32u.so" ] && cmp -s "$COMP/macdrv/win32u.so" "$UNIX_DIR/win32u.so" ;;
+        esac || why="$(dev_piece_label "$piece") isn't in the engine"
+        [ -n "$why" ] || switch_in_file "$l" || why="$(dev_piece_label "$piece") doesn't have it" ;;
+      fex)
+        if [ "$fex" != mine ]; then why="$(dev_piece_label fex) isn't in the engine"
+        elif ! fex_in_version "$l"; then why="$(dev_piece_label fex) doesn't have it"
+        fi ;;
+      dxmt)
+        if [ "$dxmt" != fork ]; then why="$(dev_piece_label dxmt) isn't in the engine"
+        elif ! printf '%s\n' "$dnames" | grep -qx "${l%%=*}"; then why="$(dev_piece_label dxmt) doesn't have it"
+        fi ;;
+    esac
+    if [ -z "$why" ]; then echo "in $l"; else echo "out $l ($why)"; fi
+  done
+}
+# dev_entries: the lines of dev_lines that go in, for the game's rule, one a line, through cdb_value
+dev_entries() {
+  local l
+  dev_lines | sed -n 's/^in //p' | while IFS= read -r l; do cdb_value "$l"; echo; done
+}
+# dev_session_line <dev_lines' output>: session.env's DEV_SWITCHES= (what went in, the session
+# report's header prints it), in a development build only
+dev_session_line() {
+  [ -z "$DEV_ON" ] || echo "DEV_SWITCHES=$(printf '%s\n' "$1" | sed -n 's/^in //p' | tr '\n' ' ' | sed 's/ $//')"
+}
 # and a rename, so a process that starts meanwhile reads the old rules or the new, never half)
 write_rules() {
   { rules_text; [ ! -f "$RULES_LOCAL" ] || cat "$RULES_LOCAL"; } | put "$RULES" 644
@@ -2059,6 +2258,11 @@ status() {
   if [ "$f" = mine ]; then b=$(fex_commit); elif [ "$f" = engine ]; then b=$ENGINE_FEX; fi
   echo "fex_commit=$b"
   echo "fex_build=$(fex_commit)"
+  # (a development build's switches from dev-switches.conf: those the game's rule has now, and
+  # those it leaves out, each with why; both empty in a release build)
+  b=$(dev_lines)
+  echo "dev_switches=$(printf '%s\n' "$b" | sed -n 's/^in //p' | tr '\n' ' ' | sed 's/ $//')"
+  echo "dev_switches_out=$(printf '%s\n' "$b" | sed -n 's/^out //p' | tr '\n' ';' | sed 's/;$//')"
   # (the engine's loader is a Game Mode app: nothing for the app to set up or switch)
   echo "gamemode=engine"
   echo "route=$(state route)"
@@ -2281,6 +2485,8 @@ install_bottle() {
     say "The game's bottle is there (the game and its settings in it are kept)"
   fi
   [ -f "$SETTINGS" ] || CREATED="$CREATED settings.conf"
+  [ -z "$DEV_ON" ] || [ -f "$DEV_FILE" ] || CREATED="$CREATED dev-switches.conf"
+  dev_update
   write_settings
   write_dxmt_conf
   say "Bottle settings: Retina mode $(setting retina)"
@@ -2317,15 +2523,21 @@ rotate_logs() {
 # (Collect Logs, the session report), and each later game start in the session (Play with Steam
 # still open, not Show Steam) updates the rules there
 launch() {
-  local e k f
+  local e k f dev
   game_env
   write_rules
+  # (a development build's switches: those that stay out, once in the log; those in, for
+  # session.env)
+  dev=$(dev_lines)
   if [ -n "$DRY" ]; then
     echo "[dry-run] environment:"; for e in "${E[@]}"; do printf '[dry-run]   %s\n' "$e"; done
     rules_text | sed 's/^/[dry-run] rule /'
+    printf '%s\n' "$dev" | sed -n 's/^out /[dry-run] dev-switches.conf leaves out /p'
     echo "[dry-run] wine $*"
     return
   fi
+  [ -z "$dev" ] || log "dev-switches.conf: in the game's rule: $(printf '%s\n' "$dev" | sed -n 's/^in //p' | tr '\n' ' ')"
+  printf '%s\n' "$dev" | sed -n 's/^out //p' | while IFS= read -r e; do log "dev-switches.conf: left out $e"; done
   wine_allowed
   mkdir -p "$LOGS"
   if ! session_running; then
@@ -2350,12 +2562,13 @@ launch() {
       fi
       for k in $SETTING_KEYS; do echo "SETTING_$k=$(setting "$k")"; done
       printf '%s\n' "${E[@]}"
+      dev_session_line "$dev"
       sed 's/^/RULE=/' "$RULES"; } >"$LOGS/session.env"
     printf '%s\n' "${E[@]}" | shasum | cut -c1-12 >"$LOGS/session.key"
   elif [ -f "$LOGS/session.env" ] && { [ "$1" = "${GAME_EXE:-}" ] || in_list -applaunch "$*"; }; then
-    # (a game start in a running session, with Steam still open: this start's rules, the rest as
-    # the session started)
-    { sed '/^RULE=/d' "$LOGS/session.env"; sed 's/^/RULE=/' "$RULES"; } >"$LOGS/session.env.new.$$"
+    # (a game start in a running session, with Steam still open: this start's rules and dev
+    # switches, the rest as the session started)
+    { sed -e '/^RULE=/d' -e '/^DEV_SWITCHES=/d' "$LOGS/session.env"; dev_session_line "$dev"; sed 's/^/RULE=/' "$RULES"; } >"$LOGS/session.env.new.$$"
     mv -f "$LOGS/session.env.new.$$" "$LOGS/session.env"
   fi
   echo "=== $(date '+%F %T') $*" >>"$LOGS/wine.log"
@@ -2886,12 +3099,13 @@ cmd_play() {
   fi
   # This Play's own session (it holds the session's lock: no other Play, session or registry write
   # until its watcher takes over), with no Wine of the bottle running: the manifest follows this
-  # version, then the registry, the DXMT tree, my unix libraries and DXMT's options. A Play that
-  # joined a session changes nothing; without the session helper the registry and the engine's files
-  # wait.
+  # version, a development build's switches (dev_update), then the registry, the DXMT tree, my unix
+  # libraries and DXMT's options. A Play that joined a session changes nothing; without the session
+  # helper the registry and the engine's files wait.
   if [ "$fresh" = yes ] && [ -z "$DRY" ]; then SESSION_LOCKED=yes; fi
   if { [ "$fresh" = yes ] || [ -n "$DRY" ] || [ ! -x "$LOCKER" ]; } && ! session_running; then
     [ "$(json_get "$MANIFEST" version)" = "$VERSION" ] || [ -n "$DRY" ] || write_manifest
+    dev_update
     apply_registry
     apply_engine_files
     write_dxmt_conf
