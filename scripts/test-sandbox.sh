@@ -837,11 +837,11 @@ else
   sed -i '' 's/^launcherframes=.*/launcherframes=off/' "$AD/settings.conf"
 fi
 ! mine || g set wine mine >/dev/null
-# A home with odd characters, in a fresh root: its settings.conf (the engine's ntdll.so, Debug logging off)
-# is all there is in it
+# A home with odd characters, in a fresh root: its settings.conf (the engine's ntdll.so, Debug logging off,
+# at settings_version 2 so wine=engine isn't reset) is all there is in it
 ODD="$SANDBOX/a%b;c$(printf '\t')d é"
 ODD_CONF="$ODD/home/Library/Application Support/$APP_NAME/settings.conf"
-mkdir -p "${ODD_CONF%/*}" && printf 'wine=engine\ndebug=off\n' >"$ODD_CONF"
+mkdir -p "${ODD_CONF%/*}" && printf 'settings_version=2\nwine=engine\ndebug=off\n' >"$ODD_CONF"
 odd_rules_are() { GW2_ON_MAC_ROOT="$ODD" "$G" rules | sed "s|$SANDBOX/a%25b%3Bc%09d é/home|/Users/a%25b%3Bc%09d é|g" | cmp -s - "$FIX/$1.rules"; }
 odd_only_conf() { [ "$(cd "$ODD" && find . | LC_ALL=C sort | tr '\n' '|')" = ".|./home|./home/Library|./home/Library/Application Support|./home/Library/Application Support/$APP_NAME|./home/Library/Application Support/$APP_NAME/settings.conf|" ]; }
 check "a home with %, ; and a tab: escaped as %XX, the é as it is" eval 'odd_rules_are escaped && odd_only_conf'
