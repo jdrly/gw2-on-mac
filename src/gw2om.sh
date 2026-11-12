@@ -2055,7 +2055,9 @@ status() {
   echo "fex=$(setting fex)"
   echo "fex_ready=$(fex_state)"
   echo "fex_file=$f"
-  echo "fex_commit=$(case "$f" in mine) fex_commit ;; engine) echo "$ENGINE_FEX" ;; esac)"
+  b=""
+  if [ "$f" = mine ]; then b=$(fex_commit); elif [ "$f" = engine ]; then b=$ENGINE_FEX; fi
+  echo "fex_commit=$b"
   echo "fex_build=$(fex_commit)"
   # (the engine's loader is a Game Mode app: nothing for the app to set up or switch)
   echo "gamemode=engine"
