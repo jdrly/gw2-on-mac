@@ -169,6 +169,8 @@ final class GameSettings {
   static let dxmts: [(String, String)] = [("fork", "My fork"), ("engine", "The engine's")]
   // Wine: my ntdll.so (components/ntdll) or the engine's own, kept next to it (gw2om.sh unix_lib)
   static let wines: [(String, String)] = [("mine", "My build"), ("engine", "The engine's")]
+  // Mac driver: my winemac.so (components/macdrv) or the engine's own, kept next to it (unix_lib)
+  static let macdrvs: [(String, String)] = [("mine", "My build"), ("engine", "The engine's")]
   // CPUs the game sees: 2 up to this Mac's logical CPUs (gw2om.sh settings: cpus, sysctl
   // hw.logicalcpu), or all
   var cpuCount: Int { Int(values["cpus"] ?? "") ?? ProcessInfo.processInfo.processorCount }
@@ -375,6 +377,9 @@ struct SettingsView: View {
         SettingRow("Wine", "Which ntdll.so every Wine process loads, Steam's too: my build, with the switches under Performance, or the engine's own to compare. Switches while Steam is closed.", off: off("wine")) {
           InkPopup(selection: settings.choice("wine", "mine"), options: GameSettings.wines)
         }
+        SettingRow("Mac driver", "Which winemac.so draws every Wine window, Steam's too: my build, with Launcher frames, or the engine's own to compare. Switches while Steam is closed.", off: off("macdrv")) {
+          InkPopup(selection: settings.choice("macdrv", "mine"), options: GameSettings.macdrvs)
+        }
       }
       SettingsGroup {
         SettingRow("MetalFX for Subsample", "With the game's Render Sampling set to Subsample, MetalFX upscales the 3D scene and the interface stays sharp. Experimental.", off: off("metalfx")) {
@@ -382,6 +387,10 @@ struct SettingsView: View {
         }
         SettingRow("Metal HUD", "Apple's overlay with the frame rate and frame times, over the game.") {
           InkSwitch(isOn: settings.toggle("hud"))
+        }
+        // (a switch of my Mac driver: Graphics › Mac driver)
+        SettingRow("Launcher frames", "The launcher's window gets a copy of each frame, and a frame equal to the last is skipped. Against a launcher that flickers.", off: off("launcherframes")) {
+          InkSwitch(isOn: settings.toggle("launcherframes"))
         }
       }
 

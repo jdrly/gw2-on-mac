@@ -3,7 +3,9 @@
 # scripts/stage-components.sh --pack and fetched and checked by scripts/stage-components.sh.
 # My ntdll.so is a download of its own when ntdll_url= and ntdll_sha256= are here: jdrly/wine's
 # asset https://github.com/jdrly/wine/releases/download/mach9-builds/ntdll-mach9-<commit>.tar.xz
-# and its sha256. Without them the checks add a stand-in (scripts/stage-components.sh --standin).
+# and its sha256. My winemac.so the same with macdrv_url= and macdrv_sha256=, the asset
+# macdrv-mach9-<commit>.tar.xz. Without them the checks add a stand-in for each
+# (scripts/stage-components.sh --standin).
 tag=components-2026-11-11
 file=gw2-on-mac-components-2026-11-11.tar.xz
 sha256=1efff2530176f6e24bc77a06eb416c6fcfebfccce7cafc54c9a2c76fda59fa6d

@@ -15,10 +15,14 @@
 # the session's record, logs/session.env (DXMT_TREE, DXMT_FORK), for the current log, and so do
 # which mouse the game had (its rule, RULE: GameController's counts, or the pointer's with
 # gcmouse=false), which ntdll.so ran (LIB_wine: mine with its commit, or the engine's own) and its
-# switches (the WINE_HEAT_* entries of the game's rule). With Debug logging my ntdll.so writes its
+# switches (the WINE_HEAT_* entries of the game's rule), and which winemac.so ran (LIB_macdrv) and
+# its switches (WINE_MACDRV_* and WINE_WIN32U_*). With Debug logging my ntdll.so writes its
 # counters to heat-<pid>.log in the logs folder: the report reads the newest one written since the
 # session started, and from it the game thread's row, the thread with the most semaphore releases
-# (it hands the job workers their jobs: about 49,000 a second, the workers a few thousand).
+# (it hands the job workers their jobs: about 49,000 a second, the workers a few thousand). My Mac
+# driver writes its macsurface lines to wine.log for Gw2-64.exe ("hwnd <h> ...: <n> flushes, ..."
+# every 600 flushes of a window): the report prints the last line of the window with the most
+# flushes, which is the launcher's (it flushes about 40 times a second; the game draws with Metal).
 # Sources, all from the fork's own lines (DXMT_STATS is on by default):
 #   "GW2 fork <version>: …"  the start of a session: DXMT's version, its switches, cpus, refresh
 #   STATS    the frame rate and frame times (avg/max ms) of each interval, the command buffers
@@ -121,21 +125,29 @@ summary() {
 
 get() { printf '%s\n' "$1" | sed -n "s/^$2=//p"; }
 
+# lib_report <key> <what mine is> <switches' prefix, an extended regex>: the file of gw2om.sh's unix_lib <key> that the
+# session loaded (session.env's LIB_<key>) and its switches, the entries of the game's rule that
+# match the pattern; fails without LIB_<key>
+lib_report() {
+  local lib name f commit hash switches
+  lib=$(sed -n "s/^LIB_$1=//p" "$LOGS/session.env")
+  [ -n "$lib" ] || return 1
+  read -r name f commit hash <<<"$lib"
+  case "$f" in
+    mine) echo "$name that ran: $2, jdrly/wine ${commit:0:11} (sha256 ${hash:0:12})" ;;
+    engine) echo "$name that ran: the engine's own, athei/wine $commit" ;;
+    *) echo "$name that ran: neither the engine's own nor mine (sha256 ${hash:0:12})" ;;
+  esac
+  switches=$(sed -n 's/^RULE=exe=Gw2-64\.exe;//p' "$LOGS/session.env" | tr ';' '\n' |
+    sed -n -E -e '/^env=WINE_HEAT_LOG=/d' -e "s/^env=($3[A-Z_]*=.*)/\\1/p" | tr '\n' ' ' | sed 's/ $//')
+  echo "Its switches: ${switches:-none}"
+}
+
 # wine_report: the ntdll.so the session loaded and its switches (session.env), and the game
 # thread's row of the session's heat log, a second
 wine_report() {
-  local lib f commit hash switches heat
-  lib=$(sed -n 's/^LIB_wine=//p' "$LOGS/session.env")
-  [ -n "$lib" ] || return 0
-  read -r _ f commit hash <<<"$lib"
-  case "$f" in
-    mine) echo "ntdll.so that ran: my Wine build, jdrly/wine ${commit:0:11} (sha256 ${hash:0:12})" ;;
-    engine) echo "ntdll.so that ran: the engine's own, athei/wine $commit" ;;
-    *) echo "ntdll.so that ran: neither the engine's own nor mine (sha256 ${hash:0:12})" ;;
-  esac
-  switches=$(sed -n 's/^RULE=exe=Gw2-64\.exe;//p' "$LOGS/session.env" | tr ';' '\n' |
-    sed -n -e '/^env=WINE_HEAT_LOG=/d' -e 's/^env=\(WINE_HEAT_[A-Z_]*=.*\)/\1/p' | tr '\n' ' ' | sed 's/ $//')
-  echo "Its switches: ${switches:-none}"
+  local heat
+  lib_report wine "my Wine build" 'WINE_HEAT_' || return 0
   heat=$(ls -t "$LOGS"/heat-[0-9]*.log 2>/dev/null | head -1 || true)
   [ -n "$heat" ] && [ "$heat" -nt "$LOGS/session.env" ] || return 0
   LC_ALL=C awk -v name="$(basename "$heat")" '
@@ -153,6 +165,29 @@ wine_report() {
       }
       printf "Heat log %s (%.0f s): the game thread, thread %s (the most releases), a second: %s\n", name, secs, f[2], out
     }' "$heat"
+}
+
+# macdrv_report: the winemac.so the session loaded and its switches (session.env), and the last
+# macsurface line of the window with the most flushes in wine.log
+macdrv_report() {
+  lib_report macdrv "my Mac driver" 'WINE_(MACDRV|WIN32U)_' || return 0
+  [ -f "$LOGS/wine.log" ] || return 0
+  LC_ALL=C awk '
+    /:macsurface:/ {
+      h = ""; n = -1
+      for (i = 1; i < NF; i++) {
+        if ($i == "hwnd") h = $(i + 1)
+        if ($(i + 1) ~ /^flushes/ && $i ~ /^[0-9]+$/) n = $i + 0
+      }
+      if (h == "" || n < 0) next
+      line[h] = $0; flushes[h] = n
+    }
+    END {
+      for (h in line) if (best == "" || flushes[h] > flushes[best]) best = h
+      if (best == "") exit
+      s = line[best]; sub(/.*:macsurface:[^ ]* /, "", s)
+      print "Its last macsurface line, the window with the most flushes (the launcher): " s
+    }' "$LOGS/wine.log"
 }
 
 report() {  # <log>
@@ -173,6 +208,7 @@ report() {  # <log>
       echo "Mouse the game had: the mouse's own counts from GameController (the engine's built-in rule)"
     fi
     wine_report
+    macdrv_report
   fi
   if [ "$(get "$s" sessions)" = 0 ]; then
     case "$ran" in
