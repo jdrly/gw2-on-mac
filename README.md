@@ -192,7 +192,7 @@ place.
 |---|---|---|---|---|
 | Graphics | Retina | `retina` | on | draws at your display's full resolution, at some cost in frame rate |
 | | Frame cap | `fpscap` | off | a steady cap paced by Metal at 30, 40, 60 or 120. Use it with the game's own vsync |
-| | MetalFX for Subsample | `metalfx` | off | MetalFX upscales the 3D scene of the game's Subsample render sampling. Greyed while the engine's own DXMT is chosen |
+| | MetalFX for Subsample | `metalfx` | off | MetalFX upscales the 3D scene and the interface stays sharp. It works only with the game's Render Sampling set to Subsample, and does nothing at Native. Greyed while the engine's own DXMT is chosen |
 | | Metal HUD | `hud` | off | Apple's overlay with frame rate and frame times, over the game only and not over Steam's windows |
 | | Launcher frames | `launcherframes` | off | the launcher's window gets a copy of each frame, and a frame equal to the last is skipped (`WINE_MACDRV_SURFACE=copy,skip`). Against a launcher that flickers. Greyed while the engine's own `winemac.so` is chosen |
 | Performance | Shader warming | `warm` | on | builds the pipelines the last sessions used before the game asks for them. Greyed while the engine's own DXMT is chosen |

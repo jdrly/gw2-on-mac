@@ -362,7 +362,7 @@ struct SettingsView: View {
         }
       }
       SettingsGroup {
-        SettingRow("MetalFX for Subsample", "With the game's Render Sampling set to Subsample, MetalFX upscales the 3D scene and the interface stays sharp. Experimental.", off: off("metalfx")) {
+        SettingRow("MetalFX for Subsample", "MetalFX upscales the 3D scene and the interface stays sharp. It works only with the game's Render Sampling set to Subsample, and does nothing at Native. Experimental.", off: off("metalfx")) {
           InkSwitch(isOn: settings.toggle("metalfx"))
         }
         SettingRow("Metal HUD", "Apple's overlay with the frame rate and frame times, over the game.") {
