@@ -988,7 +988,67 @@ EOF
   check "  its requests file: the game thread's blocks in the heat log's run summed, a second too" diff "$SANDBOX/requests.want" <(table)
   check "  --from 2 --to 12: only the block wholly inside, and the 5 s it covers" \
     [ "$(table --from 2 --to 12 | head -2 | tr '\n' '|')" = "Server requests of thread 00a4, the game thread, in heat-requests-4242.log from 2.0 to 12.0 s: blocks wholly inside 1, covering 5.0 s; each count, then a second in brackets|  get_message 300 (60.0), 0.600 ms (0.120)|" ]
+  check "  a log of this format: no game thread table, workers line or other thread's requests" \
+    eval '[ "$("$APP/Contents/Resources/session-report.sh" 2>&1 | grep -cE "^(The game thread|The workers|Server requests)")" = 1 ]'
   rm -f "$LOGS/heat-4242.log" "$LOGS/heat-requests-4242.log" "$SANDBOX/requests.want"
+  # (a heat log in jdrly/gw2-on-mac#99's format: timers, sleeps by length, rows that end in their
+  # start address and name; the game thread lacks evpool_hit and spin_scoped. Three workers, a
+  # thread with less than half their wakes, two more threads)
+  cat >"$LOGS/heat-4343.log" <<'EOF'
+heat pid 4343 exe Gw2-64.exe mode count seconds 10.0 threads 7
+total release 500000
+thread 00a4 release 490000 wake_skipped 0 wake_one 0 wake_none 3000 woken 100 spurious 0 server 700 lock_sleep 1000 lock_5us 400 lock_20us 300 lock_100us 200 lock_1ms 90 lock_long 10 wait_sleep 200 wait_5us 100 wait_20us 50 wait_100us 30 wait_1ms 15 wait_long 5 alert 50 alert_wake 20 event_set 600 event_wake 30 event_wake_none 570 wait 900 wait_timed 100 wait_poll 600 lspin_hit 0 lspin_miss 0 espin_hit 0 espin_miss 0 sspin_hit 0 sspin_miss 0 qpc 5000 yield 10 server_ms 7.000 lock_ms 252.000 wait_ms 60.000 wake_ms 3.000 alert_ms 0.600 start 140001000 name -
+thread 00b0 release 3000 woken 1000 spurious 400 lock_sleep 2000 sspin_hit 10 sspin_miss 90 lock_ms 30.000 start 140002000 name Worker
+thread 00b4 release 2000 woken 900 spurious 300 lock_sleep 1000 sspin_hit 20 sspin_miss 80 lock_ms 20.000 start 140002000 name Worker
+thread 00b8 release 1000 woken 600 spurious 200 lock_sleep 1000 sspin_hit 30 sspin_miss 70 lock_ms 10.000 start 140002000 name Worker
+thread 00c0 release 0 woken 400 spurious 0 lock_sleep 5 sspin_hit 0 sspin_miss 0 lock_ms 0.100 start 140003000 name Timer
+thread 00c8 release 0 woken 10 spurious 0 lock_sleep 0 sspin_hit 0 sspin_miss 0 lock_ms 0.000 start 140004000 name AsyncIo
+thread 00cc release 0 woken 5 spurious 0 lock_sleep 0 sspin_hit 0 sspin_miss 0 lock_ms 0.000 start 140005000 name Audio_Mixer
+EOF
+  # (its requests: the game thread's two blocks with their counters lines, AsyncIo in both,
+  # Audio_Mixer in the first, and in the second a thread with the least server time, which the
+  # heat log lacks)
+  blk() {
+    printf 'requests thread %s from %s to %s time 1762912345\ncounters %s\n' "$1" "$2" "$3" "$4"; shift 4
+    printf '%s\n' "$@" 'set_cursor handle 0 repeat 0 count 0 pos 0 clip 0 noclip 0' 'get_message internal 0 other 0 none 0' \
+      'message unlisted 0' 'set_queue_mask poll 0 nopoll 0'
+  }
+  {
+    blk 00a4 0.0 5.0 'release 290000 server 400 lock_sleep 600 lock_5us 240 lock_20us 180 lock_100us 120 lock_1ms 54 lock_long 6 lock_ms 162.000 wait_sleep 100 wait_ms 30.000 wake_ms 1.000 qpc 2500' \
+      'req select 300 3.000' 'req create_event 100 1.000'
+    blk 00c8 0.0 5.0 'server 400' 'req remove_completion 400 8.000'
+    blk 00cc 0.0 5.0 'server 100' 'req ioctl 100 2.000'
+    blk 00a4 5.0 10.0 'release 200000 server 300 lock_sleep 400 lock_5us 160 lock_20us 120 lock_100us 80 lock_1ms 36 lock_long 4 lock_ms 90.000 wait_sleep 100 wait_ms 30.000 wake_ms 2.000 qpc 2500' \
+      'req select 250 2.500' 'req create_event 50 0.500'
+    blk 00c8 5.0 10.0 'server 200' 'req remove_completion 200 4.000'
+    blk 0e0e 5.0 10.0 'server 50' 'req send_socket 50 0.500'
+  } >"$LOGS/heat-requests-4343.log"
+  # (DXMT's log has no GPU lines yet: the frames are the game thread's select requests)
+  out=$("$APP/Contents/Resources/session-report.sh" 2>&1)
+  check "  a heat log of #99's format, no DXMT frames: the table from the totals, frames by the socket poll" \
+    has <(echo "$out") "^The game thread, thread 00a4 (no name, start 140001000), from the heat log totals, which include loading: 10.0 s, 550 frames by the game's socket poll$"
+  cp "$LOGS/Gw2-64_d3d11.log" "$SANDBOX/d3d11.keep"
+  printf 'info:  GPU gpuspan=7.06/16.7 gpugap=0.51/1.1 frames=%s incomplete=0 buffers=3.1 missing=0\n' 250 350 >>"$LOGS/Gw2-64_d3d11.log"
+  out=$("$APP/Contents/Resources/session-report.sh" 2>&1)
+  check "  with DXMT's GPU lines: their frames" \
+    has <(echo "$out") "^The game thread, thread 00a4 (no name, start 140001000), from the heat log totals, which include loading: 10.0 s, 600 frames counted by DXMT$"
+  check "  the game thread's lock sleeps and lock_ms, a second and a frame: 252 ms in 600 frames" \
+    has <(echo "$out") '^  lock_sleep, lock_ms  *100.0  *1.67  *0.420$'
+  check "  a timer alone: wake_ms a frame" has <(echo "$out") '^  wake_ms  *0.005$'
+  check "  the counters the row lacks are left out" eval '! echo "$out" | grep -qE "^  (evpool_hit|spin_scoped) "'
+  check "  the lock sleeps by length, as shares of them" \
+    has <(echo "$out") '^  lock sleeps by length: under 5 us 40.0%, 5 to 20 us 30.0%, 20 to 100 us 20.0%, 0.1 to 1 ms 9.0%, 1 ms or more 1.0%$'
+  check "  the workers in one line: the three rows with at least half the most wakes" \
+    has <(echo "$out") "^The workers, 3 threads whose woken is at least half the busiest other thread's, from the heat log totals, a second (a frame): lock_sleep 400 (6.67), lock_ms 6.0 (0.100), woken 250 (4.17), spurious 90 (1.50), sspin_hit 6 (0.10), sspin_miss 24 (0.40)$"
+  check "  the requests of the game thread and of the two others with the most server time, by name" \
+    [ "$(echo "$out" | grep '^Server requests' | sed 's/, covering .*//' | tr '\n' '|')" = "Server requests of thread 00a4, the game thread, in heat-requests-4343.log from 0.0 to 10.0 s: blocks wholly inside 2|Server requests of thread 00c8, named AsyncIo, start 140004000, in heat-requests-4343.log from 0.0 to 10.0 s: blocks wholly inside 2|Server requests of thread 00cc, named Audio_Mixer, start 140005000, in heat-requests-4343.log from 0.0 to 10.0 s: blocks wholly inside 1|" ]
+  out=$("$APP/Contents/Resources/session-report.sh" --from 5 --to 10 2>&1)
+  check "  --from 5 --to 10: the table from that block's counters line, the frames its select requests" \
+    eval 'has <(echo "$out") "^The game thread, thread 00a4 (no name, start 140001000), from the counters lines of its blocks wholly inside 5.0 to 10.0 s: 5.0 s, 250 frames by the game.s socket poll$" && has <(echo "$out") "^  lock_sleep, lock_ms  *80.0  *1.60  *0.360$"'
+  check "  and the two other threads of that interval" \
+    [ "$(echo "$out" | grep '^Server requests of thread' | cut -d, -f1 | tr '\n' '|')" = "Server requests of thread 00a4|Server requests of thread 00c8|Server requests of thread 0e0e|" ]
+  mv -f "$SANDBOX/d3d11.keep" "$LOGS/Gw2-64_d3d11.log"
+  rm -f "$LOGS/heat-4343.log" "$LOGS/heat-requests-4343.log"
 else
   check "  and which ntdll.so ran: the engine's own, no switches" \
     eval 'has "$Z/session-report.txt" "^ntdll.so that ran: the engine.s own, athei/wine $ENGINE_WINE$" && has "$Z/session-report.txt" "^Its switches: none$"'

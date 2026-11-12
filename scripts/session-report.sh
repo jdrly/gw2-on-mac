@@ -10,8 +10,8 @@
 #
 #   --keep  also save the log as the logs folder's sessions/Gw2-64_d3d11-<date>.log: the
 #           log is rotated at every game start, so keep the sessions to compare
-#   --from S, --to S  the interval of the server request table, in seconds since the game
-#           started (default: the heat log's whole run)
+#   --from S, --to S  the interval of the server request tables and of the game thread's
+#           table, in seconds since the game started (default: the heat log's whole run)
 #
 # Which DXMT ran (my fork, or the engine's own, which writes none of the lines below) comes from
 # the session's record, logs/session.env (DXMT_TREE, DXMT_FORK), for the current log, and so do
@@ -25,7 +25,18 @@
 # it, heat-requests-<pid>.log has blocks of the game thread's server requests, each the change since
 # that thread's last block ("requests thread <tid> from <s> to <s> time <epoch>", jdrly/wine#15):
 # the report sums that thread's blocks that lie wholly inside the interval and prints its twelve
-# busiest requests and the set_cursor, get_message and set_queue_mask splits, a second too. My Mac
+# busiest requests and the set_cursor, get_message and set_queue_mask splits, a second too.
+# A heat log whose thread rows end in "start <hex> name <text>" (jdrly/gw2-on-mac#99) has more:
+# the request log follows two more threads, and each block has a line "counters <name> <n> ...",
+# that thread's change since its last block, the zero ones left out. From such a log the report
+# also prints the game thread's counters and timers a second and a frame, from the heat log's
+# totals (which include loading) or, with --from or --to, from its blocks' counters lines; the
+# lock and wait sleeps by length; the workers (the rows whose woken is at least half the busiest
+# other row's) summed in one line, from the totals; and the request tables of the two other
+# threads with the most server time in the interval, each under its name and start address. The
+# frames are DXMT's (frames= on its GPU lines, summed over the session) for the whole run, and the
+# game thread's select requests in the blocks for an interval: GW2 polls its socket once a frame.
+# Without either the report gives no frame column. My Mac
 # driver writes its macsurface lines to wine.log for Gw2-64.exe ("hwnd <h> ...: <n> flushes, ..."
 # every 600 flushes of a window): the report prints the last line of the window with the most
 # flushes, which is the launcher's (it flushes about 40 times a second; the game draws with Metal).
@@ -45,7 +56,7 @@ APP_NAME="GW2 on Mac arm64"
 
 usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
-KEEP="" COMPARE="" FROM=0 TO=""
+KEEP="" COMPARE="" FROM=0 TO="" RANGE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --keep) KEEP=1; shift ;;
@@ -53,6 +64,7 @@ while [ $# -gt 0 ]; do
     --from|--to)
       case "${2:-}" in ''|.|*[!0-9.]*|*.*.*) usage ;; esac
       if [ "$1" = --from ]; then FROM=$2; else TO=$2; fi
+      RANGE=1
       shift 2 ;;
     -h|--help) usage ;;
     -*) usage ;;
@@ -76,7 +88,7 @@ summary() {
       c = $0; cpus = (match(c, /cpus=[0-9]+/) ? substr(c, RSTART + 5, RLENGTH - 5) : "?")
       r = $0; refresh = (match(r, /refresh=[0-9.]+/) ? substr(r, RSTART + 8, RLENGTH - 8) : "?")
       sw = $0; sub(/.*: DXMT_STATS=/, "DXMT_STATS=", sw); switches = sw
-      sessions++
+      sessions++; frames = 0
       next
     }
     function val(line, key,    s) {
@@ -110,6 +122,7 @@ summary() {
       present = val($0, "presented"); missed += val($0, "missed") + 0; dropped += val($0, "dropped") + 0; next
     }
     /info: +METAL4 commits=/ { m4commits += val($0, "commits") + 0; m4errors += val($0, "errors") + 0; next }
+    /info: +GPU .*frames=/ { frames += val($0, "frames"); next }
     END {
       if (!sessions) { print "sessions=0"; exit }
       print "sessions=" sessions; print "version=" version; print "cpus=" cpus; print "refresh=" refresh
@@ -130,6 +143,7 @@ summary() {
       printf "compile_waits=%d\ncompile_wait_ms=%.0f\n", waits, waitms
       print "warm=" warm; print "present=" present; print "missed=" missed; print "dropped=" dropped
       print "metal4_commits=" m4commits; print "metal4_errors=" m4errors
+      print "gpu_frames=" frames
     }' "$1"
 }
 
@@ -153,9 +167,11 @@ lib_report() {
   echo "Its switches: ${switches:-none}"
 }
 
-# wine_report: the ntdll.so the session loaded and its switches (session.env), the game thread's
-# row of the session's heat log, a second, and that thread's server requests in --from..--to from
-# heat-requests-<pid>.log, when there is one
+# wine_report <frames>: the ntdll.so the session loaded and its switches (session.env), the game
+# thread's row of the session's heat log, a second, and that thread's server requests in
+# --from..--to from heat-requests-<pid>.log, when there is one. From a log of #99's format also the
+# game thread's table, the workers' line and the two other threads' requests (<frames>: DXMT's
+# frames in the session, 0 without them)
 wine_report() {
   local heat req
   lib_report wine "my Wine build" 'WINE_HEAT_' || return 0
@@ -163,10 +179,16 @@ wine_report() {
   [ -n "$heat" ] && [ "$heat" -nt "$LOGS/session.env" ] || return 0
   req="$LOGS/heat-requests-$(basename "$heat" | sed 's/^heat-//')"
   [ -f "$req" ] || req=""
-  LC_ALL=C awk -v name="$(basename "$heat")" -v from="$FROM" -v to="$TO" '
+  LC_ALL=C awk -v name="$(basename "$heat")" -v from="$FROM" -v to="$TO" -v range="$RANGE" -v frames="${1:-0}" '
     FILENAME == ARGV[1] && FNR == 1 { for (i = 1; i < NF; i++) if ($i == "seconds") secs = $(i + 1) + 0; next }
     FILENAME == ARGV[1] && $1 == "thread" {
-      r = 0; for (i = 3; i < NF; i += 2) if ($i == "release") r = $(i + 1) + 0
+      rows[++nrows] = $0
+      r = 0
+      for (i = 3; i < NF; i += 2) {
+        if ($i == "release") r = $(i + 1) + 0
+        if ($i == "start") tstart[$2] = $(i + 1)
+        if ($i == "name") tname[$2] = $(i + 1)
+      }
       if (row == "" || r > most) { most = r; row = $0 }
     }
     FILENAME == ARGV[1] { next }
@@ -178,57 +200,151 @@ wine_report() {
       if (to == "") { to = secs; end = secs + 0.15 } else { to += 0; end = to }
       from += 0
     }
+    # the blocks wholly inside the interval, by thread
     $1 == "requests" {
-      take = ($2 == "thread" && $3 == game && $5 + 0 >= from && $7 + 0 <= end)
-      if (take) { blocks++; covered += $7 - $5 }
+      t = $3; take = ($2 == "thread" && $5 + 0 >= from && $7 + 0 <= end)
+      if (take) { if (!(t in blocks)) tids[++ntids] = t; blocks[t]++; covered[t] += $7 - $5 }
       next
     }
     !take { next }
-    $1 == "req" { if (!($2 in rn)) names[++nnames] = $2; rn[$2] += $3; rt[$2] += $4; next }
-    $1 == "message" { if (!($2 in mn)) msgs[++nmsgs] = $2; mn[$2] += $3; next }
+    $1 == "req" { k = t SUBSEP $2; if (!(k in rn)) names[t, ++nnames[t]] = $2; rn[k] += $3; rt[k] += $4; srv[t] += $4; next }
+    $1 == "message" { k = t SUBSEP $2; if (!(k in mn)) msgs[t, ++nmsgs[t]] = $2; mn[k] += $3; next }
     $1 == "set_cursor" || $1 == "get_message" || $1 == "set_queue_mask" {
-      for (i = 2; i < NF; i += 2) { k = $1 " " $i; if (!(k in sn)) splits[++nsplits] = k; sn[k] += $(i + 1) }
+      for (i = 2; i < NF; i += 2) { k = t SUBSEP $1 " " $i; if (!(k in sn)) splits[t, ++nsplits[t]] = $1 " " $i; sn[k] += $(i + 1) }
+      next
     }
-    # <n> and <n> a second
-    function rate(n) { return sprintf("%.0f (%.1f)", n, covered > 0 ? n / covered : 0) }
-    # the line of split <s>: its counters in the log order
-    function split_line(s,    i, k, out) {
+    $1 == "counters" && t == game { for (i = 2; i < NF; i += 2) bc[$i] += $(i + 1) }
+    # <n> and <n> a second in <c> seconds
+    function rate(n, c) { return sprintf("%.0f (%.1f)", n, c > 0 ? n / c : 0) }
+    # the line of thread <t>s split <s>: its counters in the log order
+    function split_line(t, s,    i, k, out) {
       out = ""
-      for (i = 1; i <= nsplits; i++) if (index(splits[i], s " ") == 1) {
-        k = splits[i]; sub(/^[^ ]* /, "", k); out = out (out == "" ? "" : ", ") k " " rate(sn[splits[i]])
+      for (i = 1; i <= nsplits[t]; i++) if (index(splits[t, i], s " ") == 1) {
+        k = splits[t, i]; sub(/^[^ ]* /, "", k); out = out (out == "" ? "" : ", ") k " " rate(sn[t, splits[t, i]], covered[t])
       }
       if (out != "") print "  " s ": " out
     }
+    # thread <t>s name and start address, from the heat log
+    function who(t) {
+      if (!(t in tname)) return "not in the heat log"
+      return (tname[t] == "-" ? "no name" : "named " tname[t]) ", start " tstart[t]
+    }
+    # the request table of thread <t>, <what> it is
+    function req_table(t, what,    i, j, b, m, c, out) {
+      c = covered[t]
+      printf "Server requests of thread %s, %s, in %s from %.1f to %.1f s: blocks wholly inside %d, covering %.1f s; each count, then a second in brackets\n", \
+        t, what, reqname, from, to, blocks[t], c
+      # the twelve busiest, by count (the first seen first on a tie)
+      for (j = 1; j <= 12; j++) {
+        b = ""; for (i = 1; i <= nnames[t]; i++) { m = names[t, i]; if (!((t, m) in done) && (b == "" || rn[t, m] > rn[t, b])) b = m }
+        if (b == "") break
+        done[t, b] = 1
+        printf "  %s %s, %.3f ms (%.3f)\n", b, rate(rn[t, b], c), rt[t, b], (c > 0 ? rt[t, b] / c : 0)
+      }
+      split_line(t, "set_cursor")
+      split_line(t, "get_message")
+      # the ten busiest messages of the replies, then those the log calls unlisted
+      out = ""
+      for (j = 1; j <= 10; j++) {
+        b = ""; for (i = 1; i <= nmsgs[t]; i++) { m = msgs[t, i]; if (m != "unlisted" && !((t, m) in mdone) && (b == "" || mn[t, m] > mn[t, b])) b = m }
+        if (b == "") break
+        mdone[t, b] = 1; out = out (out == "" ? "" : ", ") b " " rate(mn[t, b], c)
+      }
+      if ((t, "unlisted") in mn) out = out (out == "" ? "" : ", ") "unlisted " rate(mn[t, "unlisted"], c)
+      if (out != "") print "  message: " out
+      split_line(t, "set_queue_mask")
+    }
+    # counter or timer <k> of the game thread: from its blocks, or from the heat log totals
+    function v(k) { return (useblk ? bc[k] : gv[k]) + 0 }
+    # a row of the game thread table: counter <c> a second and a frame, timer <tm> ms a frame
+    # (ms a second without frames); either may be ""
+    function table_row(c, tm,    lab, a, b, ms, s) {
+      lab = c; if (lab == "") lab = tm; else if (tm != "") lab = c ", " tm
+      a = ""; b = ""; ms = ""
+      if (c != "" && sec > 0) a = sprintf("%.1f", v(c) / sec)
+      if (c != "" && fr > 0) b = sprintf("%.2f", v(c) / fr)
+      if (tm != "" && fr > 0) ms = sprintf("%.3f", v(tm) / fr)
+      if (tm != "" && fr <= 0 && sec > 0) ms = sprintf("%.3f", v(tm) / sec)
+      if (fr > 0) s = sprintf("  %-22s %10s %10s %11s", lab, a, b, ms)
+      else s = sprintf("  %-22s %10s %11s", lab, a, ms)
+      sub(/ +$/, "", s); print s
+    }
+    # the sleeps <p>_sleep by length (the buckets of the yield), as shares of them
+    function lengths(p, what,    all, i, out) {
+      if (!((p "_sleep") in gv) || !((p "_long") in gv) || (all = v(p "_sleep")) <= 0) return
+      split("5us 20us 100us 1ms long", hk, " "); split("under 5 us,5 to 20 us,20 to 100 us,0.1 to 1 ms,1 ms or more", hl, ",")
+      out = ""
+      for (i = 1; i <= 5; i++) out = out (i > 1 ? ", " : "") hl[i] " " sprintf("%.1f%%", 100 * v(p "_" hk[i]) / all)
+      print "  " what " by length: " out
+    }
+    # the game thread table: its counters and timers a second and a frame, and the sleeps by length
+    function game_table(    i, m, how, src, tm) {
+      useblk = (range != "" && reqname != "")
+      sec = (useblk ? covered[game] : secs)
+      if (frames > 0 && !useblk) { fr = frames; how = "counted by DXMT" } else { fr = rn[game, "select"] + 0; how = "by the game\047s socket poll" }
+      src = "from the heat log totals, which include loading"
+      if (useblk) src = sprintf("from the counters lines of its blocks wholly inside %.1f to %.1f s", from, to)
+      how = (fr > 0 ? sprintf("%d frames %s", fr, how) : "no frame count")
+      printf "The game thread, thread %s (%s), %s: %.1f s, %s\n", game, who(game), src, sec, how
+      if (fr > 0) printf "  %-22s %10s %10s %11s\n", "", "a second", "a frame", "ms a frame"
+      else printf "  %-22s %10s %11s\n", "", "a second", "ms a second"
+      m = split("lock_sleep:lock_ms wait_sleep:wait_ms :wake_ms alert_wake:alert_ms server:server_ms release wake_skipped" \
+        " wake_one wake_none event_set event_wake event_wake_none wait wait_timed wait_poll evpool_hit lspin_hit lspin_miss" \
+        " espin_hit espin_miss sspin_hit sspin_miss spin_scoped qpc yield", spec, " ")
+      for (i = 1; i <= m; i++) {
+        tm = ""; if (split(spec[i], p, ":") > 1) tm = p[2]
+        if (tm != "" && !(tm in gv)) tm = ""
+        if (p[1] == "" && tm == "" || p[1] != "" && !(p[1] in gv)) continue
+        table_row(p[1], tm)
+      }
+      lengths("lock", "lock sleeps")
+      lengths("wait", "wait sleeps")
+    }
+    # the workers: the other rows whose woken is at least half that of the busiest other row, summed
+    function workers(    r, i, n, w, most, nw, out, k, wf) {
+      most = 0
+      for (r = 1; r <= nrows; r++) {
+        n = split(rows[r], wr, " "); if (wr[2] == game) continue
+        for (i = 3; i < n; i += 2) if (wr[i] == "woken" && wr[i + 1] + 0 > most) most = wr[i + 1] + 0
+      }
+      if (most <= 0) return
+      for (r = 1; r <= nrows; r++) {
+        n = split(rows[r], wr, " "); if (wr[2] == game) continue
+        w = 0; for (i = 3; i < n; i += 2) if (wr[i] == "woken") w = wr[i + 1] + 0
+        if (w * 2 < most) continue
+        nw++; for (i = 3; i < n; i += 2) ws[wr[i]] += wr[i + 1]
+      }
+      wf = (frames > 0 ? frames : (useblk ? 0 : fr))
+      out = ""
+      split("lock_sleep lock_ms woken spurious sspin_hit sspin_miss", wk, " ")
+      for (i = 1; i <= 6; i++) {
+        k = wk[i]; if (!(k in ws)) continue
+        out = out (out == "" ? "" : ", ") k " " sprintf(k ~ /_ms$/ ? "%.1f" : "%.0f", ws[k] / secs)
+        if (wf > 0) out = out sprintf(k ~ /_ms$/ ? " (%.3f)" : " (%.2f)", ws[k] / wf)
+      }
+      printf "The workers, %d threads whose woken is at least half the busiest other thread\047s, from the heat log totals, a second%s: %s\n", \
+        nw, (wf > 0 ? " (a frame)" : ""), out
+    }
     END {
       if (row == "" || secs <= 0) exit
-      n = split(row, f, " "); out = ""
+      n = split(row, f, " "); out = ""; game = f[2]
       for (i = 3; i < n; i += 2) {
+        gv[f[i]] = f[i + 1]
         k = f[i]; if (k !~ /^(release|wake_skipped|wake_one|wake_none|woken|spurious|server|lock_sleep|yield)$/) continue
         out = out sprintf("%s%s %.0f", out == "" ? "" : ", ", k, f[i + 1] / secs)
       }
       printf "Heat log %s (%.0f s): the game thread, thread %s (the most releases), a second: %s\n", name, secs, f[2], out
+      # (a log of #99s format: its rows name the threads)
+      if ("name" in gv) { game_table(); workers() }
       if (reqname == "") exit
-      printf "Server requests of thread %s, the game thread, in %s from %.1f to %.1f s: blocks wholly inside %d, covering %.1f s; each count, then a second in brackets\n", \
-        game, reqname, from, to, blocks, covered
-      # the twelve busiest, by count (the first seen first on a tie)
-      for (j = 1; j <= 12; j++) {
-        b = ""; for (i = 1; i <= nnames; i++) if (!(names[i] in done) && (b == "" || rn[names[i]] > rn[b])) b = names[i]
+      req_table(game, "the game thread")
+      if (!("name" in gv)) exit
+      # the two other threads with the most server time in the interval
+      for (j = 1; j <= 2; j++) {
+        b = ""; for (i = 1; i <= ntids; i++) { t = tids[i]; if (t != game && !(t in odone) && (b == "" || srv[t] > srv[b])) b = t }
         if (b == "") break
-        done[b] = 1
-        printf "  %s %s, %.3f ms (%.3f)\n", b, rate(rn[b]), rt[b], (covered > 0 ? rt[b] / covered : 0)
+        odone[b] = 1; req_table(b, who(b))
       }
-      split_line("set_cursor")
-      split_line("get_message")
-      # the ten busiest messages of the replies, then those the log calls unlisted
-      out = ""
-      for (j = 1; j <= 10; j++) {
-        b = ""; for (i = 1; i <= nmsgs; i++) if (msgs[i] != "unlisted" && !(msgs[i] in mdone) && (b == "" || mn[msgs[i]] > mn[b])) b = msgs[i]
-        if (b == "") break
-        mdone[b] = 1; out = out (out == "" ? "" : ", ") b " " rate(mn[b])
-      }
-      if ("unlisted" in mn) out = out (out == "" ? "" : ", ") "unlisted " rate(mn["unlisted"])
-      if (out != "") print "  message: " out
-      split_line("set_queue_mask")
     }' "$heat" ${req:+"$req"}
 }
 
@@ -272,7 +388,7 @@ report() {  # <log>
     else
       echo "Mouse the game had: the mouse's own counts from GameController (the engine's built-in rule)"
     fi
-    wine_report
+    wine_report "$(get "$s" gpu_frames)"
     macdrv_report
   fi
   if [ "$(get "$s" sessions)" = 0 ]; then
