@@ -405,6 +405,12 @@ pin() { sed -n "s/^$1=\([^ ]*\).*/\1/p" "$RES/gw2om.sh"; }
       "d3d11.dll $(sha12 "$E/lib/wine/dxgi/$t/aarch64-windows/d3d11.dll") (the engine's own $(pin ENGINE_D3D11_SHA256 | cut -c1-12))," \
       "winemetal.so $(sha12 "$E/lib/wine/dxgi/$t/aarch64-unix/winemetal.so") (the engine's own $(pin ENGINE_WINEMETAL_SHA256 | cut -c1-12))"
   done
+  # (FEX's three files, and the engine's own next to them while mine is in: gw2om.sh's FEX_FILES)
+  for f in aarch64-windows/xtajit64.dll aarch64-windows/libarm64ecfex.dll aarch64-unix/libarm64ecfex.so; do
+    [ -f "$E/lib/wine/$f" ] || [ -f "$E/lib/wine/$f.engine" ] || continue
+    case "$f" in *.dll) p=ENGINE_FEX_DLL_SHA256 ;; *) p=ENGINE_FEX_SO_SHA256 ;; esac
+    echo "  FEX ${f#*/}: $(sha12 "$E/lib/wine/$f")$([ ! -f "$E/lib/wine/$f.engine" ] || echo ", ${f#*/}.engine next to it $(sha12 "$E/lib/wine/$f.engine")") (the engine's own $(pin "$p" | cut -c1-12))"
+  done
   echo "Game: $([ -n "$GAME_DIR" ] && [ -f "$GAME_DIR/Gw2-64.exe" ] && echo "installed, Gw2-64.exe $(stat -f '%z bytes, %Sm' "$GAME_DIR/Gw2-64.exe")" || echo "not found")"
   [ -z "$GAME_DIR" ] || echo "  interface addon (version.dll): $([ -f "$GAME_DIR/version.dll" ] && { grep -aq 'gw2-on-mac ui-scale' "$GAME_DIR/version.dll" && echo "$APP_NAME's" || echo "another program's"; } || echo none)"
   # d3d11.dll and dxgi.dll addons (arcdps, Nexus): which, by a quick look (gw2om.sh's arcdps_state

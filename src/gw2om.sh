@@ -5,8 +5,9 @@
 # it ships, with three exceptions: its DXMT tree is my DXMT fork's (components/dxmt), its ntdll.so
 # is my Wine build's (components/ntdll), and its winemac.so my Mac driver's (components/macdrv),
 # the engine's own kept next to each (`set dxmt engine`, `set wine engine` and `set macdrv engine`
-# switch back, for comparisons from Terminal; the Settings window has no row for them).
-# Nothing goes inside wine.app.
+# switch back, for comparisons from Terminal; the Settings window has no row for them). A fourth,
+# my FEX (components/fex), goes in only after `set fex mine` from Terminal, the engine's own kept
+# next to it too. Nothing goes inside wine.app.
 #
 #   gw2om.sh status            KEY=VALUE lines describing this Mac (what the window shows)
 #   gw2om.sh install steam     phases 1-4: engine, bottle, Steam from Valve, then Steam starts
@@ -29,8 +30,8 @@
 #   gw2om.sh stop-waiting      the window stops following the game's download (the engine and
 #                              the bottle stay; Install picks up from there)
 #   gw2om.sh repair            the engine (unpacked again if it isn't the expected one), its DXMT
-#                              tree and ntdll.so as Settings asks, the bottle's settings; keeps the
-#                              game and the settings
+#                              tree, ntdll.so, winemac.so and FEX as the settings ask, the bottle's
+#                              settings; keeps the game and the settings
 #   gw2om.sh uninstall         removes everything this app created: the bottle (with the game in
 #                              it), the engine, the settings, its caches (DXMT's in them); logs
 #                              stay
@@ -78,8 +79,11 @@
 #                              archive (a stand-in whose bin/wine only pretends)
 #   GW2_ON_MAC_ENGINE_CHECKS=0 don't check the unpacked engine's files against the real engine's
 #   GW2_ON_MAC_ENGINE_LOADER_SHA256, GW2_ON_MAC_ENGINE_NTDLL_SHA256, GW2_ON_MAC_ENGINE_WINEMAC_SHA256,
-#   GW2_ON_MAC_ENGINE_D3D11_SHA256, GW2_ON_MAC_ENGINE_WINEMETAL_SHA256   a stand-in engine's own
-#                              files (engine_matches, graphics, unix_lib)
+#   GW2_ON_MAC_ENGINE_D3D11_SHA256, GW2_ON_MAC_ENGINE_WINEMETAL_SHA256,
+#   GW2_ON_MAC_ENGINE_FEX_DLL_SHA256, GW2_ON_MAC_ENGINE_FEX_SO_SHA256   a stand-in engine's own
+#                              files (engine_matches, graphics, unix_lib, fex_file)
+#   GW2_ON_MAC_FEX_SWITCHES    rows for FEX_SWITCHES, whose table is empty until a switch of mine
+#                              has one (the rules check's fork and any rows)
 #   GW2_ON_MAC_MACOS           the macOS version preflight sees
 #   GW2_ON_MAC_STEAMSETUP_URL  another SteamSetup.exe
 #   GW2_ON_MAC_SIGNER          the signer check-setup accepts (default ArenaNet)
@@ -143,6 +147,10 @@ ENGINE_NTDLL_SHA256=a0df4d34bc4918886606bcf9d04c9f853c521636fcbf3b6cce08e8c11b74
 ENGINE_WINEMAC_SHA256=ae468edce407781dbd19a7ac8aad68844a212688dd4132748341c492a0986b2f
 ENGINE_D3D11_SHA256=49099142c39d2aa066527d0f1a573d61e3177d317e638b4f7f1457978a61b8df
 ENGINE_WINEMETAL_SHA256=c28171fd25beb364d01c097a5546e2bba9780d34641acb65ad7b63fec985c64f
+# FEX's ARM64EC half, which tells the engine's own from mine (fex_file): lib/wine/aarch64-windows/
+# xtajit64.dll and libarm64ecfex.dll (one file under two names) and aarch64-unix/libarm64ecfex.so
+ENGINE_FEX_DLL_SHA256=99eb322ea77f5daf286f508871d75629ca69ecc53cefbebad61fe40beec4c64c
+ENGINE_FEX_SO_SHA256=0a3e7ea4b76a3acc634993ec98f2ef7e4d52b3806a871856e8f808099577bc4b
 # The loader's entitlements need macOS 26.4 (wine.app's own Info.plist says so too)
 MACOS_MIN=26.4
 # Valve's Steam installer, from Valve's CDN (Valve updates it in place: not pinned, its sha256
@@ -176,6 +184,8 @@ if [ -n "$ROOT" ]; then
   ENGINE_WINEMAC_SHA256="${GW2_ON_MAC_ENGINE_WINEMAC_SHA256:-$ENGINE_WINEMAC_SHA256}"
   ENGINE_D3D11_SHA256="${GW2_ON_MAC_ENGINE_D3D11_SHA256:-$ENGINE_D3D11_SHA256}"
   ENGINE_WINEMETAL_SHA256="${GW2_ON_MAC_ENGINE_WINEMETAL_SHA256:-$ENGINE_WINEMETAL_SHA256}"
+  ENGINE_FEX_DLL_SHA256="${GW2_ON_MAC_ENGINE_FEX_DLL_SHA256:-$ENGINE_FEX_DLL_SHA256}"
+  ENGINE_FEX_SO_SHA256="${GW2_ON_MAC_ENGINE_FEX_SO_SHA256:-$ENGINE_FEX_SO_SHA256}"
   MACOS="${GW2_ON_MAC_MACOS:-}"
   STEAM_SETUP_URL="${GW2_ON_MAC_STEAMSETUP_URL:-$STEAM_SETUP_URL}"
   SIGNER="${GW2_ON_MAC_SIGNER:-ArenaNet}"
@@ -630,13 +640,14 @@ apply_registry() {
 #
 # The keys are 0.1.x's, so settings.conf reads the same on both lines, and dxmt (fork: my DXMT
 # fork; engine: the engine's own, to compare), wine (mine: my ntdll.so; engine: the engine's own),
-# macdrv (mine: my winemac.so; engine: the engine's own), and jobwakes, launcherframes and eventpool
-# (rows of HEAT_SWITCHES, as fastlocks is). dxmt, wine and macdrv have no row in the Settings
-# window: they are for my comparisons from Terminal (gw2om.sh set …). On this engine some of the
+# macdrv (mine: my winemac.so; engine: the engine's own), fex (mine: my FEX; engine: the engine's
+# own, the default), and jobwakes, launcherframes and eventpool (rows of HEAT_SWITCHES, as
+# fastlocks is). dxmt, wine, macdrv and fex have no row in the Settings window: they are for my
+# comparisons from Terminal (gw2om.sh set …). On this engine some of the
 # keys need pieces of mine that come in later steps: setting_state says so, the Settings window
 # greys them with the reason, set refuses them, and they keep what settings.conf says without an
 # effect.
-SETTING_KEYS="retina fpscap metalfx hud warm fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam dxmt wine jobwakes macdrv launcherframes eventpool"
+SETTING_KEYS="retina fpscap metalfx hud warm fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam dxmt wine jobwakes macdrv launcherframes eventpool fex"
 # settings.conf's version, its line settings_version=. Install and Repair write every key with its
 # value, so a file holds the defaults it was written with, as if I had chosen them. A default that
 # changes for the files that exist gets a row here, "<version> <keys>": in a file older than
@@ -671,6 +682,7 @@ setting_default() {
     launchopts) echo "" ;;
     dxmt) echo fork ;;
     wine|macdrv) echo mine ;;
+    fex) echo engine ;;
   esac
 }
 setting_valid() { # <key> <value>
@@ -685,7 +697,7 @@ setting_valid() { # <key> <value>
     # would take for something else)
     launchopts) case "$2" in *[!A-Za-z0-9\ _.:=,/+-]*) false ;; *) [ ${#2} -le 200 ] ;; esac ;;
     dxmt) [ "$2" = fork ] || [ "$2" = engine ] ;;
-    wine|macdrv) [ "$2" = mine ] || [ "$2" = engine ] ;;
+    wine|macdrv|fex) [ "$2" = mine ] || [ "$2" = engine ] ;;
     *) false ;;
   esac
 }
@@ -715,7 +727,10 @@ setting_state() {
     gamemode) echo "off:The engine's loader is a Game Mode app. Nothing to switch." ;;
     wine) if lib_bundled wine; then echo ok; else echo "off:This build of the app has no Wine build of mine."; fi ;;
     macdrv) if lib_bundled macdrv; then echo ok; else echo "off:This build of the app has no Mac driver of mine."; fi ;;
+    fex) if fex_bundled; then echo ok; else echo "off:This build carries no FEX of mine."; fi ;;
     *)
+      e=$(fex_switch_row "$1")
+      if [ -n "$e" ]; then fex_switch_state "${e% *}" "${e##* }"; return; fi
       e=$(switch_entry "$1") l=$(switch_lib "$e")
       if [ -z "$l" ]; then echo ok
       elif [ "$(lib_want "$l")" != mine ]; then
@@ -837,7 +852,7 @@ cdb_value() {
 #                      such file Wine loads its own (n,b).
 #   env                DXMT's shader cache in the app's cache folder (dxmt_cache: my fork's, or
 #                      the engine's DXMT's own), then the switches of my ntdll.so and my Mac
-#                      driver (heat_entries)
+#                      driver (heat_entries), then FEX's (fex_entries)
 # CefHost.exe, which the game starts for its launcher and the Trading Post, inherits the game's
 # variables: the rule takes the cache path and the switches away from it again (an empty value
 # unsets a variable), and the HUD while it is on.
@@ -852,6 +867,7 @@ rules_text() {
     if [ -n "$e" ]; then entries="$entries;env=$e" removed="$removed;env=${e%%=*}="; fi
   done <<EOF
 $(heat_entries)
+$(fex_entries)
 EOF
   echo "$game;env=DXMT_SHADER_CACHE_PATH=$(cdb_value "$(dxmt_cache)")$entries"
   echo "$cef;env=DXMT_SHADER_CACHE_PATH=$removed"
@@ -870,11 +886,15 @@ EOF
 #                   doesn't get those counts
 #   wine            no setting of its own: WINE_HEAT_MSYNC_UNREG=1 goes in whenever my ntdll.so is
 #                   in place, as 0.1.x always sets it (#44)
+#   fex             the FEX my ntdll.so's sampler may read (#111): while my FEX is in place, its
+#                   libarm64ecfex.dll's build id, age and SizeOfImage from its VERSION
+#                   (fex_prof_id). A build id can't tell that a FEX is mine; the app installed it
 HEAT_SWITCHES="
 jobwakes WINE_HEAT_WAKE=one,skip
 eventpool WINE_HEAT_EVPOOL=1
 fastlocks WINE_HEAT_SPIN=lock=20:game,event=30:game
 wine WINE_HEAT_MSYNC_UNREG=1
+fex WINE_HEAT_PROF_FEX=
 launcherframes WINE_MACDRV_SURFACE=copy,skip
 mousespeed WINE_MACDRV_MOUSE_SCALE=
 "
@@ -901,11 +921,16 @@ switch_in_file() {
 # ntdll.so, FEX_SILENTLOG=0 too: FEX's messages go to wine.log, where the session report looks for
 # "FEX: Using hardware TSO".
 heat_entries() {
-  local k e v wine macdrv
-  wine=$(lib_in_use wine) macdrv=$(lib_in_use macdrv)
+  local k e v wine macdrv fex
+  wine=$(lib_in_use wine) macdrv=$(lib_in_use macdrv) fex=$(fex_in_use)
   printf '%s\n' "$HEAT_SWITCHES" | while read -r k e; do
     [ -n "$k" ] && v=$(setting "$k") && [ "$v" != off ] || continue
-    case "$e" in *=) [ "$v" != "$(setting_default "$k")" ] || continue; e=$e$v ;; esac
+    if [ "$k" = fex ]; then
+      [ "$fex" = mine ] && v=$(fex_prof_id) && [ -n "$v" ] || continue
+      e=$e$v
+    else
+      case "$e" in *=) [ "$v" != "$(setting_default "$k")" ] || continue; e=$e$v ;; esac
+    fi
     [ "$k" != mousespeed ] || [ "$(setting rawmouse)" = on ] || continue
     if [ "$(switch_lib "$e")" = macdrv ]; then [ "$macdrv" = mine ] || continue; else [ "$wine" = mine ] || continue; fi
     switch_in_file "$e" || continue
@@ -914,6 +939,39 @@ heat_entries() {
   [ "$(setting debug)" = on ] || return 0
   if [ "$wine" = mine ]; then echo WINE_HEAT_COUNT=1; echo "WINE_HEAT_LOG=$(cdb_value "$LOGS")"; echo FEX_PROFILESTATS=1; fi
   echo FEX_SILENTLOG=0
+}
+# FEX's switches, one row per setting: "<setting> <entry> <needs>", built like HEAT_SWITCHES (an
+# entry ending in = takes the setting's value and stays out at its default). <needs> is fork for
+# an option only my FEX has (jdrly/FEX), any for one the engine's FEX has too. The entry goes into
+# the game's rule while the setting isn't off and, for fork, my FEX is in place (fex_in_use) and
+# its VERSION's "switches:" line names the variable: that line lists every FEX_* option my commits
+# add, so a build without the option leaves it out. Empty until a switch of mine has a row.
+FEX_SWITCHES="
+"
+[ -z "$ROOT" ] || FEX_SWITCHES="${GW2_ON_MAC_FEX_SWITCHES:-$FEX_SWITCHES}"
+# fex_switch_row <setting>: its row's entry and needs, or nothing
+fex_switch_row() { printf '%s\n' "$FEX_SWITCHES" | awk -v k="$1" '$1 == k { print $2, $3 }'; }
+# fex_in_version <entry>: my FEX's VERSION names the entry's variable on its switches: line
+fex_in_version() { in_list "${1%%=*}" "$(sed -n 's/^switches://p' "$FEX_COMP/VERSION" 2>/dev/null | head -1)"; }
+# fex_switch_state <entry> <needs>: setting_state for a row of FEX_SWITCHES
+fex_switch_state() {
+  if [ "$2" != fork ]; then echo ok
+  elif ! fex_bundled; then echo "off:Needs my FEX, which this build of the app doesn't have."
+  elif [ "$(fex_want)" != mine ]; then echo "off:Needs my FEX, and the engine's own is chosen."
+  elif fex_in_version "$1"; then echo ok
+  else echo "off:My FEX in this app (jdrly/FEX $(fex_commit | cut -c1-11)) doesn't have this switch."
+  fi
+}
+# fex_entries: the entries of FEX_SWITCHES for the game's rule, one a line, through cdb_value
+fex_entries() {
+  local k e n v fex
+  fex=$(fex_in_use)
+  printf '%s\n' "$FEX_SWITCHES" | while read -r k e n; do
+    [ -n "$k" ] && v=$(setting "$k") && [ "$v" != off ] || continue
+    case "$e" in *=) [ "$v" != "$(setting_default "$k")" ] || continue; e=$e$v ;; esac
+    [ "$n" != fork ] || { [ "$fex" = mine ] && fex_in_version "$e"; } || continue
+    cdb_value "$e"; echo
+  done
 }
 # write_rules: compatdb.rules from the settings, then compatdb.local as it is (a temporary file
 # and a rename, so a process that starts meanwhile reads the old rules or the new, never half)
@@ -927,15 +985,17 @@ engine_ok() { [ -x "$ENG/bin/wine" ] && [ "$(cat "$ENG/.gw2om-source" 2>/dev/nul
 
 # engine_matches <dir>: the unpacked engine is the expected build: its loader's sha256, the
 # engine's own ntdll.so and winemac.so (in place, or next to mine as <file>.engine: every row of
-# unix_lib), and
-# wine.app's signature (codesign reads it and starts nothing): valid, by Mach9's team, with the
-# loader's identifier
+# unix_lib) and FEX's three files (the same, FEX_FILES), and wine.app's signature (codesign reads
+# it and starts nothing): valid, by Mach9's team, with the loader's identifier
 engine_matches() {
   local app="$1/$ENGINE_LOADER_APP" info k u="$1/lib/wine/aarch64-unix"
   [ "$(sha256 "$app/Contents/MacOS/wine" 2>/dev/null)" = "$ENGINE_LOADER_SHA256" ] || return 1
   for k in $UNIX_LIBS; do
     unix_lib "$k"
     [ "$(sha256 "$u/$LIB" 2>/dev/null)" = "$LIB_SHA" ] || [ "$(sha256 "$u/$LIB.engine" 2>/dev/null)" = "$LIB_SHA" ] || return 1
+  done
+  for k in $FEX_FILES; do
+    [ "$(sha256 "$1/lib/wine/$k" 2>/dev/null)" = "$(fex_pin "$k")" ] || [ "$(sha256 "$1/lib/wine/$k.engine" 2>/dev/null)" = "$(fex_pin "$k")" ] || return 1
   done
   codesign --verify --strict "$app" >>"$LOGFILE" 2>&1 || return 1
   info=$(codesign -dv "$app" 2>&1) || return 1
@@ -1169,29 +1229,152 @@ lib_switch() {
   say "$LIB: $(lib_label "$1" mine) is in the engine, the engine's own kept next to it as $LIB.engine"
 }
 
-# apply_engine_files: dxmt_switch and lib_switch for each of UNIX_LIBS while no session runs or
-# starts (the session's lock, as apply_registry takes it), else at the next game start that finds
-# none (Play)
+# --- FEX: my build (components/fex, jdrly/FEX built for this engine) or the engine's own
+#
+# FEX runs the game's x86_64 code. Its ARM64EC half is three files of the engine that change
+# together (FEX_FILES): aarch64-windows/xtajit64.dll, the name Wine loads for an x86_64 process,
+# and libarm64ecfex.dll, the same file under FEX's own name, and aarch64-unix/libarm64ecfex.so,
+# which the DLL loads by name and calls by index, so the two come from one build. My build has the
+# DLL once (components/fex/aarch64-windows/libarm64ecfex.dll), and both names get it. Its WoW64
+# half (xtajit.dll, Steam's i386 code) stays the engine's. The setting fex (mine|engine) starts at
+# engine: my FEX goes in only after `set fex mine`. As for unix_lib's files, each engine's own
+# file moves aside once as <file>.engine, and only when its sha256 is the pin's; mine is copied in
+# from the components, only while no session runs or starts (apply_engine_files). The three can't
+# change in one step: a switch copies all three of mine first ($f.new), then renames back to back.
+# Cut short, it leaves a mix, which the next switch finishes and Play never starts on.
+FEX_FILES="aarch64-windows/xtajit64.dll aarch64-windows/libarm64ecfex.dll aarch64-unix/libarm64ecfex.so"
+FEX_COMP="$COMP/fex"
+FEX_DIR="$ENG/lib/wine"
+# fex_src <file>: my build's file for one of FEX_FILES
+fex_src() { case "$1" in *.dll) echo "$FEX_COMP/aarch64-windows/libarm64ecfex.dll" ;; *) echo "$FEX_COMP/$1" ;; esac; }
+# fex_pin <file>: the engine's own file's sha256
+fex_pin() { case "$1" in *.dll) echo "$ENGINE_FEX_DLL_SHA256" ;; *) echo "$ENGINE_FEX_SO_SHA256" ;; esac; }
+# fex_bundled: this app carries my FEX
+fex_bundled() { [ -f "$FEX_COMP/aarch64-windows/libarm64ecfex.dll" ] && [ -f "$FEX_COMP/aarch64-unix/libarm64ecfex.so" ]; }
+# fex_commit: the commit of my FEX in this app (its VERSION's "commit:" line)
+fex_commit() { sed -n 's/^commit: //p' "$FEX_COMP/VERSION" 2>/dev/null | head -1; }
+# fex_file <file> <path>: what <path> is, for one of FEX_FILES: mine (this app's build), engine (the
+# engine's own, by the pin), other (another build of mine, from an earlier version of the app, or
+# anything else), none
+fex_file() {
+  local src
+  src=$(fex_src "$1")
+  if [ ! -f "$2" ]; then echo none
+  elif [ -f "$src" ] && cmp -s "$src" "$2"; then echo mine
+  elif [ "$(sha256 "$2")" = "$(fex_pin "$1")" ]; then echo engine
+  else echo other
+  fi
+}
+# fex_prof_id: <build id>:<age>:<SizeOfImage> of my libarm64ecfex.dll, as its VERSION's line
+# "libarm64ecfex.dll: build id <32 hex> age <n>, SizeOfImage <0x hex>" writes them, or nothing
+fex_prof_id() {
+  sed -n 's/^libarm64ecfex\.dll: build id \([0-9a-f]\{32\}\) age \([0-9]\{1,\}\), SizeOfImage \(0x[0-9a-f]\{1,\}\)$/\1:\2:\3/p' "$FEX_COMP/VERSION" 2>/dev/null | head -1
+}
+# fex_want: the FEX the setting asks for (engine without my build in the app)
+fex_want() { if fex_bundled && [ "$(setting fex)" = mine ]; then echo mine; else echo engine; fi; }
+# fex_in_place: the FEX in the engine: mine or engine when all three files are, other when one is
+# neither (an earlier build of mine, or something else), mix otherwise (some mine, some the
+# engine's own or missing: a switch cut short)
+fex_in_place() {
+  local f k all=""
+  for f in $FEX_FILES; do
+    k=$(fex_file "$f" "$FEX_DIR/$f")
+    [ "$k" != other ] || { echo other; return; }
+    [ -z "$all" ] || [ "$all" = "$k" ] || all=mix
+    [ "$all" = mix ] || all=$k
+  done
+  case "$all" in mine|engine) echo "$all" ;; *) echo mix ;; esac
+}
+# fex_in_use: the FEX the next process loads (fex_in_place; without an engine, the one it will be)
+fex_in_use() { if [ -x "$ENG/bin/wine" ]; then fex_in_place; else fex_want; fi; }
+# fex_label <mine|engine|mix|other>: what the window and the log call it
+fex_label() {
+  case "$1" in
+    mine) echo "my FEX (jdrly/FEX $(fex_commit | cut -c1-11))" ;;
+    engine) echo "the engine's own FEX (athei/FEX $ENGINE_FEX)" ;;
+    mix) echo "a mix of my FEX and the engine's own" ;;
+    *) echo "another FEX" ;;
+  esac
+}
+# fex_kept: each of the engine's own three files is in place or next to it as <file>.engine
+fex_kept() {
+  local f
+  for f in $FEX_FILES; do
+    [ "$(fex_file "$f" "$FEX_DIR/$f")" = engine ] || [ "$(fex_file "$f" "$FEX_DIR/$f.engine")" = engine ] || return 1
+  done
+}
+# fex_state: yes (the FEX the setting asks for is in place, all three files), switch (it is not, and
+# the engine's own files are there to make it from: apply_engine_files puts it in at the next
+# chance), other (the engine's own is missing: Repair unpacks the engine again), no (no engine)
+fex_state() {
+  [ -x "$ENG/bin/wine" ] || { echo no; return; }
+  if [ "$(fex_in_place)" = "$(fex_want)" ]; then echo yes
+  elif fex_kept; then echo switch
+  else echo other
+  fi
+}
+# fex_switch: the FEX the setting asks for into place (the caller has made sure that no session
+# runs or starts). To mine: my three files copied next to theirs ($f.new) first, then, file by
+# file, the engine's own aside as $f.engine when it is the one in place, and mine in. To the
+# engine's own: three renames. A file already right is left as it is, so the next switch finishes
+# one cut short.
+fex_switch() {
+  local want cur f p todo=""
+  want=$(fex_want)
+  cur=$(fex_in_place)
+  [ "$cur" != "$want" ] || return 0
+  if ! fex_kept; then
+    # (fex_state says other: Play and set say Repair)
+    log "FEX: the engine's own files are neither in place nor next to them; $(fex_label "$want") waits for Repair"
+    return 0
+  fi
+  [ "$cur" != mix ] || say "FEX: the engine's FEX files are $(fex_label mix), a switch cut short; finishing the switch to $(fex_label "$want")"
+  for f in $FEX_FILES; do [ "$(fex_file "$f" "$FEX_DIR/$f")" = "$want" ] || todo="$todo $f"; done
+  if [ "$want" = engine ]; then
+    for f in $todo; do run mv -f "$FEX_DIR/$f.engine" "$FEX_DIR/$f"; done
+    say "FEX: $(fex_label engine) is in the engine"
+    return 0
+  fi
+  for f in $todo; do
+    p="$FEX_DIR/$f"
+    run rm -f "$p.new"
+    run cp -p "$(fex_src "$f")" "$p.new"
+    # (cp -p copies the quarantine attribute of an app copied out of a browser's download)
+    [ -n "$DRY" ] || xattr -d com.apple.quarantine "$p.new" 2>/dev/null || true
+  done
+  for f in $todo; do
+    p="$FEX_DIR/$f"
+    [ "$(fex_file "$f" "$p")" != engine ] || run mv -f "$p" "$p.engine"
+    run mv -f "$p.new" "$p"
+  done
+  say "FEX: $(fex_label mine) is in the engine, the engine's own kept next to each of its three files as <file>.engine"
+}
+
+# apply_engine_files: dxmt_switch, lib_switch for each of UNIX_LIBS and fex_switch while no session
+# runs or starts (the session's lock, as apply_registry takes it), else at the next game start that
+# finds none (Play)
 apply_engine_files() {
   local k
   if [ ! -x "$ENG/bin/wine" ]; then
     if [ -n "$DRY" ]; then
       echo "[dry-run] $(dxmt_label "$(setting dxmt)") as the engine's DXMT tree"
       for k in $UNIX_LIBS; do echo "[dry-run] $(lib_label "$k" "$(lib_want "$k")") in the engine"; done
+      echo "[dry-run] $(fex_label "$(fex_want)") in the engine"
     fi
     return 0
   fi
   if ! registry_lock; then
-    log "The engine's DXMT tree and unix libraries wait for the next start without a running session (its lock is held, or its helper missing)"
+    log "The engine's DXMT tree, unix libraries and FEX wait for the next start without a running session (its lock is held, or its helper missing)"
     return 0
   fi
   if session_running; then
     registry_unlock
-    log "The engine's DXMT tree and unix libraries wait for the next start without a running session"
+    log "The engine's DXMT tree, unix libraries and FEX wait for the next start without a running session"
     return 0
   fi
   dxmt_switch
   for k in $UNIX_LIBS; do lib_switch "$k"; done
+  fex_switch
   registry_unlock
 }
 
@@ -1863,6 +2046,14 @@ status() {
     echo "${k}_release=$(lib_release_of "$k" "$f")"
     echo "${k}_build=$(lib_commit "$k")"
   done
+  # (FEX the same way: the setting, its state, the FEX in the engine now (mine, engine, mix, other)
+  # with its commit, and my build's commit in this app)
+  f=$(fex_in_use)
+  echo "fex=$(setting fex)"
+  echo "fex_ready=$(fex_state)"
+  echo "fex_file=$f"
+  echo "fex_commit=$(case "$f" in mine) fex_commit ;; engine) echo "$ENGINE_FEX" ;; esac)"
+  echo "fex_build=$(fex_commit)"
   # (the engine's loader is a Game Mode app: nothing for the app to set up or switch)
   echo "gamemode=engine"
   echo "route=$(state route)"
@@ -1936,9 +2127,13 @@ cmd_set() {
     unix_lib "$key"
     [ "$(lib_state "$key")" != other ] || warn "The engine's $LIB is neither its own nor mine. Click Repair."
   fi
+  if [ "$key" = fex ]; then
+    apply_engine_files
+    [ "$(fex_state)" != other ] || warn "The engine's FEX is neither its own nor mine. Click Repair."
+  fi
   # (each process reads the rules and dxmt.conf when it starts; the environment, the registry, the
-  # DXMT tree and the unix libraries are the session's, fixed while Steam runs)
-  if session_running && in_list "$key" "ncpu debug retina dxmt $UNIX_LIBS"; then
+  # DXMT tree, the unix libraries and FEX are the session's, fixed while Steam runs)
+  if session_running && in_list "$key" "ncpu debug retina dxmt $UNIX_LIBS fex"; then
     echo "@done $key=$value. It takes effect the next time the game starts after Steam has quit."
   else
     echo "@done $key=$value. It takes effect the next time the game starts."
@@ -2024,6 +2219,8 @@ write_manifest() {
   "winemac_sha256": "$ENGINE_WINEMAC_SHA256",
   "dxmt_d3d11_sha256": "$ENGINE_D3D11_SHA256",
   "winemetal_sha256": "$ENGINE_WINEMETAL_SHA256",
+  "fex_dll_sha256": "$ENGINE_FEX_DLL_SHA256",
+  "fex_so_sha256": "$ENGINE_FEX_SO_SHA256",
   "dxmt_fork": "$DXMT_VERSION",
   "app_files": ["$(echo $APP_FILES | sed 's/ /", "/g')"],
   "logs": "$LOGS",
@@ -2139,6 +2336,13 @@ launch() {
         f=$(lib_file "$k" "$UNIX_DIR/$LIB")
         echo "LIB_$k=$LIB $f $(lib_commit_of "$k" "$f") $(sha256 "$UNIX_DIR/$LIB" 2>/dev/null || true)"
       done
+      # (the FEX it loads: mine <commit> <sha256 of xtajit64.dll in the engine>, or engine; Play
+      # starts no session on anything else)
+      if [ "$(fex_in_place)" = mine ]; then
+        echo "LIB_fex=mine $(fex_commit) $(sha256 "$FEX_DIR/aarch64-windows/xtajit64.dll")"
+      else
+        echo "LIB_fex=$(fex_in_place)"
+      fi
       for k in $SETTING_KEYS; do echo "SETTING_$k=$(setting "$k")"; done
       printf '%s\n' "${E[@]}"
       sed 's/^/RULE=/' "$RULES"; } >"$LOGS/session.env"
@@ -2562,8 +2766,8 @@ cmd_stop_waiting() {
   echo "@done Stopped following the game's download. Install picks up from there."
 }
 
-# Repair: the engine (unpacked again if it isn't the expected one, or its DXMT tree or one of my
-# unix libraries is neither its own nor mine), the DXMT tree and the files Settings asks for, the
+# Repair: the engine (unpacked again if it isn't the expected one, or its DXMT tree, one of my
+# unix libraries or FEX is neither its own nor mine), the DXMT tree and the files Settings asks for, the
 # bottle's settings; Steam again if it is gone; the game and settings stay
 cmd_repair() {
   CREATED="" FETCH_PID=""
@@ -2596,13 +2800,14 @@ cmd_repair() {
   apply_registry
   write_manifest
   log "repair complete"
-  echo "@done Repaired: the engine and the bottle's settings are set up again. The game draws with $(dxmt_label "$(dxmt_in_use)")$(for k in $UNIX_LIBS; do printf ', with %s' "$(lib_label "$k" "$(lib_in_use "$k")")"; done)."
+  echo "@done Repaired: the engine and the bottle's settings are set up again. The game draws with $(dxmt_label "$(dxmt_in_use)")$(for k in $UNIX_LIBS; do printf ', with %s' "$(lib_label "$k" "$(lib_in_use "$k")")"; done), and runs on $(fex_label "$(fex_in_use)")."
 }
-# libs_other: one of my unix libraries has lost the engine's own file (lib_state other)
+# libs_other: one of my unix libraries or FEX has lost the engine's own file (lib_state or
+# fex_state other)
 libs_other() {
   local k
   for k in $UNIX_LIBS; do [ "$(lib_state "$k")" != other ] || return 0; done
-  return 1
+  [ "$(fex_state)" = other ]
 }
 
 cmd_reinstall_engine() {
@@ -2700,6 +2905,12 @@ cmd_play() {
         other) warn "The engine's $LIB is neither its own nor mine. Click Repair." ;;
       esac
     done
+    # (FEX runs every instruction of the game: never a session on a mix of two builds' files)
+    case "$(fex_state)/$(fex_in_place)" in
+      */mix) die "The engine's FEX files are a mix of mine and its own. Click Repair." ;;
+      */other) die "The engine's FEX is neither its own nor mine. Click Repair." ;;
+      switch/*) echo "@notice Steam is still running with $(fex_label "$(fex_in_place)"); quit Steam to switch to $(fex_label "$(fex_want)")." ;;
+    esac
   fi
   # A running session keeps the settings it started with: Steam passes its own environment on
   if session_running && [ -f "$LOGS/session.key" ]; then

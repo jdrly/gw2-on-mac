@@ -370,7 +370,8 @@ struct ThisMac: View {
     }
     let engine = s["engine_title"] ?? "Mach9 0.3.1 · Wine 11.21"
     let short = engine.components(separatedBy: " · ").first ?? engine
-    let libs = [("wine", "ntdll"), ("macdrv", "winemac")]
+    // (FEX too: its three files switch together, fex_ready as the libraries' _ready)
+    let libs = [("wine", "ntdll"), ("macdrv", "winemac"), ("fex", "FEX")]
     let wine = ThisMac.wine(s, engine: engine)
     let switching = libs.contains { s["\($0.0)_ready"] == "switch" }
     let repair = libs.filter { s["\($0.0)_ready"] == "other" }.map { $0.1 }
@@ -421,11 +422,17 @@ struct ThisMac: View {
                       "Guild Wars 2": "swords", "Disk space": "hard-drive"]
 
   // The Wine the engine runs, from the ntdll.so and winemac.so in it (gw2om.sh status wine_*,
-  // macdrv_*), on one line. Both mine from one build: "Wine 11.21 · d831f80", the release and
-  // commit of my build. Both the engine's own: the engine's title. One of mine or another file next
-  // to the engine's own: "Mach9 0.3.1 · ntdll d831f80", "Mach9 0.3.1 · another winemac". Two that
-  // aren't one build of mine: each with its commit, or "another".
+  // macdrv_*), on one line, and " · FEX <commit>" after it while my FEX is in place (fex_file).
   static func wine(_ s: [String: String], engine: String) -> String {
+    let fex = s["fex_file"] == "mine" ? " · FEX \((s["fex_commit"] ?? "").prefix(7))" : ""
+    return wineFiles(s, engine: engine) + fex
+  }
+
+  // Both mine from one build: "Wine 11.21 · d831f80", the release and commit of my build. Both the
+  // engine's own: the engine's title. One of mine or another file next to the engine's own:
+  // "Mach9 0.3.1 · ntdll d831f80", "Mach9 0.3.1 · another winemac". Two that aren't one build of
+  // mine: each with its commit, or "another".
+  private static func wineFiles(_ s: [String: String], engine: String) -> String {
     let short = engine.components(separatedBy: " · ").first ?? engine
     let libs = [("wine", "ntdll"), ("macdrv", "winemac")]
     let commit = { (key: String) in String((s["\(key)_commit"] ?? "").prefix(7)) }

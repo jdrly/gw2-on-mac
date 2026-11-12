@@ -3,8 +3,9 @@
 # with `gh release download`, which sets no quarantine attribute.
 #
 #   plan        the DXMT commit (a full sha on jdrly/dxmt's gw2-on-mac, by default its head), the Wine
-#               and Mac driver commits (full shas on jdrly/wine's gw2-on-mac, by default none) and the
-#               version (by default build.sh's)
+#               and Mac driver commits (full shas on jdrly/wine's gw2-on-mac, by default none), the
+#               FEX commit (a full sha on jdrly/FEX's gw2-on-mac, by default none) and the version
+#               (by default build.sh's)
 #   components  my DXMT fork's build of that commit: the release asset dxmt-mach9-<commit>.tar.xz of
 #               jdrly/dxmt's mach9-builds, checked against the digest GitHub reports, or else the
 #               artifact dxmt-mach9-<commit> of the fork's GW2 run for it, fetched with this run's
@@ -16,7 +17,13 @@
 #               stage-components.sh refuses for another commit, another base or engine, a file its
 #               VERSION doesn't name or no valid signature, proved on copies too. Without one the app
 #               has no ntdll.so of mine and leaves the engine's own in place. The same for my
-#               winemac.so with a Mac driver commit: the asset macdrv-mach9-<commit>.tar.xz.
+#               winemac.so with a Mac driver commit: the asset macdrv-mach9-<commit>.tar.xz. With a
+#               FEX commit, my FEX: the release asset fex-arm64-<commit>.tar.xz of jdrly/FEX's
+#               arm64-builds, checked against the digest GitHub reports, which stage-components.sh
+#               refuses for another commit, base or engine, a file its VERSION doesn't name or a
+#               libarm64ecfex.so without a valid signature, proved on copies. Without one the app
+#               has no FEX of mine; with one it still starts on the engine's own (the setting fex
+#               is engine until I set it from Terminal).
 #   checks      the Checks workflow's jobs (lint, compatdb, build, sandbox, renders, addon) with those
 #               components and that version
 #   package     scripts/release.sh --adhoc on the app the build job made (it never builds again):
@@ -25,9 +32,10 @@
 #               job may write to the repository. Its refusals are proved on copies first.
 #
 # Run by hand on arm64: gh workflow run devbuild.yml --ref arm64 [-f dxmt_commit=<sha>]
-# [-f wine_commit=<sha>] [-f macdrv_commit=<sha>] [-f version=X.Y.Z-dev.N] [-f publish=false]. A
-# pull request that changes the build's scripts or workflows runs it with publish false and no
-# wine_commit or macdrv_commit; a dry run keeps the DMG and the record as an artifact for 7 days.
+# [-f wine_commit=<sha>] [-f macdrv_commit=<sha>] [-f fex_commit=<sha>] [-f version=X.Y.Z-dev.N]
+# [-f publish=false]. A pull request that changes the build's scripts or workflows runs it with
+# publish false and no wine_commit, macdrv_commit or fex_commit; a dry run keeps the DMG and the
+# record as an artifact for 7 days.
 name: Dev build
 
 on:
@@ -43,6 +51,10 @@ on:
         default: ""
       macdrv_commit:
         description: A full sha on jdrly/wine's gw2-on-mac for my winemac.so; empty is none (the engine's own)
+        type: string
+        default: ""
+      fex_commit:
+        description: A full sha on jdrly/FEX's gw2-on-mac for my FEX; empty is none (the engine's own)
         type: string
         default: ""
       version:
@@ -80,6 +92,8 @@ env:
   DXMT_BRANCH: gw2-on-mac
   WINE_REPO: jdrly/wine
   WINE_BRANCH: gw2-on-mac
+  FEX_REPO: jdrly/FEX
+  FEX_BRANCH: gw2-on-mac
 
 jobs:
   plan:
@@ -89,6 +103,7 @@ jobs:
       dxmt_commit: ${{ steps.plan.outputs.dxmt_commit }}
       wine_commit: ${{ steps.plan.outputs.wine_commit }}
       macdrv_commit: ${{ steps.plan.outputs.macdrv_commit }}
+      fex_commit: ${{ steps.plan.outputs.fex_commit }}
       version: ${{ steps.plan.outputs.version }}
       publish: ${{ steps.plan.outputs.publish }}
     steps:
@@ -96,13 +111,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: The DXMT, Wine and Mac driver commits and the version
+      - name: The DXMT, Wine, Mac driver and FEX commits and the version
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
           DXMT_COMMIT: ${{ inputs.dxmt_commit }}
           WINE_COMMIT: ${{ inputs.wine_commit }}
           MACDRV_COMMIT: ${{ inputs.macdrv_commit }}
+          FEX_COMMIT: ${{ inputs.fex_commit }}
           VERSION: ${{ inputs.version }}
           PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
         run: |
@@ -119,6 +135,7 @@ jobs:
           on_branch dxmt_commit "$DXMT_REPO" "$DXMT_BRANCH" "$DXMT_COMMIT"
           [ -z "$WINE_COMMIT" ] || on_branch wine_commit "$WINE_REPO" "$WINE_BRANCH" "$WINE_COMMIT"
           [ -z "$MACDRV_COMMIT" ] || on_branch macdrv_commit "$WINE_REPO" "$WINE_BRANCH" "$MACDRV_COMMIT"
+          [ -z "$FEX_COMMIT" ] || on_branch fex_commit "$FEX_REPO" "$FEX_BRANCH" "$FEX_COMMIT"
           # shellcheck disable=SC2016 # (build.sh's line, literally)
           [ -n "$VERSION" ] || VERSION="$(sed -n 's/^APP_VERSION=${GW2_ON_MAC_VERSION:-\(.*\)}$/\1/p' build.sh)"
           [[ $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+-dev\.[0-9]+$ ]] || fail "version is not X.Y.Z-dev.N: $VERSION"
@@ -132,7 +149,7 @@ jobs:
             echo "::notice title=Version::The tag v$VERSION already exists; a publishing run would refuse this version"
           fi
           { echo "dxmt_commit=$DXMT_COMMIT"; echo "wine_commit=$WINE_COMMIT"; echo "macdrv_commit=$MACDRV_COMMIT"
-            echo "version=$VERSION"; echo "publish=$PUBLISH"; } | tee -a "$GITHUB_OUTPUT"
+            echo "fex_commit=$FEX_COMMIT"; echo "version=$VERSION"; echo "publish=$PUBLISH"; } | tee -a "$GITHUB_OUTPUT"
 
   components:
     needs: plan
@@ -143,6 +160,7 @@ jobs:
       DXMT_COMMIT: ${{ needs.plan.outputs.dxmt_commit }}
       WINE_COMMIT: ${{ needs.plan.outputs.wine_commit }}
       MACDRV_COMMIT: ${{ needs.plan.outputs.macdrv_commit }}
+      FEX_COMMIT: ${{ needs.plan.outputs.fex_commit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -248,6 +266,30 @@ jobs:
           [ -z "$WINE_COMMIT" ] || fetch ntdll "$WINE_COMMIT" ntdll.so WINE
           [ -z "$MACDRV_COMMIT" ] || fetch macdrv "$MACDRV_COMMIT" winemac.so MACDRV
 
+      # Unpacked where stage-components.sh looks (work/fex-arm64/install); with FEX_COMMIT set it
+      # stages that build or fails
+      - name: My FEX for its commit
+        if: env.FEX_COMMIT != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          name="fex-arm64-$FEX_COMMIT" dl="$RUNNER_TEMP/fex" dir=work/fex-arm64/install
+          mkdir -p "$dl" "$dir"
+          asset="$(gh api "repos/$FEX_REPO/releases/tags/arm64-builds" \
+            --jq ".assets[] | select(.name == \"$name.tar.xz\") | [.browser_download_url, .digest] | @tsv")" ||
+            fail "Could not read $FEX_REPO's arm64-builds release"
+          [ -n "$asset" ] || fail "$FEX_REPO's arm64-builds has no asset $name.tar.xz"
+          IFS=$'\t' read -r url digest <<<"$asset"
+          [[ $digest == sha256:* ]] || fail "GitHub reports no sha256 for $url"
+          curl -fL --retry 3 --no-progress-meter -o "$dl/$name.tar.xz" "$url"
+          sha="$(shasum -a 256 "$dl/$name.tar.xz" | cut -d' ' -f1)"
+          [ "sha256:$sha" = "$digest" ] || fail "$url is $sha, GitHub reports $digest"
+          tar -xJf "$dl/$name.tar.xz" -C "$dir"
+          find "$dir" -type f | LC_ALL=C sort
+          grep -E "^(FEX-|commit:|switches:|base:|engine:|aarch64-)" "$dir/VERSION"
+          { echo "FEX_FROM=$FEX_REPO $FEX_COMMIT, release asset $url"; echo "FEX_ARCHIVE_SHA256=$sha"; } >>"$GITHUB_ENV"
+
       - name: The interface addon
         run: |
           brew install mingw-w64
@@ -294,9 +336,35 @@ jobs:
           [ -z "$WINE_COMMIT" ] || refusals ntdll ntdll.so NTDLL_BUILD "$WINE_COMMIT"
           [ -z "$MACDRV_COMMIT" ] || refusals macdrv winemac.so MACDRV_BUILD "$MACDRV_COMMIT"
 
+      # The same on copies of my FEX, after the DXMT, the addon and my Wine builds
+      - name: stage-components.sh refuses a FEX of another commit, base or engine, another file or a .so without a valid signature
+        if: env.FEX_COMMIT != ''
+        run: |
+          zero=0000000000000000000000000000000000000000
+          refuse() { # <message> <dir> <what it took>
+            if GW2_ON_MAC_WORKSPACE="$PWD" FEX_BUILD="$2" scripts/stage-components.sh >"$RUNNER_TEMP/stage.txt" 2>&1; then
+              echo "::error::stage-components.sh took a FEX build $3"; exit 1
+            fi
+            cat "$RUNNER_TEMP/stage.txt"
+            grep -qF "$1" "$RUNNER_TEMP/stage.txt"
+          }
+          copy() { rm -rf "$RUNNER_TEMP/fex-copy" && cp -R work/fex-arm64/install "$RUNNER_TEMP/fex-copy" && echo "$RUNNER_TEMP/fex-copy"; }
+          so=aarch64-unix/libarm64ecfex.so
+          c="$(copy)"; sed -i '' "s/^commit: .*/commit: $zero/" "$c/VERSION"
+          refuse "is not commit $FEX_COMMIT" "$c" "whose VERSION names another commit"
+          c="$(copy)"; sed -i '' "s/^base: .*/base: $zero/" "$c/VERSION"
+          refuse "names another base than ENGINE_FEX" "$c" "whose VERSION names another base"
+          c="$(copy)"; sed -i '' -E "s/^(engine: .*sha256 )[0-9a-f]{64}/\1$zero${zero:0:24}/" "$c/VERSION"
+          refuse "names another engine than ENGINE_SHA256" "$c" "whose VERSION names another engine"
+          c="$(copy)"; printf x >>"$c/aarch64-windows/libarm64ecfex.dll"
+          refuse "libarm64ecfex.dll is not the file its VERSION names" "$c" "with a libarm64ecfex.dll that isn't the file its VERSION names"
+          # (VERSION names the unsigned file, so only the signature is wrong)
+          c="$(copy)"; codesign --remove-signature "$c/$so"
+          sed -i '' "s|^$so: sha256 .*|$so: sha256 $(shasum -a 256 "$c/$so" | cut -d' ' -f1)|" "$c/VERSION"
+          refuse "has no valid signature" "$c" "with a libarm64ecfex.so that codesign --verify rejects"
       - name: Stage
         run: |
-          GW2_ON_MAC_WORKSPACE="$PWD" STAGED_FROM="$DXMT_FROM; ${WINE_FROM:+$WINE_FROM; }${MACDRV_FROM:+$MACDRV_FROM; }the addon built on this runner" scripts/stage-components.sh
+          GW2_ON_MAC_WORKSPACE="$PWD" STAGED_FROM="$DXMT_FROM; ${WINE_FROM:+$WINE_FROM; }${MACDRV_FROM:+$MACDRV_FROM; }${FEX_FROM:+$FEX_FROM; }the addon built on this runner" scripts/stage-components.sh
           mkdir -p "$RUNNER_TEMP/components"
           tar -cf "$RUNNER_TEMP/components/prebuilt.tar" prebuilt
           { echo "dxmt $DXMT_COMMIT"
@@ -315,6 +383,13 @@ jobs:
               echo "macdrv archive sha256 $MACDRV_ARCHIVE_SHA256"
             else
               echo "macdrv none: the engine's own winemac.so"
+            fi
+            if [ -n "$FEX_COMMIT" ]; then
+              echo "fex $FEX_COMMIT"
+              echo "fex from $FEX_FROM"
+              echo "fex archive sha256 $FEX_ARCHIVE_SHA256"
+            else
+              echo "fex none: the engine's own FEX"
             fi
             echo "ui-scale built with $MINGW"; } >"$RUNNER_TEMP/components/components.txt"
           cat "$RUNNER_TEMP/components/components.txt"
@@ -348,6 +423,7 @@ jobs:
       DXMT_COMMIT: ${{ needs.plan.outputs.dxmt_commit }}
       WINE_COMMIT: ${{ needs.plan.outputs.wine_commit }}
       MACDRV_COMMIT: ${{ needs.plan.outputs.macdrv_commit }}
+      FEX_COMMIT: ${{ needs.plan.outputs.fex_commit }}
       VERSION: ${{ needs.plan.outputs.version }}
       PUBLISH: ${{ needs.plan.outputs.publish }}
     steps:
@@ -379,7 +455,7 @@ jobs:
 
       # release-notes/<version>.md when the commit has it, otherwise notes in its form: the commits,
       # the DXMT fork's changes since the DXMT of the previous dev build that has a record, and the
-      # commits of my ntdll.so and my winemac.so, or none
+      # commits of my ntdll.so, my winemac.so and my FEX, or none
       - name: Release notes
         env:
           GH_TOKEN: ${{ github.token }}
@@ -401,6 +477,13 @@ jobs:
               macdrv="[\`$mshort\`](https://github.com/$WINE_REPO/commit/$MACDRV_COMMIT) of my Wine fork's \`$WINE_BRANCH\`, in place of the engine's own."
             else
               macdrv="None in this build: the engine's own \`winemac.so\` stays in place."
+            fi
+            if [ -n "$FEX_COMMIT" ]; then
+              fshort="${FEX_COMMIT:0:7}"
+              wine="$wine, and my FEX at \`$fshort\` next to the engine's own"
+              fex="[\`$fshort\`](https://github.com/$FEX_REPO/commit/$FEX_COMMIT) of my FEX fork's \`$FEX_BRANCH\`, next to the engine's own. The game keeps the engine's own FEX until \`gw2om.sh set fex mine\` from Terminal."
+            else
+              fex="None in this build: the engine's own FEX stays in place."
             fi
             prev="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isPrerelease \
               --jq '[.[] | select(.isPrerelease and (.tagName | test("-dev\\.")))][0].tagName // ""')"
@@ -425,6 +508,9 @@ jobs:
 
           ### My Mac driver
           $macdrv
+
+          ### My FEX
+          $fex
 
           ### Support
           GW2 on Mac is an unofficial project. ArenaNet and NCSOFT don't make, endorse or support it, and
@@ -454,13 +540,14 @@ jobs:
             echo
             if [ -f prebuilt/ntdll/SHA256SUMS ]; then echo "prebuilt/ntdll/SHA256SUMS:"; cat prebuilt/ntdll/SHA256SUMS; echo; fi
             if [ -f prebuilt/macdrv/SHA256SUMS ]; then echo "prebuilt/macdrv/SHA256SUMS:"; cat prebuilt/macdrv/SHA256SUMS; echo; fi
+            if [ -f prebuilt/fex/SHA256SUMS ]; then echo "prebuilt/fex/SHA256SUMS:"; cat prebuilt/fex/SHA256SUMS; echo; fi
             echo "VERSIONS:"; cat "$app/Contents/Resources/VERSIONS"
           } >"$record"
           echo "BUILD_RECORD=$record" >>"$GITHUB_ENV"
 
       # On a copy of the scripts and the app; a stand-in gh that knows the tag, so nothing reaches
       # GitHub and no token is passed
-      - name: release.sh refuses the stand-in DXMT, ntdll.so and winemac.so, a version below build.sh's and a tag that exists
+      - name: release.sh refuses the stand-in DXMT, ntdll.so, winemac.so and FEX, a version below build.sh's and a tag that exists
         run: |
           copy="$RUNNER_TEMP/copy"
           mkdir -p "$copy" "$RUNNER_TEMP/fake-gh"
@@ -488,6 +575,11 @@ jobs:
           mkdir -p "$n" && echo "stand-in wine-11.21-0-g0000000 (not a build: scripts/stage-components.sh --standin)" >"$n/VERSION"
           refuse "the stand-in winemac.so" "bundles the stand-in winemac.so" --adhoc --no-release
           rm -rf "$n" && if [ -d "$RUNNER_TEMP/macdrv" ]; then cp -R "$RUNNER_TEMP/macdrv" "$n"; fi
+          n="$copy/dist/$APP_NAME.app/Contents/Resources/components/fex"
+          rm -rf "$RUNNER_TEMP/fex" && if [ -d "$n" ]; then cp -R "$n" "$RUNNER_TEMP/fex"; fi
+          mkdir -p "$n" && echo "stand-in FEX-2610-0-g0000000 (not a build: scripts/stage-components.sh --standin)" >"$n/VERSION"
+          refuse "the stand-in FEX" "bundles the stand-in FEX" --adhoc --no-release
+          rm -rf "$n" && if [ -d "$RUNNER_TEMP/fex" ]; then cp -R "$RUNNER_TEMP/fex" "$n"; fi
           cp build.sh "$RUNNER_TEMP/build.sh"
           # shellcheck disable=SC2016 # (build.sh's line, literally)
           sed -i '' 's/^APP_VERSION=.*/APP_VERSION=${GW2_ON_MAC_VERSION:-99.0.0-dev.1}/' "$copy/build.sh"

@@ -13,7 +13,8 @@
 #                                      ntdll.so, jdrly/wine, built for the engine; only if staged)
 #                                      and macdrv/ (my Mac driver's winemac.so, the same; only if
 #                                      staged), which it puts into the engine next to the engine's
-#                                      own, and
+#                                      own, fex/ (my FEX, jdrly/FEX, built for the engine; only if
+#                                      staged), which it puts there after `set fex mine`, and
 #                                      ui-scale/ (the interface addon), which it puts into the game
 #                                      folder, staged in prebuilt/ by scripts/stage-components.sh
 #   Contents/Resources/helpers/procpaths  every process's real executable (gw2om.sh's process
@@ -25,7 +26,7 @@
 # The Wine engine is not bundled: gw2om.sh downloads athei's Mach9 release at install time (an arm64
 # Wine with FEX and his DXMT build; pinned URL, size and sha256 in src/gw2om.sh) and uses it as it
 # ships, but for its DXMT tree, its ntdll.so and its winemac.so (mine, the engine's own kept next
-# to each). Steam and the game come from Valve or ArenaNet.
+# to each), and its FEX after `set fex mine`. Steam and the game come from Valve or ArenaNet.
 #
 # Built with the macOS 27 SDK (Xcode 27) for macOS 26.4 and later (the engine's loader needs it).
 #
@@ -144,6 +145,19 @@ wine_build() {
 NTDLL_BUILD="$(wine_build ntdll ntdll.so)"
 MACDRV_BUILD="$(wine_build macdrv winemac.so)"
 NTDLL_COMMIT="${NTDLL_BUILD%% *}" MACDRV_COMMIT="${MACDRV_BUILD%% *}"
+# My FEX, optional too (prebuilt/fex: its ARM64EC half, VERSION, LICENSE, NOTICES): FEX_BUILD is
+# "<commit> <libarm64ecfex.dll's sha256>", or nothing
+FEX_FILES="aarch64-windows/libarm64ecfex.dll aarch64-unix/libarm64ecfex.so VERSION LICENSE NOTICES"
+FEX_BUILD=""
+if [ -d "$P/fex" ]; then
+  for f in $FEX_FILES SHA256SUMS; do
+    [ -f "$P/fex/$f" ] || { echo "Missing $P/fex/$f; run scripts/stage-components.sh" >&2; exit 1; }
+  done
+  check_record "$P/fex"
+  FEX_COMMIT="$(sed -n 's/^commit: \([0-9a-f]\{40\}\)$/\1/p' "$P/fex/VERSION")"
+  [ -n "$FEX_COMMIT" ] || { echo "$P/fex/VERSION names no commit (a line commit: <full sha>)" >&2; exit 1; }
+  FEX_BUILD="$FEX_COMMIT $(sha "$P/fex/aarch64-windows/libarm64ecfex.dll")"
+fi
 # The engine gw2om.sh downloads, for the licences and VERSIONS
 engine_pin() { sed -n "s/^$1=\([^ ]*\).*/\1/p" src/gw2om.sh; }
 ENGINE_NAME="$(engine_pin ENGINE_NAME)" ENGINE_URL="$(engine_pin ENGINE_URL)"
@@ -212,6 +226,10 @@ if [ -n "$MACDRV_COMMIT" ]; then
   chmod 644 "$C/macdrv/VERSION" "$C/macdrv/LICENSE" "$C/macdrv/COPYING.LIB"
   chmod 755 "$C/macdrv/winemac.so"
 fi
+if [ -n "$FEX_BUILD" ]; then
+  for f in $FEX_FILES; do mkdir -p "$C/fex/$(dirname "$f")" && cp "$P/fex/$f" "$C/fex/$f" && chmod 644 "$C/fex/$f"; done
+  chmod 755 "$C/fex/aarch64-unix/libarm64ecfex.so"
+fi
 
 # The process lister gw2om.sh tells its own Wine processes by (proc_pidpath)
 mkdir -p "$R/helpers"
@@ -243,6 +261,15 @@ of athei/wine) for the engine below, https://github.com/jdrly/wine/tree/$MACDRV_
 LGPL-2.1-or-later (macdrv/COPYING.LIB, macdrv/LICENSE). Its complete source is that commit of the
 fork."
 fi
+FEX_NOTE="This build has no FEX of mine: the engine's own stays in place."
+if [ -n "$FEX_BUILD" ]; then
+  mkdir -p "$L/fex"
+  cp "$P/fex/LICENSE" "$P/fex/NOTICES" "$P/fex/VERSION" "$L/fex/"
+  FEX_NOTE="components/fex: FEX's ARM64EC half (libarm64ecfex.dll and libarm64ecfex.so), built from my
+FEX fork jdrly/FEX (a fork of athei/FEX) for the engine below,
+https://github.com/jdrly/FEX/tree/${FEX_BUILD%% *}: MIT (fex/LICENSE), with the code it links
+under the licences in fex/NOTICES. Its complete source is that commit of the fork."
+fi
 cp "$SPARKLE/LICENSE" "$L/sparkle/LICENSE"
 cp src/fonts/*-OFL.txt "$L/fonts/"
 cp src/icons/LICENSE.txt "$L/lucide/LICENSE.txt"
@@ -261,6 +288,8 @@ $NTDLL_NOTE
 
 $MACDRV_NOTE
 
+$FEX_NOTE
+
 Sparkle $SPARKLE_VERSION (app updates), https://sparkle-project.org: MIT-style licence, see
 sparkle/LICENSE.
 
@@ -273,18 +302,19 @@ licence, see lucide/LICENSE.txt.
 Not included in this app: the Wine engine, athei's Mach9 ($ENGINE_NAME: Wine with his patches,
 FEX, DXMT, Mesa, vkd3d-proton, GStreamer and the rest its release page lists, each under its own
 licence), is downloaded at install time from $ENGINE_URL
-and used as it ships, but for its DXMT tree, its ntdll.so and its winemac.so: components/dxmt,
-components/ntdll and components/macdrv go there, the engine's own next to each. Its sources and
-that list: https://github.com/athei/mach9/releases.
+and used as it ships, but for its DXMT tree, its ntdll.so, its winemac.so and its FEX:
+components/dxmt, components/ntdll and components/macdrv go there, and components/fex once I choose
+it, the engine's own next to each. Its sources and that list: https://github.com/athei/mach9/releases.
 Steam comes from Valve, Guild Wars 2 from Valve (Steam) or ArenaNet.
 EOF
 
 # channel: release, or dev (development build; gw2om.sh and the app read it)
 printf 'version=%s\nbuild=%s\nchannel=%s\nauthor=%s\ngithub=%s\nrepo=%s\nfeed=%s\n' "$APP_VERSION" "$BUNDLE_VERSION" \
   "$CHANNEL" "$APP_AUTHOR" "$GITHUB_URL" "$REPO_URL" "$(plutil -extract SUFeedURL raw "$APP/Contents/Info.plist" 2>/dev/null || true)" >"$R/app.properties"
-# (ntdll and macdrv: my ntdll.so's and my winemac.so's commit and sha256 as built, or none)
-printf 'app %s\ndxmt %s %s\nntdll %s\nmacdrv %s\nengine %s wine %s fex %s dxmt %s\nui-scale %s\nsparkle %s\nsdk %s\n' \
-  "$APP_VERSION" "$DXMT_COMMIT" "$DXMT_VERSION" "${NTDLL_BUILD:-none}" "${MACDRV_BUILD:-none}" \
+# (ntdll, macdrv and fex: my ntdll.so's, my winemac.so's and my libarm64ecfex.dll's commit and
+# sha256 as built, or none)
+printf 'app %s\ndxmt %s %s\nntdll %s\nmacdrv %s\nfex %s\nengine %s wine %s fex %s dxmt %s\nui-scale %s\nsparkle %s\nsdk %s\n' \
+  "$APP_VERSION" "$DXMT_COMMIT" "$DXMT_VERSION" "${NTDLL_BUILD:-none}" "${MACDRV_BUILD:-none}" "${FEX_BUILD:-none}" \
   "$ENGINE_NAME" "$(engine_pin ENGINE_WINE)" "$(engine_pin ENGINE_FEX)" "$(engine_pin ENGINE_DXMT)" \
   "$(sha "$P/ui-scale/version.dll" | cut -c1-12)" "$SPARKLE_VERSION" "$sdk" >"$R/VERSIONS"
 

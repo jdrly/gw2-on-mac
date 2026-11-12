@@ -72,6 +72,13 @@ drv() { [ "$MYDRV" = mine ]; }
 scale() { drv && { ! grep -q '^switches:' "$COMP/macdrv/VERSION" || in_switches WINE_MACDRV_MOUSE_SCALE; }; }
 in_switches() { sed -n 's/^switches://p' "$COMP/macdrv/VERSION" | head -1 | tr ' ' '\n' | grep -qx "$1"; }
 skipdrv() { echo "  skip   $* (this app has no winemac.so of mine)"; }
+# My FEX (components/fex): in the app or not. The setting fex starts at engine either way, so the
+# engine's own FEX is in place until a check sets fex mine
+if [ -f "$COMP/fex/aarch64-windows/libarm64ecfex.dll" ]; then MYFEX=yes; else MYFEX=no; fi
+MYFEX_COMMIT="$(sed -n 's/^commit: //p' "$COMP/fex/VERSION" 2>/dev/null || true)"
+ENGINE_FEX=9d4fa4b46b1
+fexb() { [ "$MYFEX" = yes ]; }
+skipfex() { echo "  skip   $* (this app has no FEX of mine)"; }
 mkdir -p "$H"
 # Another DXMT setup's caches in the per-user cache folder, which the app must never touch: a
 # stand-in getconf on PATH points DARWIN_USER_CACHE_DIR at the sandbox's usercache/
@@ -169,6 +176,13 @@ echo "engine's winemetal.so" >"$S/lib/wine/aarch64-unix/winemetal.so"
 rm -f "$S/lib/wine/dxgi/dxmt/aarch64-unix/"*.dll && ln -s ../../../aarch64-unix/winemetal.so "$S/lib/wine/dxgi/dxmt/aarch64-unix/winemetal.so"
 echo "engine's ntdll.so" >"$S/lib/wine/aarch64-unix/ntdll.so"
 echo "engine's winemac.so" >"$S/lib/wine/aarch64-unix/winemac.so"
+# (FEX's x86_64 half: one DLL under two names and its .so; and its i386 half, which the app leaves
+# alone)
+mkdir -p "$S/lib/wine/aarch64-windows"
+echo "engine's libarm64ecfex.dll" >"$S/lib/wine/aarch64-windows/libarm64ecfex.dll"
+cp "$S/lib/wine/aarch64-windows/libarm64ecfex.dll" "$S/lib/wine/aarch64-windows/xtajit64.dll"
+echo "engine's libarm64ecfex.so" >"$S/lib/wine/aarch64-unix/libarm64ecfex.so"
+echo "engine's xtajit.dll" >"$S/lib/wine/aarch64-windows/xtajit.dll"
 echo "<plist/>" >"$S/lib/wine/aarch64-unix/wine.app/Contents/Info.plist"
 ln -s ../lib/wine/aarch64-unix/wine.app/Contents/MacOS/wine "$S/bin/wine"
 ln -s wine.app/Contents/MacOS/wine "$S/lib/wine/aarch64-unix/wine"
@@ -216,8 +230,11 @@ export GW2_ON_MAC_ENGINE_D3D11_SHA256 GW2_ON_MAC_ENGINE_WINEMETAL_SHA256
 GW2_ON_MAC_ENGINE_NTDLL_SHA256="$(shasum -a 256 "$S/lib/wine/aarch64-unix/ntdll.so" | cut -d' ' -f1)"
 GW2_ON_MAC_ENGINE_WINEMAC_SHA256="$(shasum -a 256 "$S/lib/wine/aarch64-unix/winemac.so" | cut -d' ' -f1)"
 export GW2_ON_MAC_ENGINE_NTDLL_SHA256 GW2_ON_MAC_ENGINE_WINEMAC_SHA256
+GW2_ON_MAC_ENGINE_FEX_DLL_SHA256="$(shasum -a 256 "$S/lib/wine/aarch64-windows/libarm64ecfex.dll" | cut -d' ' -f1)"
+GW2_ON_MAC_ENGINE_FEX_SO_SHA256="$(shasum -a 256 "$S/lib/wine/aarch64-unix/libarm64ecfex.so" | cut -d' ' -f1)"
+export GW2_ON_MAC_ENGINE_FEX_DLL_SHA256 GW2_ON_MAC_ENGINE_FEX_SO_SHA256
 export GW2_ON_MAC_STEAMSETUP_URL="file://$SANDBOX/SteamSetup.exe"
-unset GW2_ON_MAC_DRY_RUN GW2_ON_MAC_ALLOW_WINE GW2_ON_MAC_SIGNER GW2_ON_MAC_MACOS GW2_ON_MAC_ENGINE_LOADER_SHA256
+unset GW2_ON_MAC_DRY_RUN GW2_ON_MAC_ALLOW_WINE GW2_ON_MAC_SIGNER GW2_ON_MAC_MACOS GW2_ON_MAC_ENGINE_LOADER_SHA256 GW2_ON_MAC_FEX_SWITCHES
 # the session's watcher (play starts it), with its times shortened: a 2 s grace, 2 s for Steam to
 # quit, a look every 0.2 s (the 15 minutes for the game to appear only in the timeout check)
 export GW2_ON_MAC_WATCH_GRACE=2 GW2_ON_MAC_WATCH_QUITWAIT=2 GW2_ON_MAC_WATCH_POLL=0.2 GW2_ON_MAC_WATCH_TIMEOUT=60
@@ -240,6 +257,7 @@ if drv; then
 else
   check "  with the engine's own winemac.so (this app has none of mine)" has <(echo "$out") "^\[dry-run\] the engine's own winemac.so (athei/wine $ENGINE_WINE) in the engine$"
 fi
+check "  with the engine's own FEX (fex=engine by default)" has <(echo "$out") "^\[dry-run\] the engine's own FEX (athei/FEX $ENGINE_FEX) in the engine$"
 check "  with the rules file and no WINE_COMPATDB" eval 'echo "$out" | grep -qxF "[dry-run]   WINE_COMPATDB_FILE=$AD/compatdb.rules" && ! echo "$out" | grep -q "WINE_COMPATDB="'
 check "dry-run creates nothing" eval '[ ! -e "$AD" ] && [ ! -e "$CACHE" ]'
 check "fresh status: not installed" [ "$(st installed)" = no ]
@@ -310,6 +328,25 @@ unix_is() {
 # ntdll_is and winemac_is mine|engine: my ntdll.so's and my Mac driver's
 ntdll_is() { unix_is ntdll.so ntdll "$1"; }
 winemac_is() { unix_is winemac.so macdrv "$1"; }
+# fex_is mine|engine: FEX's three files as the app leaves them. mine: the app's
+# components/fex/aarch64-windows/libarm64ecfex.dll as both DLLs and its libarm64ecfex.so, the
+# engine's own next to each as <file>.engine. engine: the engine's own, nothing next to them. Never
+# an unfinished <file>.new, and the i386 half as it ships
+FW="$ENG/lib/wine"
+FEXF="aarch64-windows/xtajit64.dll aarch64-windows/libarm64ecfex.dll aarch64-unix/libarm64ecfex.so"
+fex_src_of() { case "$1" in *.dll) echo "$COMP/fex/aarch64-windows/libarm64ecfex.dll" ;; *) echo "$COMP/fex/$1" ;; esac; }
+fex_is() {
+  local f
+  same "$S/lib/wine/aarch64-windows/xtajit.dll" "$FW/aarch64-windows/xtajit.dll" || return 1
+  for f in $FEXF; do
+    [ ! -e "$FW/$f.new" ] || return 1
+    if [ "$1" = engine ]; then
+      same "$S/lib/wine/$f" "$FW/$f" && [ ! -e "$FW/$f.engine" ] || return 1
+    else
+      same "$(fex_src_of "$f")" "$FW/$f" && same "$S/lib/wine/$f" "$FW/$f.engine" || return 1
+    fi
+  done
+}
 
 # --- Steam route
 section "Install through Steam"
@@ -347,6 +384,10 @@ else
   check "no winemac.so of mine in this app: the engine's own stays in place" winemac_is engine
   check "  status names it and the engine's Wine" [ "$(st macdrv_ready)/$(st macdrv_file)/$(st macdrv_commit)/$(st macdrv_build)/$(st macdrv_release)" = "yes/engine/$ENGINE_WINE//" ]
 fi
+check "the engine's own FEX in place (fex=engine by default), nothing next to it" fex_is engine
+check "  status names it and the engine's FEX commit, and my build's commit in this app" \
+  [ "$(st fex)/$(st fex_ready)/$(st fex_file)/$(st fex_commit)/$(st fex_build)" = "engine/yes/engine/$ENGINE_FEX/$MYFEX_COMMIT" ]
+check "  the install says nothing of FEX (nothing switched)" eval '! echo "$out" | grep -q "^FEX:"'
 check "gamemode=engine" [ "$(st gamemode)" = engine ]
 check "steam=yes" [ "$(st steam)" = yes ]
 check "stage=waiting_game" [ "$(st stage)" = waiting_game ]
@@ -400,12 +441,12 @@ check "DXMT's cache folder" [ -d "$DXMT_CACHE" ]
 section "Settings"
 check "defaults: warm on, fastlocks off, ncpu 8, uiscale off, cinematic dialogue off" \
   [ "$(sett warm)$(sett fastlocks)$(sett ncpu)$(sett uiscale)$(sett uiscale_cinema)" = onoff8offoff ]
-check "  settings.conf of a fresh install: settings_version=2, fastlocks off, dxmt fork, wine and macdrv mine" \
-  eval 'grep -qx settings_version=2 "$AD/settings.conf" && grep -qx fastlocks=off "$AD/settings.conf" && grep -qx dxmt=fork "$AD/settings.conf" && grep -qx wine=mine "$AD/settings.conf" && grep -qx macdrv=mine "$AD/settings.conf"'
+check "  settings.conf of a fresh install: settings_version=2, fastlocks off, dxmt fork, wine and macdrv mine, fex engine" \
+  eval 'grep -qx settings_version=2 "$AD/settings.conf" && grep -qx fastlocks=off "$AD/settings.conf" && grep -qx dxmt=fork "$AD/settings.conf" && grep -qx wine=mine "$AD/settings.conf" && grep -qx macdrv=mine "$AD/settings.conf" && grep -qx fex=engine "$AD/settings.conf"'
 
 check "default: Steam in the background on" [ "$(sett steambg)" = on ]
 check "default: Quit Steam when the game quits on" [ "$(sett quitsteam)" = on ]
-check "settings: a state for each of the 25 keys" [ "$(g settings | grep -cE '^[a-z_]+_state=(ok|off:.+)$')" = 25 ]
+check "settings: a state for each of the 26 keys" [ "$(g settings | grep -cE '^[a-z_]+_state=(ok|off:.+)$')" = 26 ]
 # (greyed: the ones a later step brings, and those that need a file of mine this app hasn't, in
 # SETTING_KEYS' order)
 OFF=""
@@ -415,7 +456,8 @@ scale || OFF="${OFF}mousespeed "
 mine || OFF="${OFF}wine jobwakes "
 drv || OFF="${OFF}macdrv launcherframes "
 mine || OFF="${OFF}eventpool "
-check "  off: gamemode$(mine || echo ", wine and its switches")$(drv || echo ", macdrv and launcherframes")$(scale || echo ", mousespeed")" \
+fexb || OFF="${OFF}fex "
+check "  off: gamemode$(mine || echo ", wine and its switches")$(drv || echo ", macdrv and launcherframes")$(scale || echo ", mousespeed")$(fexb || echo ", fex")" \
   [ "$(g settings | sed -n 's/^\([a-z_]*\)_state=off:.*/\1/p' | tr '\n' ' ')" = "$OFF" ]
 if mine; then
   check "  wine=mine, jobwakes and eventpool on and fastlocks off by default, all ok" \
@@ -579,6 +621,66 @@ if drv; then
 else
   skipdrv "set macdrv engine and mine, and the switches cut short"
 fi
+# My FEX and the engine's own, and back (nothing runs: the three files switch at once). The way
+# there is three copies, then six renames; the way back three renames
+FEXLEFT() { find "$FW" \( -name 'xtajit64.dll.*' -o -name 'libarm64ecfex.*.*' \) | LC_ALL=C sort; }
+if fexb; then
+  out=$(g set fex mine 2>&1) && rc=0 || rc=$?
+  check "set fex mine: my FEX's three files in the engine, the engine's own next to each as <file>.engine" \
+    eval '[ "$rc" = 0 ] && fex_is mine && [ "$(st fex)/$(st fex_ready)/$(st fex_file)/$(st fex_commit)/$(st fex_build)" = "mine/yes/mine/$MYFEX_COMMIT/$MYFEX_COMMIT" ] && ! echo "$out" | grep -q Repair'
+  check "  it says so" has <(echo "$out") "^FEX: my FEX (jdrly/FEX ${MYFEX_COMMIT:0:11}) is in the engine, the engine's own kept next to each of its three files as <file>.engine$"
+  check "  ntdll.so, winemac.so, the DXMT trees and wine.app as they were" \
+    eval 'ntdll_is $MYWINE && winemac_is $MYDRV && dxgi_is fork && [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]'
+  out=$(g set fex engine 2>&1) && rc=0 || rc=$?
+  check "set fex engine: the engine's own three files with the pinned hashes, nothing left over" \
+    eval '[ "$rc" = 0 ] && fex_is engine && [ -z "$(FEXLEFT)" ] && [ "$(st fex_ready)/$(st fex_file)/$(st fex_commit)" = "yes/engine/$ENGINE_FEX" ] &&
+      [ "$(shasum -a 256 "$FW/aarch64-windows/xtajit64.dll" "$FW/aarch64-windows/libarm64ecfex.dll" "$FW/aarch64-unix/libarm64ecfex.so" | cut -d" " -f1 | tr "\n" " ")" = "$GW2_ON_MAC_ENGINE_FEX_DLL_SHA256 $GW2_ON_MAC_ENGINE_FEX_DLL_SHA256 $GW2_ON_MAC_ENGINE_FEX_SO_SHA256 " ]'
+  check "  it says which" has <(echo "$out") "^FEX: the engine's own FEX (athei/FEX $ENGINE_FEX) is in the engine$"
+  # A switch cut short (a kill, the Mac off) after any of its renames, done here by hand in the
+  # switch's order, with the setting already saved: the next switch finishes it. fex_cut <to> <n>:
+  # the way to <to> from the other, cut after its first <n> renames (to mine after the copies)
+  fex_cut() {
+    local f i=0
+    sed -i '' "s/^fex=.*/fex=$1/" "$AD/settings.conf"
+    if [ "$1" = mine ]; then
+      for f in $FEXF; do cp -p "$(fex_src_of "$f")" "$FW/$f.new"; done
+      for f in $FEXF; do
+        [ $i -lt "$2" ] || return 0; mv "$FW/$f" "$FW/$f.engine"; i=$((i + 1))
+        [ $i -lt "$2" ] || return 0; mv "$FW/$f.new" "$FW/$f"; i=$((i + 1))
+      done
+    else
+      for f in $FEXF; do [ $i -lt "$2" ] || return 0; mv -f "$FW/$f.engine" "$FW/$f"; i=$((i + 1)); done
+    fi
+  }
+  for n in 0 1 2 3 4 5; do
+    fex_cut mine $n
+    want=mix; [ $n != 0 ] || want=engine
+    check "cut short on the way to mine after $n of 6 renames: fex_file=$want, fex_ready=switch; set fex mine finishes it$([ $n = 0 ] || echo ", saying so")" \
+      eval '[ "$(st fex_file)/$(st fex_ready)" = "$want/switch" ] && out=$(g set fex mine 2>&1) && fex_is mine && [ -z "$(FEXLEFT | grep "\.new$")" ] && { [ $n = 0 ] || echo "$out" | grep -q "^FEX: the engine.s FEX files are a mix of my FEX and the engine.s own, a switch cut short; finishing the switch to my FEX"; }'
+    g set fex engine >/dev/null
+  done
+  for n in 1 2; do
+    g set fex mine >/dev/null
+    fex_cut engine $n
+    check "cut short on the way back after $n of 3 renames: a mix; set fex engine finishes it, nothing left over" \
+      eval '[ "$(st fex_file)/$(st fex_ready)" = "mix/switch" ] && g set fex engine >/dev/null && fex_is engine && [ -z "$(FEXLEFT)" ]'
+  done
+  # an earlier build of mine (an older version of the app's) in place of all three
+  g set fex mine >/dev/null
+  for f in $FEXF; do echo "an earlier build of mine" >"$FW/$f"; done
+  check "an earlier build of my FEX in place: fex_file=other, fex_ready=switch; set fex mine puts this build's in" \
+    eval '[ "$(st fex_file)/$(st fex_ready)/$(st fex_commit)" = other/switch/ ] && g set fex mine >/dev/null && fex_is mine'
+  g set fex engine >/dev/null
+  check "  the engine's own FEX and wine.app as they ship through all of it" eval 'fex_is engine && [ -z "$(FEXLEFT)" ] && [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]'
+else
+  out=$(g set fex mine 2>&1) && rc=0 || rc=$?
+  check "no FEX of mine in this app: set fex mine refused, saying so; the engine's files untouched" \
+    eval '[ "$rc" != 0 ] && [ "$out" = "@error This build carries no FEX of mine." ] && [ "$(sett fex_state)" = "off:This build carries no FEX of mine." ] && fex_is engine'
+  sed -i '' 's/^fex=.*/fex=mine/' "$AD/settings.conf"
+  g set dxmt engine >/dev/null; g set dxmt fork >/dev/null
+  check "  fex=mine in settings.conf by hand: the engine's own stays through the engine's switches" eval 'fex_is engine && [ "$(st fex_ready)/$(st fex_file)" = yes/engine ]'
+  sed -i '' 's/^fex=.*/fex=engine/' "$AD/settings.conf"
+fi
 check "set ncpu all: no WINENCPU" sh -c "'$G' set ncpu all >/dev/null && ! '$G' env | grep -q WINENCPU"
 MAXC=$(sysctl -n hw.logicalcpu)
 # (GitHub's runners have 3 CPUs, too few for the checks of 6 and 8)
@@ -623,7 +725,7 @@ check "set launchopts -maploadinfo" g set launchopts "-maploadinfo"
 check "launchopts with a ; refused" sh -c "! '$G' set launchopts '-x; rm -rf /' >/dev/null"
 check "unknown value refused (exit 2)" sh -c "'$G' set fpscap 45 >/dev/null; [ \$? = 2 ]"
 check "unknown key refused" sh -c "! '$G' set colour red >/dev/null"
-check "settings.conf has every key and settings_version" [ "$(grep -c '=' "$AD/settings.conf")" = 26 ]
+check "settings.conf has every key and settings_version" [ "$(grep -c '=' "$AD/settings.conf")" = 27 ]
 
 section "The larger interface (addon)"
 GD="$STEAM/steamapps/common/Guild Wars 2"
@@ -778,6 +880,42 @@ check "Debug logging with the engine's ntdll.so: FEX_SILENTLOG=0 for the game, u
   rules_are debug-engine
 g set debug off >/dev/null
 check "  Debug logging off: neither" rules_are off
+# FEX's switches (FEX_SWITCHES, empty in the app): the sandbox's table has a fork row and an any
+# row, on two settings that are on by default and write nothing else into the rules. Their entries
+# come after everything else, taken away from CefHost.exe again: the any row's always, the fork
+# row's only with my FEX in place and its variable on my VERSION's switches: line (the four
+# combinations; the staged VERSION back after)
+FEXROWS="updates FEX_TESTFORK=1 fork
+quitsteam FEX_TESTANY=1 any"
+fexrules_are() { GW2_ON_MAC_FEX_SWITCHES="$FEXROWS" rules_are "$1"; }
+fex_named() { # yes|no: my FEX's VERSION names FEX_TESTFORK on its switches: line
+  { grep -v '^switches:' "$SANDBOX/fex-VERSION.keep"; if [ "$1" = yes ]; then echo "switches: FEX_TESTFORK"; else echo "switches:"; fi; } >"$COMP/fex/VERSION"
+}
+if fexb; then cp "$COMP/fex/VERSION" "$SANDBOX/fex-VERSION.keep"; fi
+check "FEX's switches, the engine's own FEX in place: the any row's entry alone" fexrules_are fex-any
+if fexb; then
+  fex_named yes
+  check "  with my VERSION naming the fork row's variable: still the any row's alone" fexrules_are fex-any
+  check "  the fork row's setting greyed with the reason, set refused" \
+    eval '[ "$(GW2_ON_MAC_FEX_SWITCHES="$FEXROWS" "$G" settings | sed -n "s/^updates_state=//p")" = "off:Needs my FEX, and the engine'"'"'s own is chosen." ] && ! GW2_ON_MAC_FEX_SWITCHES="$FEXROWS" "$G" set updates on >/dev/null 2>&1'
+  g set fex mine >/dev/null
+  check "my FEX in place, its VERSION naming the variable: the fork row's entry, then the any row's" fexrules_are fex-fork-any
+  check "  a dry run of Play prints the game's rule with them" \
+    eval '[ "$(GW2_ON_MAC_FEX_SWITCHES="$FEXROWS" GW2_ON_MAC_DRY_RUN=1 "$G" play 2>&1 | sed -n "s/^\[dry-run\] rule \(exe=Gw2-64\.exe;.*\)/\1/p")" = "$(head -1 "$FIX/fex-fork-any.rules" | sed "s|/Users/me|$H|")" ]'
+  fex_named no
+  check "my FEX in place, its VERSION not naming it: the any row's alone" fexrules_are fex-any
+  check "  the fork row's setting greyed, saying so" \
+    eval '[ "$(GW2_ON_MAC_FEX_SWITCHES="$FEXROWS" "$G" settings | sed -n "s/^updates_state=//p")" = "off:My FEX in this app (jdrly/FEX ${MYFEX_COMMIT:0:11}) doesn'"'"'t have this switch." ]'
+  fex_named yes
+  GW2_ON_MAC_FEX_SWITCHES="$FEXROWS" "$G" set quitsteam off >/dev/null
+  check "  the any row's setting off: the fork row's entry alone" eval 'GW2_ON_MAC_FEX_SWITCHES="$FEXROWS" g rules | head -1 | grep -q ";env=DXMT_SHADER_CACHE_PATH=[^;]*;env=FEX_TESTFORK=1$"'
+  g set quitsteam on >/dev/null; g set fex engine >/dev/null
+  cp "$SANDBOX/fex-VERSION.keep" "$COMP/fex/VERSION"
+else
+  check "  the fork row's setting greyed: no FEX of mine in this app" \
+    eval '[ "$(GW2_ON_MAC_FEX_SWITCHES="$FEXROWS" "$G" settings | sed -n "s/^updates_state=//p")" = "off:Needs my FEX, which this build of the app doesn'"'"'t have." ]'
+fi
+check "  without the sandbox's table (the app's, empty): no FEX_* entry" eval 'rules_are off && GW2_ON_MAC_FEX_SWITCHES="$FEXROWS" g rules | grep -q FEX_TESTANY'
 # My ntdll.so's switches (HEAT_SWITCHES): after the cache path, taken away from CefHost.exe again
 if mine; then
   # dry_rule: the game's rule a dry run of Play prints, which has to be the rules' first line
@@ -785,6 +923,18 @@ if mine; then
   g set wine mine >/dev/null; g set jobwakes off >/dev/null; g set eventpool off >/dev/null
   check "my ntdll.so, every switch off: WINE_HEAT_MSYNC_UNREG=1 alone, unset for CefHost.exe" rules_are heat-off
   check "  a dry run of Play prints the game's rule with it" eval '[ "$(dry_rule)" = "$(g rules | head -1)" ]'
+  # (with my FEX in place too: the FEX my ntdll.so's sampler may read, from my FEX's VERSION, after
+  # WINE_HEAT_MSYNC_UNREG=1; only if my ntdll.so's VERSION has no switches: line or names it)
+  if fexb && { ! grep -q '^switches:' "$COMP/ntdll/VERSION" || grep -q '^switches:.* WINE_HEAT_PROF_FEX\( \|$\)' "$COMP/ntdll/VERSION"; }; then
+    FEXID=$(sed -n 's/^libarm64ecfex\.dll: build id \([0-9a-f]\{32\}\) age \([0-9]\{1,\}\), SizeOfImage \(0x[0-9a-f]\{1,\}\)$/\1:\2:\3/p' "$COMP/fex/VERSION")
+    g set fex mine >/dev/null
+    check "  and my FEX in place: WINE_HEAT_PROF_FEX=<its build id>:<age>:<SizeOfImage> after it, unset for CefHost.exe" \
+      eval '[ -n "$FEXID" ] && [ "$(g rules | sed "s|$H|/Users/me|g" | tr "\n" "|")" = "$(head -1 "$FIX/heat-off.rules");env=WINE_HEAT_PROF_FEX=$FEXID|$(tail -1 "$FIX/heat-off.rules");env=WINE_HEAT_PROF_FEX=|" ]'
+    g set wine engine >/dev/null
+    check "  my FEX with the engine's own ntdll.so: no WINE_HEAT_PROF_FEX" eval '! g rules | grep -q WINE_HEAT_PROF_FEX'
+    g set wine mine >/dev/null; g set fex engine >/dev/null
+    check "  the engine's own FEX with my ntdll.so: none either" rules_are heat-off
+  fi
   g set jobwakes on >/dev/null
   check "job wakes on: WINE_HEAT_WAKE=one,skip for the game, unset for CefHost.exe" rules_are jobwakes
   check "  a dry run of Play prints the game's rule with it" eval '[ "$(dry_rule)" = "$(g rules | head -1)" ]'
@@ -945,6 +1095,7 @@ else
   check "  and which winemac.so: the engine's own, no WINE_MACDRV_* in the rules" \
     eval '[ "$(sed -n "s/^LIB_macdrv=//p" "$LOGS/session.env")" = "winemac.so engine $ENGINE_WINE $GW2_ON_MAC_ENGINE_WINEMAC_SHA256" ] && ! grep -q WINE_MACDRV_ "$LOGS/session.env"'
 fi
+check "  and which FEX: the engine's own (fex=engine by default)" eval '[ "$(sed -n "s/^LIB_fex=//p" "$LOGS/session.env")" = engine ]'
 
 section "Collect Logs (redaction and the leak check)"
 mkdir -p "$STEAM/config" "$STEAM/logs" "$BOTTLE/drive_c/users/$BUSER/AppData/Roaming/Guild Wars 2"
@@ -1250,6 +1401,11 @@ else
   check "  and which winemac.so ran: the engine's own, no switches" \
     eval '[ "$(grep -A1 "^winemac.so that ran: " "$Z/session-report.txt" | tr "\n" "|")" = "winemac.so that ran: the engine'"'"'s own, athei/wine $ENGINE_WINE|Its switches: none|" ]'
 fi
+# (compatdb.local's FEX_HOSTFEATURES is in the game's rule: a FEX switch the session ran)
+check "  and which FEX ran: the engine's own, with compatdb.local's switch" \
+  eval '[ "$(grep -A1 "^FEX that ran: " "$Z/session-report.txt" | tr "\n" "|")" = "FEX that ran: the engine'"'"'s own, athei/FEX $ENGINE_FEX|Its switches: FEX_HOSTFEATURES=disableavx|" ]'
+check "  system-info names my FEX build in the app (or none) and FEX's files in the engine" \
+  eval 'has "$Z/system-info.txt" "^Versions: .* fex $(fexb && echo "$MYFEX_COMMIT" || echo none) " && has "$Z/system-info.txt" "^  FEX xtajit64.dll: ${GW2_ON_MAC_ENGINE_FEX_DLL_SHA256:0:12} (the engine.s own " && [ -f "$Z/VERSIONS" ] && grep -q "^fex " "$Z/VERSIONS"'
 # (DXMT's wait field is count, the window's total and its longest: two windows with waits and one
 # without, which adds nothing)
 printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60
@@ -1371,6 +1527,39 @@ if drv; then
   g set macdrv mine >/dev/null
 else
   skipdrv "set macdrv engine while a session runs"
+fi
+if fexb; then
+  mv "$ENG/bin/wineserver" "$ENG/bin/wineserver.heat" && cp "$SANDBOX/sleeper" "$ENG/bin/wineserver"
+  "$ENG/bin/wineserver" 60 & sp=$!
+  sleep 0.3
+  check "set fex mine while a session runs: saved, and the engine's own FEX stays (the session's processes have it loaded)" \
+    eval '"$G" set fex mine | grep -q "after Steam has quit" && [ "$(sett fex)" = mine ] && fex_is engine && [ "$(st fex_ready)" = switch ]'
+  kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
+  mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
+  : >"$STANDIN_LOG"; out=$(g play 2>&1); started
+  check "  once it has ended, the next Play puts my FEX in before Wine starts, and says so" \
+    eval 'fex_is mine && echo "$out" | grep -q "^FEX: my FEX (jdrly/FEX ${MYFEX_COMMIT:0:11}) is in the engine, the engine.s own kept next to each" && has "$STANDIN_LOG" "^wine "'
+  check "  the session's record: LIB_fex=mine, its commit and the sha256 of xtajit64.dll in the engine" \
+    eval '[ "$(sed -n "s/^LIB_fex=//p" "$LOGS/session.env")" = "mine $MYFEX_COMMIT $(shasum -a 256 "$COMP/fex/aarch64-windows/libarm64ecfex.dll" | cut -d" " -f1)" ]'
+  printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60\n' >"$LOGS/Gw2-64_d3d11.log"
+  out=$("$APP/Contents/Resources/session-report.sh" 2>&1)
+  check "  the session report's FEX that ran names my commit, as the record does" \
+    has <(echo "$out") "^FEX that ran: my FEX, jdrly/FEX ${MYFEX_COMMIT:0:11} (xtajit64.dll sha256 $(shasum -a 256 "$COMP/fex/aarch64-windows/libarm64ecfex.dll" | cut -c1-12))$"
+  rm -f "$LOGS/Gw2-64_d3d11.log"
+  watch_done
+  # a mix that can't be finished (the engine's own xtajit64.dll gone, mine in its place, the other
+  # two the engine's): Play refuses before anything starts
+  g set fex engine >/dev/null
+  cp "$(fex_src_of aarch64-windows/xtajit64.dll)" "$FW/aarch64-windows/xtajit64.dll"
+  : >"$STANDIN_LOG"; out=$(g play 2>&1) && rc=0 || rc=$?
+  check "a mix of my FEX and the engine's own with one of its files gone: fex_ready=other, Play refuses and starts nothing" \
+    eval '[ "$(st fex_ready)/$(st fex_file)" = other/mix ] && [ "$rc" != 0 ] && echo "$out" | grep -qxF "@error The engine'"'"'s FEX files are a mix of mine and its own. Click Repair." && ! has "$STANDIN_LOG" "^wine "'
+  out=$(g repair 2>&1) && rc=0 || rc=$?
+  check "  repair unpacks the engine again and puts the engine's own FEX in, as fex=engine asks" \
+    eval '[ "$rc" = 0 ] && echo "$out" | grep -q "unpacking the engine again" && fex_is engine && [ "$(st fex_ready)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ]'
+  watch_done
+else
+  skipfex "set fex mine while a session runs, and a mix Play refuses"
 fi
 cp "$SANDBOX/sleeper" "$ENG/bin/Gw2-64.exe"
 "$ENG/bin/Gw2-64.exe" 60 & gp=$!
@@ -1876,7 +2065,7 @@ fi
 out=$(g repair 2>&1) && rc=0 || rc=$?
 check "  repair unpacks the engine again and puts the ntdll.so Settings asks for in: $MYWINE" \
   eval '[ "$rc" = 0 ] && echo "$out" | grep -q "unpacking the engine again" && ntdll_is $MYWINE && [ "$(st wine_ready)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ]'
-check "  and says which ntdll.so and winemac.so are in the engine" has <(echo "$out") "^@done Repaired: .*, with $([ "$MYWINE" = mine ] && echo "my ntdll.so (jdrly/wine ${MYWINE_COMMIT:0:11})" || echo "the engine's own ntdll.so (athei/wine $ENGINE_WINE)"), with $(drv && echo "my winemac.so (jdrly/wine ${MYDRV_COMMIT:0:11})" || echo "the engine's own winemac.so (athei/wine $ENGINE_WINE)")\.$"
+check "  and says which ntdll.so, winemac.so and FEX are in the engine" has <(echo "$out") "^@done Repaired: .*, with $([ "$MYWINE" = mine ] && echo "my ntdll.so (jdrly/wine ${MYWINE_COMMIT:0:11})" || echo "the engine's own ntdll.so (athei/wine $ENGINE_WINE)"), with $(drv && echo "my winemac.so (jdrly/wine ${MYDRV_COMMIT:0:11})" || echo "the engine's own winemac.so (athei/wine $ENGINE_WINE)"), and runs on the engine's own FEX (athei/FEX $ENGINE_FEX)\.$"
 check "  wine.app untouched" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
 # A winemac.so that is neither the engine's own nor mine, and no engine's own next to it
 echo "something else" >"$NT/winemac.so" && rm -f "$NT/winemac.so.engine"
@@ -1947,15 +2136,19 @@ mkdir -p "$SANDBOX/tar-check" && tar -xJf "$QA" -C "$SANDBOX/tar-check"
 check "a quarantined archive: tar alone copies the attribute onto what it unpacks" sh -c "xattr -r '$SANDBOX/tar-check' | grep -q com.apple.quarantine"
 # An app copied out of a DMG downloaded in a browser (a dev build: ad hoc signed, not notarized):
 # its components are quarantined too, and the DXMT tree and version.dll are copied from them
-qc() { find "$COMP/dxmt" -type f; [ ! -d "$COMP/ntdll" ] || find "$COMP/ntdll" -type f; [ ! -d "$COMP/macdrv" ] || find "$COMP/macdrv" -type f; echo "$COMP/ui-scale/version.dll"; }
+qc() { find "$COMP/dxmt" -type f; [ ! -d "$COMP/ntdll" ] || find "$COMP/ntdll" -type f; [ ! -d "$COMP/macdrv" ] || find "$COMP/macdrv" -type f; [ ! -d "$COMP/fex" ] || find "$COMP/fex" -type f; echo "$COMP/ui-scale/version.dll"; }
 qc | while IFS= read -r f; do xattr -w com.apple.quarantine "0083;6731f0a1;Safari;" "$f"; done
 cp -p "$COMP/ui-scale/version.dll" "$SANDBOX/cp-check"
 check "quarantined components: cp -p alone copies the attribute" sh -c "xattr '$SANDBOX/cp-check' | grep -q com.apple.quarantine"
 out=$(g reinstall-engine 2>&1) && rc=0 || rc=$?
 check "reinstall-engine from it: the verified download, unpacked again" eval '[ "$rc" = 0 ] && echo "$out" | grep -q "^@done" && echo "$out" | grep -q "using the verified download"'
 check "  no file of the engine has the quarantine attribute (my DXMT tree, ntdll.so and winemac.so, copied from the components, included)" sh -c "! xattr -r '$ENG' | grep -q com.apple.quarantine"
-check "  graphics=yes after it, the engine as it ships with my DXMT in its tree and the ntdll.so and winemac.so Settings asks for" \
-  eval '[ "$(st graphics)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ] && dxgi_is fork && ntdll_is $MYWINE && winemac_is $MYDRV'
+check "  graphics=yes after it, the engine as it ships with my DXMT in its tree, the ntdll.so and winemac.so Settings asks for and the engine's own FEX" \
+  eval '[ "$(st graphics)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ] && dxgi_is fork && ntdll_is $MYWINE && winemac_is $MYDRV && fex_is engine'
+if fexb; then
+  check "  set fex mine from quarantined components: none of FEX's files in the engine has the attribute" \
+    eval 'g set fex mine >/dev/null && fex_is mine && ! xattr -r "$FW" | grep -q com.apple.quarantine && g set fex engine >/dev/null && fex_is engine'
+fi
 check "  wine.app untouched through all of it" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
 check "set uiscale on: the game folder's version.dll has no quarantine attribute" eval 'g set uiscale on >/dev/null && [ -f "$GD/version.dll" ] && ! xattr "$GD/version.dll" | grep -q com.apple.quarantine'
 g set uiscale off >/dev/null
