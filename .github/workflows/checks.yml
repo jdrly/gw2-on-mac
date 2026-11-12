@@ -98,9 +98,9 @@ jobs:
         if: inputs.components == ''
         run: scripts/stage-components.sh --fetch
 
-      # Until prebuilt.lock pins an archive with my arm64 DXMT (jdrly/dxmt#182) and my ntdll.so
-      # (jdrly/wine's mach9-builds), stand-ins in their layout for what it lacks: what the sandbox
-      # needs, never a release (scripts/release.sh refuses them)
+      # Until prebuilt.lock pins an archive with my arm64 DXMT (jdrly/dxmt#182), my ntdll.so and my
+      # winemac.so (jdrly/wine's mach9-builds), stand-ins in their layout for what it lacks: what
+      # the sandbox needs, never a release (scripts/release.sh refuses them)
       - name: Stand-ins for the components prebuilt.lock doesn't pin
         if: inputs.components == ''
         run: scripts/stage-components.sh --standin
@@ -136,8 +136,8 @@ jobs:
           path: ${{ runner.temp }}/app.tar
           retention-days: 7
 
-      # The refusals change the files this job has finished with. A dev build has no archive, and
-      # my ntdll.so only with its wine_commit.
+      # The refusals change the files this job has finished with. A dev build has no archive, my
+      # ntdll.so only with its wine_commit and my winemac.so only with its macdrv_commit.
       - name: build.sh refuses a changed component, stage-components.sh a changed archive
         env:
           ARCHIVE: ${{ inputs.components == '' }}
@@ -158,36 +158,57 @@ jobs:
             grep 'prebuilt/ntdll does not match its record' "$RUNNER_TEMP/build.txt"
             rm -rf prebuilt/ntdll && cp -R "$RUNNER_TEMP/ntdll" prebuilt/ntdll
           fi
+          if [ -d prebuilt/macdrv ]; then
+            cp -R prebuilt/macdrv "$RUNNER_TEMP/macdrv"
+            printf x >>prebuilt/macdrv/winemac.so
+            if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took a winemac.so that isn't its record's"; exit 1; fi
+            grep 'prebuilt/macdrv does not match its record' "$RUNNER_TEMP/build.txt"
+            rm -rf prebuilt/macdrv && cp -R "$RUNNER_TEMP/macdrv" prebuilt/macdrv
+          fi
           printf 'not the addon' >prebuilt/ui-scale/version.dll
           if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took a changed version.dll"; exit 1; fi
           grep 'version.dll is not the addon' "$RUNNER_TEMP/build.txt"
           [ "$ARCHIVE" = true ] || exit 0
-          # My ntdll.so as a pinned download (prebuilt.lock's ntdll_url and ntdll_sha256), in the
-          # layout of jdrly/wine's asset: a signed dylib in place of the real file, which has no
-          # asset yet. Staged with the right sha256, refused with another.
-          nt="$RUNNER_TEMP/ntdll-asset"
-          mkdir -p "$nt/files"
-          echo 'int gw2om_check;' | clang -x c -dynamiclib -o "$nt/files/ntdll.so" -
+          # My ntdll.so and my winemac.so as pinned downloads (prebuilt.lock's ntdll_url and
+          # ntdll_sha256, macdrv_url and macdrv_sha256), each in the layout of its jdrly/wine asset:
+          # a signed dylib in place of the real file, which has no asset yet. Staged with the right
+          # sha256s, refused with another for either.
           engine_sha="$(sed -n 's/^ENGINE_SHA256=\([0-9a-f]*\).*/\1/p' src/gw2om.sh)"
           engine_wine="$(sed -n 's/^ENGINE_WINE=\([0-9a-f]*\).*/\1/p' src/gw2om.sh)"
-          { echo "wine-11.21-0-g0000000"; echo "commit: 1111111111111111111111111111111111111111"
-            echo "base: $engine_wine"
-            echo "engine: Mach9 v0.3.1 (wine-v0.3.1-macos-arm64.tar.xz, sha256 $engine_sha)"
-            echo "ntdll.so: sha256 $(shasum -a 256 "$nt/files/ntdll.so" | cut -d' ' -f1)"; } >"$nt/files/VERSION"
-          echo "LGPL" >"$nt/files/COPYING.LIB" && echo "Wine's LICENSE" >"$nt/files/LICENSE"
-          tar -cJf "$nt/ntdll-mach9-1111111111111111111111111111111111111111.tar.xz" -C "$nt/files" ntdll.so VERSION COPYING.LIB LICENSE
-          asset_sha="$(shasum -a 256 "$nt/ntdll-mach9-1111111111111111111111111111111111111111.tar.xz" | cut -d' ' -f1)"
+          commit=1111111111111111111111111111111111111111
+          sum() { shasum -a 256 "$1" | cut -d' ' -f1; }
+          asset() { # <kind> <file>: the archive <kind>-mach9-<commit>.tar.xz with <file>; prints its path
+            local d="$RUNNER_TEMP/$1-asset"
+            mkdir -p "$d/files"
+            echo 'int gw2om_check;' | clang -x c -dynamiclib -o "$d/files/$2" -
+            { echo "wine-11.21-0-g0000000"; echo "commit: $commit"; echo "base: $engine_wine"
+              echo "engine: Mach9 v0.3.1 (wine-v0.3.1-macos-arm64.tar.xz, sha256 $engine_sha)"
+              echo "$2: sha256 $(sum "$d/files/$2")"; } >"$d/files/VERSION"
+            echo "LGPL" >"$d/files/COPYING.LIB" && echo "Wine's LICENSE" >"$d/files/LICENSE"
+            tar -cJf "$d/$1-mach9-$commit.tar.xz" -C "$d/files" "$2" VERSION COPYING.LIB LICENSE
+            echo "$d/$1-mach9-$commit.tar.xz"
+          }
+          nt="$(asset ntdll ntdll.so)"
+          md="$(asset macdrv winemac.so)"
+          other="$(echo other | shasum -a 256 | cut -d' ' -f1)"
+          lock() { # <ntdll sha256> <macdrv sha256>
+            cat "$RUNNER_TEMP/prebuilt.lock"
+            echo "ntdll_url=file://$nt"; echo "ntdll_sha256=$1"; echo "macdrv_url=file://$md"; echo "macdrv_sha256=$2"
+          }
           cp prebuilt.lock "$RUNNER_TEMP/prebuilt.lock"
-          { cat "$RUNNER_TEMP/prebuilt.lock"; echo "ntdll_url=file://$nt/ntdll-mach9-1111111111111111111111111111111111111111.tar.xz"
-            echo "ntdll_sha256=$asset_sha"; } >prebuilt.lock
+          lock "$(sum "$nt")" "$(sum "$md")" >prebuilt.lock
           scripts/stage-components.sh --fetch
-          cmp "$nt/files/ntdll.so" prebuilt/ntdll/ntdll.so
-          grep -x 'commit: 1111111111111111111111111111111111111111' prebuilt/ntdll/VERSION
-          grep '^ntdll 1111111111111111111111111111111111111111 ' prebuilt/STAGED
-          { cat "$RUNNER_TEMP/prebuilt.lock"; echo "ntdll_url=file://$nt/ntdll-mach9-1111111111111111111111111111111111111111.tar.xz"
-            echo "ntdll_sha256=$(echo other | shasum -a 256 | cut -d' ' -f1)"; } >prebuilt.lock
+          cmp "$RUNNER_TEMP/ntdll-asset/files/ntdll.so" prebuilt/ntdll/ntdll.so
+          cmp "$RUNNER_TEMP/macdrv-asset/files/winemac.so" prebuilt/macdrv/winemac.so
+          grep -x "commit: $commit" prebuilt/ntdll/VERSION prebuilt/macdrv/VERSION
+          grep "^ntdll $commit ntdll.so " prebuilt/STAGED
+          grep "^macdrv $commit winemac.so " prebuilt/STAGED
+          lock "$other" "$(sum "$md")" >prebuilt.lock
           if scripts/stage-components.sh --fetch >"$RUNNER_TEMP/stage.txt" 2>&1; then echo "stage-components.sh took an ntdll.so archive with another sha256"; exit 1; fi
-          grep 'ntdll-mach9-1111111111111111111111111111111111111111.tar.xz does not match the sha256 in prebuilt.lock' "$RUNNER_TEMP/stage.txt"
+          grep "ntdll-mach9-$commit.tar.xz does not match the sha256 in prebuilt.lock" "$RUNNER_TEMP/stage.txt"
+          lock "$(sum "$nt")" "$other" >prebuilt.lock
+          if scripts/stage-components.sh --fetch >"$RUNNER_TEMP/stage.txt" 2>&1; then echo "stage-components.sh took a winemac.so archive with another sha256"; exit 1; fi
+          grep "macdrv-mach9-$commit.tar.xz does not match the sha256 in prebuilt.lock" "$RUNNER_TEMP/stage.txt"
           cp "$RUNNER_TEMP/prebuilt.lock" prebuilt.lock
           archive=".cache/$(sed -n 's/^sha256=//p' prebuilt.lock)/$(sed -n 's/^file=//p' prebuilt.lock)"
           printf x >>"$archive"

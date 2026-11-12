@@ -48,8 +48,9 @@
 #                                    (APP_FILES, default dist/<name>.files). BUILD_RECORD is the
 #                                    workflow's record of the build; the DMG's sha256 is added to it.
 #                                    DXMT_COMMIT, if set, must be the commit the bundled DXMT names,
-#                                    and WINE_COMMIT, if set, the commit the bundled ntdll.so's
-#                                    VERSION names, with the file's sha256.
+#                                    and WINE_COMMIT and MACDRV_COMMIT, if set, the commit the
+#                                    bundled ntdll.so's and winemac.so's VERSION names, with the
+#                                    file's sha256.
 #   scripts/release.sh --adhoc --no-release the same without the pre-release
 #
 # Releases from GitHub Actions (SWTOR on Mac's .github/workflows/release.yml; this repository has no
@@ -204,6 +205,8 @@ package() {
     { echo "The app bundles the stand-in DXMT (scripts/stage-components.sh --standin); stage the real one" >&2; exit 1; }
   ! grep -q '^stand-in' "$APP/Contents/Resources/components/ntdll/VERSION" 2>/dev/null ||
     { echo "The app bundles the stand-in ntdll.so (scripts/stage-components.sh --standin); stage the real one or none" >&2; exit 1; }
+  ! grep -q '^stand-in' "$APP/Contents/Resources/components/macdrv/VERSION" 2>/dev/null ||
+    { echo "The app bundles the stand-in winemac.so (scripts/stage-components.sh --standin); stage the real one or none" >&2; exit 1; }
   if [ "$MODE" = --adhoc ]; then
     # build.sh's ad hoc signatures, verified and kept: nothing is signed again
     codesign --verify --strict --deep "$APP"
@@ -212,9 +215,10 @@ package() {
   else
     # Inside out: the process lister and the session's lock (helpers/procpaths, sessionlock), my
     # DXMT fork's winemetal.so (gw2om.sh puts it into the engine's DXMT tree, where Wine loads it;
-    # every Mach-O of a notarized app is signed; the PE DLLs are not Mach-O), my ntdll.so if the
-    # app has it (the engine's loader has library validation off, so it loads with my signature
-    # too; the app tells it from the engine's own by its bytes, not by the fork's hash), Sparkle in its
+    # every Mach-O of a notarized app is signed; the PE DLLs are not Mach-O), my ntdll.so and
+    # winemac.so if the app has them (the engine's loader has library validation off, so it loads
+    # them with my signature too; the app tells each from the engine's own by its bytes, not by the
+    # fork's hash), Sparkle in its
     # documented order (Autoupdate, Updater.app, the framework, each with the hardened runtime and
     # no --deep; build.sh removed its XPC services), then the app (app.plist: no exceptions). The
     # engine is downloaded at install time, signed by its author, and nothing goes inside wine.app.
@@ -223,6 +227,7 @@ package() {
     sign "$APP/Contents/Resources/helpers/sessionlock"
     sign "$APP/Contents/Resources/components/dxmt/aarch64-unix/winemetal.so"
     [ ! -f "$APP/Contents/Resources/components/ntdll/ntdll.so" ] || sign "$APP/Contents/Resources/components/ntdll/ntdll.so"
+    [ ! -f "$APP/Contents/Resources/components/macdrv/winemac.so" ] || sign "$APP/Contents/Resources/components/macdrv/winemac.so"
     fw="$APP/$FW_REL"
     sign "$fw/Versions/B/Autoupdate"
     sign "$fw/Versions/B/Updater.app"
@@ -255,7 +260,8 @@ package() {
 
 # --adhoc: the app in the finished DMG is the one build.sh made, file for file, with a valid
 # signature, and it is a dev build of this app: its bundle id, the dev channel, no feed. With
-# DXMT_COMMIT and WINE_COMMIT, it bundles those commits' DXMT and ntdll.so.
+# DXMT_COMMIT, WINE_COMMIT and MACDRV_COMMIT, it bundles those commits' DXMT, ntdll.so and
+# winemac.so.
 check_dmg() {
   local mnt a n err=""
   echo "[release] checking the app in the disk image"
@@ -276,6 +282,11 @@ check_dmg() {
     { grep -qx "commit: $WINE_COMMIT" "$n/VERSION" 2>/dev/null && [ -f "$n/ntdll.so" ] &&
       grep -qx "ntdll.so: sha256 $(shasum -a 256 "$n/ntdll.so" | cut -d' ' -f1)" "$n/VERSION"; } ||
     err="The DMG's app bundles no ntdll.so of commit $WINE_COMMIT with the sha256 its VERSION names"
+  n="$a/Contents/Resources/components/macdrv"
+  [ -n "$err" ] || [ -z "${MACDRV_COMMIT:-}" ] ||
+    { grep -qx "commit: $MACDRV_COMMIT" "$n/VERSION" 2>/dev/null && [ -f "$n/winemac.so" ] &&
+      grep -qx "winemac.so: sha256 $(shasum -a 256 "$n/winemac.so" | cut -d' ' -f1)" "$n/VERSION"; } ||
+    err="The DMG's app bundles no winemac.so of commit $MACDRV_COMMIT with the sha256 its VERSION names"
   detach "$mnt"
   rmdir "$mnt"
   [ -z "$err" ] || { echo "$err" >&2; exit 1; }
