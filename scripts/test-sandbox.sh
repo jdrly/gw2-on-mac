@@ -769,6 +769,11 @@ check "raw mouse-look on: the rules as before, and the dry run's rule has no gcm
 g set dxmt engine >/dev/null
 check "the engine's own DXMT: the game's shader cache is that DXMT's own" rules_are engine-dxmt
 g set dxmt fork >/dev/null
+g set debug on >/dev/null
+check "Debug logging with the engine's ntdll.so: FEX_SILENTLOG=0 for the game, unset for CefHost.exe, and no FEX_PROFILESTATS (my ntdll.so reads the counters)" \
+  rules_are debug-engine
+g set debug off >/dev/null
+check "  Debug logging off: neither" rules_are off
 # My ntdll.so's switches (HEAT_SWITCHES): after the cache path, taken away from CefHost.exe again
 if mine; then
   # dry_rule: the game's rule a dry run of Play prints, which has to be the rules' first line
@@ -780,8 +785,10 @@ if mine; then
   check "job wakes on: WINE_HEAT_WAKE=one,skip for the game, unset for CefHost.exe" rules_are jobwakes
   check "  a dry run of Play prints the game's rule with it" eval '[ "$(dry_rule)" = "$(g rules | head -1)" ]'
   g set debug on >/dev/null
-  check "  with Debug logging: the counters too, written to the logs folder" rules_are jobwakes-debug
-  g set debug off >/dev/null; g set jobwakes off >/dev/null; g set eventpool on >/dev/null
+  check "  with Debug logging: the counters too, written to the logs folder, and FEX's counters and messages" rules_are jobwakes-debug
+  g set debug off >/dev/null
+  check "  Debug logging off again: neither of FEX's variables" eval 'rules_are jobwakes && ! g rules | grep -q FEX_'
+  g set jobwakes off >/dev/null; g set eventpool on >/dev/null
   check "event pool on: WINE_HEAT_EVPOOL=1 for the game, unset for CefHost.exe" rules_are eventpool
   check "  a dry run of Play prints the game's rule with it" eval '[ "$(dry_rule)" = "$(g rules | head -1)" ]'
   g set eventpool off >/dev/null; g set fastlocks on >/dev/null
@@ -811,8 +818,8 @@ if mine; then
   cp "$SANDBOX/ntdll-VERSION.keep" "$COMP/ntdll/VERSION"
   g set debug on >/dev/null; g set wine engine >/dev/null
   out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
-  check "wine engine, every switch and Debug logging on: no WINE_HEAT_* in the rules or in a dry run of Play" \
-    eval '! g rules | grep -q WINE_HEAT_ && ! echo "$out" | grep -q WINE_HEAT_ && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=[^;]*$"'
+  check "wine engine, every switch and Debug logging on: no WINE_HEAT_* nor FEX_PROFILESTATS in the rules or in a dry run of Play, FEX_SILENTLOG=0 alone" \
+    eval 'rules_are debug-engine && ! echo "$out" | grep -qE "WINE_HEAT_|FEX_PROFILESTATS" && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=[^;]*;env=FEX_SILENTLOG=0$"'
   g set debug off >/dev/null; g set wine mine >/dev/null; g set jobwakes off >/dev/null; g set eventpool off >/dev/null; g set fastlocks off >/dev/null
 else
   out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
@@ -1034,7 +1041,43 @@ EOF
     [ "$(table --from 2 --to 12 | head -2 | tr '\n' '|')" = "Server requests of thread 00a4, the game thread, in heat-requests-4242.log from 2.0 to 12.0 s: blocks wholly inside 1, covering 5.0 s; each count, then a second in brackets|  get_message 300 (60.0), 0.600 ms (0.120)|" ]
   check "  a log of this format: no game thread table, workers line or other thread's requests" \
     eval '[ "$("$APP/Contents/Resources/session-report.sh" 2>&1 | grep -cE "^(The game thread|The workers|Server requests)")" = 1 ]'
-  rm -f "$LOGS/heat-4242.log" "$LOGS/heat-requests-4242.log" "$SANDBOX/requests.want"
+  check "  no fex lines in the blocks, no FEX_SILENTLOG=0 in the rule: nothing of FEX's" \
+    eval '! "$APP/Contents/Resources/session-report.sh" 2>&1 | grep -qE "^(FEX|Memory ordering)"'
+  # (the same blocks with FEX's counters, in the line my ntdll.so writes per jdrly/gw2-on-mac#111;
+  # no real session has them yet. The game thread compiles 2.5 s in its first block and little in
+  # the next two, with #117's four counts in the second; the other thread got no slot)
+  fexl() { printf 'fex jit_ms %s jit %s miss %s rlock_ms 1.000 wlock_ms 0.500 smc 0 sigbus 0 float 2 signal_ms 0.100 dcache_hit 0 dcache_miss 0 dcache_ms 0.000%s\n' "$@"; }
+  awk -v a="$(fexl 2500.000 30000 9000 '')" -v b="$(fexl 20.000 100 500 ' tso_switches 4 native_exits 120 code_buffer_moves 1 l1_resizes 0')" \
+      -v c="$(fexl 900.000 8000 2000 '')" '
+    { print }
+    /^requests thread 00a4 / { n++; print (n == 1 ? a : n == 2 ? b : c) }
+    /^requests thread 0024 / { print "fex has no slot of 36" }' "$LOGS/heat-requests-4242.log" >"$SANDBOX/requests.fex"
+  mv -f "$SANDBOX/requests.fex" "$LOGS/heat-requests-4242.log"
+  cat >"$SANDBOX/fex.want" <<'EOF'
+FEX's counters of thread 00a4, the game thread, in heat-requests-4242.log from 0.0 to 10.0 s: 2 blocks, covering 10.0 s
+  In all: compiling 2520.0 ms, 30100 blocks; lookup cache misses 9500, its lock 2.0 ms read, 1.0 ms write; SMC 0; signals 0.2 ms
+  A second, the median and the highest 5 s: compiling 252.0 and 500.0 ms, lookup cache misses 950 and 1800
+  Compile bursts, compiling over 10% of the time: at 0.0 s for 5.0 s, 30000 blocks
+  Also, in all: sigbus 0, float 4, dcache_hit 0, dcache_miss 0, dcache_ms 0.000, tso_switches 4, native_exits 120, code_buffer_moves 1, l1_resizes 0
+FEX's counters of thread 0024, another thread: none, FEX had no slot left for it (36 in use). Its stats have room for about 36 threads and can't grow on macOS.
+EOF
+  fex() { "$APP/Contents/Resources/session-report.sh" "$@" 2>&1 | awk '/^FEX/ { p = 1; print; next } p && /^  / { print; next } { p = 0 }'; }
+  check "  with fex lines: the request table as before" diff "$SANDBOX/requests.want" <(table)
+  check "  FEX's counters of the game thread in the heat log's run, the names the report doesn't know as they are, and the thread without a slot" \
+    diff "$SANDBOX/fex.want" <(fex)
+  check "  --to 15: three blocks, and a second burst" \
+    has <(fex --from 0 --to 15) "^  Compile bursts, compiling over 10% of the time: at 0.0 s for 5.0 s, 30000 blocks; at 10.0 s for 5.0 s, 8000 blocks$"
+  # (FEX_SILENTLOG=0 in the rule: FEX's lines in wine.log, "<level> <thread id> <message>")
+  cp -p "$LOGS/session.env" "$SANDBOX/session.env.keep"; cp "$LOGS/wine.log" "$SANDBOX/wine.log.fex"
+  sed -i '' 's/^\(RULE=exe=Gw2-64\.exe;.*\)$/\1;env=FEX_SILENTLOG=0/' "$LOGS/session.env"; touch -t 202601010000 "$LOGS/session.env"
+  printf '0024:err:module:import_dll x\nI 01A4 FEX: Using hardware TSO\nE 01A4 FEX: a failure\nD 01B0 something\n' >"$LOGS/wine.log"
+  check "  FEX said it uses hardware TSO: the line, and FEX's lines and errors" \
+    has <("$APP/Contents/Resources/session-report.sh" 2>&1) "^Memory ordering: hardware TSO (FEX said so); FEX wrote 3 lines to wine.log, 1 of them errors$"
+  printf '0024:err:module:import_dll x\n' >"$LOGS/wine.log"
+  check "  FEX said nothing: it says so" \
+    has <("$APP/Contents/Resources/session-report.sh" 2>&1) "^FEX didn't say it uses hardware TSO; FEX wrote 0 lines to wine.log$"
+  mv -f "$SANDBOX/session.env.keep" "$LOGS/session.env"; mv -f "$SANDBOX/wine.log.fex" "$LOGS/wine.log"
+  rm -f "$LOGS/heat-4242.log" "$LOGS/heat-requests-4242.log" "$SANDBOX/requests.want" "$SANDBOX/fex.want"
   # (a heat log in jdrly/gw2-on-mac#99's format: timers, sleeps by length, rows that end in their
   # start address and name; the game thread lacks evpool_hit and spin_scoped. Three workers, a
   # thread with less than half their wakes, two more threads)

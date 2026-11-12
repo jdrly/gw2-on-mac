@@ -36,7 +36,20 @@
 # threads with the most server time in the interval, each under its name and start address. The
 # frames are DXMT's (frames= on its GPU lines, summed over the session) for the whole run, and the
 # game thread's select requests in the blocks for an interval: GW2 polls its socket once a frame.
-# Without either the report gives no frame column. My Mac
+# Without either the report gives no frame column.
+# With Debug logging the game's rule has FEX_PROFILESTATS=1, and my ntdll.so puts FEX's counters of
+# a block's thread into the block, one line after "requests thread" (the format is in
+# jdrly/gw2-on-mac#111): "fex jit_ms <ms> jit <n> miss <n> rlock_ms <ms> wlock_ms <ms> smc <n>
+# sigbus <n> float <n> signal_ms <ms> dcache_hit <n> dcache_miss <n> dcache_ms <ms>", the change
+# since that thread's last block, more names maybe after those; or "fex has no slot of <n>"; or
+# "fex stats version <v> slot <bytes>". From the same blocks as the request tables, for each thread
+# with such lines (the game thread first) the report prints the totals, the median and the highest
+# 5 s block of compile time and of lookup cache misses a second, the compile bursts (blocks in a row
+# where compiling took over 10% of the time: the first is the start, a later one of similar size a
+# discard or a new map) and every other name summed as it is. The rule has FEX_SILENTLOG=0 too, and
+# FEX's lines go to wine.log ("<I|E|D> <thread id in hex> <message>", "A <message>" for an
+# assertion): the report says whether one was "FEX: Using hardware TSO", and how many FEX wrote and
+# how many of them were errors. My Mac
 # driver writes its macsurface lines to wine.log for Gw2-64.exe ("hwnd <h> ...: <n> flushes, ..."
 # every 600 flushes of a window): the report prints the last line of the window with the most
 # flushes, which is the launcher's (it flushes about 40 times a second; the game draws with Metal).
@@ -205,9 +218,21 @@ wine_report() {
     $1 == "requests" {
       t = $3; take = ($2 == "thread" && $5 + 0 >= from && $7 + 0 <= end)
       if (take) { if (!(t in blocks)) tids[++ntids] = t; blocks[t]++; covered[t] += $7 - $5 }
+      bfrom = $5 + 0; bto = $7 + 0
       next
     }
     !take { next }
+    # the counters FEX keeps for the thread of the block: the series, by block, and the sum of each name
+    $1 == "fex" {
+      if (!(t in fseen)) { fseen[t] = 1; forder[++nfex] = t }
+      if ($2 == "has" || $2 == "stats") { fmsg[t] = $0; next }
+      k = ++fexn[t]; ffrom[t, k] = bfrom; fto[t, k] = bto
+      for (i = 2; i < NF; i += 2) {
+        if (!((t, $i) in fsum)) fnames[t, ++nfnames[t]] = $i
+        fsum[t, $i] += $(i + 1); fv[t, k, $i] = $(i + 1) + 0
+      }
+      next
+    }
     $1 == "req" { k = t SUBSEP $2; if (!(k in rn)) names[t, ++nnames[t]] = $2; rn[k] += $3; rt[k] += $4; next }
     $1 == "message" { k = t SUBSEP $2; if (!(k in mn)) msgs[t, ++nmsgs[t]] = $2; mn[k] += $3; next }
     $1 == "set_cursor" || $1 == "get_message" || $1 == "set_queue_mask" {
@@ -257,6 +282,51 @@ wine_report() {
       if ((t, "unlisted") in mn) out = out (out == "" ? "" : ", ") "unlisted " rate(mn[t, "unlisted"], c)
       if (out != "") print "  message: " out
       split_line(t, "set_queue_mask")
+    }
+    # the median of a[1..n], which it sorts
+    function median(a, n,    i, j, x) {
+      for (i = 2; i <= n; i++) { x = a[i]; j = i - 1; while (j > 0 && a[j] > x) { a[j + 1] = a[j]; j-- } a[j + 1] = x }
+      return n % 2 ? a[(n + 1) / 2] : (a[n / 2] + a[n / 2 + 1]) / 2
+    }
+    # the counters FEX keeps for thread <t>, <what> it is
+    function fex_thread(t, what,    k, d, c, n, jr, mr, jmax, mmax, hot, inb, bs, be, bj, out, i, m, w) {
+      if (!fexn[t]) {
+        m = fmsg[t]; split(m, w, " ")
+        if (w[2] == "has") printf "FEX\047s counters of thread %s, %s: none, FEX had no slot left for it (%s in use). Its stats have room for about 36 threads and can\047t grow on macOS.\n", t, what, w[6]
+        else printf "FEX\047s counters of thread %s, %s: my ntdll.so can\047t read them (%s)\n", t, what, substr(m, 5)
+        return
+      }
+      c = 0; n = 0; jmax = 0; mmax = 0
+      for (k = 1; k <= fexn[t]; k++) {
+        d = fto[t, k] - ffrom[t, k]; c += d
+        if (d <= 0) continue
+        jr[++n] = fv[t, k, "jit_ms"] / d; mr[n] = fv[t, k, "miss"] / d
+        if (jr[n] > jmax) jmax = jr[n]
+        if (mr[n] > mmax) mmax = mr[n]
+      }
+      printf "FEX\047s counters of thread %s, %s, in %s from %.1f to %.1f s: %d blocks, covering %.1f s\n", t, what, reqname, from, to, fexn[t], c
+      printf "  In all: compiling %.1f ms, %.0f blocks; lookup cache misses %.0f, its lock %.1f ms read, %.1f ms write; SMC %.0f; signals %.1f ms\n", \
+        fsum[t, "jit_ms"], fsum[t, "jit"], fsum[t, "miss"], fsum[t, "rlock_ms"], fsum[t, "wlock_ms"], fsum[t, "smc"], fsum[t, "signal_ms"]
+      if (n) printf "  A second, the median and the highest 5 s: compiling %.1f and %.1f ms, lookup cache misses %.0f and %.0f\n", median(jr, n), jmax, median(mr, n), mmax
+      # (blocks in a row whose compile time is over 10% of their time: ms over 100 times the seconds)
+      out = ""; inb = 0
+      for (k = 1; k <= fexn[t]; k++) {
+        d = fto[t, k] - ffrom[t, k]; hot = (d > 0 && fv[t, k, "jit_ms"] > 100 * d)
+        if (hot) { if (!inb) { inb = 1; bs = ffrom[t, k]; bj = 0 } be = fto[t, k]; bj += fv[t, k, "jit"] }
+        if (inb && (!hot || k == fexn[t])) { out = out (out == "" ? "" : "; ") sprintf("at %.1f s for %.1f s, %.0f blocks", bs, be - bs, bj); inb = 0 }
+      }
+      print "  Compile bursts, compiling over 10% of the time: " (out == "" ? "none" : out)
+      out = ""
+      for (i = 1; i <= nfnames[t]; i++) {
+        m = fnames[t, i]; if (m ~ /^(jit_ms|jit|miss|rlock_ms|wlock_ms|smc|signal_ms)$/) continue
+        out = out (out == "" ? "" : ", ") m " " sprintf(m ~ /_ms$/ ? "%.3f" : "%.0f", fsum[t, m])
+      }
+      if (out != "") print "  Also, in all: " out
+    }
+    # every thread with FEX lines in the interval, the game thread first
+    function fex_report(    i) {
+      if (game in fseen) fex_thread(game, "the game thread")
+      for (i = 1; i <= nfex; i++) if (forder[i] != game) fex_thread(forder[i], forder[i] in tname ? who(forder[i]) : "another thread")
     }
     # counter or timer <k> of the game thread: from its blocks, or from the heat log totals
     function v(k) { return (useblk ? bc[k] : gv[k]) + 0 }
@@ -343,6 +413,7 @@ wine_report() {
       if ("name" in gv) { game_table(); workers() }
       if (reqname == "") exit
       req_table(game, "the game thread")
+      fex_report()
       if (!("name" in gv)) exit
       # the two other threads with the most server time in the interval
       for (j = 1; j <= 2; j++) {
@@ -351,6 +422,22 @@ wine_report() {
         odone[b] = 1; req_table(b, who(b))
       }
     }' "$heat" ${req:+"$req"}
+}
+
+# fex_tso_report: with FEX_SILENTLOG=0 in the game's rule, what FEX said in wine.log about memory
+# ordering, how many lines it wrote and how many of them were errors (E) or assertions (A)
+fex_tso_report() {
+  grep -qE '^RULE=exe=Gw2-64\.exe;(.*;)?env=FEX_SILENTLOG=0(;|$)' "$LOGS/session.env" && [ -f "$LOGS/wine.log" ] || return 0
+  LC_ALL=C awk '
+    /^[IEDA] [0-9A-F]+ / || /^A / { lines++ }
+    /^E [0-9A-F]+ / || /^A / { errors++ }
+    /FEX: Using hardware TSO/ { tso = 1 }
+    END {
+      s = (tso ? "Memory ordering: hardware TSO (FEX said so)" : "FEX didn\047t say it uses hardware TSO")
+      s = s sprintf("; FEX wrote %d lines to wine.log", lines)
+      if (errors) s = s sprintf(", %d of them errors", errors)
+      print s
+    }' "$LOGS/wine.log"
 }
 
 # macdrv_report: the winemac.so the session loaded and its switches (session.env), and the last
@@ -394,6 +481,7 @@ report() {  # <log>
       echo "Mouse the game had: the mouse's own counts from GameController (the engine's built-in rule)"
     fi
     wine_report "$(get "$s" gpu_frames)"
+    fex_tso_report
     macdrv_report
   fi
   if [ "$(get "$s" sessions)" = 0 ]; then
