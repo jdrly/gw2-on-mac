@@ -217,7 +217,7 @@ place.
 | Mouse | Raw mouse-look | `rawmouse` | on | on, the game's raw input is the mouse's own counts from GameController; off, it is the pointer's movement, see below |
 | | Mouse-look speed | `mousespeed` | 1× | a factor on the mouse's own counts, from 0.5× to 3×, which my `winemac.so` applies before the game gets them (`WINE_MACDRV_MOUSE_SCALE`). The game's own camera settings apply on top. Greyed while *Raw mouse-look* is off, while the engine's own `winemac.so` is chosen, or while my file in this app doesn't have the switch |
 | Updates | Check automatically | `updates` | on | Sparkle checks for new versions. Off in development builds, which have no update feed |
-| Troubleshooting | Debug logging | `debug` | off | DXMT's log at `debug` and Wine's errors, for a bug report, at some cost in performance. With my `winemac.so`, also its `macsurface` lines for `Gw2-64.exe`. On in development builds |
+| Troubleshooting | Debug logging | `debug` | off | DXMT's log at `debug` and Wine's errors, for a bug report, at some cost in performance. With my `winemac.so`, also its `macsurface` lines for `Gw2-64.exe`. FEX's messages too, and with my `ntdll.so` FEX's counters. On in development builds |
 
 ### Raw mouse-look
 
@@ -591,7 +591,17 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   `WINE_HEAT_SPIN=lock=20:game,event=30:game`. `WINE_HEAT_MSYNC_UNREG=1` has no setting and goes
   in whenever my file is in place, as on 0.1.x. An entry whose variable the file's `VERSION`
   doesn't list on its `switches:` line stays out. Debug logging adds `WINE_HEAT_COUNT=1` and
-  `WINE_HEAT_LOG` with the logs folder, where my file writes `heat-<pid>.log` every 5 seconds.
+  `WINE_HEAT_LOG` with the logs folder, where my file writes `heat-<pid>.log` every 5 seconds,
+  and `FEX_PROFILESTATS=1`, which makes FEX keep its counters per thread for my file to read.
+  They cost FEX a timer read at the start and end of each compile and each locked lookup, which
+  is why they ride on Debug logging. Debug logging also adds `FEX_SILENTLOG=0` with either
+  `ntdll.so`, so FEX's own messages go to `wine.log`. That is more than the line about hardware
+  TSO the report looks for. FEX's debug messages are compiled into the engine's build, so FEX then
+  writes a line for every exception it handles, and one for each piece of self-modifying code and
+  each unaligned atomic it handles. It writes each line the moment it happens, on the thread
+  that hit it. A session with many of them gets a longer `wine.log` and may run slower. Nobody has
+  measured that in the game yet. The session report prints FEX's line count and lines a second,
+  so one session with Debug logging shows it.
   `CefHost.exe`'s rule unsets each of them again with an empty value.
 - The `WINE_MACDRV_*` entries are my `winemac.so`'s, rows of the same table. Each goes in only
   while my driver is in place, whatever `wine` says, and `CefHost.exe`'s rule unsets it. *Launcher
@@ -825,6 +835,19 @@ last session from DXMT's own log lines:
   frames are its `select` requests, since GW2 polls its socket once a frame. Also the job workers
   summed in one line, and the request tables of the two other threads the log follows, under their
   names and start addresses
+- FEX's counters, from the `fex` lines my `ntdll.so` puts into the same blocks, for each thread
+  that has them, the game thread first: the time spent compiling and the blocks compiled, lookup
+  cache misses and the time on the cache's lock, writes to code pages (SMC) and signal time, in
+  all; compile time and misses a second, as the median of the blocks and the highest one; and the
+  compile bursts, each run of blocks where compiling took over 10% of the time, with its start,
+  length and blocks compiled. A block without counters ends a burst. The first burst is the
+  game's start. A later one of similar size is FEX throwing its code away, or a new map. Counters
+  the report has no words for are summed under their own names. A thread FEX had no slot for says
+  so: FEX's stats have room for about 36 threads and can't grow on macOS. A line my `ntdll.so`
+  wrote instead of counters is printed whole
+- with Debug logging, whether FEX said in `wine.log` that it uses hardware TSO, the Mac's own x86
+  memory ordering, and how many lines FEX wrote there, how many a second from Play to the log's
+  last line, and how many were errors
 - which `winemac.so` ran and its switches, and with Debug logging the last `macsurface` line of
   the launcher's window from `wine.log`. The launcher's is the window with the most flushes, about
   40 a second, since the game draws with Metal

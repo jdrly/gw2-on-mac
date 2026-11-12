@@ -895,7 +895,11 @@ switch_in_file() {
 # heat_entries: the entries for the game's rule, one a line and already through cdb_value (a
 # newline in the logs folder's path can't split one): the switches that are on and whose file is
 # mine and, with Debug logging and my ntdll.so, its counters (WINE_HEAT_COUNT), which it writes to
-# the logs folder as heat-<pid>.log every 5 s. None of a file while the engine's own is in place.
+# the logs folder as heat-<pid>.log every 5 s, and FEX's counters (FEX_PROFILESTATS=1: FEX keeps
+# them per thread, my ntdll.so reads them; each costs FEX a timer read around every compile and
+# locked lookup). None of a file while the engine's own is in place. With Debug logging, whichever
+# ntdll.so, FEX_SILENTLOG=0 too: FEX's messages go to wine.log, where the session report looks for
+# "FEX: Using hardware TSO".
 heat_entries() {
   local k e v wine macdrv
   wine=$(lib_in_use wine) macdrv=$(lib_in_use macdrv)
@@ -907,7 +911,9 @@ heat_entries() {
     switch_in_file "$e" || continue
     cdb_value "$e"; echo
   done
-  if [ "$wine" = mine ] && [ "$(setting debug)" = on ]; then echo WINE_HEAT_COUNT=1; echo "WINE_HEAT_LOG=$(cdb_value "$LOGS")"; fi
+  [ "$(setting debug)" = on ] || return 0
+  if [ "$wine" = mine ]; then echo WINE_HEAT_COUNT=1; echo "WINE_HEAT_LOG=$(cdb_value "$LOGS")"; echo FEX_PROFILESTATS=1; fi
+  echo FEX_SILENTLOG=0
 }
 # write_rules: compatdb.rules from the settings, then compatdb.local as it is (a temporary file
 # and a rename, so a process that starts meanwhile reads the old rules or the new, never half)
