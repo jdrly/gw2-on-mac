@@ -898,6 +898,8 @@ last session from DXMT's own log lines:
 - which `winemac.so` ran and its switches, and with Debug logging the last `macsurface` line of
   the launcher's window from `wine.log`. The launcher's is the window with the most flushes, about
   40 a second, since the game draws with Metal
+- "FEX that ran": my FEX with its commit or the engine's own, and the `FEX_*` entries of the game's
+  rule
 - for each `vmmap` file taken since the session started: the minutes in, the footprint and FEX's
   code buffers by size, as "16M full, 32M full, 64M 25.4M resident; FEX has thrown its code away 2
   times"
@@ -911,8 +913,6 @@ the largest is the one in use and every other one is a discard. The full region 
 game is about 50,000 lines, and nothing reads it. `vmmap` stops the game while it reads it, so
 nothing takes one on a timer. The file's first line has the game's pid, its seconds since start
 and how long `vmmap` took, which is the longest the game can have stood still.
-- "FEX that ran": my FEX with its commit or the engine's own, and the `FEX_*` entries of the game's
-  rule
 
 # Development
 

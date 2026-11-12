@@ -19,9 +19,9 @@
 # gcmouse=false), which ntdll.so ran (LIB_wine: mine with its commit, or the engine's own) and its
 # switches (the WINE_HEAT_* entries of the game's rule), which winemac.so ran (LIB_macdrv) and its
 # switches (WINE_MACDRV_* and WINE_WIN32U_*), and which FEX ran (LIB_fex: mine with its commit, or
-# the engine's own) and its switches (the FEX_* entries of the game's rule). With Debug logging my ntdll.so writes its
-# counters to heat-<pid>.log in the logs folder: the report reads the newest one written since the
-# session started, and from it the game thread's row, the thread with the most semaphore releases
+# the engine's own) and its switches (the FEX_* entries of the game's rule). With Debug logging my
+# ntdll.so writes its counters to heat-<pid>.log in the logs folder: the report reads the newest
+# one written since the session started, and from it the game thread's row, the thread with the most semaphore releases
 # (it hands the job workers their jobs: about 49,000 a second, the workers a few thousand). Next to
 # it, heat-requests-<pid>.log has blocks of the game thread's server requests, each the change since
 # that thread's last block ("requests thread <tid> from <s> to <s> time <epoch>", jdrly/wine#15):
@@ -514,6 +514,8 @@ vmmap_report() {
         printf "vmmap %s (%s): footprint %s, peak %s; code buffers %s\n", at, name, fp, peak, out
       }' "$f"
   done
+}
+
 # fex_report: the FEX the session ran (session.env's LIB_fex: mine <commit> <sha256>, or engine)
 # and the FEX_* entries of the game's rule
 fex_report() {
