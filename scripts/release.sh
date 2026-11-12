@@ -193,6 +193,25 @@ attach() {
   else hdiutil attach -quiet -readonly -nobrowse -noverify -mountpoint "$2" "$1"; fi
 }
 detach() { hdiutil detach -quiet "$1" || hdiutil detach -quiet -force "$1"; }
+# make_dmg <folder>: $DMG from <folder>, saying what hdiutil said when it fails (-quiet would close
+# its output). GitHub's macOS runners sometimes fail it with "Resource busy", the temporary image
+# still attached as hdiutil detaches it: that one is tried again, 3 times in all, 15 s apart. Any
+# other failure stops at once.
+make_dmg() {
+  local try out
+  for try in 1 2 3; do
+    [ "$try" = 1 ] || rm -f "$DMG"
+    out=$(hdiutil create -volname "$APP_NAME $VERSION" -srcfolder "$1" -fs HFS+ -format ULMO "$DMG" 2>&1) && return 0
+    printf '%s\n' "$out" >&2
+    case "$out" in
+      *"Resource busy"*) echo "[release] hdiutil create: Resource busy (try $try of 3)" >&2 ;;
+      *) echo "[release] hdiutil create failed" >&2; return 1 ;;
+    esac
+    [ "$try" = 3 ] || sleep 15
+  done
+  echo "[release] hdiutil create failed with Resource busy 3 times" >&2
+  return 1
+}
 
 # Copies, signs and packages the app into $DMG, and notarizes it unless --no-notarize. --adhoc
 # keeps build.sh's ad hoc signatures and checks the app in the DMG instead.
@@ -250,7 +269,7 @@ package() {
   mkdir -p "$stage"
   ditto "$APP" "$stage/$APP_NAME.app"
   ln -s /Applications "$stage/Applications"
-  hdiutil create -quiet -volname "$APP_NAME $VERSION" -srcfolder "$stage" -fs HFS+ -format ULMO "$DMG"
+  make_dmg "$stage"
   rm -rf "$stage"
   if [ "$MODE" = --adhoc ]; then check_dmg; return; fi
   codesign --force --timestamp --sign "$IDENTITY" "$DMG"

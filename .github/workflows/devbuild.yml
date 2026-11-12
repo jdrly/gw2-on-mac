@@ -561,7 +561,7 @@ jobs:
 
       # On a copy of the scripts and the app; a stand-in gh that knows the tag, so nothing reaches
       # GitHub and no token is passed
-      - name: release.sh refuses the stand-in DXMT, ntdll.so, winemac.so and FEX, a version below build.sh's and a tag that exists
+      - name: release.sh refuses the stand-in DXMT, ntdll.so, winemac.so and FEX, a version below build.sh's and a tag that exists, and says why hdiutil failed
         run: |
           copy="$RUNNER_TEMP/copy"
           mkdir -p "$copy" "$RUNNER_TEMP/fake-gh"
@@ -606,6 +606,20 @@ jobs:
             'echo "stand-in gh: $*" >&2; exit 1' >"$RUNNER_TEMP/fake-gh/gh"
           chmod +x "$RUNNER_TEMP/fake-gh/gh"
           PATH="$RUNNER_TEMP/fake-gh:$PATH" GW2_ON_MAC_PUBLISH=1 refuse "a tag that exists" "Tag v$VERSION already exists" --adhoc
+          # A stand-in hdiutil whose create fails with HDIUTIL_SAYS (the rest goes to the real one):
+          # release.sh prints what it said, tries Resource busy 3 times and anything else once
+          mkdir -p "$RUNNER_TEMP/fake-hdiutil"
+          # shellcheck disable=SC2016 # (the stand-in's lines, literally)
+          printf '%s\n' '#!/bin/bash' \
+            '[ "$1" = create ] || exec /usr/bin/hdiutil "$@"' \
+            'echo x >>"$RUNNER_TEMP/hdiutil.calls"; echo "hdiutil: create failed - $HDIUTIL_SAYS" >&2; exit 1' >"$RUNNER_TEMP/fake-hdiutil/hdiutil"
+          chmod +x "$RUNNER_TEMP/fake-hdiutil/hdiutil"
+          rm -f "$RUNNER_TEMP/hdiutil.calls"
+          PATH="$RUNNER_TEMP/fake-hdiutil:$PATH" HDIUTIL_SAYS="Resource busy" refuse "a disk image hdiutil couldn't make" "hdiutil create failed with Resource busy 3 times" --adhoc --no-release
+          [ "$(grep -c '^hdiutil: create failed - Resource busy$' "$RUNNER_TEMP/release.txt")/$(wc -l <"$RUNNER_TEMP/hdiutil.calls" | tr -d ' ')" = 3/3 ]
+          rm -f "$RUNNER_TEMP/hdiutil.calls"
+          PATH="$RUNNER_TEMP/fake-hdiutil:$PATH" HDIUTIL_SAYS="No space left on device" refuse "a disk image hdiutil couldn't make" "hdiutil: create failed - No space left on device" --adhoc --no-release
+          [ "$(wc -l <"$RUNNER_TEMP/hdiutil.calls" | tr -d ' ')" = 1 ]
           rm -rf "$copy"
 
       - name: release.sh --adhoc
