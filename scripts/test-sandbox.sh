@@ -659,6 +659,13 @@ if fexb; then
       eval '[ "$(st fex_file)/$(st fex_ready)" = "$want/switch" ] && out=$(g set fex mine 2>&1) && fex_is mine && [ -z "$(FEXLEFT | grep "\.new$")" ] && { [ $n = 0 ] || echo "$out" | grep -q "^FEX: the engine.s FEX files are a mix of my FEX and the engine.s own, a switch cut short; finishing the switch to my FEX"; }'
     g set fex engine >/dev/null
   done
+  # the other way after a cut on the way to mine: set fex engine puts the engine's own back and
+  # removes the copies that switch made
+  for n in 0 1 2 3 4 5; do
+    fex_cut mine $n
+    check "cut short on the way to mine after $n of 6 renames, then set fex engine: the engine's own, nothing left over" \
+      eval 'g set fex engine >/dev/null && fex_is engine && [ -z "$(FEXLEFT)" ]'
+  done
   for n in 1 2; do
     g set fex mine >/dev/null
     fex_cut engine $n
@@ -924,16 +931,27 @@ if mine; then
   check "my ntdll.so, every switch off: WINE_HEAT_MSYNC_UNREG=1 alone, unset for CefHost.exe" rules_are heat-off
   check "  a dry run of Play prints the game's rule with it" eval '[ "$(dry_rule)" = "$(g rules | head -1)" ]'
   # (with my FEX in place too: the FEX my ntdll.so's sampler may read, from my FEX's VERSION, after
-  # WINE_HEAT_MSYNC_UNREG=1; only if my ntdll.so's VERSION has no switches: line or names it)
-  if fexb && { ! grep -q '^switches:' "$COMP/ntdll/VERSION" || grep -q '^switches:.* WINE_HEAT_PROF_FEX\( \|$\)' "$COMP/ntdll/VERSION"; }; then
+  # WINE_HEAT_MSYNC_UNREG=1, only for an ntdll.so whose VERSION names it on its switches: line; no
+  # line, an empty one or one without it is no. The staged VERSION back after)
+  if fexb; then
     FEXID=$(sed -n 's/^libarm64ecfex\.dll: build id \([0-9a-f]\{32\}\) age \([0-9]\{1,\}\), SizeOfImage \(0x[0-9a-f]\{1,\}\)$/\1:\2:\3/p' "$COMP/fex/VERSION")
+    cp "$COMP/ntdll/VERSION" "$SANDBOX/ntdll-VERSION.prof"
+    nt_switches() { { grep -v '^switches:' "$SANDBOX/ntdll-VERSION.prof"; [ "$1" = none ] || echo "switches:${1#-}"; } >"$COMP/ntdll/VERSION"; }
     g set fex mine >/dev/null
-    check "  and my FEX in place: WINE_HEAT_PROF_FEX=<its build id>:<age>:<SizeOfImage> after it, unset for CefHost.exe" \
+    nt_switches " WINE_HEAT_MSYNC_UNREG WINE_HEAT_PROF_FEX"
+    check "  and my FEX in place, my ntdll.so's VERSION naming it: WINE_HEAT_PROF_FEX=<build id>:<age>:<SizeOfImage> after it, unset for CefHost.exe" \
       eval '[ -n "$FEXID" ] && [ "$(g rules | sed "s|$H|/Users/me|g" | tr "\n" "|")" = "$(head -1 "$FIX/heat-off.rules");env=WINE_HEAT_PROF_FEX=$FEXID|$(tail -1 "$FIX/heat-off.rules");env=WINE_HEAT_PROF_FEX=|" ]'
+    for sw in none - " WINE_HEAT_MSYNC_UNREG"; do
+      nt_switches "$sw"
+      check "  an ntdll.so VERSION with $([ "$sw" = none ] && echo "no switches: line" || { [ "$sw" = - ] && echo "an empty switches: line" || echo "a switches: line without it"; }): no WINE_HEAT_PROF_FEX" \
+        eval '! g rules | grep -q WINE_HEAT_PROF_FEX'
+    done
+    nt_switches " WINE_HEAT_MSYNC_UNREG WINE_HEAT_PROF_FEX"
     g set wine engine >/dev/null
     check "  my FEX with the engine's own ntdll.so: no WINE_HEAT_PROF_FEX" eval '! g rules | grep -q WINE_HEAT_PROF_FEX'
     g set wine mine >/dev/null; g set fex engine >/dev/null
     check "  the engine's own FEX with my ntdll.so: none either" rules_are heat-off
+    cp "$SANDBOX/ntdll-VERSION.prof" "$COMP/ntdll/VERSION"
   fi
   g set jobwakes on >/dev/null
   check "job wakes on: WINE_HEAT_WAKE=one,skip for the game, unset for CefHost.exe" rules_are jobwakes

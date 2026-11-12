@@ -632,7 +632,8 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   in whenever my file is in place, as on 0.1.x. `WINE_HEAT_PROF_FEX=<build id>:<age>:<SizeOfImage>`
   tells my file's sampler which FEX it may read: it goes in while my FEX is in place too, with the
   values its `VERSION` gives for `libarm64ecfex.dll`, since a build id can't say that a FEX is mine
-  and the app, which installed it, can. An entry whose variable the file's `VERSION`
+  and the app, which installed it, can. It needs my file's `switches:` line to name it; a file
+  without the line doesn't get it. Any other entry whose variable the file's `VERSION`
   doesn't list on its `switches:` line stays out. Debug logging adds `WINE_HEAT_COUNT=1` and
   `WINE_HEAT_LOG` with the logs folder, where my file writes `heat-<pid>.log` every 5 seconds,
   and `FEX_PROFILESTATS=1`, which makes FEX keep its counters per thread for my file to read.

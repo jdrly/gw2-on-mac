@@ -888,7 +888,8 @@ EOF
 #                   in place, as 0.1.x always sets it (#44)
 #   fex             the FEX my ntdll.so's sampler may read (#111): while my FEX is in place, its
 #                   libarm64ecfex.dll's build id, age and SizeOfImage from its VERSION
-#                   (fex_prof_id). A build id can't tell that a FEX is mine; the app installed it
+#                   (fex_prof_id). A build id can't tell that a FEX is mine; the app installed it.
+#                   Only for an ntdll.so whose switches: line names it (no line is no)
 HEAT_SWITCHES="
 jobwakes WINE_HEAT_WAKE=one,skip
 eventpool WINE_HEAT_EVPOOL=1
@@ -927,6 +928,7 @@ heat_entries() {
     [ -n "$k" ] && v=$(setting "$k") && [ "$v" != off ] || continue
     if [ "$k" = fex ]; then
       [ "$fex" = mine ] && v=$(fex_prof_id) && [ -n "$v" ] || continue
+      grep -q '^switches:' "$COMP/ntdll/VERSION" 2>/dev/null || continue
       e=$e$v
     else
       case "$e" in *=) [ "$v" != "$(setting_default "$k")" ] || continue; e=$e$v ;; esac
@@ -1322,6 +1324,8 @@ fex_switch() {
   local want cur f p todo=""
   want=$(fex_want)
   cur=$(fex_in_place)
+  # (copies a switch to mine cut short left, whichever way this one goes)
+  for f in $FEX_FILES; do [ ! -e "$FEX_DIR/$f.new" ] || run rm -f "$FEX_DIR/$f.new"; done
   [ "$cur" != "$want" ] || return 0
   if ! fex_kept; then
     # (fex_state says other: Play and set say Repair)
@@ -1337,7 +1341,6 @@ fex_switch() {
   fi
   for f in $todo; do
     p="$FEX_DIR/$f"
-    run rm -f "$p.new"
     run cp -p "$(fex_src "$f")" "$p.new"
     # (cp -p copies the quarantine attribute of an app copied out of a browser's download)
     [ -n "$DRY" ] || xattr -d com.apple.quarantine "$p.new" 2>/dev/null || true
