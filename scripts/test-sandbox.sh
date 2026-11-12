@@ -892,7 +892,59 @@ if mine; then
   out=$("$APP/Contents/Resources/session-report.sh" 2>&1)
   check "  the session's heat log: the game thread's row, a second" \
     has <(echo "$out") "^Heat log heat-4242.log (10 s): the game thread, thread 00a4 (the most releases), a second: release 49000, wake_skipped 41000, wake_one 8000, wake_none 0, server 7$"
-  rm -f "$LOGS/heat-4242.log"
+  check "  no requests file: no request table" eval '! echo "$out" | grep -q "^Server requests"'
+  # (its requests file, in jdrly/wine#15's format: two blocks of the game thread inside the heat
+  # log's 10 s, one of another thread, and one of the game thread after them, which don't count)
+  cat >"$LOGS/heat-requests-4242.log" <<'EOF'
+requests thread 00a4 from 0.0 to 5.0 time 1762912345
+req set_cursor 1000 20.000
+req get_message 200 0.400
+req set_queue_mask 50 0.100
+set_cursor handle 1000 repeat 990 count 0 pos 0 clip 0 noclip 0
+get_message internal 100 other 100 none 0
+message 0x80001ff1 100
+message 0x8001 100
+message unlisted 0
+set_queue_mask poll 50 nopoll 0
+requests thread 0024 from 0.0 to 5.0 time 1762912345
+req set_cursor 7777 9.000
+set_cursor handle 7777 repeat 7777 count 0 pos 0 clip 0 noclip 0
+get_message internal 0 other 0 none 0
+message unlisted 0
+set_queue_mask poll 0 nopoll 0
+requests thread 00a4 from 5.0 to 10.0 time 1762912350
+req get_message 300 0.600
+req set_cursor 10 0.200
+req select 5 0.050
+set_cursor handle 10 repeat 10 count 0 pos 0 clip 0 noclip 0
+get_message internal 0 other 300 none 100
+message 0x8001 200
+message unlisted 3
+set_queue_mask poll 0 nopoll 0
+requests thread 00a4 from 10.0 to 15.0 time 1762912355
+req set_cursor 5555 50.000
+set_cursor handle 5555 repeat 0 count 0 pos 0 clip 0 noclip 0
+get_message internal 0 other 0 none 0
+message 0x8001 4444
+message unlisted 0
+set_queue_mask poll 0 nopoll 0
+EOF
+  table() { "$APP/Contents/Resources/session-report.sh" "$@" 2>&1 | awk '/^Server requests/ { p = 1; print; next } p && /^  / { print; next } { p = 0 }'; }
+  cat >"$SANDBOX/requests.want" <<'EOF'
+Server requests of thread 00a4, the game thread, in heat-requests-4242.log from 0.0 to 10.0 s: blocks wholly inside 2, covering 10.0 s; each count, then a second in brackets
+  set_cursor 1010 (101.0), 20.200 ms (2.020)
+  get_message 500 (50.0), 1.000 ms (0.100)
+  set_queue_mask 50 (5.0), 0.100 ms (0.010)
+  select 5 (0.5), 0.050 ms (0.005)
+  set_cursor: handle 1010 (101.0), repeat 1000 (100.0), count 0 (0.0), pos 0 (0.0), clip 0 (0.0), noclip 0 (0.0)
+  get_message: internal 100 (10.0), other 400 (40.0), none 100 (10.0)
+  message: 0x8001 300 (30.0), 0x80001ff1 100 (10.0), unlisted 3 (0.3)
+  set_queue_mask: poll 50 (5.0), nopoll 0 (0.0)
+EOF
+  check "  its requests file: the game thread's blocks in the heat log's run summed, a second too" diff "$SANDBOX/requests.want" <(table)
+  check "  --from 2 --to 12: only the block wholly inside, and the 5 s it covers" \
+    [ "$(table --from 2 --to 12 | head -2 | tr '\n' '|')" = "Server requests of thread 00a4, the game thread, in heat-requests-4242.log from 2.0 to 12.0 s: blocks wholly inside 1, covering 5.0 s; each count, then a second in brackets|  get_message 300 (60.0), 0.600 ms (0.120)|" ]
+  rm -f "$LOGS/heat-4242.log" "$LOGS/heat-requests-4242.log" "$SANDBOX/requests.want"
 else
   check "  and which ntdll.so ran: the engine's own, no switches" \
     eval 'has "$Z/session-report.txt" "^ntdll.so that ran: the engine.s own, athei/wine $ENGINE_WINE$" && has "$Z/session-report.txt" "^Its switches: none$"'
