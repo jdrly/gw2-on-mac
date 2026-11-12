@@ -42,6 +42,8 @@ set -u
 APP_NAME="GW2 on Mac"
 APP_FOLDER="GW2 on Mac arm64"
 RES="$(cd "$(dirname "$0")" && pwd)"
+# release or dev (build.sh's app.properties, as gw2om.sh reads it)
+CHANNEL="$(sed -n 's/^channel=//p' "$RES/app.properties" 2>/dev/null || true)"
 ROOT="${GW2_ON_MAC_ROOT:-}"
 H="${ROOT:+$ROOT/home}"
 H="${H:-$HOME}"
@@ -363,7 +365,9 @@ ls -t "$LOGS"/heat-[0-9]*.log 2>/dev/null | head -3 | while IFS= read -r f; do
   add_log "$f" 5000000
   add_log "$LOGS/heat-requests-${f##*/heat-}" 5000000
 done
-for f in settings.conf state install-manifest.json dxmt.conf compatdb.rules compatdb.local dev-switches.conf; do add "$APPDIR/$f"; done
+for f in settings.conf state install-manifest.json dxmt.conf compatdb.rules compatdb.local; do add "$APPDIR/$f"; done
+# (a release reads no dev-switches.conf, even one a development build left)
+[ "$CHANNEL" != dev ] || add "$APPDIR/dev-switches.conf"
 add "$RES/VERSIONS"
 # the game's and Steam's own logs (game_rules)
 add_log "$GW2_APPDATA/ArenaNet.log" 5000000 game-logs game

@@ -774,7 +774,10 @@ setting_state() {
         if lib_bundled "$l"; then echo "off:Needs $n, and the engine's own $LIB is chosen."
         else echo "off:Needs $n, which this build of the app doesn't have."
         fi
-      elif switch_in_file "$e"; then echo ok
+      elif switch_in_file "$e"; then
+        if dev_sets "$e"; then echo "off:Set in dev-switches.conf (${e%%=*}). Take its line out there to use this row."
+        else echo ok
+        fi
       elif [ "$l" = macdrv ]; then echo "off:My Mac driver in this app (jdrly/wine $(lib_commit macdrv | cut -c1-11)) doesn't have this switch."
       else echo "off:My Wine build in this app (jdrly/wine $(lib_commit wine | cut -c1-11)) doesn't have this switch."
       fi ;;
@@ -948,12 +951,14 @@ switch_lib() { case "$1" in '') ;; WINE_MACDRV_*|WINE_WIN32U_*) echo macdrv ;; *
 # or my winemac.so) reads its variable. Its VERSION names the commit, not the switches, and a
 # commit can't tell which of them it has. So the answer comes from a line "switches: <variable> …"
 # (every switch variable the file reads) when VERSION has one, and is yes when it hasn't.
+# switch_named <entry>: the same, but no without the line (a development build's lines,
+# dev_lines, need the record to name them)
 switch_in_file() {
-  local f="$COMP/ntdll/VERSION"
-  [ "$(switch_lib "$1")" != macdrv ] || f="$COMP/macdrv/VERSION"
-  grep -q '^switches:' "$f" 2>/dev/null || return 0
-  in_list "${1%%=*}" "$(sed -n 's/^switches://p' "$f" | head -1)"
+  grep -q '^switches:' "$(switch_version "$1")" 2>/dev/null || return 0
+  switch_named "$1"
 }
+switch_named() { in_list "${1%%=*}" "$(sed -n 's/^switches://p' "$(switch_version "$1")" 2>/dev/null | head -1)"; }
+switch_version() { if [ "$(switch_lib "$1")" = macdrv ]; then echo "$COMP/macdrv/VERSION"; else echo "$COMP/ntdll/VERSION"; fi; }
 # heat_entries: the entries for the game's rule, one a line and already through cdb_value (a
 # newline in the logs folder's path can't split one): the switches that are on and whose file is
 # mine and, with Debug logging and my ntdll.so, its counters (WINE_HEAT_COUNT), which it writes to
@@ -1025,14 +1030,17 @@ fex_entries() {
 # delete is off. The game's rule gets every line left, after the rows' entries (dev_entries), and
 # CefHost.exe has them unset as it has the others. A line of the table below goes in only while
 # the file of mine that reads it is in place and has the switch:
-#   wine    my ntdll.so, its VERSION's switches: line (switch_in_file)
+#   wine    my ntdll.so, its VERSION's switches: line (switch_named; a VERSION without the line
+#           names none)
 #   macdrv  my winemac.so, the same
 #   win32u  my win32u.so, which comes in the same build as my winemac.so and on its switches:
 #           line. Nothing of the app puts it into the engine yet, so its lines stay out.
 #   fex     my FEX, its VERSION's switches: line (fex_in_version)
 #   fexany  FEX's own option, which the engine's FEX has too: always
 #   dxmt    my DXMT fork. Its build carries no record of its switches: the app looks for the
-#           variable's name in its DLLs (dxmt_names), where each switch it reads is a string.
+#           variable's name in the DLLs of the fork's tree in the engine (dxmt_names), where each
+#           switch it reads is a string. That tree can be an earlier build of mine while Steam
+#           still runs with it, so it's the one read, not this app's.
 # A line that isn't in the table (one I added) goes in as it is. What stays out is said once in the
 # log at each start (launch), and status and the session report list what went in.
 #
@@ -1041,9 +1049,13 @@ fex_entries() {
 # file's (its line version=): each row newer than the file whose variable the file doesn't name,
 # not even commented out, is added at the end, on. Nothing else in the file changes. A switch goes
 # in at the value that turns its new behaviour on. Not in it: diagnostics (Debug logging has
-# them), anything that can cap the frame rate below 60 (DXMT_PRESENT_QUEUE=two), a value only I
-# can choose (the mouse speed, DXMT_CHUNKS), a switch that brings back upstream's behaviour
-# (DXMT_DEPTH_PFV, DXMT_STENCIL_PFV), and the rows' own variables. A fork's issues are
+# them), anything that can cap the frame rate below 60 (DXMT_PRESENT_QUEUE=two; the lower thread
+# priorities DXMT_THREAD_PRIORITY, DXMT_COMPILE_PRIORITY and DXMT_RENDER_THREAD_PRIORITY, which
+# are tuning values, and lower priorities cost frames in crowds on 0.1.x; DXMT_BG_POLICY=occlusion,
+# which throttles the game whenever another window covers it), a value only I can choose (the
+# mouse speed, DXMT_CHUNKS), a switch that brings back upstream's behaviour (DXMT_DEPTH_PFV,
+# DXMT_STENCIL_PFV), and the rows' own variables. A row whose variable a line of the file sets is
+# greyed while the line is there (dev_sets): the file's entry comes later in the rule and wins. A fork's issues are
 # jdrly/<fork>#n, the app's #n. Unplayed: no session of the game has run with it.
 DEV_SWITCHES="
 1 wine #14,#45 unplayed WINE_HEAT_SPIN=lock=20:game,event=30:game,sem=5:game the Faster locks row's two spins, and the job workers spin 5 µs on their semaphore before they sleep. While this line is here, its value replaces the row's.
@@ -1062,10 +1074,6 @@ DEV_SWITCHES="
 1 dxmt jdrly/dxmt#157 unplayed DXMT_PRESENT_QUEUE=pace Present sleeps after a frame whose nextDrawable blocked (never two, which can latch 30 fps). Needs DXMT_STATS, on by default.
 1 dxmt jdrly/dxmt#159 unplayed DXMT_WARM_JOBS=2 with Shader warming, two speculative jobs at once while Metal's cache is cold
 1 dxmt jdrly/dxmt#147 unplayed DXMT_SKIP_SAME_SRV=1 SetShaderResources skips a slot that already holds the incoming view
-1 dxmt jdrly/dxmt#151 unplayed DXMT_THREAD_PRIORITY=utility DXMT's encode and finish threads at base priority 20 instead of time-critical
-1 dxmt jdrly/dxmt#152 unplayed DXMT_COMPILE_PRIORITY=utility the compile workers at base priority 20 instead of time-critical
-1 dxmt jdrly/dxmt#9 unplayed DXMT_RENDER_THREAD_PRIORITY=3 the game's render thread at HIGHEST and in the user-interactive QoS class
-1 dxmt jdrly/dxmt#15 unplayed DXMT_BG_POLICY=occlusion the background frame cap waits for the window to be hidden, not for another app to have the focus
 1 dxmt jdrly/dxmt#5 played DXMT_PSO_ARCHIVE=1 Metal binary archives of the pipelines, looked up in the last 4 sessions' archives
 1 dxmt jdrly/dxmt#75 unplayed DXMT_PSO_GENERATIONS=1 the archives published as generations instead of one file a session
 1 dxmt jdrly/dxmt#73 unplayed DXMT_COMPILE_DEMAND=1 the compile service's declared policy (Shader warming turns it on too)
@@ -1082,6 +1090,10 @@ dev_piece_label() {
     dxmt) echo "my DXMT fork" ;;
   esac
 }
+# dev_sets <entry of a row>: in a development build, a line of dev-switches.conf sets the entry's
+# variable and goes into the rule (my file's record names it: the row's caller has checked that the
+# file is mine)
+dev_sets() { [ -n "$DEV_ON" ] && grep -q "^${1%%=*}=" "$DEV_FILE" 2>/dev/null && switch_named "$1"; }
 # dev_file_version: dev-switches.conf's version= (0 without the file or the line)
 dev_file_version() {
   local v
@@ -1127,11 +1139,13 @@ dev_update() {
   } | put "$DEV_FILE" 644
   say "dev-switches.conf: version $DEV_SWITCHES_VERSION, switched on: $(printf '%s' "${added:-nothing}" | tr '\n' ' ')"
 }
-# dxmt_names: the DXMT_* names in my DXMT fork's DLLs in this app, those the game loads
-# (aarch64-windows), one a line (every byte that can't be in a name splits them, so a name inside a
-# longer one doesn't count)
+# dxmt_names: the DXMT_* names in the DLLs the game loads (aarch64-windows) of my DXMT fork's tree
+# in the engine, or of this app's build without an engine, one a line (every byte that can't be in a
+# name splits them, so a name inside a longer one doesn't count)
 dxmt_names() {
-  find "$COMP/dxmt/aarch64-windows" -type f -name '*.dll' -exec cat {} + 2>/dev/null | LC_ALL=C tr -c 'A-Z0-9_' '\n' |
+  local d="$DXGI/dxmt/aarch64-windows"
+  [ -d "$d" ] || d="$COMP/dxmt/aarch64-windows"
+  find "$d" -type f -name '*.dll' -exec cat {} + 2>/dev/null | LC_ALL=C tr -c 'A-Z0-9_' '\n' |
     LC_ALL=C grep -x 'DXMT_[A-Z0-9_]*' | LC_ALL=C sort -u || true
 }
 # dev_lines: dev-switches.conf's switch lines in a development build, one a line: "in NAME=value"
@@ -1152,7 +1166,7 @@ dev_lines() {
           macdrv) [ "$macdrv" = mine ] ;;
           win32u) [ -f "$COMP/macdrv/win32u.so" ] && cmp -s "$COMP/macdrv/win32u.so" "$UNIX_DIR/win32u.so" ;;
         esac || why="$(dev_piece_label "$piece") isn't in the engine"
-        [ -n "$why" ] || switch_in_file "$l" || why="$(dev_piece_label "$piece") doesn't have it" ;;
+        [ -n "$why" ] || switch_named "$l" || why="$(dev_piece_label "$piece") doesn't have it" ;;
       fex)
         if [ "$fex" != mine ]; then why="$(dev_piece_label fex) isn't in the engine"
         elif ! fex_in_version "$l"; then why="$(dev_piece_label fex) doesn't have it"

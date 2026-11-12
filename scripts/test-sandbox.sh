@@ -2482,6 +2482,13 @@ check "a development build's fresh install: dev-switches.conf, version= first, e
 check "  each under a comment that names its piece and its issue and says played or unplayed" comments_ok "$DEVF"
 check "  the rows on, once: settings.conf at dev_version=1" rows_on "$DAD/settings.conf"
 check "  and the install said both" eval 'echo "$out" | grep -q "^Development build: the switch rows on, once: jobwakes=on " && echo "$out" | grep -q "^dev-switches.conf: version $DEVVER, switched on: "'
+if mine; then
+  check "  Faster locks greyed while the file's WINE_HEAT_SPIN line sets it, set refused" \
+    eval '[ "$(dg settings | sed -n "s/^fastlocks_state=//p")" = "off:Set in dev-switches.conf (WINE_HEAT_SPIN). Take its line out there to use this row." ] && ! dg set fastlocks off >/dev/null 2>&1'
+  sed -i '' 's/^WINE_HEAT_SPIN=/#WINE_HEAT_SPIN=/' "$DEVF"
+  check "  that line commented out: the row works again" eval '[ "$(dg settings | sed -n "s/^fastlocks_state=//p")" = ok ]'
+  sed -i '' 's/^#WINE_HEAT_SPIN=/WINE_HEAT_SPIN=/' "$DEVF"
+fi
 if fexb; then
   check "  my FEX in the engine (fex=mine)" eval '[ "$(dg status | sed -n "s/^fex_file=//p")" = mine ]'
 fi
@@ -2509,6 +2516,25 @@ dg set dxmt engine >/dev/null
 check "  the engine's own DXMT: no DXMT_* line in the rule, each left out saying so" \
   eval 'no_dxmt_lines && dg status | sed -n "s/^dev_switches_out=//p" | grep -q "DXMT_PRESENT_QUEUE=pace (my DXMT fork isn'"'"'t in the engine)"'
 dg set dxmt fork >/dev/null
+# My DXMT fork's tree in the engine is what's read, not this app's build: it can be an earlier
+# build while Steam runs with it. Its DLLs replaced by one without a name, then by one with only
+# DXMT_PRESENT_QUEUE (the tree back after)
+DTREE="$DAD/engine/lib/wine/dxgi/dxmt/aarch64-windows"
+rm -rf "$SANDBOX/dtree.keep" && cp -Rp "$DTREE" "$SANDBOX/dtree.keep"
+for f in "$DTREE"/*.dll; do echo "an earlier build" >"$f"; done
+check "an earlier build of my DXMT fork in the engine: its DXMT_* lines out, saying so" \
+  eval '! dg status | grep "^dev_switches=" | grep -q DXMT_ && dg status | sed -n "s/^dev_switches_out=//p" | grep -q "DXMT_PRESENT_QUEUE=pace (my DXMT fork doesn'"'"'t have it)"'
+printf 'x\0DXMT_PRESENT_QUEUE\0' >"$DTREE/d3d11.dll"
+check "  one that has DXMT_PRESENT_QUEUE: that line in, the others out" \
+  eval 'dg status | grep "^dev_switches=" | grep -q DXMT_PRESENT_QUEUE=pace && dg status | sed -n "s/^dev_switches_out=//p" | grep -q "DXMT_PRESENTER_FREE=1 (my DXMT fork doesn'"'"'t have it)"'
+rm -rf "$DTREE" && cp -Rp "$SANDBOX/dtree.keep" "$DTREE"
+if mine; then
+  # (a VERSION without a switches: line names nothing for a development build's lines)
+  grep -v '^switches:' "$DEVKEEP/ntdll" >"$COMP/ntdll/VERSION"
+  check "my ntdll.so's VERSION without a switches: line: WINE_HEAT_SPIN's line out, saying so" \
+    eval 'dg status | sed -n "s/^dev_switches_out=//p" | grep -q "WINE_HEAT_SPIN=lock=20:game,event=30:game,sem=5:game (my ntdll.so doesn'"'"'t have it)"'
+  dev_switches_line ntdll WINE_HEAT_COUNT WINE_HEAT_EVPOOL WINE_HEAT_LOG WINE_HEAT_MSYNC_UNREG WINE_HEAT_SPIN WINE_HEAT_WAKE
+fi
 cp "$DEVF" "$SANDBOX/devf.keep"
 cp "$DAD/settings.conf" "$SANDBOX/devsettings.keep"
 out=$(dg repair 2>&1)
@@ -2548,6 +2574,10 @@ check "  a second start changes nothing" eval 'same "$RDEVF" "$SANDBOX/rdevf.kee
 dgr set rawmouse off >/dev/null
 dgr repair >/dev/null 2>&1
 check "  raw mouse-look off afterwards stays off" eval 'grep -qx rawmouse=off "$RAD/settings.conf"'
+mkdir -p "$SANDBOX/relzip"
+zip=$(GW2_ON_MAC_ROOT="$RROOT" "$RELR/collect-logs.sh" "$SANDBOX/relzip" 2>/dev/null | tail -1)
+check "a release's Collect Logs leaves out the dev-switches.conf a development build left" \
+  eval '[ -f "$RDEVF" ] && [ -f "$zip" ] && unzip -l "$zip" | grep -q settings.conf && ! unzip -l "$zip" | grep -q dev-switches.conf'
 for k in ntdll macdrv fex; do [ ! -f "$DEVKEEP/$k" ] || cp "$DEVKEEP/$k" "$COMP/$k/VERSION"; done
 rm -rf "$DROOT" "$RROOT" "$DEVR" "$RELR"
 

@@ -670,12 +670,15 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   `gw2om.sh` when its version is newer than the file's `version=` line: a switch the file doesn't
   name yet, not even commented out, is added at the end, on, and nothing else changes. The table
   has every switch of my forks that is off by default, at the value that turns its new behaviour
-  on, apart from diagnostics, anything that can cap the frame rate below 60, values only I can
-  choose and the rows' own variables. A line of the table goes in only while the file of mine that
+  on, apart from diagnostics, anything that can cap the frame rate below 60 (DXMT's lower thread
+  priorities and `DXMT_BG_POLICY=occlusion` among them), values only I can choose and the rows'
+  own variables. A row whose variable a line of the file sets, *Faster locks* with the file's
+  `WINE_HEAT_SPIN`, is greyed while that line is there, since the file's entry wins. A line of the table goes in only while the file of mine that
   reads it is in place and has the switch: the `switches:` line of my `ntdll.so`'s,
-  `winemac.so`'s or FEX's `VERSION`. My `win32u.so` comes in my Mac driver's build, but nothing
+  `winemac.so`'s or FEX's `VERSION` (a `VERSION` without that line names none). My `win32u.so` comes in my Mac driver's build, but nothing
   of the app puts it into the engine yet, so its lines stay out. My DXMT fork's build has no such
-  record: the app looks for the name in the fork's DLLs, where each switch it reads is a string.
+  record: the app looks for the name in the DLLs of the fork's tree in the engine, where each
+  switch it reads is a string. That tree can be an earlier build while Steam still runs with it.
   `FEX_DYNAMICL1CACHE` is FEX's own and goes in with either FEX. The log says at each start what
   stays out and why, and `status` prints `dev_switches=` and `dev_switches_out=`.
 - A `compatdb.local` that I put in the app's folder is appended as it is, for trying FEX switches
