@@ -137,6 +137,8 @@ reg() {
     insec && $0 == n { found = 1 } END { exit !found }' "$BOTTLE/user.reg" 2>/dev/null
 }
 ALL_MAC='Software\\\\Wine\\\\Mac Driver'
+ALL_X11='Software\\\\Wine\\\\X11 Driver'
+GW2_X11='Software\\\\Wine\\\\AppDefaults\\\\Gw2-64.exe\\\\X11 Driver'
 same() { cmp -s "$1" "$2"; }
 # the session's file, and waits (up to 10 s) for its watcher to reach a stage or end
 sess() { sed -n "s/^$1=//p" "$AD/session" 2>/dev/null; }
@@ -354,7 +356,7 @@ check "  bin/wine and lib/wine/aarch64-unix/wine still link to the loader in win
   eval '[ "$(readlink "$ENG/bin/wine")" = ../$LOADER ] && [ "$(readlink "$ENG/lib/wine/aarch64-unix/wine")" = wine.app/Contents/MacOS/wine ]'
 check "  no Game Mode bundle (the engine's loader is the Game Mode app)" [ ! -e "$AD/gamemode" ]
 check "RetinaMode=y in the bottle" reg "$ALL_MAC" RetinaMode y
-check "EmulateModeset=Y" reg 'Software\\\\Wine\\\\X11 Driver' EmulateModeset Y
+check "EmulateModeset=N (0.1.x's behaviour, not Mach9's launcher's Y: #90)" reg "$ALL_X11" EmulateModeset N
 check "ShowCrashDialog=dword:0" eval 'regsec "Software\\\\\\\\Wine\\\\\\\\WineDbg" | grep -qx "\"ShowCrashDialog\"=dword:00000000"'
 check "  nothing for Gw2-64.exe (AppDefaults) and no raw mouse-look values" sh -c "! grep -q -e AppDefaults -e RawMouse '$BOTTLE/user.reg'"
 check "wineboot with WINEMSYNC=1 and winemenubuilder off, nothing else of the app's" \
@@ -1046,8 +1048,13 @@ sleep 0.3
 check "busy=session with the engine's wineserver" [ "$(st busy)" = session ]
 check "uninstall refused while it runs" sh -c "! '$G' uninstall >/dev/null 2>&1"
 check "repair refused while it runs" sh -c "! '$G' repair >/dev/null 2>&1"
+# (a bottle from an earlier 0.2 build: EmulateModeset=Y, and a value of mine for Gw2-64.exe only)
+sed -i '' 's/^"EmulateModeset"="N"$/"EmulateModeset"="Y"/' "$BOTTLE/user.reg"
+printf '\n[Software\\\\Wine\\\\AppDefaults\\\\Gw2-64.exe\\\\X11 Driver] 1700000000\n"EmulateModeset"="Y"\n' >>"$BOTTLE/user.reg"
 check "set retina off while it runs: saved" sh -c "'$G' set retina off | grep -q 'after Steam has quit' && [ \"\$('$G' settings | sed -n 's/^retina=//p')\" = off ]"
 check "  but the registry waits (Wine reads it at the session's start)" reg "$ALL_MAC" RetinaMode y
+check "  and EmulateModeset=Y from an earlier 0.2 build stays until then, as Gw2-64.exe's own does" \
+  eval 'reg "$ALL_X11" EmulateModeset Y && reg "$GW2_X11" EmulateModeset Y'
 check "set dxmt engine while it runs: saved, and the tree waits (the session's processes have it loaded)" \
   eval '"$G" set dxmt engine | grep -q "after Steam has quit" && [ "$(sett dxmt)" = engine ] && dxgi_is fork && [ "$(st graphics)" = switch ]'
 check "set rawmouse off while it runs: saved, for the next game start with Steam still open (the rules are written at each)" \
@@ -1056,6 +1063,11 @@ check "set arcdps on while it runs: refused, nothing placed" eval '! "$G" set ar
 kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
 mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
 check "  once it has ended, the switch goes through" eval 'g set dxmt engine >/dev/null && dxgi_is engine && g set dxmt fork >/dev/null && dxgi_is fork'
+: >"$STANDIN_LOG"; g play >/dev/null 2>&1; started
+check "  the next Play writes EmulateModeset=N" reg "$ALL_X11" EmulateModeset N
+check "    and leaves Gw2-64.exe's own Y alone (two values in all)" \
+  eval 'reg "$GW2_X11" EmulateModeset Y && [ "$(grep -c "^\"EmulateModeset\"=" "$BOTTLE/user.reg")" = 2 ]'
+watch_done
 if mine; then
   mv "$ENG/bin/wineserver" "$ENG/bin/wineserver.heat" && cp "$SANDBOX/sleeper" "$ENG/bin/wineserver"
   "$ENG/bin/wineserver" 60 & sp=$!

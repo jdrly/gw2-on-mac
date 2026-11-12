@@ -592,9 +592,16 @@ registry_lock() {
 }
 registry_unlock() { [ -z "$DRY" ] && [ -z "${SESSION_LOCKED:-}" ] || return 0; exec 8>&-; }
 
-# The bottle's registry settings, the three values Mach9's own launcher writes: RetinaMode (from
-# settings.conf), EmulateModeset and ShowCrashDialog off. Only while no session runs or starts (Wine reads user.reg when its wineserver
-# starts and writes it back), else at the next game start that finds none (play).
+# The bottle's registry settings: RetinaMode (from settings.conf), EmulateModeset off and
+# ShowCrashDialog off. Mach9's own launcher writes EmulateModeset on; 0.1.x never writes it. I
+# write it off, as N, so a bottle with Y from an earlier 0.2 build loses it (#90). With Y, moving
+# the cursor made the frame interval saw between 16.7 and 33 ms, where 0.1.x stays at 16.7: win32u
+# fakes the game's mode set and drops its gamma ramp (dlls/win32u/dc.c), so the window server flips
+# the game's frames straight to the display and each cursor update blocks a frame's swap (the
+# value is measured in play, the gamma part read from samples). The game's Gamma slider did
+# nothing either. Values under AppDefaults stay as they are. Only while no session runs or starts
+# (Wine reads user.reg when its wineserver starts and writes it back), else at the next game start
+# that finds none (play).
 apply_registry() {
   [ -f "$BOTTLE/user.reg" ] || [ -n "$DRY" ] || return 0
   if ! registry_lock; then
@@ -607,7 +614,7 @@ apply_registry() {
     return 0
   fi
   set_reg "$REG_MAC" RetinaMode "\"$([ "$(setting retina)" = on ] && echo y || echo n)\""
-  set_reg "$REG_X11" EmulateModeset '"Y"'
+  set_reg "$REG_X11" EmulateModeset '"N"'
   set_reg "$REG_WINEDBG" ShowCrashDialog dword:00000000
   registry_unlock
 }
