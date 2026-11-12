@@ -150,7 +150,7 @@ func installer(_ state: String) -> Installer {
     st = st.merging(["macdrv": "engine", "macdrv_file": "engine", "macdrv_commit": "53def89293a",
                      "macdrv_release": ""]) { $1 }
   case "ready-other":
-    // another ntdll.so (an earlier build of mine) that the next Play replaces
+    // another ntdll.so (an earlier build of mine) that the next Play replaces, next to my winemac.so
     st = st.merging(["wine_ready": "switch", "wine_file": "other", "wine_commit": "", "wine_release": ""]) { $1 }
   case "ready-repair":
     // an earlier version's install whose engine graphics aren't the engine's own: Repair
@@ -346,7 +346,8 @@ func renderAll(_ dir: URL, exports: URL?) async {
       ("ready", [:], "Wine 11.21 · d831f80", "DXMT 0.80 · 2483559"),
       ("ready-engine", [:], engine, "DXMT · d903db8"),
       ("ready-mixed", [:], "Mach9 0.3.1 · ntdll d831f80", "DXMT 0.80 · 2483559"),
-      ("ready-other", [:], "Mach9 0.3.1 · another ntdll", "DXMT 0.80 · 2483559"),
+      ("ready-mixed", other, "Mach9 0.3.1 · another ntdll", "DXMT 0.80 · 2483559"),
+      ("ready-other", [:], "another ntdll · winemac d831f80", "DXMT 0.80 · 2483559"),
       ("ready-engine", ["macdrv_file": "mine", "macdrv_commit": "d831f808236c", "macdrv_release": "11.21"],
        "Mach9 0.3.1 · winemac d831f80", "DXMT · d903db8"),
       ("ready", ["macdrv_commit": "1a2b3c4d5e6f"], "ntdll d831f80 · winemac 1a2b3c4", "DXMT 0.80 · 2483559"),
