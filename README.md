@@ -591,7 +591,13 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   and `FEX_PROFILESTATS=1`, which makes FEX keep its counters per thread for my file to read.
   They cost FEX a timer read at the start and end of each compile and each locked lookup, which
   is why they ride on Debug logging. Debug logging also adds `FEX_SILENTLOG=0` with either
-  `ntdll.so`, so FEX's own messages go to `wine.log`.
+  `ntdll.so`, so FEX's own messages go to `wine.log`. That is more than the line about hardware
+  TSO the report looks for. FEX's debug messages are compiled into the engine's build, so FEX then
+  writes a line for every exception it handles, and one for each piece of self-modifying code and
+  each unaligned atomic it handles. It writes each line the moment it happens, on the thread
+  that hit it. A session with many of them gets a longer `wine.log` and may run slower. Nobody has
+  measured that in the game yet. The session report prints FEX's line count and lines a second,
+  so one session with Debug logging shows it.
   `CefHost.exe`'s rule unsets each of them again with an empty value.
 - The `WINE_MACDRV_*` entries are my `winemac.so`'s, rows of the same table. Each goes in only
   while my driver is in place, whatever `wine` says, and `CefHost.exe`'s rule unsets it. *Launcher
@@ -830,12 +836,14 @@ last session from DXMT's own log lines:
   cache misses and the time on the cache's lock, writes to code pages (SMC) and signal time, in
   all; compile time and misses a second, as the median of the blocks and the highest one; and the
   compile bursts, each run of blocks where compiling took over 10% of the time, with its start,
-  length and blocks compiled. The first burst is the game's start. A later one of similar size is
-  FEX throwing its code away, or a new map. Counters the report has no words for are summed under
-  their own names. A thread FEX had no slot for says so: FEX's stats have room for about 36
-  threads and can't grow on macOS
+  length and blocks compiled. A block without counters ends a burst. The first burst is the
+  game's start. A later one of similar size is FEX throwing its code away, or a new map. Counters
+  the report has no words for are summed under their own names. A thread FEX had no slot for says
+  so: FEX's stats have room for about 36 threads and can't grow on macOS. A line my `ntdll.so`
+  wrote instead of counters is printed whole
 - with Debug logging, whether FEX said in `wine.log` that it uses hardware TSO, the Mac's own x86
-  memory ordering, and how many lines FEX wrote there and how many were errors
+  memory ordering, and how many lines FEX wrote there, how many a second from Play to the log's
+  last line, and how many were errors
 - which `winemac.so` ran and its switches, and with Debug logging the last `macsurface` line of
   the launcher's window from `wine.log`. The launcher's is the window with the most flushes, about
   40 a second, since the game draws with Metal

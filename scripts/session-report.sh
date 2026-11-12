@@ -45,11 +45,12 @@
 # "fex stats version <v> slot <bytes>". From the same blocks as the request tables, for each thread
 # with such lines (the game thread first) the report prints the totals, the median and the highest
 # 5 s block of compile time and of lookup cache misses a second, the compile bursts (blocks in a row
-# where compiling took over 10% of the time: the first is the start, a later one of similar size a
-# discard or a new map) and every other name summed as it is. The rule has FEX_SILENTLOG=0 too, and
-# FEX's lines go to wine.log ("<I|E|D> <thread id in hex> <message>", "A <message>" for an
-# assertion): the report says whether one was "FEX: Using hardware TSO", and how many FEX wrote and
-# how many of them were errors. My Mac
+# where compiling took over 10% of the time, a block without counters ending one: the first is the
+# start, a later one of similar size a discard or a new map), every other name summed as it is, and
+# the blocks without counters with the last such line. The rule has FEX_SILENTLOG=0 too, and FEX's
+# lines go to wine.log ("<I|E|D> <thread id in hex> <message>", "A <message>" for an assertion):
+# the report says whether one was "FEX: Using hardware TSO", how many FEX wrote, how many a second
+# from Play to the log's last write, and how many were errors. My Mac
 # driver writes its macsurface lines to wine.log for Gw2-64.exe ("hwnd <h> ...: <n> flushes, ..."
 # every 600 flushes of a window): the report prints the last line of the window with the most
 # flushes, which is the launcher's (it flushes about 40 times a second; the game draws with Metal).
@@ -222,11 +223,12 @@ wine_report() {
       next
     }
     !take { next }
-    # the counters FEX keeps for the thread of the block: the series, by block, and the sum of each name
+    # the counters FEX keeps for the thread of the block: the series, by block (with its place among
+    # the thread blocks, so a block without counters ends a burst), and the sum of each name
     $1 == "fex" {
       if (!(t in fseen)) { fseen[t] = 1; forder[++nfex] = t }
-      if ($2 == "has" || $2 == "stats") { fmsg[t] = $0; next }
-      k = ++fexn[t]; ffrom[t, k] = bfrom; fto[t, k] = bto
+      if ($2 == "has" || $2 == "stats") { fmsg[t] = $0; fmsgn[t]++; next }
+      k = ++fexn[t]; ffrom[t, k] = bfrom; fto[t, k] = bto; fseq[t, k] = blocks[t]
       for (i = 2; i < NF; i += 2) {
         if (!((t, $i) in fsum)) fnames[t, ++nfnames[t]] = $i
         fsum[t, $i] += $(i + 1); fv[t, k, $i] = $(i + 1) + 0
@@ -288,12 +290,14 @@ wine_report() {
       for (i = 2; i <= n; i++) { x = a[i]; j = i - 1; while (j > 0 && a[j] > x) { a[j + 1] = a[j]; j-- } a[j + 1] = x }
       return n % 2 ? a[(n + 1) / 2] : (a[n / 2] + a[n / 2 + 1]) / 2
     }
+    # a compile burst from <bs> to <be> s with <bj> blocks compiled
+    function burst(bs, be, bj) { return sprintf("at %.1f s for %.1f s, %.0f blocks", bs, be - bs, bj) }
     # the counters FEX keeps for thread <t>, <what> it is
     function fex_thread(t, what,    k, d, c, n, jr, mr, jmax, mmax, hot, inb, bs, be, bj, out, i, m, w) {
       if (!fexn[t]) {
         m = fmsg[t]; split(m, w, " ")
         if (w[2] == "has") printf "FEX\047s counters of thread %s, %s: none, FEX had no slot left for it (%s in use). Its stats have room for about 36 threads and can\047t grow on macOS.\n", t, what, w[6]
-        else printf "FEX\047s counters of thread %s, %s: my ntdll.so can\047t read them (%s)\n", t, what, substr(m, 5)
+        else printf "FEX\047s counters of thread %s, %s: my ntdll.so can\047t read them: %s\n", t, what, m
         return
       }
       c = 0; n = 0; jmax = 0; mmax = 0
@@ -305,17 +309,20 @@ wine_report() {
         if (mr[n] > mmax) mmax = mr[n]
       }
       printf "FEX\047s counters of thread %s, %s, in %s from %.1f to %.1f s: %d blocks, covering %.1f s\n", t, what, reqname, from, to, fexn[t], c
-      printf "  In all: compiling %.1f ms, %.0f blocks; lookup cache misses %.0f, its lock %.1f ms read, %.1f ms write; SMC %.0f; signals %.1f ms\n", \
+      printf "  In all: compiling %.3f ms, %.0f blocks; lookup cache misses %.0f, its lock %.3f ms read, %.3f ms write; SMC %.0f; signals %.3f ms\n", \
         fsum[t, "jit_ms"], fsum[t, "jit"], fsum[t, "miss"], fsum[t, "rlock_ms"], fsum[t, "wlock_ms"], fsum[t, "smc"], fsum[t, "signal_ms"]
-      if (n) printf "  A second, the median and the highest 5 s: compiling %.1f and %.1f ms, lookup cache misses %.0f and %.0f\n", median(jr, n), jmax, median(mr, n), mmax
-      # (blocks in a row whose compile time is over 10% of their time: ms over 100 times the seconds)
+      if (n) printf "  A second, the median and the highest 5 s: compiling %.3f and %.3f ms, lookup cache misses %.0f and %.0f\n", median(jr, n), jmax, median(mr, n), mmax
+      # (blocks of the thread in a row whose compile time is over 10% of their time: ms over 100
+      # times the seconds; a block of the thread without counters ends one)
       out = ""; inb = 0
       for (k = 1; k <= fexn[t]; k++) {
         d = fto[t, k] - ffrom[t, k]; hot = (d > 0 && fv[t, k, "jit_ms"] > 100 * d)
+        if (inb && (!hot || fseq[t, k] != fseq[t, k - 1] + 1)) { out = out (out == "" ? "" : "; ") burst(bs, be, bj); inb = 0 }
         if (hot) { if (!inb) { inb = 1; bs = ffrom[t, k]; bj = 0 } be = fto[t, k]; bj += fv[t, k, "jit"] }
-        if (inb && (!hot || k == fexn[t])) { out = out (out == "" ? "" : "; ") sprintf("at %.1f s for %.1f s, %.0f blocks", bs, be - bs, bj); inb = 0 }
       }
+      if (inb) out = out (out == "" ? "" : "; ") burst(bs, be, bj)
       print "  Compile bursts, compiling over 10% of the time: " (out == "" ? "none" : out)
+      if (fmsgn[t]) printf "  %d of its blocks had no counters, the last with: %s\n", fmsgn[t], fmsg[t]
       out = ""
       for (i = 1; i <= nfnames[t]; i++) {
         m = fnames[t, i]; if (m ~ /^(jit_ms|jit|miss|rlock_ms|wlock_ms|smc|signal_ms)$/) continue
@@ -425,16 +432,20 @@ wine_report() {
 }
 
 # fex_tso_report: with FEX_SILENTLOG=0 in the game's rule, what FEX said in wine.log about memory
-# ordering, how many lines it wrote and how many of them were errors (E) or assertions (A)
+# ordering, how many lines it wrote, how many a second from Play (session.env) to the log's last
+# write, and how many of them were errors (E) or assertions (A)
 fex_tso_report() {
+  local secs
   grep -qE '^RULE=exe=Gw2-64\.exe;(.*;)?env=FEX_SILENTLOG=0(;|$)' "$LOGS/session.env" && [ -f "$LOGS/wine.log" ] || return 0
-  LC_ALL=C awk '
+  secs=$(( $(date -r "$LOGS/wine.log" +%s) - $(date -r "$LOGS/session.env" +%s) ))
+  LC_ALL=C awk -v secs="$secs" '
     /^[IEDA] [0-9A-F]+ / || /^A / { lines++ }
     /^E [0-9A-F]+ / || /^A / { errors++ }
     /FEX: Using hardware TSO/ { tso = 1 }
     END {
       s = (tso ? "Memory ordering: hardware TSO (FEX said so)" : "FEX didn\047t say it uses hardware TSO")
       s = s sprintf("; FEX wrote %d lines to wine.log", lines)
+      if (secs > 0) s = s sprintf(", %.2f a second over the %.1f min from Play to its last line", lines / secs, secs / 60)
       if (errors) s = s sprintf(", %d of them errors", errors)
       print s
     }' "$LOGS/wine.log"

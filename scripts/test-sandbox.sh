@@ -1055,8 +1055,8 @@ EOF
   mv -f "$SANDBOX/requests.fex" "$LOGS/heat-requests-4242.log"
   cat >"$SANDBOX/fex.want" <<'EOF'
 FEX's counters of thread 00a4, the game thread, in heat-requests-4242.log from 0.0 to 10.0 s: 2 blocks, covering 10.0 s
-  In all: compiling 2520.0 ms, 30100 blocks; lookup cache misses 9500, its lock 2.0 ms read, 1.0 ms write; SMC 0; signals 0.2 ms
-  A second, the median and the highest 5 s: compiling 252.0 and 500.0 ms, lookup cache misses 950 and 1800
+  In all: compiling 2520.000 ms, 30100 blocks; lookup cache misses 9500, its lock 2.000 ms read, 1.000 ms write; SMC 0; signals 0.200 ms
+  A second, the median and the highest 5 s: compiling 252.000 and 500.000 ms, lookup cache misses 950 and 1800
   Compile bursts, compiling over 10% of the time: at 0.0 s for 5.0 s, 30000 blocks
   Also, in all: sigbus 0, float 4, dcache_hit 0, dcache_miss 0, dcache_ms 0.000, tso_switches 4, native_exits 120, code_buffer_moves 1, l1_resizes 0
 FEX's counters of thread 0024, another thread: none, FEX had no slot left for it (36 in use). Its stats have room for about 36 threads and can't grow on macOS.
@@ -1067,15 +1067,27 @@ EOF
     diff "$SANDBOX/fex.want" <(fex)
   check "  --to 15: three blocks, and a second burst" \
     has <(fex --from 0 --to 15) "^  Compile bursts, compiling over 10% of the time: at 0.0 s for 5.0 s, 30000 blocks; at 10.0 s for 5.0 s, 8000 blocks$"
-  # (FEX_SILENTLOG=0 in the rule: FEX's lines in wine.log, "<level> <thread id> <message>")
+  # (the game thread's second block without counters, between its two bursts, and a header my
+  # ntdll.so can't read for the other thread)
+  sed -i '' -e 's/^fex jit_ms 20\.000 .*/fex stats version 3 slot 96/' -e 's/^fex has no slot of 36$/fex stats version 3 slot 96/' "$LOGS/heat-requests-4242.log"
+  out=$(fex --from 0 --to 15)
+  check "  a block without counters ends a burst, and its line stays in sight, whole" \
+    eval 'has <(echo "$out") "^  Compile bursts, compiling over 10% of the time: at 0.0 s for 5.0 s, 30000 blocks; at 10.0 s for 5.0 s, 8000 blocks$" &&
+      has <(echo "$out") "^  1 of its blocks had no counters, the last with: fex stats version 3 slot 96$"'
+  check "  a thread with only such a line: printed whole" \
+    has <(echo "$out") "^FEX's counters of thread 0024, another thread: my ntdll.so can't read them: fex stats version 3 slot 96$"
+  # (FEX_SILENTLOG=0 in the rule: FEX's lines in wine.log, "<level> <thread id> <message>", the log's
+  # last line a minute after Play)
   cp -p "$LOGS/session.env" "$SANDBOX/session.env.keep"; cp "$LOGS/wine.log" "$SANDBOX/wine.log.fex"
   sed -i '' 's/^\(RULE=exe=Gw2-64\.exe;.*\)$/\1;env=FEX_SILENTLOG=0/' "$LOGS/session.env"; touch -t 202601010000 "$LOGS/session.env"
   printf '0024:err:module:import_dll x\nI 01A4 FEX: Using hardware TSO\nE 01A4 FEX: a failure\nD 01B0 something\n' >"$LOGS/wine.log"
-  check "  FEX said it uses hardware TSO: the line, and FEX's lines and errors" \
-    has <("$APP/Contents/Resources/session-report.sh" 2>&1) "^Memory ordering: hardware TSO (FEX said so); FEX wrote 3 lines to wine.log, 1 of them errors$"
+  touch -t 202601010001 "$LOGS/wine.log"
+  check "  FEX said it uses hardware TSO: the line, and FEX's lines, a second over the session, and errors" \
+    has <("$APP/Contents/Resources/session-report.sh" 2>&1) "^Memory ordering: hardware TSO (FEX said so); FEX wrote 3 lines to wine.log, 0.05 a second over the 1.0 min from Play to its last line, 1 of them errors$"
   printf '0024:err:module:import_dll x\n' >"$LOGS/wine.log"
+  touch -t 202601010001 "$LOGS/wine.log"
   check "  FEX said nothing: it says so" \
-    has <("$APP/Contents/Resources/session-report.sh" 2>&1) "^FEX didn't say it uses hardware TSO; FEX wrote 0 lines to wine.log$"
+    has <("$APP/Contents/Resources/session-report.sh" 2>&1) "^FEX didn't say it uses hardware TSO; FEX wrote 0 lines to wine.log, 0.00 a second over the 1.0 min from Play to its last line$"
   mv -f "$SANDBOX/session.env.keep" "$LOGS/session.env"; mv -f "$SANDBOX/wine.log.fex" "$LOGS/wine.log"
   rm -f "$LOGS/heat-4242.log" "$LOGS/heat-requests-4242.log" "$SANDBOX/requests.want" "$SANDBOX/fex.want"
   # (a heat log in jdrly/gw2-on-mac#99's format: timers, sleeps by length, rows that end in their
