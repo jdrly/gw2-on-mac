@@ -953,11 +953,84 @@ for pid in 9101 9202 9303 9404; do
   touch -t "20250101000$n" "$LOGS/heat-$pid.log" "$LOGS/heat-requests-$pid.log"
 done
 echo "profile" >"$LOGS/heat-prof-9404.log"
+# (a stand-in for macOS's vmmap, $ROOT/bin/vmmap: it notes the pid it was given and prints an
+# excerpt of the first 0.2 session's, with FEX's three code buffers among other regions)
+{ printf '#!/bin/bash\necho "$1" >>"%s/vmmap.args"\ncat <<'"'"'MAP'"'"'\n' "$SANDBOX"; cat <<'EOF'; echo MAP; } >"$SANDBOX/bin/vmmap"
+Process:         Gw2-64.exe [70549]
+Path:            /Users/*/Library/Application Support/GW2 on Mac arm64/*/wine.app/Contents/MacOS/wine
+Load Address:    0x104508000
+Identifier:      wine
+Version:         11.21 (0)
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  launchd [1]
+Target Type:     live task (Roots Present)
+
+Date/Time:       2026-11-11 18:29:37.635 +0100
+Launch Time:     2026-11-11 18:22:04.591 +0100
+OS Version:      macOS 27.2 (26B123)
+Report Version:  7
+Analysis Tool:   /usr/bin/vmmap
+
+Physical footprint:         8.4G
+Physical footprint (peak):  9.0G
+Idle exit:                  untracked
+----
+
+Virtual Memory Map of process 70549 (Gw2-64.exe)
+Output report format:  2.4  -- 64-bit process
+VM page size:  16384 bytes
+Collected with PhysFootprint mode enabled
+
+==== regions for process 70549  (non-writable and writable regions are interleaved)
+REGION TYPE                    START - END         [ VSIZE  RSDNT  DIRTY   SWAP] PRT/MAX SHRMOD PURGE    REGION DETAIL
+mapped file                     10000-12000        [    8K     8K     0K     0K] r--/r-x SM=ALI          /Users/USER/Library/Application Support/GW2 o
+Untagged                        12000-22000        [   64K     0K     0K     0K] ---/rwx SM=NUL
+Untagged                 7fe9dbbf1000-7fe9dbff1000 [ 4096K     0K     0K    16K] rw-/rwx SM=COW
+Untagged                 7fe9dbff1000-7fe9dbff2000 [    4K     0K     0K     0K] ---/rwx SM=NUL
+Untagged                 7fe9dc000000-7fe9dffff000 [ 64.0M  25.4M  25.4M   224K] rwx/rwx SM=PRV
+Untagged                 7fe9dffff000-7fe9e0000000 [    4K     0K     0K     0K] ---/rwx SM=PRV
+Untagged                 7fea90b90000-7fea91b90000 [ 16.0M     0K     0K   112K] rw-/rwx SM=COW
+Untagged                 7fea91b90000-7fea93b8f000 [ 32.0M  24.8M  24.8M  7392K] rwx/rwx SM=PRV
+Untagged                 7fea93b8f000-7fea93b90000 [    4K     4K     4K     0K] ---/rwx SM=PRV
+Untagged                 7feffdb30000-7feffdb31000 [    4K     4K     4K     0K] rw-/rwx SM=COW
+Untagged                 7feffdb40000-7feffeb3f000 [ 16.0M  9280K  9280K  7100K] rwx/rwx SM=PRV
+Untagged                 7feffeb3f000-7feffeb40000 [    4K     0K     0K     4K] ---/rwx SM=PRV
+owned unmapped (graphics)    unmapped-unmapped     [  352K   352K   352K     0K] rw-/rw- SM=PRV PURGE=N  owned physical footprint (unmapped) (graphics
+page table in kernel           kernel-kernel       [ 21.8M  21.8M  21.8M     0K] rw-/rw- SM=PRV          charged to process physical footprint
+
+==== Legend
+SM=sharing mode:
+        COW=copy_on_write PRV=private NUL=empty ALI=aliased
+        SHM=shared ZER=zero_filled S/A=shared_alias
+PURGE=purgeable mode:
+        V=volatile N=nonvolatile E=empty   otherwise is unpurgeable
+
+==== Summary for process 70549
+ReadOnly portion of Libraries: Total=3.0G resident=898.2M(29%) swapped_out_or_unallocated=2.1G(71%)
+Writable regions: Total=268.0G written=5.0G(2%) resident=6.2G(2%) swapped_out=1.2G(0%) unallocated=260.6G(97%)
+
+                                VIRTUAL RESIDENT    DIRTY  SWAPPED VOLATILE   NONVOL    EMPTY   REGION
+REGION TYPE                        SIZE     SIZE     SIZE     SIZE     SIZE     SIZE     SIZE    COUNT (non-coalesced)
+===========                     ======= ========    =====  ======= ========   ======    =====  =======
+Accelerate Framework               128K      32K      32K      96K       0K      32K       0K        1
+Activity Tracing                   256K      24K      48K       0K       0K      24K       0K        1
+page table in kernel              21.8M    21.8M    21.8M       0K       0K       0K       0K        1
+shared memory                     13.7M    12.8M    12.8M       0K       0K      12K       0K       46
+unused but dirty shlib __DATA      420K     243K     243K     177K       0K       0K       0K      353
+===========                     ======= ========    =====  ======= ========   ======    =====  =======
+TOTAL                              1.0T     7.3G     6.7G     1.4G      68K   514.4M    11.5M    52825
+TOTAL, minus reserved VM space   745.6G     7.3G     6.7G     1.4G      68K   514.4M    11.5M    52825
+EOF
+chmod 755 "$SANDBOX/bin/vmmap"
+rm -f "$SANDBOX/vmmap.args"
 mkdir -p "$SANDBOX/zip"
 zip=$("$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip" 2>"$SANDBOX/collect.err" | tail -1)
 check "collect-logs makes a zip" [ -f "$zip" ]
 rm -rf "$SANDBOX/unzipped" && mkdir -p "$SANDBOX/unzipped" && (cd "$SANDBOX/unzipped" && unzip -q "$zip")
 Z="$SANDBOX/unzipped/$(basename "$zip" .zip)"
+check "  no game running: no vmmap taken, and no vmmap file in the logs folder or the zip" \
+  eval '[ ! -e "$SANDBOX/vmmap.args" ] && ! ls "$LOGS" "$Z/logs" | grep -q "^vmmap-"'
 for f in logs/install.log logs/wine.log logs/Gw2-64_d3d11.log settings.conf compatdb.rules compatdb.local install-manifest.json session-report.txt system-info.txt gpu-errors.txt game-logs/ArenaNet.log game-logs/steam/content_log.txt; do
   check "  has $f" [ -f "$Z/$f" ]
 done
@@ -1245,6 +1318,31 @@ sleep 0.3
 check "busy=game with a Gw2-64.exe of the engine running, game_pid its pid" eval '[ "$(st busy)/$(st game_pid)" = "game/$gp" ]'
 check "play brings it up instead of starting another" sh -c "'$G' play | grep -q 'already running'"
 check "reset-shaders refused while the game runs" sh -c "! '$G' reset-shaders >/dev/null 2>&1"
+rm -f "$SANDBOX/vmmap.args"
+out=$(g vmmap 2>&1)
+vf=${out#@done }
+check "vmmap while the game runs: one vmmap of the game's pid, into the logs folder" \
+  eval '[ "$(cat "$SANDBOX/vmmap.args" 2>/dev/null)" = "$gp" ] && [ "$(dirname "$vf")" = "$LOGS" ] && [ -f "$vf" ] && case "${vf##*/}" in vmmap-*.txt) ;; *) false ;; esac'
+check "  its first line: the pid, the seconds since the game started, how long vmmap took" \
+  eval 'head -1 "$vf" | grep -qE "^Gw2-64\.exe pid $gp, running [0-9]+ s, vmmap took [0-9.]+ s \(the game stood still for at most that long\)$"'
+check "  then the header through the peak, the three rwx/rwx regions, and the summary to its end" \
+  eval '[ "$(sed -n 2p "$vf")" = "Process:         Gw2-64.exe [70549]" ] && grep -q "^Physical footprint (peak):  9.0G$" "$vf" &&
+    [ "$(grep -c " rwx/rwx " "$vf")" = 3 ] && [ "$(tail -1 "$vf" | cut -c1-30)" = "TOTAL, minus reserved VM space" ]'
+check "  and no other region, nor the legend" eval '! grep -qE "(r--|rw-|---)/r|^Idle exit|^==== (regions|Legend)" "$vf"'
+cp -p "$LOGS/session.env" "$SANDBOX/session.env.keep"
+touch -t 202601010000 "$LOGS/session.env"
+[ -f "$LOGS/Gw2-64_d3d11.log" ] || printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60\n' >"$LOGS/Gw2-64_d3d11.log"
+check "  the session report: the footprint, three buffers by size, two discards" \
+  has <("$APP/Contents/Resources/session-report.sh" 2>&1) "^vmmap at [0-9.]* min (${vf##*/}): footprint 8.4G, peak 9.0G; code buffers 16M full, 32M full, 64M 25.4M resident; FEX has thrown its code away 2 times$"
+rm -f "$vf" "$SANDBOX/vmmap.args"
+zip=$("$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip" 2>>"$SANDBOX/collect.err" | tail -1)
+rm -rf "$SANDBOX/unzipped" && mkdir -p "$SANDBOX/unzipped" && (cd "$SANDBOX/unzipped" && unzip -q "$zip")
+Z="$SANDBOX/unzipped/$(basename "$zip" .zip)"
+check "Collect Logs while the game runs: a vmmap of the game, in the logs folder and in the zip, and its line in the report" \
+  eval '[ "$(cat "$SANDBOX/vmmap.args" 2>/dev/null)" = "$gp" ] && vf=$(ls "$LOGS"/vmmap-*.txt) && [ -f "$Z/logs/${vf##*/}" ] &&
+    has "$Z/session-report.txt" "^vmmap at .*; FEX has thrown its code away 2 times$"'
+rm -f "$LOGS"/vmmap-*.txt "$SANDBOX/vmmap.args"
+mv -f "$SANDBOX/session.env.keep" "$LOGS/session.env"
 kill $gp 2>/dev/null || true; wait $gp 2>/dev/null || true
 rm -f "$ENG/bin/Gw2-64.exe"
 check "busy=none again" [ "$(st busy)" = none ]
@@ -1256,6 +1354,8 @@ sleep 0.3
 out=$(g play 2>&1) && rc=0 || rc=$?
 check "a Gw2-64.exe of another app running: play refuses, starts nothing" \
   eval '[ "$rc" != 0 ] && echo "$out" | grep -qxF "@error Guild Wars 2 is running in another app. Quit it first." && [ ! -s "$STANDIN_LOG" ] && [ "$(st busy)/$(st game_pid)" = none/ ]'
+check "  vmmap leaves it alone: it isn't this app's game" \
+  eval '[ "$(g vmmap)" = "@done Guild Wars 2 isn'"'"'t running, so there is no vmmap to take." ] && [ ! -e "$SANDBOX/vmmap.args" ] && ! ls "$LOGS" | grep -q "^vmmap-"'
 kill $op 2>/dev/null || true; wait $op 2>/dev/null || true
 
 section "Steam quits after the game (watch-session)"

@@ -10,7 +10,9 @@
 #                  game starts before the last), DXMT's Gw2-64_d3d11.log (and .1-4) and the other
 #                  processes' DXMT logs, the heat counters of the newest 3 games (heat-<pid>.log
 #                  and heat-requests-<pid>.log, Debug logging), session.env (what the last session
-#                  started with), the interface addon's logs
+#                  started with), the interface addon's logs, and while the game runs a new
+#                  vmmap-<date>-<time>.txt (gw2om.sh vmmap: FEX's code buffers and the footprint),
+#                  next to those of earlier presses
 #   settings.conf, state, install-manifest.json, dxmt.conf, compatdb.rules and compatdb.local, the
 #                  app's VERSIONS
 #   session-report.txt  the last game session in short (session-report.sh)
@@ -343,6 +345,9 @@ gpu_errors() {  # → stdout; the count's line also into $work/gpu-summary
     }' "$work/gpu-log"
 }
 
+# (only while this bottle's game runs, which vmmap stops while it reads it: the file lands in the
+# logs folder before the loop below takes the folder)
+"$RES/gw2om.sh" vmmap </dev/null >/dev/null 2>&1 || true
 for f in "$LOGS"/*; do
   case "$f" in
     *.zip|*/heat-prof-*) continue ;;

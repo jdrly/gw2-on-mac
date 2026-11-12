@@ -65,6 +65,8 @@
 #   gw2om.sh fetch-engine      downloads and verifies the engine into the cache
 #   gw2om.sh env               the game's environment as play would set it (for Terminal)
 #   gw2om.sh rules             the compatdb rules play would write (for Terminal)
+#   gw2om.sh vmmap             while the game runs: FEX's code buffers and the footprint from
+#                              macOS's vmmap, into the logs folder (cmd_vmmap; Collect Logs too)
 #
 # Environment:
 #   GW2_ON_MAC_ROOT=/abs/dir   sandbox for tests: the app's files, logs and caches all live under
@@ -3021,6 +3023,48 @@ cmd_end_leftovers() {
   esac
 }
 
+# vmmap: the game's memory as macOS's vmmap reads it, for FEX's code buffers (the process's only
+# regions that are rwx/rwx; how many says how often FEX threw its code away) and the footprint.
+# Only for this bottle's Gw2-64.exe, proc_list's game. vmmap stops the game while it reads it, so
+# it runs only when I ask: this command, or Collect Logs. It writes $LOGS/vmmap-<date>-<time>.txt:
+#   Gw2-64.exe pid <pid>, running <s> s, vmmap took <s> s (the game stood still for at most that long)
+# then vmmap's header through "Physical footprint (peak)", the region list's column line with its
+# rwx/rwx regions only, and the summary from "==== Summary" on; or a line "vmmap failed …". In a
+# sandbox the vmmap is $ROOT/bin/vmmap (a test's), and without one nothing runs.
+VMMAP=/usr/bin/vmmap
+[ -z "$ROOT" ] || VMMAP="$ROOT/bin/vmmap"
+cmd_vmmap() {
+  local pid secs f t took st=0
+  pid=$(proc_list | awk '$1 == "game" { print $2; exit }')
+  [ -n "$pid" ] || { echo "@done Guild Wars 2 isn't running, so there is no vmmap to take."; return 0; }
+  [ -x "$VMMAP" ] || die "No $VMMAP to run."
+  # (ps's elapsed time: [[dd-]hh:]mm:ss)
+  secs=$(ps -o etime= -p "$pid" 2>/dev/null | awk '{ n = split($1, a, /[-:]/); s = a[n] + 60 * a[n - 1]
+    if (n > 2) s += 3600 * a[n - 2]; if (n > 3) s += 86400 * a[n - 3]; print s }')
+  mkdir -p "$LOGS"
+  f="$LOGS/vmmap-$(date +%Y%m%d-%H%M%S).txt"
+  t=$(mktemp -d)
+  TIMEFORMAT=%R
+  { time "$VMMAP" "$pid" >"$t/out" 2>"$t/err" </dev/null; } 2>"$t/time" || st=$?
+  took=$(tail -1 "$t/time")
+  { echo "Gw2-64.exe pid $pid, running ${secs:-?} s, vmmap took $took s (the game stood still for at most that long)"
+    if [ "$st" != 0 ]; then
+      echo "vmmap failed with status $st: $(head -3 "$t/err" | tr '\n' ' ')"
+    else
+      # (a header without the peak line ends at 40 lines: never the whole region list)
+      LC_ALL=C awk '
+        !head { print; if (/^Physical footprint \(peak\):/ || NR >= 40) head = 1; next }
+        /^==== Summary/ { summary = 1; print "" }
+        summary { print; next }
+        /^REGION TYPE/ { print ""; print; next }
+        / rwx\/rwx / { print }' "$t/out"
+    fi
+  } >"$f"
+  rm -rf "$t"
+  [ "$st" = 0 ] || die "vmmap failed with status $st (see $f)."
+  echo "@done $f"
+}
+
 cmd_fetch_engine() {
   open_log
   log "---- fetch-engine $ENGINE_URL"
@@ -3051,5 +3095,6 @@ case "${1:-}" in
   fetch-engine) cmd_fetch_engine ;;
   env) cmd_env ;;
   rules) rules_text; [ ! -f "$RULES_LOCAL" ] || cat "$RULES_LOCAL" ;;
+  vmmap) cmd_vmmap ;;
   *) sed -n '2,/^# Environment/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 2 ;;
 esac

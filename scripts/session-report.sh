@@ -40,6 +40,11 @@
 # driver writes its macsurface lines to wine.log for Gw2-64.exe ("hwnd <h> ...: <n> flushes, ..."
 # every 600 flushes of a window): the report prints the last line of the window with the most
 # flushes, which is the launcher's (it flushes about 40 times a second; the game draws with Metal).
+# Each vmmap-<date>-<time>.txt written since the session started (gw2om.sh vmmap, or Collect Logs
+# while the game runs) gives one line: minutes in, the footprint, and FEX's code buffers (its rwx/rwx
+# regions) by size. FEX starts a new buffer twice the size, up to 128 MB, each time it throws its
+# code away, so the largest is the one in use and the others are full; the buffers less one is how
+# often it threw its code away.
 # Sources, all from the fork's own lines (DXMT_STATS is on by default):
 #   "GW2 fork <version>: …"  the start of a session: DXMT's version, its switches, cpus, refresh
 #   STATS    the frame rate and frame times (avg/max ms) of each interval, the command buffers
@@ -376,6 +381,42 @@ macdrv_report() {
     }' "$LOGS/wine.log"
 }
 
+# vmmap_report: a line for each vmmap file of the session, in the order they were taken
+vmmap_report() {
+  local f
+  for f in "$LOGS"/vmmap-*.txt; do
+    [ -f "$f" ] && [ "$f" -nt "$LOGS/session.env" ] || continue
+    LC_ALL=C awk -v name="${f##*/}" '
+      FNR == 1 { for (i = 1; i < NF; i++) if ($i == "running") secs = $(i + 1) }
+      /^vmmap failed/ { failed = $0 }
+      /^Physical footprint:/ { fp = $3 }
+      /^Physical footprint \(peak\):/ { peak = $4 }
+      # (Untagged  <start>-<end> [ VSIZE RSDNT DIRTY SWAP] rwx/rwx SM=PRV)
+      / rwx\/rwx / { s = $0; sub(/.*\[ */, "", s); split(s, c, / +/); n++; vs[n] = c[1]; rs[n] = c[2]; by[n] = bytes(c[1]) }
+      function bytes(v,    x, u) {
+        x = v + 0; u = substr(v, length(v))
+        if (u == "K") x *= 1024; else if (u == "M") x *= 1048576; else if (u == "G") x *= 1073741824
+        return x
+      }
+      END {
+        at = (secs ~ /^[0-9]+$/ ? sprintf("at %.1f min", secs / 60) : "at an unknown time")
+        if (failed != "") { printf "vmmap %s (%s): %s\n", at, name, failed; exit }
+        out = ""
+        if (n) {
+          # by size, the smallest first; the same size in the order of the list
+          for (i = 1; i <= n; i++) o[i] = i
+          for (i = 2; i <= n; i++) { x = o[i]; j = i - 1; while (j > 0 && by[o[j]] > by[x]) { o[j + 1] = o[j]; j-- } o[j + 1] = x }
+          for (i = 1; i <= n; i++) {
+            v = vs[o[i]]; if (v ~ /\.0[KMG]$/) v = substr(v, 1, length(v) - 3) substr(v, length(v))
+            out = out (i > 1 ? ", " : "") v " " (i < n ? "full" : rs[o[i]] " resident")
+          }
+          out = out "; FEX has thrown its code away " (n == 2 ? "once" : (n - 1) " times")
+        } else out = "none (no rwx/rwx region)"
+        printf "vmmap %s (%s): footprint %s, peak %s; code buffers %s\n", at, name, fp, peak, out
+      }' "$f"
+  done
+}
+
 report() {  # <log>
   local s ran=""
   s=$(summary "$1")
@@ -395,6 +436,7 @@ report() {  # <log>
     fi
     wine_report "$(get "$s" gpu_frames)"
     macdrv_report
+    vmmap_report
   fi
   if [ "$(get "$s" sessions)" = 0 ]; then
     case "$ran" in
