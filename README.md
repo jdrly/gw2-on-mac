@@ -800,7 +800,8 @@ The session report, `Resources/session-report.sh [--keep] [--from S] [--to S] [l
 last session from DXMT's own log lines:
 
 - frame rate as median, 10th percentile and minimum, frame times, hitches and DXMT's share of them
-- shader compiles and the render thread's waits for them
+- shader compiles and DXMT's encode thread's waits for them: how many, their total and the
+  longest
 - shader warming, presentation and Metal 4 errors
 - which `ntdll.so` ran and its switches, and with Debug logging the game thread's row of the
   session's heat log, a second. The game thread is the thread with the most semaphore releases: it
