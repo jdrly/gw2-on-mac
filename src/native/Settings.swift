@@ -176,9 +176,9 @@ final class GameSettings {
   static let interfaceScales: [(String, String)] = [
     ("1.5", "1.5×"), ("1.75", "1.67×"), ("1.8", "1.83×"), ("2.0", "2.06×"),
   ]
-  // Mouse-look speed: a factor on the macOS pointer's speed (gw2om.sh MOUSE_SPEEDS)
+  // Mouse-look speed: a factor on the mouse's own counts from GameController (gw2om.sh MOUSE_SPEEDS)
   static let mouseSpeeds: [(String, String)] = ["0.5", "0.75", "1", "1.25", "1.5", "1.75", "2", "2.5", "3"]
-    .map { ($0, $0 == "1" ? "1× (pointer speed)" : "\($0)×") }
+    .map { ($0, $0 == "1" ? "1× (the mouse's own counts)" : "\($0)×") }
 }
 
 // The panes, in sidebar order
@@ -468,7 +468,7 @@ struct SettingsView: View {
         SettingRow("Raw mouse-look", "On, the game's raw mouse input is the mouse's own movement, read from GameController, without the pointer's acceleration. Off, it is the pointer's movement, as Wine usually does it. Takes effect the next time the game starts.", off: off("rawmouse")) {
           InkSwitch(isOn: settings.toggle("rawmouse"))
         }
-        SettingRow("Mouse-look speed", "How fast the camera turns with raw mouse-look, compared with your pointer speed in System Settings. The game's own camera settings apply on top.", off: off("mousespeed")) {
+        SettingRow("Mouse-look speed", "How fast the camera turns with raw mouse-look: a factor on the mouse's own counts, which the game gets at 1×. The game's own camera settings apply on top.", off: off("mousespeed")) {
           InkPopup(selection: settings.choice("mousespeed", "1"), options: GameSettings.mouseSpeeds)
         }
         .disabled(settings.values["rawmouse"] != "on")

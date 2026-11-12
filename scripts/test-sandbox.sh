@@ -402,11 +402,12 @@ check "settings: a state for each of the 25 keys" [ "$(g settings | grep -cE '^[
 # SETTING_KEYS' order)
 OFF=""
 mine || OFF="${OFF}fastlocks "
-OFF="${OFF}gamemode mousespeed "
+OFF="${OFF}gamemode "
+drv || OFF="${OFF}mousespeed "
 mine || OFF="${OFF}wine jobwakes "
 drv || OFF="${OFF}macdrv launcherframes "
 mine || OFF="${OFF}eventpool "
-check "  off: mousespeed (#59), gamemode$(mine || echo ", wine and its switches")$(drv || echo ", macdrv and launcherframes")" \
+check "  off: gamemode$(mine || echo ", wine and its switches")$(drv || echo ", macdrv, launcherframes and mousespeed")" \
   [ "$(g settings | sed -n 's/^\([a-z_]*\)_state=off:.*/\1/p' | tr '\n' ' ')" = "$OFF" ]
 if mine; then
   check "  wine=mine, jobwakes and eventpool on and fastlocks off by default, all ok" \
@@ -416,10 +417,10 @@ else
     eval '[ "$(sett wine_state)" = "off:This build of the app has no Wine build of mine." ] && [ "$(sett jobwakes_state)" = "off:Needs my Wine build, which this build of the app doesn'"'"'t have." ] && [ "$(sett eventpool_state)" = "$(sett jobwakes_state)" ] && [ "$(sett fastlocks_state)" = "$(sett jobwakes_state)" ] && ! "$G" set wine engine >/dev/null 2>&1 && ! "$G" set jobwakes off >/dev/null 2>&1 && ! "$G" set eventpool off >/dev/null 2>&1 && ! "$G" set fastlocks on >/dev/null 2>&1'
 fi
 if drv; then
-  check "  macdrv=mine and launcherframes=off by default, both ok" [ "$(sett macdrv)/$(sett macdrv_state)/$(sett launcherframes)/$(sett launcherframes_state)" = mine/ok/off/ok ]
+  check "  macdrv=mine, launcherframes=off and mousespeed=1 by default, all ok" [ "$(sett macdrv)/$(sett macdrv_state)/$(sett launcherframes)/$(sett launcherframes_state)/$(sett mousespeed)/$(sett mousespeed_state)" = mine/ok/off/ok/1/ok ]
 else
-  check "  with their reasons; set macdrv engine and set launcherframes on refused" \
-    eval '[ "$(sett macdrv_state)" = "off:This build of the app has no Mac driver of mine." ] && [ "$(sett launcherframes_state)" = "off:Needs my Mac driver, which this build of the app doesn'"'"'t have." ] && ! "$G" set macdrv engine >/dev/null 2>&1 && ! "$G" set launcherframes on >/dev/null 2>&1'
+  check "  with their reasons; set macdrv engine, set launcherframes on and set mousespeed 1.5 refused" \
+    eval '[ "$(sett macdrv_state)" = "off:This build of the app has no Mac driver of mine." ] && [ "$(sett launcherframes_state)" = "off:Needs my Mac driver, which this build of the app doesn'"'"'t have." ] && [ "$(sett mousespeed_state)" = "$(sett launcherframes_state)" ] && ! "$G" set macdrv engine >/dev/null 2>&1 && ! "$G" set launcherframes on >/dev/null 2>&1 && ! "$G" set mousespeed 1.5 >/dev/null 2>&1'
 fi
 # settings.conf's version (SETTINGS_RESETS): a file from before version 1 holds the fastlocks=on
 # and coolworkers=3 the arm64 line wrote while both rows were greyed; fastlocks reads off, and
@@ -456,17 +457,18 @@ if mine; then
     eval '[ "$(sett fastlocks)" = on ] && grep -qx fastlocks=on "$AD/settings.conf" && grep -qx settings_version=2 "$AD/settings.conf"'
   g set fastlocks off >/dev/null
 fi
-check "  rawmouse ok; mousespeed greyed: the engine sends the mouse's own counts" \
-  eval '[ "$(sett rawmouse_state)" = ok ] && [ "$(sett mousespeed_state)" = "off:The engine gives the game the mouse'"'"'s own counts. Use the game'"'"'s own camera settings for the speed." ]'
+check "  rawmouse ok" [ "$(sett rawmouse_state)" = ok ]
+g set rawmouse off >/dev/null
+check "  rawmouse off: mousespeed greyed, saying so first; set mousespeed 1.5 refused" \
+  eval '[ "$(sett mousespeed_state)" = "off:Needs Raw mouse-look, which is off." ] && ! "$G" set mousespeed 1.5 >/dev/null 2>&1'
+g set rawmouse on >/dev/null
 check "  ok for the ones my DXMT fork brings back: metalfx, warm; dxmt=fork by default" \
   [ "$(sett metalfx_state)/$(sett warm_state)/$(sett dxmt)/$(sett dxmt_state)" = ok/ok/fork/ok ]
 check "  the larger interface's settings and arcdps carry a note" \
   [ "$(g settings | sed -n 's/^\([a-z_]*\)_note=.*/\1/p' | tr '\n' ' ')" = "uiscale uiscale_size uiscale_sans uiscale_cinema arcdps " ]
 out=$(g set coolworkers 5 2>&1) && rc=0 || rc=$?
 check "set coolworkers 5: refused as an unknown setting" eval '[ "$rc" = 2 ] && [ "$out" = "@error Unknown setting: coolworkers=5" ]'
-for k in mousespeed=2.5 gamemode=off; do
-  check "set ${k%%=*} ${k#*=}: refused" sh -c "! '$G' set ${k%%=*} ${k#*=} >/dev/null"
-done
+check "set gamemode off: refused" sh -c "! '$G' set gamemode off >/dev/null"
 sed -i '' 's/^gamemode=on$/gamemode=off/' "$AD/settings.conf"
 g set hud on >/dev/null; g set hud off >/dev/null
 check "  a greyed key keeps what settings.conf says (gamemode=off by hand), and does nothing" eval '[ "$(sett gamemode)" = off ] && grep -qx gamemode=off "$AD/settings.conf"'
@@ -774,7 +776,7 @@ if mine; then
   g set jobwakes on >/dev/null; g set eventpool on >/dev/null
   check "all three on: each entry, in the table's order" rules_are heat-all
   check "  a dry run of Play prints the game's rule with them" eval '[ "$(dry_rule)" = "$(g rules | head -1)" ]'
-  # A VERSION with a switches: line (heat_in_file): an entry whose variable it doesn't name stays
+  # A VERSION with a switches: line (switch_in_file): an entry whose variable it doesn't name stays
   # out, and its row is greyed. The app reads the first switches: line, so the narrowed line
   # replaces any the VERSION has. Twice: from the staged VERSION as it is (a pull request's ntdll.so
   # has no switches: line), and from that VERSION with the full line of my d831f80 build added
@@ -819,22 +821,48 @@ if drv; then
   g set launcherframes off >/dev/null
   out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
   check "launcher frames off: no WINE_MACDRV_* in the rules or in a dry run of Play" eval 'rules_are off && ! echo "$out" | grep -q WINE_MACDRV_'
-  g set launcherframes on >/dev/null; g set macdrv engine >/dev/null
+  # Mouse-look speed: a factor other than 1 is an entry with the value, after launcher frames'
+  g set mousespeed 1.5 >/dev/null
+  check "mouse-look speed 1.5: WINE_MACDRV_MOUSE_SCALE=1.5 for the game, unset for CefHost.exe" rules_are mousespeed
   out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
-  check "macdrv engine with launcher frames on: no WINE_MACDRV_* in the rules or in a dry run of Play" \
+  check "  a dry run of Play prints the game's rule with it" eval 'echo "$out" | grep -qxF "[dry-run] rule $(g rules | head -1)" && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;.*;env=WINE_MACDRV_MOUSE_SCALE=1.5$"'
+  g set launcherframes on >/dev/null
+  check "  with launcher frames on: after WINE_MACDRV_SURFACE, in the table's order" eval 'g rules | head -1 | grep -q ";env=WINE_MACDRV_SURFACE=copy,skip;env=WINE_MACDRV_MOUSE_SCALE=1.5$"'
+  g set launcherframes off >/dev/null; g set rawmouse off >/dev/null
+  out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
+  check "  raw mouse-look off: no WINE_MACDRV_* in the rules or in a dry run of Play" eval '! g rules | grep -q WINE_MACDRV_ && ! echo "$out" | grep -q WINE_MACDRV_'
+  g set rawmouse on >/dev/null
+  # The VERSION's switches: line (switch_in_file) for my Mac driver: today's builds name
+  # WINE_MACDRV_SURFACE alone, a build with the factor names WINE_MACDRV_MOUSE_SCALE too. The staged
+  # VERSION back after
+  cp "$COMP/macdrv/VERSION" "$SANDBOX/macdrv-VERSION.keep"
+  { grep -v '^switches:' "$SANDBOX/macdrv-VERSION.keep"; echo "switches: WINE_MACDRV_SURFACE"; } >"$COMP/macdrv/VERSION"
+  check "a VERSION that lists WINE_MACDRV_SURFACE only: mouse-look speed greyed, saying so, set refused, its entry out" \
+    eval '[ "$(sett mousespeed_state)" = "off:My Mac driver in this app (jdrly/wine ${MYDRV_COMMIT:0:11}) doesn'"'"'t have this switch." ] && [ "$(sett launcherframes_state)" = ok ] && ! "$G" set mousespeed 2 >/dev/null 2>&1 && rules_are off'
+  { grep -v '^switches:' "$SANDBOX/macdrv-VERSION.keep"; echo "switches: WINE_MACDRV_MOUSE_SCALE WINE_MACDRV_SURFACE"; } >"$COMP/macdrv/VERSION"
+  check "  one that lists WINE_MACDRV_MOUSE_SCALE too: ok, and the entry back" eval '[ "$(sett mousespeed_state)" = ok ] && rules_are mousespeed'
+  cp "$SANDBOX/macdrv-VERSION.keep" "$COMP/macdrv/VERSION"
+  g set mousespeed 1 >/dev/null
+  out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
+  check "mouse-look speed 1: no WINE_MACDRV_* in the rules or in a dry run of Play" \
     eval 'rules_are off && ! echo "$out" | grep -q WINE_MACDRV_ && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=[^;]*$"'
+  g set launcherframes on >/dev/null; g set mousespeed 1.5 >/dev/null; g set macdrv engine >/dev/null
+  out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
+  check "macdrv engine with launcher frames on and mouse-look speed 1.5: no WINE_MACDRV_* in the rules or in a dry run of Play" \
+    eval 'rules_are off && ! echo "$out" | grep -q WINE_MACDRV_ && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=[^;]*$"'
+  check "  mouse-look speed greyed with launcher frames' reason" eval '[ "$(sett mousespeed_state)" = "off:Needs my Mac driver, and the engine'"'"'s own winemac.so is chosen." ] && [ "$(sett launcherframes_state)" = "$(sett mousespeed_state)" ]'
   if mine; then
     g set wine mine >/dev/null; g set jobwakes on >/dev/null
     check "  and my ntdll.so's switches stay, apart from it" rules_are jobwakes
     g set jobwakes off >/dev/null; g set wine engine >/dev/null
   fi
-  g set macdrv mine >/dev/null; g set launcherframes off >/dev/null
+  g set macdrv mine >/dev/null; g set launcherframes off >/dev/null; g set mousespeed 1 >/dev/null
 else
-  sed -i '' 's/^launcherframes=.*/launcherframes=on/' "$AD/settings.conf"
+  sed -i '' -e 's/^launcherframes=.*/launcherframes=on/' -e 's/^mousespeed=.*/mousespeed=1.5/' "$AD/settings.conf"
   out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
-  check "no winemac.so of mine, launcher frames on in settings.conf: no WINE_MACDRV_* in the rules or in a dry run of Play" \
+  check "no winemac.so of mine, launcher frames on and mouse-look speed 1.5 in settings.conf: no WINE_MACDRV_* in the rules or in a dry run of Play" \
     eval 'rules_are off && ! echo "$out" | grep -q WINE_MACDRV_'
-  sed -i '' 's/^launcherframes=.*/launcherframes=off/' "$AD/settings.conf"
+  sed -i '' -e 's/^launcherframes=.*/launcherframes=off/' -e 's/^mousespeed=.*/mousespeed=1/' "$AD/settings.conf"
 fi
 ! mine || g set wine mine >/dev/null
 # A home with odd characters, in a fresh root: its settings.conf (the engine's ntdll.so, Debug logging off,

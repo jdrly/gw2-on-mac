@@ -269,7 +269,7 @@ func settings(_ extra: [String: String] = [:]) -> GameSettings {
 // The states and notes gw2om.sh settings prints on this line (setting_state, setting_note; the
 // sandbox suite pins them there): the greyed rows with their reasons, the untested notes
 let engineStates: [String: String] = [
-  "mousespeed_state": "off:The engine gives the game the mouse's own counts. Use the game's own camera settings for the speed.",
+  "mousespeed_state": "off:My Mac driver in this app (jdrly/wine d831f808236) doesn't have this switch.",
   "gamemode_state": "off:The engine's loader is a Game Mode app. Nothing to switch.",
   "uiscale_note": "Untested on this engine.", "uiscale_size_note": "Untested on this engine.",
   "uiscale_sans_note": "Untested on this engine.", "uiscale_cinema_note": "A code patch, untested under FEX.",
