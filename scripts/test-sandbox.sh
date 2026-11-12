@@ -2506,8 +2506,11 @@ check "status lists the lines in the rule, and those left out" \
 check "the install's start of Steam: session.env names the lines in the rule, install.log those left out" \
   eval '[ "$(sed -n "s/^DEV_SWITCHES=//p" "$DLOGS/session.env")" = "$(dev_expect | tr "\n" " " | sed "s/ \$//")" ] && grep -q "dev-switches.conf: left out WINE_WIN32U_SETCURSOR=shm (my win32u.so isn'"'"'t in the engine)" "$DLOGS/install.log"'
 printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60\n' >"$DLOGS/Gw2-64_d3d11.log"
+# (the report to a file first: a grep -q on its pipe would end it with a broken pipe, which
+# pipefail counts as the check's failure)
+GW2_ON_MAC_ROOT="$DROOT" "$APP/Contents/Resources/session-report.sh" >"$CHECKS/devreport.txt" 2>&1
 check "  the session report's header prints them" \
-  eval 'GW2_ON_MAC_ROOT="$DROOT" "$APP/Contents/Resources/session-report.sh" | grep -qxF "Dev switches that were on (dev-switches.conf): $(dev_expect | tr "\n" " " | sed "s/ \$//")"'
+  eval 'grep -qxF "Dev switches that were on (dev-switches.conf): $(dev_expect | tr "\n" " " | sed "s/ \$//")" "$CHECKS/devreport.txt"'
 sed -i '' 's/^FEX_DYNAMICL1CACHE=/#FEX_DYNAMICL1CACHE=/' "$DEVF"
 echo "MY_OWN_SWITCH=1" >>"$DEVF"
 check "a line commented out is gone from the rule and status; a line I added is in, after the others" \
@@ -2576,8 +2579,9 @@ dgr repair >/dev/null 2>&1
 check "  raw mouse-look off afterwards stays off" eval 'grep -qx rawmouse=off "$RAD/settings.conf"'
 mkdir -p "$SANDBOX/relzip"
 zip=$(GW2_ON_MAC_ROOT="$RROOT" "$RELR/collect-logs.sh" "$SANDBOX/relzip" 2>/dev/null | tail -1)
+unzip -l "$zip" >"$SANDBOX/relzip.txt" 2>&1
 check "a release's Collect Logs leaves out the dev-switches.conf a development build left" \
-  eval '[ -f "$RDEVF" ] && [ -f "$zip" ] && unzip -l "$zip" | grep -q settings.conf && ! unzip -l "$zip" | grep -q dev-switches.conf'
+  eval '[ -f "$RDEVF" ] && [ -f "$zip" ] && grep -q settings.conf "$SANDBOX/relzip.txt" && ! grep -q dev-switches.conf "$SANDBOX/relzip.txt"'
 for k in ntdll macdrv fex; do [ ! -f "$DEVKEEP/$k" ] || cp "$DEVKEEP/$k" "$COMP/$k/VERSION"; done
 rm -rf "$DROOT" "$RROOT" "$DEVR" "$RELR"
 
