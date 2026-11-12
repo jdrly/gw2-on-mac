@@ -99,7 +99,7 @@ jobs:
         run: scripts/stage-components.sh --fetch
 
       # Until prebuilt.lock pins an archive with my arm64 DXMT (jdrly/dxmt#182), my ntdll.so and my
-      # winemac.so (jdrly/wine's mach9-builds) and my FEX (jdrly/FEX's arm64-builds), stand-ins in
+      # winemac.so (jdrly/wine's arm64-builds) and my FEX (jdrly/FEX's arm64-builds), stand-ins in
       # their layout for what it lacks: what the sandbox needs, never a release (scripts/release.sh
       # refuses them)
       - name: Stand-ins for the components prebuilt.lock doesn't pin
@@ -186,7 +186,7 @@ jobs:
           engine_wine="$(sed -n 's/^ENGINE_WINE=\([0-9a-f]*\).*/\1/p' src/gw2om.sh)"
           commit=1111111111111111111111111111111111111111
           sum() { shasum -a 256 "$1" | cut -d' ' -f1; }
-          asset() { # <kind> <file>: the archive <kind>-mach9-<commit>.tar.xz with <file>; prints its path
+          asset() { # <kind> <file>: the archive <kind>-arm64-<commit>.tar.xz with <file>; prints its path
             local d="$RUNNER_TEMP/$1-asset"
             mkdir -p "$d/files"
             echo 'int gw2om_check;' | clang -x c -dynamiclib -o "$d/files/$2" -
@@ -194,8 +194,8 @@ jobs:
               echo "engine: Mach9 v0.3.1 (wine-v0.3.1-macos-arm64.tar.xz, sha256 $engine_sha)"
               echo "$2: sha256 $(sum "$d/files/$2")"; } >"$d/files/VERSION"
             echo "LGPL" >"$d/files/COPYING.LIB" && echo "Wine's LICENSE" >"$d/files/LICENSE"
-            tar -cJf "$d/$1-mach9-$commit.tar.xz" -C "$d/files" "$2" VERSION COPYING.LIB LICENSE
-            echo "$d/$1-mach9-$commit.tar.xz"
+            tar -cJf "$d/$1-arm64-$commit.tar.xz" -C "$d/files" "$2" VERSION COPYING.LIB LICENSE
+            echo "$d/$1-arm64-$commit.tar.xz"
           }
           nt="$(asset ntdll ntdll.so)"
           md="$(asset macdrv winemac.so)"
@@ -237,10 +237,10 @@ jobs:
           grep "^fex $commit libarm64ecfex.dll " prebuilt/STAGED
           lock "$other" "$(sum "$md")" "$(sum "$fx")" >prebuilt.lock
           if scripts/stage-components.sh --fetch >"$RUNNER_TEMP/stage.txt" 2>&1; then echo "stage-components.sh took an ntdll.so archive with another sha256"; exit 1; fi
-          grep "ntdll-mach9-$commit.tar.xz does not match the sha256 in prebuilt.lock" "$RUNNER_TEMP/stage.txt"
+          grep "ntdll-arm64-$commit.tar.xz does not match the sha256 in prebuilt.lock" "$RUNNER_TEMP/stage.txt"
           lock "$(sum "$nt")" "$other" "$(sum "$fx")" >prebuilt.lock
           if scripts/stage-components.sh --fetch >"$RUNNER_TEMP/stage.txt" 2>&1; then echo "stage-components.sh took a winemac.so archive with another sha256"; exit 1; fi
-          grep "macdrv-mach9-$commit.tar.xz does not match the sha256 in prebuilt.lock" "$RUNNER_TEMP/stage.txt"
+          grep "macdrv-arm64-$commit.tar.xz does not match the sha256 in prebuilt.lock" "$RUNNER_TEMP/stage.txt"
           lock "$(sum "$nt")" "$(sum "$md")" "$other" >prebuilt.lock
           if scripts/stage-components.sh --fetch >"$RUNNER_TEMP/stage.txt" 2>&1; then echo "stage-components.sh took a FEX archive with another sha256"; exit 1; fi
           grep "fex-arm64-$commit.tar.xz does not match the sha256 in prebuilt.lock" "$RUNNER_TEMP/stage.txt"

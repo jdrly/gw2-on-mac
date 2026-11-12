@@ -48,9 +48,9 @@ DXMT's, `ntdll.so`'s, `winemac.so`'s, FEX's and the addon's binaries aren't in t
 ignored `prebuilt/`, or takes them from the downloads that `prebuilt.lock` pins. The workspace is
 `GW2_ON_MAC_WORKSPACE`, by default `../gw2-on-mac`. DXMT is the fork's CI build for this engine,
 and its source is the fork's commit that `VERSION` names. `ntdll.so` is my Wine fork's CI build,
-the release asset `ntdll-mach9-<commit>.tar.xz` of jdrly/wine's `mach9-builds`, and its source is
+the release asset `ntdll-arm64-<commit>.tar.xz` of jdrly/wine's `arm64-builds`, and its source is
 the commit its `VERSION` names. `winemac.so` is the same, from the asset
-`macdrv-mach9-<commit>.tar.xz`. FEX is my FEX fork's CI build, the release asset
+`macdrv-arm64-<commit>.tar.xz`. FEX is my FEX fork's CI build, the release asset
 `fex-arm64-<commit>.tar.xz` of jdrly/FEX's `arm64-builds`, and its source is the commit its
 `VERSION` names. The addon's source is [`addon/ui-scale`](addon/ui-scale), and
 `scripts/build-addon.sh` builds it. `build.sh` downloads Sparkle at a pinned version and sha256.
