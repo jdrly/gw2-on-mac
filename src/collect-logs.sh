@@ -8,8 +8,9 @@
 # In the zip:
 #   logs/          the app's logs (the end of large ones): install.log, wine.log (and .1-4, the
 #                  game starts before the last), DXMT's Gw2-64_d3d11.log (and .1-4) and the other
-#                  processes' DXMT logs, the heat counters (heat-<pid>.log, Debug logging),
-#                  session.env (what the last session started with), the interface addon's logs
+#                  processes' DXMT logs, the heat counters of the newest 3 games (heat-<pid>.log
+#                  and heat-requests-<pid>.log, Debug logging), session.env (what the last session
+#                  started with), the interface addon's logs
 #   settings.conf, state, install-manifest.json, dxmt.conf, compatdb.rules and compatdb.local, the
 #                  app's VERSIONS
 #   session-report.txt  the last game session in short (session-report.sh)
@@ -350,7 +351,11 @@ for f in "$LOGS"/*; do
     *) [ -f "$f" ] && add_log "$f" 20000000 ;;
   esac
 done
-for f in $(ls -t "$LOGS"/heat-[0-9]*.log 2>/dev/null | head -3); do add_log "$f" 5000000; done
+# (by line, as the logs folder's name has spaces; each with its server requests)
+ls -t "$LOGS"/heat-[0-9]*.log 2>/dev/null | head -3 | while IFS= read -r f; do
+  add_log "$f" 5000000
+  add_log "$LOGS/heat-requests-${f##*/heat-}" 5000000
+done
 for f in settings.conf state install-manifest.json dxmt.conf compatdb.rules compatdb.local; do add "$APPDIR/$f"; done
 add "$RES/VERSIONS"
 # the game's and Steam's own logs (game_rules)

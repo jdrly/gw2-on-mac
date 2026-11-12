@@ -882,6 +882,15 @@ printf 'started by %s from %s/Library, mail zz.person@example.com, token=abcDEF1
 printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60\ninfo:  STATS fps=60.0 ms=16.7/24.8 cb=1.1 rp=31.7(+0.0 merged) encode=0.23+1.03/10.3\ninfo:  HITCH frame=52 ms=120.0 dxmt(ms/calls): create=4.0/37 flush=3.5/1\n' >"$LOGS/Gw2-64_d3d11.log"
 mkdir -p "$GD/addons/arcdps" && printf 'crash\nself: Zz Charname Q, zz_arc_acct.1234\n' >"$GD/addons/arcdps/arcdps_lastcrash.log"
 echo "info: build" >"$GD/addons/arcdps/arcdps.log"; cp "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll"
+# (the heat counters of 4 games in the logs folder, whose name has spaces, each with its server
+# requests, older than session.env so the session report leaves them alone, and a profile)
+n=0
+for pid in 9101 9202 9303 9404; do
+  n=$((n + 1))
+  echo "heat pid $pid" >"$LOGS/heat-$pid.log"; echo "requests pid $pid" >"$LOGS/heat-requests-$pid.log"
+  touch -t "20250101000$n" "$LOGS/heat-$pid.log" "$LOGS/heat-requests-$pid.log"
+done
+echo "profile" >"$LOGS/heat-prof-9404.log"
 mkdir -p "$SANDBOX/zip"
 zip=$("$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip" 2>"$SANDBOX/collect.err" | tail -1)
 check "collect-logs makes a zip" [ -f "$zip" ]
@@ -890,6 +899,13 @@ Z="$SANDBOX/unzipped/$(basename "$zip" .zip)"
 for f in logs/install.log logs/wine.log logs/Gw2-64_d3d11.log settings.conf compatdb.rules compatdb.local install-manifest.json session-report.txt system-info.txt gpu-errors.txt game-logs/ArenaNet.log game-logs/steam/content_log.txt; do
   check "  has $f" [ -f "$Z/$f" ]
 done
+for pid in 9202 9303 9404; do
+  check "  has the heat log of game $pid and its server requests" sh -c "[ -f '$Z/logs/heat-$pid.log' ] && [ -f '$Z/logs/heat-requests-$pid.log' ]"
+done
+check "  but not the 4th newest game's, nor the profile" \
+  sh -c "[ ! -e '$Z/logs/heat-9101.log' ] && [ ! -e '$Z/logs/heat-requests-9101.log' ] && [ ! -e '$Z/logs/heat-prof-9404.log' ]"
+for pid in 9101 9202 9303 9404; do rm -f "$LOGS/heat-$pid.log" "$LOGS/heat-requests-$pid.log"; done
+rm -f "$LOGS/heat-prof-9404.log"
 check "  the session report read DXMT's log" has "$Z/session-report.txt" "Frame rate: median 60.0"
 check "  and says which DXMT ran: my fork, its build" has "$Z/session-report.txt" "^DXMT that ran: my DXMT fork, $(head -1 "$COMP/dxmt/VERSION" | cut -c1-20)"
 check "  and which mouse the game had: GameController's (raw mouse-look on)" has "$Z/session-report.txt" "^Mouse the game had: the mouse's own counts from GameController"
