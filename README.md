@@ -942,10 +942,10 @@ real build, `stage-components.sh --standin` adds a stand-in in the same layout f
 `--pack` and `scripts/release.sh` refuse it.
 
 **Where my ntdll.so comes from.** My Wine fork's `GW2` workflow builds it for this engine (#40)
-and publishes each commit's build as the asset `ntdll-mach9-<commit>.tar.xz` of jdrly/wine's
-pre-release `mach9-builds`: `ntdll.so`, `VERSION`, `COPYING.LIB` and `LICENSE`. `VERSION` has the
+and publishes each commit's build as the asset `ntdll-arm64-<commit>.tar.xz` of jdrly/wine's
+pre-release `arm64-builds`: `ntdll.so`, `VERSION`, `COPYING.LIB` and `LICENSE`. `VERSION` has the
 lines `commit: <full sha>`, `engine: … sha256 <the engine tarball's>` and `ntdll.so: sha256 <the
-file's>`. `stage-components.sh` copies it, unpacked, from `work/ntdll-mach9/install` in the
+file's>`. `stage-components.sh` copies it, unpacked, from `work/ntdll-arm64/install` in the
 workspace (`NTDLL_BUILD` overrides it) and writes `prebuilt/ntdll/SHA256SUMS`. It refuses a build
 for another engine than `ENGINE_SHA256` or on another base than `ENGINE_WINE` (`VERSION`'s `base:`
 line), an `ntdll.so` that isn't the file its `VERSION` names or
@@ -954,9 +954,9 @@ build and without `WINE_COMMIT` it stages no `ntdll/`, and the app leaves the en
 place. `build.sh` refuses a `prebuilt/ntdll` that doesn't match its record.
 
 **Where my winemac.so comes from.** The same workflow builds it from the same commit and publishes
-it next to the `ntdll` archive as `macdrv-mach9-<commit>.tar.xz` (#57): `winemac.so`, `VERSION`,
+it next to the `ntdll` archive as `macdrv-arm64-<commit>.tar.xz` (#57): `winemac.so`, `VERSION`,
 `COPYING.LIB` and `LICENSE`, with `winemac.so: sha256 <the file's>` in `VERSION`. Staging takes it
-from `work/macdrv-mach9/install` (`MACDRV_BUILD`) into `prebuilt/macdrv` with the same checks, and
+from `work/macdrv-arm64/install` (`MACDRV_BUILD`) into `prebuilt/macdrv` with the same checks, and
 `MACDRV_COMMIT` asks for a commit as `WINE_COMMIT` does. `build.sh` refuses a `prebuilt/macdrv`
 that doesn't match its record.
 
@@ -999,9 +999,9 @@ the checkout as `GW2_ON_MAC_WORKSPACE`. Staging refuses a DXMT build whose `VERS
 engine than `ENGINE_SHA256` in `src/gw2om.sh`, or a `winemetal.so` without a valid signature, and
 with `DXMT_COMMIT` set, a build of another commit. `STAGED_FROM` puts the fork's commit and where
 its files came from into the first line of `prebuilt/STAGED`. With a Wine commit it fetches my
-fork's `ntdll.so` asset into `work/ntdll-mach9/install` and stages it with `WINE_COMMIT` set;
+fork's `ntdll.so` asset into `work/ntdll-arm64/install` and stages it with `WINE_COMMIT` set;
 without one a dev build has none. A Mac driver commit does the same for `winemac.so`, into
-`work/macdrv-mach9/install` with `MACDRV_COMMIT`, and a FEX commit for my FEX, from jdrly/FEX's
+`work/macdrv-arm64/install` with `MACDRV_COMMIT`, and a FEX commit for my FEX, from jdrly/FEX's
 `arm64-builds` into `work/fex-arm64/install` with `FEX_COMMIT`. A dev build with my FEX still
 starts on the engine's own: `fex` is `engine` until I set it.
 
@@ -1176,16 +1176,16 @@ gh release download v0.2.0-dev.5 -R jdrly/gw2-on-mac -p '*.dmg' -D ~/Downloads
 ```
 
 - DXMT is my fork's build of a commit on its `gw2-on-mac`: the release asset
-  `dxmt-mach9-<commit>.tar.xz` of jdrly/dxmt's `mach9-builds`, checked against GitHub's digest,
-  or until that exists, the artifact `dxmt-mach9-<commit>` of the fork's `GW2` run, fetched with
+  `dxmt-arm64-<commit>.tar.xz` of jdrly/dxmt's `arm64-builds`, checked against GitHub's digest,
+  or until that exists, the artifact `dxmt-arm64-<commit>` of the fork's `GW2` run, fetched with
   the run's own token. A commit that isn't on the branch, or whose run hasn't finished green, is
   refused.
 - My `ntdll.so` comes only with `wine_commit`, a commit on my Wine fork's `gw2-on-mac`: the
-  release asset `ntdll-mach9-<commit>.tar.xz` of jdrly/wine's `mach9-builds`, checked against
+  release asset `ntdll-arm64-<commit>.tar.xz` of jdrly/wine's `arm64-builds`, checked against
   GitHub's digest. A commit that isn't on the branch or has no asset is refused. Without
   `wine_commit` the app has no `ntdll.so` of mine and leaves the engine's own in place.
 - My `winemac.so` comes only with `macdrv_commit`, the same way: the asset
-  `macdrv-mach9-<commit>.tar.xz`. The two commits are separate inputs, so a build can carry either
+  `macdrv-arm64-<commit>.tar.xz`. The two commits are separate inputs, so a build can carry either
   file without the other.
 - My FEX comes only with `fex_commit`, a commit on my FEX fork's `gw2-on-mac`: the release asset
   `fex-arm64-<commit>.tar.xz` of jdrly/FEX's `arm64-builds`, checked against GitHub's digest.

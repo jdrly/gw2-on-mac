@@ -35,9 +35,9 @@
 #
 # Sources: GW2_ON_MAC_WORKSPACE (default ../gw2-on-mac, next to this repository) and in it
 # DXMT_BUILD=work/dxmt-arm64/install (the fork's CI artifact, unpacked),
-# NTDLL_BUILD=work/ntdll-mach9/install (jdrly/wine's asset ntdll-mach9-<commit>.tar.xz, unpacked;
-# without it no ntdll/), MACDRV_BUILD=work/macdrv-mach9/install (its asset
-# macdrv-mach9-<commit>.tar.xz, unpacked; without it no macdrv/) and
+# NTDLL_BUILD=work/ntdll-arm64/install (jdrly/wine's asset ntdll-arm64-<commit>.tar.xz, unpacked;
+# without it no ntdll/), MACDRV_BUILD=work/macdrv-arm64/install (its asset
+# macdrv-arm64-<commit>.tar.xz, unpacked; without it no macdrv/) and
 # FEX_BUILD=work/fex-arm64/install (jdrly/FEX's asset fex-arm64-<commit>.tar.xz, unpacked; without
 # it no fex/) and UISCALE_BUILD=work/ui-scale/build (relative to the workspace, or absolute). It
 # refuses a DXMT build, a Wine build or a FEX build of mine for another engine than
@@ -80,8 +80,8 @@ WINE_KINDS="ntdll macdrv"
 # MACDRV_COMMIT, or none); WK_BUILD, the unpacked build in the workspace
 wine_kind() {
   case "$1" in
-    ntdll) WK_FILE=ntdll.so WK_COMMIT="${WINE_COMMIT:-}" WK_BUILD="${NTDLL_BUILD:-work/ntdll-mach9/install}" ;;
-    macdrv) WK_FILE=winemac.so WK_COMMIT="${MACDRV_COMMIT:-}" WK_BUILD="${MACDRV_BUILD:-work/macdrv-mach9/install}" ;;
+    ntdll) WK_FILE=ntdll.so WK_COMMIT="${WINE_COMMIT:-}" WK_BUILD="${NTDLL_BUILD:-work/ntdll-arm64/install}" ;;
+    macdrv) WK_FILE=winemac.so WK_COMMIT="${MACDRV_COMMIT:-}" WK_BUILD="${MACDRV_BUILD:-work/macdrv-arm64/install}" ;;
   esac
 }
 
