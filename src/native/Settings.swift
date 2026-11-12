@@ -274,7 +274,7 @@ struct SettingsView: View {
       Button("Cancel", role: .cancel) { confirmAction = nil }
     } message: {
       Text(confirmAction == "reset-shaders"
-           ? "This clears \(appName)'s DXMT shader caches for the game (in ~/Library/Caches/\(appName)), my fork's and the engine's DXMT's: "
+           ? "This clears \(appName)'s DXMT shader caches for the game (in ~/Library/Caches/\(appFolder)), my fork's and the engine's DXMT's: "
              + "its compiled shaders, pipeline archives and recorded pipelines. The next sessions build "
              + "them again, with more hitches at first."
            : "The Wine engine is unpacked again from the verified download and \(appName)'s graphics and "

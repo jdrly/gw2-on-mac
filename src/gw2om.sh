@@ -99,10 +99,13 @@
 # "@notice <text>", "@error <text>", "@done <text>". Everything else is plain log text.
 # Runs under macOS's /bin/bash 3.2.
 set -euo pipefail
-# The app's name, for its texts and its three folders in ~/Library (Application Support, Logs,
-# Caches). The 0.2 development build has its own, so it installs next to 0.1.x and shares nothing
-# with it. build.sh and the scripts in scripts/ read it from here.
-APP_NAME="GW2 on Mac arm64"
+# The app's name in its texts, and its name on disk: the .app's file name and its three folders in
+# ~/Library (Application Support, Logs, Caches). The 0.2 development build shows the same name as
+# 0.1.x but keeps its own on disk, so it installs next to 0.1.x and shares nothing with it. A text
+# that names a folder uses the folder's name. build.sh and the scripts in scripts/ read both from
+# here.
+APP_NAME="GW2 on Mac"
+APP_FOLDER="GW2 on Mac arm64"
 RES="$(cd "$(dirname "$0")" && pwd)"
 COMP="$RES/components"
 VERSION="$(sed -n 's/^version=//p' "$RES/app.properties" 2>/dev/null || true)"
@@ -186,9 +189,9 @@ else
   SYS_APPS=/Applications
   IMPORT_COPY="" FREE_KB=""
 fi
-APPDIR="$H/Library/Application Support/$APP_NAME"
-LOGS="$H/Library/Logs/$APP_NAME"
-CACHE="$H/Library/Caches/$APP_NAME"
+APPDIR="$H/Library/Application Support/$APP_FOLDER"
+LOGS="$H/Library/Logs/$APP_FOLDER"
+CACHE="$H/Library/Caches/$APP_FOLDER"
 ENG="$APPDIR/engine"                  # the unpacked engine, as it ships
 BOTTLE="$APPDIR/bottle"               # the game's Wine prefix (Steam and the game live in it)
 SETTINGS="$APPDIR/settings.conf"
@@ -940,8 +943,10 @@ engine_matches() {
 # repair, set dxmt and Play.
 DXGI="$ENG/lib/wine/dxgi"
 DXMT_MARK=.gw2om-dxmt
-# my fork's build: its VERSION's first line (git describe: v0.80-…-g<commit>) and the commit in it
+# my fork's build: its VERSION's first line (git describe: v0.80-…-g<commit>), the release and
+# the commit in it
 DXMT_VERSION="$(head -1 "$COMP/dxmt/VERSION" 2>/dev/null || true)"
+DXMT_RELEASE="$(printf '%s\n' "$DXMT_VERSION" | grep -oE 'v[0-9]+(\.[0-9]+)+' | head -1 | cut -c2- || true)"
 DXMT_COMMIT="$(printf '%s\n' "$DXMT_VERSION" | grep -oE '[0-9a-f]{7,40}' | tail -1 || true)"
 # dxmt_files: the component's files, relative to components/dxmt
 dxmt_files() { (cd "$COMP/dxmt" 2>/dev/null && find . -type f | sed 's|^\./||' | LC_ALL=C sort); }
@@ -1086,6 +1091,12 @@ lib_in_use() {
 # lib_commit_of <key> <mine|engine|other|none>: that file's commit (mine: my build's; engine: the
 # engine's Wine)
 lib_commit_of() { case "$2" in mine) lib_commit "$1" ;; engine) echo "$ENGINE_WINE" ;; esac; }
+# lib_release_of <key> <mine|engine|other|none>: the Wine release my build is on (11.21 from the
+# first line of its VERSION, git describe: wine-11.21-…-g<commit>); empty for the others
+lib_release_of() {
+  unix_lib "$1"
+  [ "$2" != mine ] || head -1 "$LIB_COMP/VERSION" 2>/dev/null | grep -oE 'wine-[0-9]+(\.[0-9]+)+' | head -1 | cut -c6- || true
+}
 # lib_label <key> <mine|engine|other>: what the window and the log call it
 lib_label() {
   unix_lib "$1"
@@ -1647,7 +1658,7 @@ import_settings() {
   to="$BOTTLE/drive_c/users/$(bottle_user)/AppData/Roaming/Guild Wars 2"
   say "Your game settings from $from"
   if [ -n "$DRY" ]; then echo "[dry-run] copy Local.dat and GFXSettings.Gw2-64.exe.xml to $to"; return 0; fi
-  backup="$to/$APP_NAME backup $(date '+%Y-%m-%d %H%M%S')"
+  backup="$to/$APP_FOLDER backup $(date '+%Y-%m-%d %H%M%S')"
   run mkdir -p "$to"
   for f in GFXSettings.Gw2-64.exe.xml Local.dat; do
     [ -f "$from/$f" ] || continue
@@ -1818,9 +1829,11 @@ status() {
   echo "dxmt=$(setting dxmt)"
   echo "dxmt_tree=$(dxmt_tree "$DXGI/dxmt")"
   echo "dxmt_version=$DXMT_VERSION"
+  echo "dxmt_release=$DXMT_RELEASE"
   echo "dxmt_commit=$DXMT_COMMIT"
   # (each of my unix libraries: the setting, the file Settings asks for (lib_state), the one in the
-  # engine now (mine, engine, other, none) and its commit, and my build's commit in this app)
+  # engine now (mine, engine, other, none) with its commit and, if mine, its Wine release, and my
+  # build's commit in this app)
   for k in $UNIX_LIBS; do
     unix_lib "$k"
     f=$(lib_file "$k" "$UNIX_DIR/$LIB")
@@ -1828,6 +1841,7 @@ status() {
     echo "${k}_ready=$(lib_state "$k")"
     echo "${k}_file=$f"
     echo "${k}_commit=$(lib_commit_of "$k" "$f")"
+    echo "${k}_release=$(lib_release_of "$k" "$f")"
     echo "${k}_build=$(lib_commit "$k")"
   done
   # (the engine's loader is a Game Mode app: nothing for the app to set up or switch)
@@ -1977,7 +1991,7 @@ unlock() {
 write_manifest() {
   put "$MANIFEST" 644 <<EOF
 {
-  "app": "$APP_NAME",
+  "app": "$APP_FOLDER",
   "version": "$VERSION",
   "installed": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "route": "$(state route)",

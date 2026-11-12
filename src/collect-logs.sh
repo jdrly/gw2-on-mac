@@ -35,14 +35,16 @@
 #
 # GW2_ON_MAC_ROOT=/abs/dir: a sandbox (as for gw2om.sh); the zip then goes to its Desktop.
 set -u
-# The app's name and its folders' (as gw2om.sh's)
-APP_NAME="GW2 on Mac arm64"
+# The app's name in its texts, and its name on disk: its folders, the crash reports' and the zip's
+# (as gw2om.sh's)
+APP_NAME="GW2 on Mac"
+APP_FOLDER="GW2 on Mac arm64"
 RES="$(cd "$(dirname "$0")" && pwd)"
 ROOT="${GW2_ON_MAC_ROOT:-}"
 H="${ROOT:+$ROOT/home}"
 H="${H:-$HOME}"
-APPDIR="$H/Library/Application Support/$APP_NAME"
-LOGS="$H/Library/Logs/$APP_NAME"
+APPDIR="$H/Library/Application Support/$APP_FOLDER"
+LOGS="$H/Library/Logs/$APP_FOLDER"
 DIAG="$H/Library/Logs/DiagnosticReports"
 BOTTLE="$APPDIR/bottle"
 STEAM="$BOTTLE/drive_c/Program Files (x86)/Steam"
@@ -57,10 +59,10 @@ done
 GW2_APPDATA="$BOTTLE/drive_c/users/$BOTTLE_USER/AppData/Roaming/Guild Wars 2"
 # DXMT's shader caches for the game, in the app's own cache folder (the game's compatdb rule sets
 # DXMT_SHADER_CACHE_PATH to one of them): my DXMT fork's, the engine's DXMT's
-DXMT_CACHE="$H/Library/Caches/$APP_NAME/dxmt/Gw2-64.exe"
-DXMT_CACHE_FORK="$H/Library/Caches/$APP_NAME/fork/dxmt/Gw2-64.exe"
+DXMT_CACHE="$H/Library/Caches/$APP_FOLDER/dxmt/Gw2-64.exe"
+DXMT_CACHE_FORK="$H/Library/Caches/$APP_FOLDER/fork/dxmt/Gw2-64.exe"
 
-name="${APP_NAME// /-}-logs-$(date +%Y-%m-%d-%H%M)"
+name="${APP_FOLDER// /-}-logs-$(date +%Y-%m-%d-%H%M)"
 dest="${1:-$H/Desktop}"
 work="$(mktemp -d)" || exit 1
 trap 'rm -rf "$work"' EXIT
@@ -240,7 +242,7 @@ CRASH_FILE_MAX=3000000
 crash_reports() {
   local size f n=0 total=0
   find "$DIAG" -maxdepth 1 -type f \( -iname '*wine*' -o -iname 'Gw2*' -o -iname 'steam*' \
-    -o -name "$APP_NAME*" -o -name 'GW2onMac*' -o -name 'MTLCompilerService*' \) \
+    -o -name "$APP_FOLDER*" -o -name 'GW2onMac*' -o -name 'MTLCompilerService*' \) \
     \( -name '*.ips' -o -name '*.crash' -o -name '*.hang' -o -name '*.spin' -o -name '*.diag' \) \
     -mtime -7 -exec stat -f '%m %z %N' {} + 2>/dev/null | sort -rn | while read -r _ size f; do
       case "${f##*/}" in

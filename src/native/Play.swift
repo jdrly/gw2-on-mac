@@ -46,7 +46,7 @@ extension Installer {
       let notice = output.split(separator: "\n").first { $0.hasPrefix("@notice ") }.map { String($0.dropFirst(8)) }
       let error = output.contains("@done ") ? notice
         : output.split(separator: "\n").first { $0.hasPrefix("@error ") }.map { String($0.dropFirst(7)) }
-          ?? "The game could not be started. Details are in ~/Library/Logs/\(appName)/wine.log."
+          ?? "The game could not be started. Details are in ~/Library/Logs/\(appFolder)/wine.log."
       // (a game the last status didn't know yet: up once status has its pid)
       refresh { if output.contains("already running") { self.gameApp?.activate() } }
       then(error, output.contains("@done "))

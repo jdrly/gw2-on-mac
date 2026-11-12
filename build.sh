@@ -65,12 +65,14 @@ GITHUB_URL=https://github.com/jdrly
 REPO_URL=https://github.com/jdrly/gw2-on-mac
 MACOS_MIN=26.4
 CACHE="$ROOT/.cache"
-# The app's name (gw2om.sh has the one definition) and bundle id: the 0.2 development build
-# has its own, so it installs next to 0.1.x and keeps its own defaults
+# The app's name (gw2om.sh has the one definition), its name on disk and bundle id: the 0.2
+# development build shows the name 0.1.x shows (CFBundleName, the menu bar's) but has its own
+# file name and id, so it installs next to 0.1.x and keeps its own defaults
 APP_NAME="$(sed -n 's/^APP_NAME="\(.*\)"$/\1/p' src/gw2om.sh)"
-[ -n "$APP_NAME" ] || { echo "No APP_NAME=\"…\" line in src/gw2om.sh" >&2; exit 1; }
+APP_FOLDER="$(sed -n 's/^APP_FOLDER="\(.*\)"$/\1/p' src/gw2om.sh)"
+[ -n "$APP_NAME" ] && [ -n "$APP_FOLDER" ] || { echo "No APP_NAME=\"…\" or APP_FOLDER=\"…\" line in src/gw2om.sh" >&2; exit 1; }
 APP_ID=cz.jandrly.gw2onmac.arm64
-APP="$ROOT/dist/$APP_NAME.app"
+APP="$ROOT/dist/$APP_FOLDER.app"
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 
 # Pinned dependencies. Bump the version and sha256 together.
@@ -307,5 +309,5 @@ codesign --force --sign - "$R/helpers/sessionlock"
 codesign --force --sign - "$APP"
 codesign --verify --strict "$APP"
 # Every file's sha256, what scripts/release.sh --adhoc compares the app in its DMG with
-scripts/app-files.sh "$APP" >"$ROOT/dist/$APP_NAME.files"
+scripts/app-files.sh "$APP" >"$ROOT/dist/$APP_FOLDER.files"
 echo "Built $APP ($(du -sh "$APP" | cut -f1))"
