@@ -2,9 +2,10 @@
 # The install, status, play and settings logic behind the app's window. Unlike SWTOR
 # on Mac it changes no existing install: it creates its own Wine engine and bottle and installs the
 # game through Steam or ArenaNet's own installer. On this line the engine is Mach9's arm64 Wine as
-# it ships, with two exceptions: its DXMT tree is my DXMT fork's (components/dxmt), and its ntdll.so
-# is my Wine build's (components/ntdll), the engine's own kept next to each (Settings › Graphics ›
-# DXMT and Wine switch back). Nothing goes inside wine.app.
+# it ships, with three exceptions: its DXMT tree is my DXMT fork's (components/dxmt), its ntdll.so
+# is my Wine build's (components/ntdll), and its winemac.so my Mac driver's (components/macdrv),
+# the engine's own kept next to each (Settings › Graphics › DXMT, Wine and Mac driver switch back).
+# Nothing goes inside wine.app.
 #
 #   gw2om.sh status            KEY=VALUE lines describing this Mac (what the window shows)
 #   gw2om.sh install steam     phases 1-4: engine, bottle, Steam from Valve, then Steam starts
@@ -73,9 +74,9 @@
 #   GW2_ON_MAC_ENGINE_URL, GW2_ON_MAC_ENGINE_SHA256, GW2_ON_MAC_ENGINE_SIZE   another engine
 #                              archive (a stand-in whose bin/wine only pretends)
 #   GW2_ON_MAC_ENGINE_CHECKS=0 don't check the unpacked engine's files against the real engine's
-#   GW2_ON_MAC_ENGINE_LOADER_SHA256, GW2_ON_MAC_ENGINE_NTDLL_SHA256, GW2_ON_MAC_ENGINE_D3D11_SHA256,
-#   GW2_ON_MAC_ENGINE_WINEMETAL_SHA256   a stand-in engine's own files (engine_matches, graphics,
-#                              unix_lib)
+#   GW2_ON_MAC_ENGINE_LOADER_SHA256, GW2_ON_MAC_ENGINE_NTDLL_SHA256, GW2_ON_MAC_ENGINE_WINEMAC_SHA256,
+#   GW2_ON_MAC_ENGINE_D3D11_SHA256, GW2_ON_MAC_ENGINE_WINEMETAL_SHA256   a stand-in engine's own
+#                              files (engine_matches, graphics, unix_lib)
 #   GW2_ON_MAC_MACOS           the macOS version preflight sees
 #   GW2_ON_MAC_STEAMSETUP_URL  another SteamSetup.exe
 #   GW2_ON_MAC_SIGNER          the signer check-setup accepts (default ArenaNet)
@@ -124,14 +125,15 @@ ENGINE_WINE=53def89293a   # athei/wine, wine-11.21-37
 ENGINE_FEX=9d4fa4b46b1
 ENGINE_DXMT=d903db89036   # athei/dxmt
 # Checked after unpacking (engine_matches): the loader, a signed app bundle that every Wine process
-# runs as (nothing may change inside it: a copied or re-signed loader exits), and ntdll.so, which
-# also tells the engine's own from mine (unix_lib). The DXMT tree's d3d11.dll and winemetal.so tell
-# the engine's own DXMT from mine (dxmt_tree).
+# runs as (nothing may change inside it: a copied or re-signed loader exits), and ntdll.so and
+# winemac.so, which also tell the engine's own from mine (unix_lib). The DXMT tree's d3d11.dll and
+# winemetal.so tell the engine's own DXMT from mine (dxmt_tree).
 ENGINE_LOADER_APP=lib/wine/aarch64-unix/wine.app
 ENGINE_LOADER_SHA256=fac8babc821737c25483679e179f2e61e9dd2c43e3122decb1a77c5870dbeb99
 ENGINE_LOADER_ID=app.mach9.loader
 ENGINE_TEAM=WLKUUJD25W
 ENGINE_NTDLL_SHA256=a0df4d34bc4918886606bcf9d04c9f853c521636fcbf3b6cce08e8c11b74e787
+ENGINE_WINEMAC_SHA256=ae468edce407781dbd19a7ac8aad68844a212688dd4132748341c492a0986b2f
 ENGINE_D3D11_SHA256=49099142c39d2aa066527d0f1a573d61e3177d317e638b4f7f1457978a61b8df
 ENGINE_WINEMETAL_SHA256=c28171fd25beb364d01c097a5546e2bba9780d34641acb65ad7b63fec985c64f
 # The loader's entitlements need macOS 26.4 (wine.app's own Info.plist says so too)
@@ -164,6 +166,7 @@ if [ -n "$ROOT" ]; then
   ENGINE_CHECKS="${GW2_ON_MAC_ENGINE_CHECKS:-1}"
   ENGINE_LOADER_SHA256="${GW2_ON_MAC_ENGINE_LOADER_SHA256:-$ENGINE_LOADER_SHA256}"
   ENGINE_NTDLL_SHA256="${GW2_ON_MAC_ENGINE_NTDLL_SHA256:-$ENGINE_NTDLL_SHA256}"
+  ENGINE_WINEMAC_SHA256="${GW2_ON_MAC_ENGINE_WINEMAC_SHA256:-$ENGINE_WINEMAC_SHA256}"
   ENGINE_D3D11_SHA256="${GW2_ON_MAC_ENGINE_D3D11_SHA256:-$ENGINE_D3D11_SHA256}"
   ENGINE_WINEMETAL_SHA256="${GW2_ON_MAC_ENGINE_WINEMETAL_SHA256:-$ENGINE_WINEMETAL_SHA256}"
   MACOS="${GW2_ON_MAC_MACOS:-}"
@@ -612,11 +615,12 @@ apply_registry() {
 # --- Settings
 #
 # The keys are 0.1.x's, so settings.conf reads the same on both lines, and dxmt (fork: my DXMT
-# fork; engine: the engine's own, to compare), wine (mine: my ntdll.so; engine: the engine's own)
-# and jobwakes (a row of HEAT_SWITCHES). On this engine some of them need pieces of mine that
+# fork; engine: the engine's own, to compare), wine (mine: my ntdll.so; engine: the engine's own),
+# macdrv (mine: my winemac.so; engine: the engine's own), and jobwakes and launcherframes (rows of
+# HEAT_SWITCHES). On this engine some of them need pieces of mine that
 # come in later steps: setting_state says so, the Settings window greys them with the reason, set
 # refuses them, and they keep what settings.conf says without an effect.
-SETTING_KEYS="retina fpscap metalfx hud warm coolworkers fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam dxmt wine jobwakes"
+SETTING_KEYS="retina fpscap metalfx hud warm coolworkers fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam dxmt wine jobwakes macdrv launcherframes"
 FPS_CAPS="off 30 40 60 120"
 # Mouse-look speed (mousespeed): RawMouseGameControllerScale on 0.1.x, a factor on the macOS
 # pointer's speed (SWTOR on Mac's MOUSE_SPEEDS)
@@ -627,7 +631,7 @@ UI_SCALES="1.5 1.75 1.8 2.0"
 setting_default() {
   case "$1" in
     retina|warm|fastlocks|uiscale_sans|gamemode|rawmouse|updates|steambg|quitsteam|jobwakes) echo on ;;
-    metalfx|hud|uiscale|uiscale_cinema) echo off ;;
+    metalfx|hud|uiscale|uiscale_cinema|launcherframes) echo off ;;
     mousespeed) echo 1 ;;
     debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
     fpscap) echo off ;;
@@ -636,12 +640,12 @@ setting_default() {
     uiscale_size) echo 1.75 ;;
     launchopts) echo "" ;;
     dxmt) echo fork ;;
-    wine) echo mine ;;
+    wine|macdrv) echo mine ;;
   esac
 }
 setting_valid() { # <key> <value>
   case "$1" in
-    retina|metalfx|hud|warm|fastlocks|uiscale|uiscale_sans|uiscale_cinema|gamemode|rawmouse|updates|debug|steambg|quitsteam|jobwakes)
+    retina|metalfx|hud|warm|fastlocks|uiscale|uiscale_sans|uiscale_cinema|gamemode|rawmouse|updates|debug|steambg|quitsteam|jobwakes|launcherframes)
       [ "$2" = on ] || [ "$2" = off ] ;;
     mousespeed) in_list "$2" "$MOUSE_SPEEDS" ;;
     fpscap) in_list "$2" "$FPS_CAPS" ;;
@@ -652,7 +656,7 @@ setting_valid() { # <key> <value>
     # would take for something else)
     launchopts) case "$2" in *[!A-Za-z0-9\ _.:=,/+-]*) false ;; *) [ ${#2} -le 200 ] ;; esac ;;
     dxmt) [ "$2" = fork ] || [ "$2" = engine ] ;;
-    wine) [ "$2" = mine ] || [ "$2" = engine ] ;;
+    wine|macdrv) [ "$2" = mine ] || [ "$2" = engine ] ;;
     *) false ;;
   esac
 }
@@ -667,15 +671,18 @@ setting() { # <key>: its value, or the default
 # setting_state <key>: ok, or off:<reason> for a setting this engine can't do yet (the one table of
 # them; settings prints it, the window greys the row and shows the reason, set refuses the key)
 setting_state() {
+  local l
   case "$1" in
     metalfx|warm) if [ "$(setting dxmt)" = fork ]; then echo ok; else echo "off:Needs my DXMT fork (Graphics › DXMT)."; fi ;;
     coolworkers|fastlocks) echo "off:Need my Wine changes. Come with step 3." ;;
     mousespeed) echo "off:The engine gives the game the mouse's own counts. A speed factor comes with #59 if I need one." ;;
     gamemode) echo "off:The engine's loader is a Game Mode app. Nothing to switch." ;;
     wine) if lib_bundled wine; then echo ok; else echo "off:This build of the app has no Wine build of mine."; fi ;;
+    macdrv) if lib_bundled macdrv; then echo ok; else echo "off:This build of the app has no Mac driver of mine."; fi ;;
     *)
-      if ! in_list "$1" "$(heat_keys)"; then echo ok
-      elif [ "$(lib_want wine)" = mine ]; then echo ok
+      l=$(switch_lib "$(switch_entry "$1")")
+      if [ -z "$l" ] || [ "$(lib_want "$l")" = mine ]; then echo ok
+      elif [ "$l" = macdrv ]; then echo "off:Needs my Mac driver (Graphics › Mac driver)."
       else echo "off:Needs my Wine build (Graphics › Wine)."
       fi ;;
   esac
@@ -724,10 +731,16 @@ write_dxmt_conf() {
 #   DXMT_SUBSAMPLE_METALFX=1        metalfx=on: MetalFX for the Subsample pass (#56)
 #   DXMT_STATS=1                    debug=on: the 2 s STATS lines (on by default in the fork; said
 #                                   here so the session's record shows it)
-# The engine's DXMT reads none of them, so they stay out while it runs.
+# The engine's DXMT reads none of them, so they stay out while it runs. With Debug logging and my
+# winemac.so in the engine, WINEDEBUG also takes my Mac driver's channel macsurface for Gw2-64.exe
+# (the launcher and the game; Wine's <process>:<channel> form): each window surface's flushes and
+# skipped frames every 600 flushes, in wine.log, which the session report reads.
 game_env() {
   local n debug=-all fork=""
-  [ "$(setting debug)" != on ] || debug=err+all,fixme-all
+  if [ "$(setting debug)" = on ]; then
+    debug=err+all,fixme-all
+    [ "$(lib_in_use macdrv)" != mine ] || debug="$debug,Gw2-64.exe:+macsurface"
+  fi
   [ "$(dxmt_in_use)" != fork ] || fork=yes
   E=(
     "WINEPREFIX=$BOTTLE"
@@ -780,7 +793,8 @@ cdb_value() {
 #                      there (arcdps, Nexus), version while the larger interface is on. With no
 #                      such file Wine loads its own (n,b).
 #   env                DXMT's shader cache in the app's cache folder (dxmt_cache: my fork's, or
-#                      the engine's DXMT's own), then my ntdll.so's switches (heat_entries)
+#                      the engine's DXMT's own), then the switches of my ntdll.so and my Mac
+#                      driver (heat_entries)
 # CefHost.exe, which the game starts for its launcher and the Trading Post, inherits the game's
 # variables: the rule takes the cache path and the switches away from it again (an empty value
 # unsets a variable), and the HUD while it is on.
@@ -800,24 +814,34 @@ EOF
   echo "$cef;env=DXMT_SHADER_CACHE_PATH=$removed"
 }
 
-# The game's switches in my ntdll.so (jdrly/wine, WINE_HEAT_*; it acts on them in Gw2-64.exe only),
-# one row per setting: "<setting> <entry>". The entry goes into the game's rule while the setting
-# isn't off and my ntdll.so is the one in the engine (heat_entries). A new switch is a new row.
+# The game's switches in my Wine builds (jdrly/wine; they act on them in Gw2-64.exe only, which is
+# the launcher too), one row per setting: "<setting> <entry>". The entry goes into the game's rule
+# while the setting isn't off and the file that reads it is mine (heat_entries): WINE_HEAT_* my
+# ntdll.so (wine), WINE_MACDRV_* and WINE_WIN32U_* my Mac driver (macdrv; switch_lib). A new switch
+# is a new row.
+#   launcherframes  my winemac.so hands Cocoa a copy of each frame of a window it draws with GDI,
+#                   such as the launcher's, and skips a frame equal to the last (#57)
 HEAT_SWITCHES="
 jobwakes WINE_HEAT_WAKE=one,skip
+launcherframes WINE_MACDRV_SURFACE=copy,skip
 "
-heat_keys() { printf '%s\n' "$HEAT_SWITCHES" | awk 'NF { print $1 }'; }
+# switch_entry <setting>: its row's entry, or nothing; switch_lib <entry>: the unix_lib key whose
+# file reads it, or nothing for no entry
+switch_entry() { printf '%s\n' "$HEAT_SWITCHES" | awk -v k="$1" '$1 == k { print $2 }'; }
+switch_lib() { case "$1" in '') ;; WINE_MACDRV_*|WINE_WIN32U_*) echo macdrv ;; *) echo wine ;; esac; }
 # heat_entries: the entries for the game's rule, one a line and already through cdb_value (a
-# newline in the logs folder's path can't split one): the switches that are on and, with
-# Debug logging, the counters (WINE_HEAT_COUNT), which my ntdll.so writes to the logs folder as
-# heat-<pid>.log every 5 s. None while the engine's own ntdll.so is in place.
+# newline in the logs folder's path can't split one): the switches that are on and whose file is
+# mine and, with Debug logging and my ntdll.so, its counters (WINE_HEAT_COUNT), which it writes to
+# the logs folder as heat-<pid>.log every 5 s. None of a file while the engine's own is in place.
 heat_entries() {
-  local k e
-  [ "$(lib_in_use wine)" = mine ] || return 0
+  local k e wine macdrv
+  wine=$(lib_in_use wine) macdrv=$(lib_in_use macdrv)
   printf '%s\n' "$HEAT_SWITCHES" | while read -r k e; do
-    if [ -n "$k" ] && [ "$(setting "$k")" != off ]; then cdb_value "$e"; echo; fi
+    [ -n "$k" ] && [ "$(setting "$k")" != off ] || continue
+    if [ "$(switch_lib "$e")" = macdrv ]; then [ "$macdrv" = mine ] || continue; else [ "$wine" = mine ] || continue; fi
+    cdb_value "$e"; echo
   done
-  if [ "$(setting debug)" = on ]; then echo WINE_HEAT_COUNT=1; echo "WINE_HEAT_LOG=$(cdb_value "$LOGS")"; fi
+  if [ "$wine" = mine ] && [ "$(setting debug)" = on ]; then echo WINE_HEAT_COUNT=1; echo "WINE_HEAT_LOG=$(cdb_value "$LOGS")"; fi
 }
 # write_rules: compatdb.rules from the settings, then compatdb.local as it is (a temporary file
 # and a rename, so a process that starts meanwhile reads the old rules or the new, never half)
@@ -830,7 +854,8 @@ write_rules() {
 engine_ok() { [ -x "$ENG/bin/wine" ] && [ "$(cat "$ENG/.gw2om-source" 2>/dev/null || true)" = "$ENGINE_SHA256" ]; }
 
 # engine_matches <dir>: the unpacked engine is the expected build: its loader's sha256, the
-# engine's own ntdll.so (in place, or next to mine as ntdll.so.engine: every row of unix_lib), and
+# engine's own ntdll.so and winemac.so (in place, or next to mine as <file>.engine: every row of
+# unix_lib), and
 # wine.app's signature (codesign reads it and starts nothing): valid, by Mach9's team, with the
 # loader's identifier
 engine_matches() {
@@ -975,11 +1000,12 @@ dxmt_switch() {
 # mine is copied in from the components. Every process of the bottle loads the same file, Steam's
 # too, so it changes only while no session runs or starts (apply_engine_files). A build of the app
 # without my file (no components/<folder>) leaves the engine's own in place and greys the setting.
-UNIX_LIBS="wine"
+UNIX_LIBS="wine macdrv"
 UNIX_DIR="$ENG/lib/wine/aarch64-unix"
 unix_lib() {
   case "$1" in
     wine) LIB=ntdll.so LIB_COMP="$COMP/ntdll" LIB_SHA=$ENGINE_NTDLL_SHA256 ;;
+    macdrv) LIB=winemac.so LIB_COMP="$COMP/macdrv" LIB_SHA=$ENGINE_WINEMAC_SHA256 ;;
     *) return 1 ;;
   esac
 }
@@ -1912,6 +1938,7 @@ write_manifest() {
   "engine_dxmt": "$ENGINE_DXMT",
   "loader_sha256": "$ENGINE_LOADER_SHA256",
   "ntdll_sha256": "$ENGINE_NTDLL_SHA256",
+  "winemac_sha256": "$ENGINE_WINEMAC_SHA256",
   "dxmt_d3d11_sha256": "$ENGINE_D3D11_SHA256",
   "winemetal_sha256": "$ENGINE_WINEMETAL_SHA256",
   "dxmt_fork": "$DXMT_VERSION",

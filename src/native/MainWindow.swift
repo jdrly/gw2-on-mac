@@ -377,10 +377,17 @@ struct ThisMac: View {
       }
     }
     let engine = s["engine_title"] ?? "Mach9 0.3.1 · Wine 11.21"
-    // the ntdll.so in the engine (gw2om.sh status wine_*): mine with its commit, another, or the engine's own
+    // the ntdll.so and winemac.so in the engine (gw2om.sh status wine_*, macdrv_*): mine with its
+    // commit, another, or the engine's own (not named)
     let short = engine.components(separatedBy: " · ").first ?? engine
-    let wine = s["wine_file"] == "mine" ? "\(short) · my ntdll \((s["wine_commit"] ?? "").prefix(7))"
-      : s["wine_file"] == "other" ? "\(short) · another ntdll" : engine
+    let libs = [("wine", "ntdll"), ("macdrv", "winemac")]
+    let mine = libs.compactMap { lib -> String? in
+      s["\(lib.0)_file"] == "mine" ? "my \(lib.1) \((s["\(lib.0)_commit"] ?? "").prefix(7))"
+        : s["\(lib.0)_file"] == "other" ? "another \(lib.1)" : nil
+    }
+    let wine = mine.isEmpty ? engine : ([short] + mine).joined(separator: " · ")
+    let switching = libs.contains { s["\($0.0)_ready"] == "switch" }
+    let repair = libs.filter { s["\($0.0)_ready"] == "other" }.map { $0.1 }
     let macos = s["macos"] ?? "?"
     // the DXMT Settings asks for: my fork (its commit) or the engine's own (athei/dxmt's)
     let dxmt = s["dxmt"] == "engine" ? "DXMT \((s["engine_dxmt"] ?? "").prefix(7)) · the engine's"
@@ -404,13 +411,13 @@ struct ThisMac: View {
       Check(id: "macOS", icon: "cpu",
             value: installer.macosOK ? macos : "\(macos) · needs \(s["macos_min"] ?? "26.4")",
             tone: installer.macosOK ? .good : .bad),
-      // (switch: Settings changed the ntdll.so while Steam ran; other: neither the engine's nor mine)
+      // (switch: Settings changed a file while Steam ran; other: neither the engine's nor mine)
       Check(id: "Engine", icon: "wine",
             value: s["engine_installed"] != "yes" ? "\(engine) · not set up"
-              : s["wine_ready"] == "switch" ? "\(wine) · at the next Play"
-              : s["wine_ready"] == "other" ? "\(short) · ntdll needs Repair" : wine,
-            tone: s["engine_installed"] != "yes" ? .off : s["wine_ready"] == "switch" ? .pending
-              : s["wine_ready"] == "other" ? .bad : .good),
+              : switching ? "\(wine) · at the next Play"
+              : !repair.isEmpty ? "\(short) · \(repair.joined(separator: " and ")) needs Repair" : wine,
+            tone: s["engine_installed"] != "yes" ? .off : switching ? .pending
+              : !repair.isEmpty ? .bad : .good),
       // (switch: Settings changed it while Steam ran; the next Play puts it in)
       Check(id: "Graphics", icon: "sparkles",
             value: s["graphics"] == "yes" ? dxmt
