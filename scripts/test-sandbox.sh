@@ -448,6 +448,21 @@ check "  the crash log kept its exception" has "$Z/game-logs/ArenaNet.log" "Exce
 check "  no arcdps log (its crash log may hold character names)" sh -c "! find '$Z' -iname 'arcdps*' | grep -q . && ! grep -rq 'Zz Charname Q' '$Z'"
 check "  system-info names the d3d11.dll addon: arcdps" has "$Z/system-info.txt" "d3d11.dll addon: arcdps"
 rm -rf "$GD/addons" "$GD/d3d11.dll"
+# (DXMT's wait field is count, the window's total and its longest: two windows with waits and one
+# without, which adds nothing)
+printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60
+info:  COMPILE variants=10 air=0/0 pso=1/15 built=2 failed=0 build=shader:0/0.0 pipeline:2/30.0 queue=0/0 threads=2 wait=13x 109.6/21.1 slow=0
+info:  COMPILE variants=5 air=0/0 pso=1/15 built=1 failed=0 build=shader:0/0.0 pipeline:1/9.0 queue=0/0 threads=2 wait=0x 0.0/0.0 slow=0
+info:  COMPILE variants=3 air=0/0 pso=1/15 built=1 failed=0 build=shader:0/0.0 pipeline:1/12.0 queue=0/0 threads=2 wait=3x 31.4/18.9 slow=0
+' >"$SANDBOX/compile_d3d11.log"
+out=$("$APP/Contents/Resources/session-report.sh" "$SANDBOX/compile_d3d11.log" 2>&1)
+check "the session report adds up DXMT's compile waits as its log gives them, and the longest" \
+  has <(echo "$out") "^Compiles: 18 shader variants, 4 pipelines built, 0 failed; DXMT's encode thread waited 16 times, about 141 ms in all, the longest 21.1 ms$"
+out=$("$APP/Contents/Resources/session-report.sh" --compare "$SANDBOX/compile_d3d11.log" "$SANDBOX/compile_d3d11.log" 2>&1 |
+  awk '/^compile_wait/ { print $1, $2, $3 }' | tr '\n' '|')
+check "  and --compare prints the same three numbers for both sessions" \
+  [ "$out" = "compile_waits 16 16|compile_wait_ms 141 141|compile_wait_max 21.1 21.1|" ]
+rm -f "$SANDBOX/compile_d3d11.log"
 
 section "Steam in the background after the first login"
 LU="$STEAM/config/loginusers.vdf"

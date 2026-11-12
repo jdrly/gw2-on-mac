@@ -16,7 +16,8 @@
 #   STATS    the frame rate and frame times (avg/max ms) of each interval, the command buffers
 #            and render passes per frame, the encode thread's time
 #   HITCH    each frame over DXMT_HITCH_MS (50): its time and DXMT's calls in it (ms/calls)
-#   COMPILE  shader variants and pipelines built, the render thread's waits for them
+#   COMPILE  shader variants and pipelines built, DXMT's encode thread's waits for them: each
+#            window's count, total and longest (wait=Nx total/max ms)
 #   WARM     shader warming: pipelines planned and built ahead (DXMT_WARM)
 #   PRESENT  presentation: presented-to-display latency, missed and dropped frames
 #   METAL4   Metal 4 commits and errors
@@ -46,7 +47,7 @@ summary() {
     /GW2 fork .*: DXMT_STATS=/ {
       # a new session: forget the one before
       n = 0; delete fps; summs = 0; maxms = 0; hitches = 0; worst = 0; delete dx; variants = 0; builtp = 0
-      failed = 0; waits = 0; waitms = 0; warm = ""; warmp = 0; present = ""; m4commits = 0; m4errors = 0; cb = 0; rp = 0
+      failed = 0; waits = 0; waitms = 0; waitmax = 0; warm = ""; warmp = 0; present = ""; m4commits = 0; m4errors = 0; cb = 0; rp = 0
       enc = 0; missed = 0; dropped = 0; slowc = 0
       v = $0; sub(/.*GW2 fork /, "", v); sub(/:.*/, "", v); version = v
       c = $0; cpus = (match(c, /cpus=[0-9]+/) ? substr(c, RSTART + 5, RLENGTH - 5) : "?")
@@ -76,7 +77,7 @@ summary() {
     }
     /info: +COMPILE variants=/ {
       variants += val($0, "variants") + 0; builtp += val($0, "built") + 0; failed += val($0, "failed") + 0
-      w = $0; if (match(w, /wait=[0-9]+x [0-9.]+\/[0-9.]+/)) { split(substr(w, RSTART + 5, RLENGTH - 5), wx, "x "); waits += wx[1]; split(wx[2], wt, "/"); waitms += wx[1] * wt[1] }
+      w = $0; if (match(w, /wait=[0-9]+x [0-9.]+\/[0-9.]+/)) { split(substr(w, RSTART + 5, RLENGTH - 5), wx, "x "); waits += wx[1]; split(wx[2], wt, "/"); waitms += wt[1]; if (wt[2] + 0 > waitmax) waitmax = wt[2] + 0 }
       slowc += val($0, "slow") + 0
       next
     }
@@ -103,7 +104,7 @@ summary() {
       for (k2 in dx) if (dx[k2] >= 1) top = top sprintf("%s %.0f ms, ", k2, dx[k2])
       sub(/, $/, "", top); print "hitch_dxmt=" top
       print "variants=" variants; print "pipelines_built=" builtp; print "compile_failed=" failed
-      printf "compile_waits=%d\ncompile_wait_ms=%.0f\n", waits, waitms
+      printf "compile_waits=%d\ncompile_wait_ms=%.0f\ncompile_wait_max=%.1f\n", waits, waitms, waitmax
       print "warm=" warm; print "present=" present; print "missed=" missed; print "dropped=" dropped
       print "metal4_commits=" m4commits; print "metal4_errors=" m4errors
     }' "$1"
@@ -131,7 +132,7 @@ report() {  # <log>
   echo "Hitches (frames over 50 ms): $(get "$s" hitches), the worst $(get "$s" hitch_worst) ms"
   [ -z "$(get "$s" hitch_dxmt)" ] || echo "  DXMT's time in them: $(get "$s" hitch_dxmt)"
   echo "Compiles: $(get "$s" variants) shader variants, $(get "$s" pipelines_built) pipelines built, $(get "$s" compile_failed) failed;" \
-    "the render thread waited $(get "$s" compile_waits) times, about $(get "$s" compile_wait_ms) ms in all"
+    "DXMT's encode thread waited $(get "$s" compile_waits) times, about $(get "$s" compile_wait_ms) ms in all, the longest $(get "$s" compile_wait_max) ms"
   [ -z "$(get "$s" warm)" ] || echo "Shader warming: $(get "$s" warm | cut -c1-160)"
   [ -z "$(get "$s" present)" ] || echo "Presentation: presented-to-display $(get "$s" present) ms (min/avg/max), $(get "$s" missed) missed, $(get "$s" dropped) dropped"
   echo "Metal 4: $(get "$s" metal4_commits) commits, $(get "$s" metal4_errors) errors"
@@ -143,7 +144,7 @@ compare() {  # <A> <B>
   printf '%-34s %18s %18s\n' "" "A" "B"
   printf '%-34s %18s %18s\n' "log" "$(basename "$1")" "$(basename "$2")"
   for k in version fps_median fps_low fps_min ms_avg ms_max cb rp encode hitches hitch_worst variants pipelines_built \
-    compile_waits compile_wait_ms missed dropped metal4_errors; do
+    compile_waits compile_wait_ms compile_wait_max missed dropped metal4_errors; do
     printf '%-34s %18s %18s\n' "$k" "$(get "$a" "$k" | cut -c1-18)" "$(get "$b" "$k" | cut -c1-18)"
   done
 }
