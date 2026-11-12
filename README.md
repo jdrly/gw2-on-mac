@@ -194,7 +194,7 @@ file while both rows were greyed, so no file held a choice of mine.
 | | Job wakes | `jobwakes` | on | a job the game hands out wakes one sleeping worker, and none when no worker sleeps (`WINE_HEAT_WAKE=one,skip`). Greyed while the engine's own `ntdll.so` is chosen |
 | | Event pool | `eventpool` | on | closed events are kept and handed out again, without a request to the Wine server (`WINE_HEAT_EVPOOL=1`). Greyed while the engine's own `ntdll.so` is chosen |
 | | Faster locks | `fastlocks` | off | short spins before the game thread sleeps on a busy lock, a job group or an event (`WINE_HEAT_SPIN=lock=20:game,event=30:game`). Greyed while the engine's own `ntdll.so` is chosen |
-| | Cooler job workers | `coolworkers` | off | greyed: needs my Wine changes, which come with step 3 |
+| | Cooler job workers | `coolworkers` | off | greyed: not in my Wine build yet. It comes once big crowds hold 60 FPS without it |
 | Interface | Larger interface | `uiscale` | off | my interface addon, see below. Untested on this engine |
 | | Interface Size "Larger" | `uiscale_size` | 1.75 | the addon's scale: 1.5, 1.75, 1.8 or 2.0 |
 | | Small text in Cronos | `uiscale_sans` | on | chat, the tracker and labels have no larger font, so the addon draws them in Cronos at the larger size |

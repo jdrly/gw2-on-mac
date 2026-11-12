@@ -445,7 +445,7 @@ check "  ok for the ones my DXMT fork brings back: metalfx, warm; dxmt=fork by d
 check "  the larger interface's settings and arcdps carry a note" \
   [ "$(g settings | sed -n 's/^\([a-z_]*\)_note=.*/\1/p' | tr '\n' ' ')" = "uiscale uiscale_size uiscale_sans uiscale_cinema arcdps " ]
 out=$(g set coolworkers 5 2>&1) && rc=0 || rc=$?
-check "set coolworkers 5: refused with the step 3 reason" eval '[ "$rc" = 1 ] && [ "$out" = "@error Need my Wine changes. Come with step 3." ]'
+check "set coolworkers 5: refused with its reason" eval '[ "$rc" = 1 ] && [ "$out" = "@error Not in my Wine build yet. It comes once big crowds hold 60 FPS without it." ]'
 for k in mousespeed=2.5 gamemode=off; do
   check "set ${k%%=*} ${k#*=}: refused" sh -c "! '$G' set ${k%%=*} ${k#*=} >/dev/null"
 done

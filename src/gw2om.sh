@@ -692,7 +692,7 @@ setting_state() {
   local l
   case "$1" in
     metalfx|warm) if [ "$(setting dxmt)" = fork ]; then echo ok; else echo "off:Needs my DXMT fork (Graphics › DXMT)."; fi ;;
-    coolworkers) echo "off:Need my Wine changes. Come with step 3." ;;
+    coolworkers) echo "off:Not in my Wine build yet. It comes once big crowds hold 60 FPS without it." ;;
     mousespeed) echo "off:The engine gives the game the mouse's own counts. A speed factor comes with #59 if I need one." ;;
     gamemode) echo "off:The engine's loader is a Game Mode app. Nothing to switch." ;;
     wine) if lib_bundled wine; then echo ok; else echo "off:This build of the app has no Wine build of mine."; fi ;;
