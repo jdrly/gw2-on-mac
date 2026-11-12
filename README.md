@@ -813,6 +813,14 @@ last session from DXMT's own log lines:
   lie wholly inside the heat log's run, or inside `--from <s> --to <s>` (seconds since the game
   started). It says how many blocks it counted and the seconds they cover, so a block across an
   edge shows as missing time
+- from a heat log whose rows end in the thread's start address and name (jdrly/gw2-on-mac#99):
+  the game thread's counters a second and a frame, its timers (`lock_ms`, `wait_ms`, `wake_ms`,
+  `alert_ms`, `server_ms`) as milliseconds a frame, and its lock and wait sleeps by length. For
+  the whole run they come from the heat log's totals, which include loading, and the frames are
+  DXMT's; with `--from` or `--to` they come from the game thread's blocks in the interval, and the
+  frames are its `select` requests, since GW2 polls its socket once a frame. Also the job workers
+  summed in one line, and the request tables of the two other threads the log follows, under their
+  names and start addresses
 - which `winemac.so` ran and its switches, and with Debug logging the last `macsurface` line of
   the launcher's window from `wine.log`. The launcher's is the window with the most flushes, about
   40 a second, since the game draws with Metal
