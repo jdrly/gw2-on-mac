@@ -439,13 +439,13 @@ if mine; then
   g set fastlocks off >/dev/null
 fi
 check "  rawmouse ok; mousespeed greyed: the engine sends the mouse's own counts" \
-  eval '[ "$(sett rawmouse_state)" = ok ] && [ "$(sett mousespeed_state)" = "off:The engine gives the game the mouse'"'"'s own counts. A speed factor comes with #59 if I need one." ]'
+  eval '[ "$(sett rawmouse_state)" = ok ] && [ "$(sett mousespeed_state)" = "off:The engine gives the game the mouse'"'"'s own counts. Use the game'"'"'s own camera settings for the speed." ]'
 check "  ok for the ones my DXMT fork brings back: metalfx, warm; dxmt=fork by default" \
   [ "$(sett metalfx_state)/$(sett warm_state)/$(sett dxmt)/$(sett dxmt_state)" = ok/ok/fork/ok ]
 check "  the larger interface's settings and arcdps carry a note" \
   [ "$(g settings | sed -n 's/^\([a-z_]*\)_note=.*/\1/p' | tr '\n' ' ')" = "uiscale uiscale_size uiscale_sans uiscale_cinema arcdps " ]
 out=$(g set coolworkers 5 2>&1) && rc=0 || rc=$?
-check "set coolworkers 5: refused with the step 3 reason" eval '[ "$rc" = 1 ] && [ "$out" = "@error Need my Wine changes. Come with step 3." ]'
+check "set coolworkers 5: refused with its reason" eval '[ "$rc" = 1 ] && [ "$out" = "@error Not in my Wine build yet. It comes once big crowds hold 60 FPS without it." ]'
 for k in mousespeed=2.5 gamemode=off; do
   check "set ${k%%=*} ${k#*=}: refused" sh -c "! '$G' set ${k%%=*} ${k#*=} >/dev/null"
 done
