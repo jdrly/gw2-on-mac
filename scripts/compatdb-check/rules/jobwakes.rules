@@ -1,2 +1,2 @@
-exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=/Users/me/Library/Caches/GW2 on Mac arm64/fork/dxmt/Gw2-64.exe;env=WINE_HEAT_WAKE=one,skip;env=WINE_HEAT_MSYNC_UNREG=1
-exe=CefHost.exe;env=DXMT_SHADER_CACHE_PATH=;env=WINE_HEAT_WAKE=;env=WINE_HEAT_MSYNC_UNREG=
+exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=/Users/me/Library/Caches/GW2 on Mac arm64/fork/dxmt/Gw2-64.exe;env=DXMT_METAL4=0;env=WINE_HEAT_WAKE=one,skip;env=WINE_HEAT_MSYNC_UNREG=1
+exe=CefHost.exe;env=DXMT_SHADER_CACHE_PATH=;env=DXMT_METAL4=;env=WINE_HEAT_WAKE=;env=WINE_HEAT_MSYNC_UNREG=

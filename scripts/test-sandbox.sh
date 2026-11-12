@@ -466,7 +466,7 @@ check "  settings.conf of a fresh install: settings_version=2, fastlocks off, dx
 
 check "default: Steam in the background on" [ "$(sett steambg)" = on ]
 check "default: Quit Steam when the game quits on" [ "$(sett quitsteam)" = on ]
-check "settings: a state for each of the 26 keys" [ "$(g settings | grep -cE '^[a-z_]+_state=(ok|off:.+)$')" = 26 ]
+check "settings: a state for each of the 27 keys" [ "$(g settings | grep -cE '^[a-z_]+_state=(ok|off:.+)$')" = 27 ]
 # (greyed: the ones a later step brings, and those that need a file of mine this app hasn't, in
 # SETTING_KEYS' order)
 OFF=""
@@ -538,8 +538,15 @@ g set rawmouse off >/dev/null
 check "  rawmouse off: mousespeed greyed, saying so first; set mousespeed 1.5 refused" \
   eval '[ "$(sett mousespeed_state)" = "off:Needs Raw mouse-look, which is off." ] && ! "$G" set mousespeed 1.5 >/dev/null 2>&1'
 g set rawmouse on >/dev/null
-check "  ok for the ones my DXMT fork brings back: metalfx, warm; dxmt=fork by default" \
-  [ "$(sett metalfx_state)/$(sett warm_state)/$(sett dxmt)/$(sett dxmt_state)" = ok/ok/fork/ok ]
+check "  ok for the ones my DXMT fork brings back: metal, metalfx, warm; dxmt=fork by default" \
+  [ "$(sett metal_state)/$(sett metalfx_state)/$(sett warm_state)/$(sett dxmt)/$(sett dxmt_state)" = ok/ok/ok/fork/ok ]
+check "  metal: 3 by default, in settings.conf and status; set metal 5 refused" \
+  eval '[ "$(sett metal)/$(st metal)" = 3/3 ] && grep -qx metal=3 "$AD/settings.conf" && ! "$G" set metal 5 >/dev/null 2>&1'
+# (a settings.conf from before the row: no metal= line)
+sed -i '' '/^metal=/d' "$AD/settings.conf"
+check "  a settings.conf without the key reads 3" eval '[ "$(sett metal)" = 3 ] && g rules | head -1 | grep -q ";env=DXMT_METAL4=0"'
+g set hud on >/dev/null; g set hud off >/dev/null
+check "  and the next write adds metal=3" eval 'grep -qx metal=3 "$AD/settings.conf"'
 check "  the larger interface's settings and arcdps carry a note" \
   [ "$(g settings | sed -n 's/^\([a-z_]*\)_note=.*/\1/p' | tr '\n' ' ')" = "uiscale uiscale_size uiscale_sans uiscale_cinema arcdps " ]
 out=$(g set coolworkers 5 2>&1) && rc=0 || rc=$?
@@ -556,8 +563,8 @@ out=$(g set dxmt engine 2>&1) && rc=0 || rc=$?
 check "set dxmt engine: the engine's own tree is the active one, mine waits next to it" \
   eval '[ "$rc" = 0 ] && dxgi_is engine && [ -f "$ENG/lib/wine/dxgi/dxmt.fork/.gw2om-dxmt" ] && [ "$(st graphics)/$(st dxmt_tree)" = yes/engine ] && ! echo "$out" | grep -q Repair'
 check "  it says which" has <(echo "$out") "^DXMT: the engine's own DXMT (athei/dxmt d903db89036) draws the game"
-check "  warming and MetalFX greyed with the reason; set warm refused" \
-  eval '[ "$(sett warm_state)" = "off:Needs my DXMT fork, and the engine'"'"'s own DXMT is chosen." ] && [ "$(sett metalfx_state)" = "$(sett warm_state)" ] && ! "$G" set warm off >/dev/null 2>&1'
+check "  warming, MetalFX and Metal greyed with the reason; set warm and set metal refused" \
+  eval '[ "$(sett warm_state)" = "off:Needs my DXMT fork, and the engine'"'"'s own DXMT is chosen." ] && [ "$(sett metalfx_state)" = "$(sett warm_state)" ] && [ "$(sett metal_state)" = "$(sett warm_state)" ] && ! "$G" set warm off >/dev/null 2>&1 && ! "$G" set metal 4 >/dev/null 2>&1'
 check "  none of the fork's variables in the environment" sh -c "! '$G' env | grep -qE 'DXMT_(CACHE_DIR|WARM|DEPENDENCY_COMPRESSION|SUBSAMPLE|STATS)'"
 # (after the heat entries exactly FEX's that Debug logging adds: FEX_PROFILESTATS only with my
 # ntdll.so in place, FEX_SILENTLOG with either, neither with Debug logging off)
@@ -954,7 +961,21 @@ FIX="$ROOT/scripts/compatdb-check/rules"
 rules_are() { g rules | sed "s|$H|/Users/me|g" | cmp -s - "$FIX/$1.rules"; }
 # (the engine's own ntdll.so, so no WINE_HEAT_* entry, until the checks of my ntdll.so's switches below)
 ! mine || g set wine engine >/dev/null
-check "everything off: the cache path for the game, taken away from CefHost.exe" rules_are off
+check "everything off: the cache path and Metal 3 (DXMT_METAL4=0) for the game, both taken away from CefHost.exe" rules_are off
+g set metal 4 >/dev/null
+check "Metal 4: DXMT_METAL4=1 for the game, unset for CefHost.exe" rules_are metal4
+out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
+check "  a dry run of Play prints the game's rule with it" eval 'echo "$out" | grep -qxF "[dry-run] rule $(g rules | head -1)" && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;.*;env=DXMT_METAL4=1$"'
+printf 'exe=Gw2-64.exe;env=DXMT_METAL4=0\n' >"$AD/compatdb.local"
+check "  a compatdb.local line comes after the rules, so its DXMT_METAL4=0 is the last word" \
+  eval '[ "$(g rules | sed -n 3p)" = "exe=Gw2-64.exe;env=DXMT_METAL4=0" ] && g rules | head -1 | grep -q ";env=DXMT_METAL4=1$"'
+rm -f "$AD/compatdb.local"
+g set dxmt engine >/dev/null
+out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
+check "  the engine's own DXMT: no DXMT_METAL4 in the rules or in a dry run of Play" eval 'rules_are engine-dxmt && ! echo "$out" | grep -q DXMT_METAL4'
+g set dxmt fork >/dev/null; g set metal 3 >/dev/null
+out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
+check "Metal 3 again: a dry run of Play prints the rule with DXMT_METAL4=0" eval 'rules_are off && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=[^;]*;env=DXMT_METAL4=0$"'
 g set hud on >/dev/null
 check "the HUD on: metal_hud=true for the game, false for CefHost.exe" rules_are hud
 g set hud off >/dev/null; g set uiscale on >/dev/null
@@ -969,7 +990,7 @@ g set hud off >/dev/null; g set uiscale off >/dev/null; rm -f "$GD/d3d11.dll"
 check "  all off again" rules_are off
 g set rawmouse off >/dev/null
 check "raw mouse-look off: gcmouse=false for the game, nothing for CefHost.exe" \
-  eval '[ "$(g rules | head -1)" = "exe=Gw2-64.exe;gcmouse=false;env=DXMT_SHADER_CACHE_PATH=$DXMT_CACHE" ] && [ "$(g rules | tail -1)" = "exe=CefHost.exe;env=DXMT_SHADER_CACHE_PATH=" ]'
+  eval '[ "$(g rules | head -1)" = "exe=Gw2-64.exe;gcmouse=false;env=DXMT_SHADER_CACHE_PATH=$DXMT_CACHE;env=DXMT_METAL4=0" ] && [ "$(g rules | tail -1)" = "exe=CefHost.exe;env=DXMT_SHADER_CACHE_PATH=;env=DXMT_METAL4=" ]'
 out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
 check "  a dry run of Play prints the game's rule with it" eval 'echo "$out" | grep -qxF "[dry-run] rule $(g rules | head -1)"'
 g set hud on >/dev/null
@@ -1014,7 +1035,7 @@ if fexb; then
     eval '[ "$(GW2_ON_MAC_FEX_SWITCHES="$FEXROWS" "$G" settings | sed -n "s/^updates_state=//p")" = "off:My FEX in this app (jdrly/FEX ${MYFEX_COMMIT:0:11}) doesn'"'"'t have this switch." ]'
   fex_named yes
   GW2_ON_MAC_FEX_SWITCHES="$FEXROWS" "$G" set quitsteam off >/dev/null
-  check "  the any row's setting off: the fork row's entry alone" eval 'GW2_ON_MAC_FEX_SWITCHES="$FEXROWS" g rules | head -1 | grep -q ";env=DXMT_SHADER_CACHE_PATH=[^;]*;env=FEX_TESTFORK=1$"'
+  check "  the any row's setting off: the fork row's entry alone" eval 'GW2_ON_MAC_FEX_SWITCHES="$FEXROWS" g rules | head -1 | grep -q ";env=DXMT_SHADER_CACHE_PATH=[^;]*;env=DXMT_METAL4=0;env=FEX_TESTFORK=1$"'
   g set quitsteam on >/dev/null; g set fex engine >/dev/null
   cp "$SANDBOX/fex-VERSION.keep" "$COMP/fex/VERSION"
 else
@@ -1090,7 +1111,7 @@ if mine; then
   g set debug on >/dev/null; g set wine engine >/dev/null
   out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
   check "wine engine, every switch and Debug logging on: no WINE_HEAT_* nor FEX_PROFILESTATS in the rules or in a dry run of Play, FEX_SILENTLOG=0 alone" \
-    eval 'rules_are debug-engine && ! echo "$out" | grep -qE "WINE_HEAT_|FEX_PROFILESTATS" && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=[^;]*;env=FEX_SILENTLOG=0$"'
+    eval 'rules_are debug-engine && ! echo "$out" | grep -qE "WINE_HEAT_|FEX_PROFILESTATS" && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=[^;]*;env=DXMT_METAL4=0;env=FEX_SILENTLOG=0$"'
   g set debug off >/dev/null; g set wine mine >/dev/null; g set jobwakes off >/dev/null; g set eventpool off >/dev/null; g set fastlocks off >/dev/null
 else
   out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
@@ -1138,11 +1159,11 @@ if drv; then
   g set mousespeed 1 >/dev/null
   out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
   check "mouse-look speed 1: no WINE_MACDRV_* in the rules or in a dry run of Play" \
-    eval 'rules_are off && ! echo "$out" | grep -q WINE_MACDRV_ && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=[^;]*$"'
+    eval 'rules_are off && ! echo "$out" | grep -q WINE_MACDRV_ && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=[^;]*;env=DXMT_METAL4=0$"'
   g set launcherframes on >/dev/null; g set mousespeed 1.5 >/dev/null; g set macdrv engine >/dev/null
   out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
   check "macdrv engine with launcher frames on and mouse-look speed 1.5: no WINE_MACDRV_* in the rules or in a dry run of Play" \
-    eval 'rules_are off && ! echo "$out" | grep -q WINE_MACDRV_ && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=[^;]*$"'
+    eval 'rules_are off && ! echo "$out" | grep -q WINE_MACDRV_ && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=[^;]*;env=DXMT_METAL4=0$"'
   check "  mouse-look speed greyed with launcher frames' reason" eval '[ "$(sett mousespeed_state)" = "off:Needs my Mac driver, and the engine'"'"'s own winemac.so is chosen." ] && [ "$(sett launcherframes_state)" = "$(sett mousespeed_state)" ]'
   if mine; then
     g set wine mine >/dev/null; g set jobwakes on >/dev/null
@@ -1195,7 +1216,7 @@ check "Steam -applaunch 1284210 with the launch options" has "$STANDIN_LOG" 'ste
 check "  with DXMT's config file and the rules file" eval 'has "$STANDIN_LOG" "DXMT_CONFIG_FILE=$AD/dxmt.conf" && grep -qxF "  WINE_COMPATDB_FILE=$AD/compatdb.rules" "$STANDIN_LOG"'
 check "  play wrote compatdb.rules before it: the rules and compatdb.local" eval '[ "$(cat "$AD/compatdb.rules")" = "$(g rules)" ] && grep -q FEX_HOSTFEATURES "$AD/compatdb.rules"'
 check "  session.env records the engine, its commits, the settings, the environment and the rules" \
-  eval 'has "$LOGS/session.env" "^ENGINE=mach9-v0.3.1$" && has "$LOGS/session.env" "^ENGINE_FEX=" && has "$LOGS/session.env" "^SETTING_hud=off$" && has "$LOGS/session.env" "^WINE_COMPATDB_FILE=" && [ "$(sed -n "s/^RULE=//p" "$LOGS/session.env")" = "$(cat "$AD/compatdb.rules")" ]'
+  eval 'has "$LOGS/session.env" "^ENGINE=mach9-v0.3.1$" && has "$LOGS/session.env" "^ENGINE_FEX=" && has "$LOGS/session.env" "^SETTING_hud=off$" && has "$LOGS/session.env" "^SETTING_metal=3$" && has "$LOGS/session.env" "^WINE_COMPATDB_FILE=" && [ "$(sed -n "s/^RULE=//p" "$LOGS/session.env")" = "$(cat "$AD/compatdb.rules")" ]'
 check "  and which DXMT the session loads: my fork, its build" \
   eval 'has "$LOGS/session.env" "^DXMT_TREE=fork$" && [ "$(sed -n "s/^DXMT_FORK=//p" "$LOGS/session.env")" = "$(head -1 "$COMP/dxmt/VERSION")" ] && has "$LOGS/session.env" "^SETTING_dxmt=fork$"'
 if mine; then
@@ -1538,6 +1559,18 @@ out=$("$APP/Contents/Resources/session-report.sh" --compare "$SANDBOX/compile_d3
 check "  and --compare prints the same three numbers for both sessions" \
   [ "$out" = "compile_waits 16 16|compile_wait_ms 141 141|compile_wait_max 21.1 21.1|" ]
 rm -f "$SANDBOX/compile_d3d11.log"
+# The Metal a session drew with: DXMT_METAL4 on the fork's startup line (0 Metal 3, 1 Metal 4)
+printf 'info:  GW2 fork v0.80-492-g1dcb12d: DXMT_STATS=1 DXMT_METAL4=0 cpus=8 refresh=60\ninfo:  STATS fps=60.0 ms=16.7/24.8 cb=1.1 rp=2.0(+0.0 merged) encode=0.02+0.20/7.3\n' >"$SANDBOX/metal3_d3d11.log"
+out=$("$APP/Contents/Resources/session-report.sh" "$SANDBOX/metal3_d3d11.log" 2>&1)
+check "the session report of a Metal 3 session: Metal 3 in its header, and in place of the Metal 4 line" \
+  eval 'echo "$out" | grep -qx "DXMT v0.80-492-g1dcb12d, Metal 3, 8 CPUs seen, display at 60 Hz" && echo "$out" | grep -qx "Metal 3" && ! echo "$out" | grep -q "^Metal 4"'
+printf 'info:  GW2 fork v0.80-489-g2483559: DXMT_STATS=1 DXMT_METAL4=1 cpus=8 refresh=60\ninfo:  METAL4 commits=159 buffers=3 allocmb=4.84 slow=0 errors=0 resadds=1124\ninfo:  METAL4 commits=309 buffers=3 allocmb=8.53 slow=0 errors=1 resadds=35987\n' >"$SANDBOX/metal4_d3d11.log"
+out=$("$APP/Contents/Resources/session-report.sh" "$SANDBOX/metal4_d3d11.log" 2>&1)
+check "  of a Metal 4 session: Metal 4 in its header, and its commits and errors" \
+  eval 'echo "$out" | grep -qx "DXMT v0.80-489-g2483559, Metal 4, 8 CPUs seen, display at 60 Hz" && echo "$out" | grep -qx "Metal 4: 468 commits, 1 errors"'
+out=$("$APP/Contents/Resources/session-report.sh" --compare "$SANDBOX/metal3_d3d11.log" "$SANDBOX/metal4_d3d11.log" 2>&1 | awk '$1 == "metal4" { print $2, $3 }')
+check "  and --compare prints each one's DXMT_METAL4" [ "$out" = "0 1" ]
+rm -f "$SANDBOX/metal3_d3d11.log" "$SANDBOX/metal4_d3d11.log"
 cp "$LOGS/session.env" "$SANDBOX/session.env.keep"
 sed -i '' -e 's/^DXMT_TREE=.*/DXMT_TREE=engine/' -e 's/^RULE=exe=Gw2-64.exe;/&gcmouse=false;/' "$LOGS/session.env"
 echo "info:  Using feature level D3D_FEATURE_LEVEL_11_1" >"$LOGS/engine-only_d3d11.log"

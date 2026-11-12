@@ -62,7 +62,11 @@
 # code away, so the largest is the one in use and the others are full; the buffers less one is how
 # often it threw its code away.
 # Sources, all from the fork's own lines (DXMT_STATS is on by default):
-#   "GW2 fork <version>: …"  the start of a session: DXMT's version, its switches, cpus, refresh
+#   "GW2 fork <version>: …"  the start of a session: DXMT's version, its switches, cpus, refresh,
+#            and DXMT_METAL4, the Metal it drew with: 1 is Metal 4, and 0 (the Metal row at
+#            Metal 3) and unsupported (asked for, but this Mac or another switch kept it off) are
+#            Metal 3. With a fork whose line doesn't name it, the report names no Metal and keeps
+#            its Metal 4 line.
 #   STATS    the frame rate and frame times (avg/max ms) of each interval, the command buffers
 #            and render passes per frame, the encode thread's time
 #   HITCH    each frame over DXMT_HITCH_MS (50): its time and DXMT's calls in it (ms/calls)
@@ -109,6 +113,7 @@ summary() {
       v = $0; sub(/.*GW2 fork /, "", v); sub(/:.*/, "", v); version = v
       c = $0; cpus = (match(c, /cpus=[0-9]+/) ? substr(c, RSTART + 5, RLENGTH - 5) : "?")
       r = $0; refresh = (match(r, /refresh=[0-9.]+/) ? substr(r, RSTART + 8, RLENGTH - 8) : "?")
+      m = $0; metal4 = (match(m, / DXMT_METAL4=[^ ]+/) ? substr(m, RSTART + 13, RLENGTH - 13) : "")
       sw = $0; sub(/.*: DXMT_STATS=/, "DXMT_STATS=", sw); switches = sw
       sessions++; frames = 0
       next
@@ -164,7 +169,7 @@ summary() {
       print "variants=" variants; print "pipelines_built=" builtp; print "compile_failed=" failed
       printf "compile_waits=%d\ncompile_wait_ms=%.0f\ncompile_wait_max=%.1f\n", waits, waitms, waitmax
       print "warm=" warm; print "present=" present; print "missed=" missed; print "dropped=" dropped
-      print "metal4_commits=" m4commits; print "metal4_errors=" m4errors
+      print "metal4=" metal4; print "metal4_commits=" m4commits; print "metal4_errors=" m4errors
       print "gpu_frames=" frames
     }' "$1"
 }
@@ -535,8 +540,14 @@ fex_report() {
 }
 
 report() {  # <log>
-  local s ran="" s_dev
+  local s ran="" s_dev m metal=""
   s=$(summary "$1")
+  # (the Metal it drew with, from the fork's startup line; nothing from a fork that doesn't name it)
+  m=$(get "$s" metal4)
+  if [ "$m" = 1 ]; then metal="Metal 4"
+  elif [ "$m" = unsupported ]; then metal="Metal 3 (Metal 4 asked for, not available)"
+  elif [ -n "$m" ]; then metal="Metal 3"
+  fi
   echo "Session: $1 (the last of $(get "$s" sessions) in it)"
   if [ -f "$LOGS/session.env" ] && [ "$(dirname "$1")" = "$LOGS" ]; then
     case "$(sed -n 's/^DXMT_TREE=//p' "$LOGS/session.env")" in
@@ -569,7 +580,7 @@ report() {  # <log>
     esac
     return
   fi
-  echo "DXMT $(get "$s" version), $(get "$s" cpus) CPUs seen, display at $(get "$s" refresh) Hz"
+  echo "DXMT $(get "$s" version),${metal:+ $metal,} $(get "$s" cpus) CPUs seen, display at $(get "$s" refresh) Hz"
   if [ -f "$LOGS/session.env" ] && [ "$(dirname "$1")" = "$LOGS" ]; then
     echo "Settings at the start: $(sed -n 's/^SETTING_//p' "$LOGS/session.env" | tr '\n' ' ')"
   fi
@@ -587,7 +598,12 @@ report() {  # <log>
     "DXMT's encode thread waited $(get "$s" compile_waits) times, about $(get "$s" compile_wait_ms) ms in all, the longest $(get "$s" compile_wait_max) ms"
   [ -z "$(get "$s" warm)" ] || echo "Shader warming: $(get "$s" warm | cut -c1-160)"
   [ -z "$(get "$s" present)" ] || echo "Presentation: presented-to-display $(get "$s" present) ms (min/avg/max), $(get "$s" missed) missed, $(get "$s" dropped) dropped"
-  echo "Metal 4: $(get "$s" metal4_commits) commits, $(get "$s" metal4_errors) errors"
+  # (Metal 3 has no Metal 4 commits to count)
+  if [ -z "$metal" ] || [ "$metal" = "Metal 4" ]; then
+    echo "Metal 4: $(get "$s" metal4_commits) commits, $(get "$s" metal4_errors) errors"
+  else
+    echo "$metal"
+  fi
 }
 
 compare() {  # <A> <B>
@@ -595,7 +611,7 @@ compare() {  # <A> <B>
   a=$(summary "$1"); b=$(summary "$2")
   printf '%-34s %18s %18s\n' "" "A" "B"
   printf '%-34s %18s %18s\n' "log" "$(basename "$1")" "$(basename "$2")"
-  for k in version fps_median fps_low fps_min ms_avg ms_max cb rp encode hitches hitch_worst variants pipelines_built \
+  for k in version metal4 fps_median fps_low fps_min ms_avg ms_max cb rp encode hitches hitch_worst variants pipelines_built \
     compile_waits compile_wait_ms compile_wait_max missed dropped metal4_errors; do
     printf '%-34s %18s %18s\n' "$k" "$(get "$a" "$k" | cut -c1-18)" "$(get "$b" "$k" | cut -c1-18)"
   done

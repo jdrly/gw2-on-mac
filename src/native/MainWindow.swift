@@ -63,6 +63,10 @@ struct MainView: View {
     .onChange(of: showLogSheet || confirmUninstall || blocked != nil) { _, open in
       installer.sheetOpen = open
     }
+    // (a setting saved in the Settings window: the checks read it again, the Metal row's in Graphics)
+    .onChange(of: settings.saving) { _, saving in
+      if !saving { installer.refresh() }
+    }
     .alert("Uninstall \(appName)?", isPresented: $confirmUninstall) {
       Button("Uninstall", role: .destructive) { installer.start(.uninstall) }
       Button("Cancel", role: .cancel) {}
@@ -405,7 +409,7 @@ struct ThisMac: View {
               : !repair.isEmpty ? .bad : .good),
       // (switch: Settings changed it while Steam ran; the next Play puts it in)
       Check(id: "Graphics", icon: "sparkles",
-            value: s["graphics"] == "yes" ? dxmt
+            value: s["graphics"] == "yes" ? ThisMac.dxmtMetal(s)
               : s["graphics"] == "switch" ? "\(dxmt) · at the next Play"
               : s["graphics"] == "other" ? "\(dxmt) · needs Repair" : "\(dxmt) · not set up",
             tone: s["graphics"] == "yes" ? .good : s["graphics"] == "switch" ? .pending
@@ -458,6 +462,14 @@ struct ThisMac: View {
     if s["dxmt"] == "engine" { return "DXMT · \((s["engine_dxmt"] ?? "").prefix(7))" }
     let release = s["dxmt_release"] ?? "", commit = (s["dxmt_commit"] ?? "").prefix(7)
     return release.isEmpty ? "DXMT · \(commit)" : "DXMT \(release) · \(commit)"
+  }
+
+  // The Graphics check with that tree in place: my fork's with the Metal its next start uses (the
+  // Metal row, gw2om.sh status metal), "DXMT 0.80 · 2483559 · Metal 3". With the check's other
+  // states the cell is already full, so only here.
+  static func dxmtMetal(_ s: [String: String]) -> String {
+    guard s["dxmt"] != "engine", let metal = s["metal"] else { return dxmt(s) }
+    return "\(dxmt(s)) · Metal \(metal)"
   }
 }
 
@@ -514,7 +526,7 @@ struct CheckCell: View {
 
 struct WhatItDoes: View {
   private let features: [(String, String, String)] = [
-    ("zap", "Direct3D 11 straight to Metal", "My DXMT fork draws the game through Metal 4."),
+    ("zap", "Direct3D 11 straight to Metal", "My DXMT fork draws the game through Metal."),
     ("cpu", "Wine for Apple silicon", "Wine runs natively. FEX translates only the game's own x86 code."),
     ("type", "Sharp text at 4K", "A larger interface drawn from the game's own crisp fonts."),
     ("undo-2", "Yours, and reversible", "Your own Steam or ArenaNet install. Uninstall removes everything."),

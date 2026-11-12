@@ -204,6 +204,7 @@ chosen, and the main window's *Engine* and *Graphics* checks name the files in p
 |---|---|---|---|---|
 | Graphics | Retina | `retina` | on | draws at your display's full resolution, at some cost in frame rate |
 | | Frame cap | `fpscap` | off | a steady cap paced by Metal at 30, 40, 60 or 120. Use it with the game's own vsync |
+| | Metal | `metal` | 3 | Metal 3 or Metal 4 for my DXMT fork (`DXMT_METAL4=0` or `=1` in the game's rule). Metal 3 draws smoothly. Metal 4 is the newer path, and for now it stutters while the cursor moves. A `settings.conf` without the key reads 3. Greyed while the engine's own DXMT is chosen |
 | | MetalFX for Subsample | `metalfx` | off | MetalFX upscales the 3D scene and the interface stays sharp. It works only with the game's Render Sampling set to Subsample, and does nothing at Native. Greyed while the engine's own DXMT is chosen |
 | | Metal HUD | `hud` | off | Apple's overlay with frame rate and frame times, over the game only and not over Steam's windows |
 | | Launcher frames | `launcherframes` | off | the launcher's window gets a copy of each frame, and a frame equal to the last is skipped (`WINE_MACDRV_SURFACE=copy,skip`). Against a launcher that flickers. Greyed while the engine's own `winemac.so` is chosen |
@@ -444,8 +445,10 @@ of my fork), and `other` when the tree is neither the engine's own nor mine. Rep
 the engine again and puts the asked-for tree in.
 It also prints my fork's build in the app: `dxmt_version` (its `VERSION`'s first line, such as
 `v0.80-489-g2483559`), `dxmt_release` (`0.80`) and `dxmt_commit`. The *This Mac* panel's Graphics
-cell shows `DXMT 0.80 · 2483559` for my fork and `DXMT · d903db8`, athei's commit, for the
-engine's own.
+cell shows `DXMT 0.80 · 2483559 · Metal 3` for my fork, with the Metal the next start uses
+(`status` prints it as `metal`), and `DXMT · d903db8`, athei's commit, for the engine's own. The
+cell has no room for the Metal next to `at the next Play` or `needs Repair`, so it shows it only
+when the tree is in place.
 To tell my fork's tree from an earlier build, the script compares every file of
 `components/dxmt` (44 MB in `0.2.0-dev.3`) with the tree. Play and `status` do that once and
 reuse the answer for the rest of the command, until a swap changes the tree.
@@ -645,6 +648,9 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   in 0.2.0-dev.1, and `fork/dxmt/Gw2-64.exe` while my fork is active. My fork doesn't read the
   variable; it takes the same folder from `DXMT_CACHE_DIR`.
   `CefHost.exe` gets it removed.
+- `DXMT_METAL4` follows it while my fork is active: `0` with the *Metal* row at Metal 3, `1` at
+  Metal 4. The engine's own DXMT doesn't read it, so it stays out then. `CefHost.exe` gets it
+  removed.
 - The `WINE_HEAT_*` entries are my `ntdll.so`'s switches, which it acts on in `Gw2-64.exe` only.
   They follow the cache path, one `env=` field each, and only while my file is in place. The table
   `HEAT_SWITCHES` in `gw2om.sh` has one row per setting, `<key> <entry>`: *Job wakes* writes
@@ -697,7 +703,8 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   stays out and why, and `status` prints `dev_switches=` and `dev_switches_out=`.
 - A `compatdb.local` that I put in the app's folder is appended as it is, for trying FEX switches
   such as `exe=Gw2-64.exe;env=FEX_HOSTFEATURES=disableavx`. Nothing in the app writes it, and
-  Collect Logs includes it.
+  Collect Logs includes it. It comes last, so a line of it wins over the app's: with
+  `exe=Gw2-64.exe;env=DXMT_METAL4=0` in it, the game runs on Metal 3 whatever the *Metal* row says.
 
 The engine's built-in rules already give every process DXMT, DPI awareness, raw mouse input from
 GameController and FEX's reduced x87 precision. The `compatdb` check on GitHub's runners reads each
@@ -903,7 +910,8 @@ last session from DXMT's own log lines:
 - frame rate as median, 10th percentile and minimum, frame times, hitches and DXMT's share of them
 - shader compiles and DXMT's encode thread's waits for them: how many, their total and the
   longest
-- shader warming, presentation and Metal 4 errors
+- shader warming, presentation, and the Metal the session drew with, from `DXMT_METAL4` on my
+  fork's first line: `Metal 3`, or for Metal 4 its commits and errors. The header names it too.
 - which `ntdll.so` ran and its switches, and with Debug logging the game thread's row of the
   session's heat log, a second. The game thread is the thread with the most semaphore releases: it
   hands the job workers their jobs, about 49,000 a second, and the workers make a few thousand
