@@ -378,14 +378,17 @@ struct ThisMac: View {
     }
     let engine = s["engine_title"] ?? "Mach9 0.3.1 · Wine 11.21"
     // the ntdll.so and winemac.so in the engine (gw2om.sh status wine_*, macdrv_*): mine with its
-    // commit, another, or the engine's own (not named)
+    // commit, another, or the engine's own (not named). The cell has one line: with two of my files
+    // the engine's name goes, and one commit stands for both when they are the same build.
     let short = engine.components(separatedBy: " · ").first ?? engine
     let libs = [("wine", "ntdll"), ("macdrv", "winemac")]
-    let mine = libs.compactMap { lib -> String? in
-      s["\(lib.0)_file"] == "mine" ? "my \(lib.1) \((s["\(lib.0)_commit"] ?? "").prefix(7))"
-        : s["\(lib.0)_file"] == "other" ? "another \(lib.1)" : nil
-    }
-    let wine = mine.isEmpty ? engine : ([short] + mine).joined(separator: " · ")
+    let commit = { (key: String) in String((s["\(key)_commit"] ?? "").prefix(7)) }
+    let named = libs.filter { s["\($0.0)_file"] == "mine" || s["\($0.0)_file"] == "other" }
+    let mine = named.map { s["\($0.0)_file"] == "mine" ? "my \($0.1) \(commit($0.0))" : "another \($0.1)" }
+    let wine = named.isEmpty ? engine
+      : named.count == 1 ? "\(short) · \(mine[0])"
+      : s["wine_file"] == "mine" && s["macdrv_file"] == "mine" && commit("wine") == commit("macdrv")
+        ? "my ntdll and winemac \(commit("wine"))" : mine.joined(separator: " · ")
     let switching = libs.contains { s["\($0.0)_ready"] == "switch" }
     let repair = libs.filter { s["\($0.0)_ready"] == "other" }.map { $0.1 }
     let macos = s["macos"] ?? "?"
