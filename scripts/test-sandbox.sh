@@ -270,7 +270,7 @@ else
   check "  with the engine's own ntdll.so (this app has none of mine)" has <(echo "$out") "^\[dry-run\] the engine's own ntdll.so (athei/wine $ENGINE_WINE) in the engine$"
 fi
 if drv; then
-  check "  with my winemac.so for the engine" has <(echo "$out") "^\[dry-run\] my winemac.so (jdrly/wine ${MYDRV_COMMIT:0:11}) in the engine$"
+  check "  with my $DRVNAME for the engine" eval 'echo "$out" | grep -qxF "[dry-run] my $DRVNAME (jdrly/wine ${MYDRV_COMMIT:0:11}) in the engine"'
 else
   check "  with the engine's own winemac.so (this app has none of mine)" has <(echo "$out") "^\[dry-run\] the engine's own winemac.so (athei/wine $ENGINE_WINE) in the engine$"
 fi
@@ -1673,6 +1673,24 @@ if drv; then
   check "  once Steam has quit, Play finishes the switch to the engine's own pair before Wine starts" \
     eval 'winemac_is engine && win32u_is engine && has "$LOGS/session.env" "^LIB_win32u=win32u.so engine $GW2_ON_MAC_ENGINE_WIN32U_SHA256$" && has "$STANDIN_LOG" "^wine "'
   watch_done
+  # An earlier version of the app cut short between its pair's renames: its winemac.so next to the
+  # engine's own win32u.so, which nothing can tell from an earlier build without win32u.so. While
+  # Steam runs, Play refuses it; once Steam has quit, Play puts this build's pair in
+  sed -i '' 's/^macdrv=.*/macdrv=mine/' "$AD/settings.conf"
+  mv "$NT/winemac.so" "$NT/winemac.so.engine" && echo "an earlier build of mine" >"$NT/winemac.so"
+  mv "$ENG/bin/wineserver" "$ENG/bin/wineserver.heat" && cp "$SANDBOX/sleeper" "$ENG/bin/wineserver"
+  "$ENG/bin/wineserver" 60 & sp=$!
+  sleep 0.3
+  : >"$STANDIN_LOG"; out=$(g play 2>&1) && rc=0 || rc=$?
+  check "an earlier build's winemac.so next to the engine's own win32u.so while Steam runs: macdrv_file=other, Play refuses and starts nothing" \
+    eval '[ "$(st macdrv_file)/$(st macdrv_ready)" = other/switch ] && [ "$rc" != 0 ] && echo "$out" | grep -qxF "@error The engine'"'"'s winemac.so is another build of mine, and nothing proves its win32u.so is that build'"'"'s. Quit Steam and click Play again to put this build'"'"'s in." && ! has "$STANDIN_LOG" "^wine "'
+  kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
+  mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
+  : >"$STANDIN_LOG"; out=$(g play 2>&1); started
+  check "  once Steam has quit, Play puts this build's pair in before Wine starts" \
+    eval 'winemac_is mine && win32u_is mine && has "$STANDIN_LOG" "^wine "'
+  watch_done
+  g set macdrv engine >/dev/null
   # one it can't finish: my win32u.so over the engine's own, which is nowhere else
   cp "$COMP/macdrv/win32u.so" "$NT/win32u.so"
   : >"$STANDIN_LOG"; out=$(g play 2>&1) && rc=0 || rc=$?

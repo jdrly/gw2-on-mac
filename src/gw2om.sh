@@ -3213,12 +3213,18 @@ cmd_play() {
       switch) echo "@notice Steam is still running with $(dxmt_label "$(dxmt_in_use)"); quit Steam to switch to $(dxmt_label "$(setting dxmt)")." ;;
       *) warn "The engine's DXMT is neither its own nor mine. Click Repair." ;;
     esac
-    # (winemac.so and win32u.so of two builds never load together: no session on a mix)
+    # (winemac.so and win32u.so of two builds never load together: no session on a mix, nor on
+    # another build of my Mac driver, whose win32u.so nothing can prove is its pair: an earlier
+    # version of the app may have been cut short between the two)
     for k in $UNIX_LIBS; do
       unix_lib "$k"
       case "$(lib_state "$k")/$(lib_file "$k")" in
         other/mix) die "The engine's ${LIB_FILES// / and } are a mix of mine and its own. Click Repair." ;;
         switch/mix) die "The engine's ${LIB_FILES// / and } are a mix of mine and its own, a switch cut short. Quit Steam and click Play again to finish it." ;;
+        other/other) [ "$LIB_FILES" = "$LIB" ] || die "The engine's ${LIB_FILES// / and } are neither its own nor mine. Click Repair."
+          warn "$(lib_neither "$k")" ;;
+        switch/other) [ "$LIB_FILES" = "$LIB" ] || die "The engine's $LIB is another build of mine, and nothing proves its win32u.so is that build's. Quit Steam and click Play again to put this build's in."
+          echo "@notice Steam is still running with $(lib_label "$k" "$(lib_in_use "$k")"); quit Steam to switch to $(lib_label "$k" "$(lib_want "$k")")." ;;
         switch/*) echo "@notice Steam is still running with $(lib_label "$k" "$(lib_in_use "$k")"); quit Steam to switch to $(lib_label "$k" "$(lib_want "$k")")." ;;
         other/*) warn "$(lib_neither "$k")" ;;
       esac
