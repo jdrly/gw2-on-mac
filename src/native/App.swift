@@ -15,12 +15,13 @@
 import AppKit
 import SwiftUI
 
-// The app's name in its window, menus, About panel and texts, and in the three folders gw2om.sh
-// keeps in ~/Library (its APP_NAME, which Info.plist gets from build.sh). The 0.2 development
-// build has its own, so it installs next to 0.1.x and shares nothing with it.
-// appEdition also goes under the header's wordmark.
-let appEdition = "arm64"
-let appName = "GW2 on Mac \(appEdition)"
+// The app's name in its window, menus, About panel and texts (gw2om.sh's APP_NAME, which
+// Info.plist gets from build.sh), and its name on disk: the .app's file name and the three folders
+// gw2om.sh keeps in ~/Library (its APP_FOLDER). The 0.2 development build shows the name 0.1.x
+// shows but keeps its own on disk, so it installs next to 0.1.x and shares nothing with it. A
+// text that names a folder uses appFolder.
+let appName = "GW2 on Mac"
+let appFolder = "GW2 on Mac arm64"
 
 // MARK: - Model
 
@@ -688,7 +689,7 @@ final class LogCollector {
       alert.alertStyle = .warning
       alert.messageText = "Could not collect the logs"
       alert.informativeText = "\(problem?.isEmpty == false ? problem! : "collect-logs.sh failed.")\n\n"
-        + "The logs are in ~/Library/Logs/\(appName)."
+        + "The logs are in ~/Library/Logs/\(appFolder)."
     }
     NSApp.activate()
     alert.runModal()

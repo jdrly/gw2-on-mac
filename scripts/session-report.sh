@@ -40,8 +40,8 @@
 #   METAL4   Metal 4 commits and errors
 # Also in Collect Logs (session-report.txt). Runs under macOS's /bin/bash 3.2 and awk.
 set -euo pipefail
-# The app's name and its logs folder's (as gw2om.sh's)
-APP_NAME="GW2 on Mac arm64"
+# The app's logs folder (as gw2om.sh's APP_FOLDER)
+APP_FOLDER="GW2 on Mac arm64"
 
 usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
@@ -62,7 +62,7 @@ done
 ROOT="${GW2_ON_MAC_ROOT:-}"
 H="${ROOT:+$ROOT/home}"
 H="${H:-$HOME}"
-LOGS="$H/Library/Logs/$APP_NAME"
+LOGS="$H/Library/Logs/$APP_FOLDER"
 
 # summary <log>: KEY=VALUE lines of its last session
 summary() {

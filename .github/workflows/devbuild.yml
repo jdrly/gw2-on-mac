@@ -371,7 +371,8 @@ jobs:
         run: |
           tar -xf "$RUNNER_TEMP/app.tar"
           tar -xf "$RUNNER_TEMP/components/prebuilt.tar"
-          name="$(sed -n 's/^APP_NAME="\(.*\)"$/\1/p' src/gw2om.sh)"
+          # (the app's name on disk, the .app's file name, which the release and its DMG keep)
+          name="$(sed -n 's/^APP_FOLDER="\(.*\)"$/\1/p' src/gw2om.sh)"
           echo "APP_NAME=$name" >>"$GITHUB_ENV"
           [ "$(plutil -extract CFBundleShortVersionString raw "dist/$name.app/Contents/Info.plist")" = "$VERSION" ] ||
             { echo "::error::The build job's app is not version $VERSION"; exit 1; }

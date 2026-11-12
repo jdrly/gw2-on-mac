@@ -285,14 +285,6 @@ struct Wordmark: View {
           .shadow(color: Brand.headerShadow.opacity(0.9), radius: 2.5, y: 1)
       }
       .frame(height: 20)
-      // which build this is, so 0.1.x and this one look different side by side
-      Text(appEdition.uppercased())
-        .font(.display(12))
-        .tracking(5)
-        .foregroundStyle(Brand.headerText)
-        .shadow(color: Brand.headerShadow.opacity(0.9), radius: 2.5, y: 1)
-        .padding(.leading, 38)
-        .frame(height: 16)
     }
     .fixedSize()
     .accessibilityElement(children: .ignore)
@@ -377,24 +369,13 @@ struct ThisMac: View {
       }
     }
     let engine = s["engine_title"] ?? "Mach9 0.3.1 · Wine 11.21"
-    // the ntdll.so and winemac.so in the engine (gw2om.sh status wine_*, macdrv_*): mine with its
-    // commit, another, or the engine's own (not named). The cell has one line: with two of my files
-    // the engine's name goes, and one commit stands for both when they are the same build.
     let short = engine.components(separatedBy: " · ").first ?? engine
     let libs = [("wine", "ntdll"), ("macdrv", "winemac")]
-    let commit = { (key: String) in String((s["\(key)_commit"] ?? "").prefix(7)) }
-    let named = libs.filter { s["\($0.0)_file"] == "mine" || s["\($0.0)_file"] == "other" }
-    let mine = named.map { s["\($0.0)_file"] == "mine" ? "my \($0.1) \(commit($0.0))" : "another \($0.1)" }
-    let wine = named.isEmpty ? engine
-      : named.count == 1 ? "\(short) · \(mine[0])"
-      : s["wine_file"] == "mine" && s["macdrv_file"] == "mine" && commit("wine") == commit("macdrv")
-        ? "my ntdll and winemac \(commit("wine"))" : mine.joined(separator: " · ")
+    let wine = ThisMac.wine(s, engine: engine)
     let switching = libs.contains { s["\($0.0)_ready"] == "switch" }
     let repair = libs.filter { s["\($0.0)_ready"] == "other" }.map { $0.1 }
     let macos = s["macos"] ?? "?"
-    // the DXMT Settings asks for: my fork (its commit) or the engine's own (athei/dxmt's)
-    let dxmt = s["dxmt"] == "engine" ? "DXMT \((s["engine_dxmt"] ?? "").prefix(7)) · the engine's"
-      : "DXMT \((s["dxmt_commit"] ?? "").prefix(7)) · my fork"
+    let dxmt = ThisMac.dxmt(s)
     let route = installer.installedRoute == .arenanet ? "ArenaNet" : "Steam"
     let game: Check
     if installer.gameInstalled {
@@ -438,6 +419,34 @@ struct ThisMac: View {
 
   static let icons = ["macOS": "cpu", "Engine": "wine", "Graphics": "sparkles", "Game Mode": "gamepad-2",
                       "Guild Wars 2": "swords", "Disk space": "hard-drive"]
+
+  // The Wine the engine runs, from the ntdll.so and winemac.so in it (gw2om.sh status wine_*,
+  // macdrv_*), on one line. Both mine from one build: "Wine 11.21 · d831f80", the release and
+  // commit of my build. Both the engine's own: the engine's title. One of mine or another file next
+  // to the engine's own: "Mach9 0.3.1 · ntdll d831f80", "Mach9 0.3.1 · another winemac". Two that
+  // aren't one build of mine: each with its commit, or "another".
+  static func wine(_ s: [String: String], engine: String) -> String {
+    let short = engine.components(separatedBy: " · ").first ?? engine
+    let libs = [("wine", "ntdll"), ("macdrv", "winemac")]
+    let commit = { (key: String) in String((s["\(key)_commit"] ?? "").prefix(7)) }
+    let named = libs.filter { s["\($0.0)_file"] == "mine" || s["\($0.0)_file"] == "other" }
+    let each = named.map { s["\($0.0)_file"] == "mine" ? "\($0.1) \(commit($0.0))" : "another \($0.1)" }
+    if named.isEmpty { return engine }
+    if named.count == 1 { return "\(short) · \(each[0])" }
+    if s["wine_file"] == "mine", s["macdrv_file"] == "mine", commit("wine") == commit("macdrv") {
+      let release = s["wine_release"] ?? ""
+      return release.isEmpty ? "Wine · \(commit("wine"))" : "Wine \(release) · \(commit("wine"))"
+    }
+    return each.joined(separator: " · ")
+  }
+
+  // The DXMT Settings asks for: my fork, "DXMT 0.80 · 2483559" (the release and commit of my
+  // build), or the engine's own, "DXMT · d903db8" (athei/dxmt's commit)
+  static func dxmt(_ s: [String: String]) -> String {
+    if s["dxmt"] == "engine" { return "DXMT · \((s["engine_dxmt"] ?? "").prefix(7))" }
+    let release = s["dxmt_release"] ?? "", commit = (s["dxmt_commit"] ?? "").prefix(7)
+    return release.isEmpty ? "DXMT · \(commit)" : "DXMT \(release) · \(commit)"
+  }
 }
 
 struct CheckCell: View {
@@ -1135,7 +1144,7 @@ struct LogSheet: View {
       .padding(10)
       .background(Brand.bgRaised, in: .rect(cornerRadius: 8))
       HStack {
-        Text("The full log is in ~/Library/Logs/\(appName).").font(.body(12)).bodyBox(12).foregroundStyle(Brand.fg3)
+        Text("The full log is in ~/Library/Logs/\(appFolder).").font(.body(12)).bodyBox(12).foregroundStyle(Brand.fg3)
         Spacer()
         Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
       }

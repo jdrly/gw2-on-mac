@@ -20,10 +20,13 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 ROOT="$PWD"
+# The name the app shows, from gw2om.sh, and its name on disk, written out here: the folders of
+# every install before, which a new build must find where they are
 APP_NAME="$(sed -n 's/^APP_NAME="\(.*\)"$/\1/p' src/gw2om.sh)"
 [ -n "$APP_NAME" ] || { echo "No APP_NAME=\"…\" line in src/gw2om.sh" >&2; exit 1; }
+APP_FOLDER="GW2 on Mac arm64"
 WS="${GW2_ON_MAC_WORKSPACE:-$ROOT/../gw2-on-mac}"
-APP="$(cd "${1:-dist/$APP_NAME.app}" && pwd)"
+APP="$(cd "${1:-dist/$APP_FOLDER.app}" && pwd)"
 G="$APP/Contents/Resources/gw2om.sh"
 [ -f "$G" ] || { echo "no $G; run ./build.sh" >&2; exit 1; }
 GW2OM="$G"
@@ -40,9 +43,9 @@ rm -rf "$SANDBOX" "$FAILED"
 mkdir -p "$SANDBOX"
 SANDBOX="$(cd "$SANDBOX" && pwd -P)"
 H="$SANDBOX/home"
-AD="$H/Library/Application Support/$APP_NAME"
-LOGS="$H/Library/Logs/$APP_NAME"
-CACHE="$H/Library/Caches/$APP_NAME"
+AD="$H/Library/Application Support/$APP_FOLDER"
+LOGS="$H/Library/Logs/$APP_FOLDER"
+CACHE="$H/Library/Caches/$APP_FOLDER"
 ENG="$AD/engine"
 BOTTLE="$AD/bottle"
 STEAM="$BOTTLE/drive_c/Program Files (x86)/Steam"
@@ -321,24 +324,24 @@ check "@progress lines for the engine" has <(echo "$out") "@progress Wine engine
 check "installed=yes" [ "$(st installed)" = yes ]
 check "engine_installed=yes" [ "$(st engine_installed)" = yes ]
 check "graphics=yes: my DXMT fork, as Settings asks by default" [ "$(st graphics)/$(st dxmt)/$(st dxmt_tree)" = yes/fork/fork ]
-check "  status names the fork's build" eval '[ "$(st dxmt_version)" = "$(head -1 "$COMP/dxmt/VERSION")" ] && [ -n "$(st dxmt_commit)" ]'
+check "  status names the fork's build and its release" eval '[ "$(st dxmt_version)" = "$(head -1 "$COMP/dxmt/VERSION")" ] && [ -n "$(st dxmt_commit)" ] && [ -n "$(st dxmt_release)" ] && head -1 "$COMP/dxmt/VERSION" | grep -qF "v$(st dxmt_release)-"'
 check "  the install says so" has <(echo "$out") "^DXMT: my DXMT fork ($(head -1 "$COMP/dxmt/VERSION")) draws the game"
 check "  the engine's DXMT tree is mine, the engine's own next to it as it ships" dxgi_is fork
 if mine; then
   check "my ntdll.so in the engine, the engine's own next to it as ntdll.so.engine" ntdll_is mine
-  check "  status names it and its commit" [ "$(st wine)/$(st wine_ready)/$(st wine_file)/$(st wine_commit)/$(st wine_build)" = "mine/yes/mine/$MYWINE_COMMIT/$MYWINE_COMMIT" ]
+  check "  status names it, its commit and its Wine release" [ "$(st wine)/$(st wine_ready)/$(st wine_file)/$(st wine_commit)/$(st wine_build)/$(st wine_release)" = "mine/yes/mine/$MYWINE_COMMIT/$MYWINE_COMMIT/11.21" ]
   check "  the install says so" has <(echo "$out") "^ntdll.so: my ntdll.so (jdrly/wine ${MYWINE_COMMIT:0:11}) is in the engine, the engine's own kept next to it as ntdll.so.engine$"
 else
   check "no ntdll.so of mine in this app: the engine's own stays in place" ntdll_is engine
-  check "  status names it and the engine's Wine" [ "$(st wine_ready)/$(st wine_file)/$(st wine_commit)/$(st wine_build)" = "yes/engine/$ENGINE_WINE/" ]
+  check "  status names it and the engine's Wine" [ "$(st wine_ready)/$(st wine_file)/$(st wine_commit)/$(st wine_build)/$(st wine_release)" = "yes/engine/$ENGINE_WINE//" ]
 fi
 if drv; then
   check "my winemac.so in the engine, the engine's own next to it as winemac.so.engine" winemac_is mine
-  check "  status names it and its commit" [ "$(st macdrv)/$(st macdrv_ready)/$(st macdrv_file)/$(st macdrv_commit)/$(st macdrv_build)" = "mine/yes/mine/$MYDRV_COMMIT/$MYDRV_COMMIT" ]
+  check "  status names it, its commit and its Wine release" [ "$(st macdrv)/$(st macdrv_ready)/$(st macdrv_file)/$(st macdrv_commit)/$(st macdrv_build)/$(st macdrv_release)" = "mine/yes/mine/$MYDRV_COMMIT/$MYDRV_COMMIT/11.21" ]
   check "  the install says so" has <(echo "$out") "^winemac.so: my winemac.so (jdrly/wine ${MYDRV_COMMIT:0:11}) is in the engine, the engine's own kept next to it as winemac.so.engine$"
 else
   check "no winemac.so of mine in this app: the engine's own stays in place" winemac_is engine
-  check "  status names it and the engine's Wine" [ "$(st macdrv_ready)/$(st macdrv_file)/$(st macdrv_commit)/$(st macdrv_build)" = "yes/engine/$ENGINE_WINE/" ]
+  check "  status names it and the engine's Wine" [ "$(st macdrv_ready)/$(st macdrv_file)/$(st macdrv_commit)/$(st macdrv_build)/$(st macdrv_release)" = "yes/engine/$ENGINE_WINE//" ]
 fi
 check "gamemode=engine" [ "$(st gamemode)" = engine ]
 check "steam=yes" [ "$(st steam)" = yes ]
@@ -370,7 +373,8 @@ check "the manifest" has "$AD/install-manifest.json" '"route": "steam"'
 check "install.log" has "$LOGS/install.log" "install steam"
 # (the app's own three folders and nothing else in Library, so it never shares one with another
 # build of the app, such as 0.1.x)
-check "only the app's folders in Library: $APP_NAME" eval '[ "$(cd "$H/Library" && ls -d */* | tr "\n" "|")" = "Application Support/$APP_NAME|Caches/$APP_NAME|Logs/$APP_NAME|" ]'
+check "only the app's folders in Library: $APP_FOLDER" eval '[ "$(cd "$H/Library" && ls -d */* | tr "\n" "|")" = "Application Support/$APP_FOLDER|Caches/$APP_FOLDER|Logs/$APP_FOLDER|" ]'
+check "  status reads the install from there, the folder of every install before" [ "$(st app_dir)" = "$AD" ]
 
 section "Steam downloads the game (played by the test)"
 m="$STEAM/steamapps/appmanifest_1284210.acf"
@@ -840,10 +844,10 @@ fi
 # A home with odd characters, in a fresh root: its settings.conf (the engine's ntdll.so, Debug logging off,
 # at settings_version 2 so wine=engine isn't reset) is all there is in it
 ODD="$SANDBOX/a%b;c$(printf '\t')d é"
-ODD_CONF="$ODD/home/Library/Application Support/$APP_NAME/settings.conf"
+ODD_CONF="$ODD/home/Library/Application Support/$APP_FOLDER/settings.conf"
 mkdir -p "${ODD_CONF%/*}" && printf 'settings_version=2\nwine=engine\ndebug=off\n' >"$ODD_CONF"
 odd_rules_are() { GW2_ON_MAC_ROOT="$ODD" "$G" rules | sed "s|$SANDBOX/a%25b%3Bc%09d é/home|/Users/a%25b%3Bc%09d é|g" | cmp -s - "$FIX/$1.rules"; }
-odd_only_conf() { [ "$(cd "$ODD" && find . | LC_ALL=C sort | tr '\n' '|')" = ".|./home|./home/Library|./home/Library/Application Support|./home/Library/Application Support/$APP_NAME|./home/Library/Application Support/$APP_NAME/settings.conf|" ]; }
+odd_only_conf() { [ "$(cd "$ODD" && find . | LC_ALL=C sort | tr '\n' '|')" = ".|./home|./home/Library|./home/Library/Application Support|./home/Library/Application Support/$APP_FOLDER|./home/Library/Application Support/$APP_FOLDER/settings.conf|" ]; }
 check "a home with %, ; and a tab: escaped as %XX, the é as it is" eval 'odd_rules_are escaped && odd_only_conf'
 if mine; then
   printf 'jobwakes=on\neventpool=off\ndebug=on\n' >"$ODD_CONF"
@@ -1841,7 +1845,7 @@ g uninstall >/dev/null 2>&1
 # into an earlier run's bottle, whose own settings go to a backup folder
 g install steam >/dev/null 2>&1; g stop-waiting >/dev/null
 mkdir -p "$BS" && echo "the bottle's own" >"$BS/Local.dat"
-backup_kept() { local f; for f in "$BS"/"$APP_NAME backup "*/Local.dat; do has "$f" "the bottle's own" && return 0; done; return 1; }
+backup_kept() { local f; for f in "$BS"/"$APP_FOLDER backup "*/Local.dat; do has "$f" "the bottle's own" && return 0; done; return 1; }
 : >"$STANDIN_LOG"
 out=$(g install import "$WRAP" 2>&1) && rc=0 || rc=$?
 check "install import of the wrapper's (ArenaNet) into the earlier bottle exits 0" [ "$rc" = 0 ]

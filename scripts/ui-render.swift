@@ -122,9 +122,12 @@ func installer(_ state: String) -> Installer {
   let i = Installer()
   var st: [String: String] = [
     "version": "0.2.0-dev.2", "engine": "mach9-v0.3.1", "engine_title": "Mach9 0.3.1 · Wine 11.21",
-    "engine_dxmt": "d903db89036", "dxmt": "fork", "dxmt_tree": "fork", "dxmt_commit": "e02a4d6",
-    "wine": "mine", "wine_ready": "yes", "wine_file": "mine", "wine_commit": "4f1c2e9a7b31", "wine_build": "4f1c2e9a7b31",
-    "macdrv": "mine", "macdrv_ready": "yes", "macdrv_file": "mine", "macdrv_commit": "4f1c2e9a7b31", "macdrv_build": "4f1c2e9a7b31",
+    "engine_dxmt": "d903db89036", "dxmt": "fork", "dxmt_tree": "fork", "dxmt_version": "v0.80-489-g2483559",
+    "dxmt_release": "0.80", "dxmt_commit": "2483559",
+    "wine": "mine", "wine_ready": "yes", "wine_file": "mine", "wine_commit": "d831f808236c", "wine_release": "11.21",
+    "wine_build": "d831f808236c",
+    "macdrv": "mine", "macdrv_ready": "yes", "macdrv_file": "mine", "macdrv_commit": "d831f808236c", "macdrv_release": "11.21",
+    "macdrv_build": "d831f808236c",
     "macos": "27.2", "macos_min": "26.4", "macos_ok": "yes",
     "arch": "arm64", "installed": "yes", "installed_version": "0.2.0-dev.2", "engine_installed": "yes", "graphics": "yes",
     "gamemode": "engine", "route": "steam", "steam": "yes", "game": "yes", "stage": "finished",
@@ -137,6 +140,18 @@ func installer(_ state: String) -> Installer {
     // disk is short
     st["game"] = "no"; st["stage"] = "none"; st["steam"] = "no"; st["route"] = ""
     st["disk_free"] = "62000000000"
+  case "ready-engine":
+    // the engine's own ntdll.so, winemac.so and DXMT, as Settings can ask for them
+    st = st.merging(["dxmt": "engine", "dxmt_tree": "engine", "wine": "engine", "wine_file": "engine",
+                     "wine_commit": "53def89293a", "wine_release": "", "macdrv": "engine", "macdrv_file": "engine",
+                     "macdrv_commit": "53def89293a", "macdrv_release": ""]) { $1 }
+  case "ready-mixed":
+    // my ntdll.so next to the engine's own winemac.so
+    st = st.merging(["macdrv": "engine", "macdrv_file": "engine", "macdrv_commit": "53def89293a",
+                     "macdrv_release": ""]) { $1 }
+  case "ready-other":
+    // another ntdll.so (an earlier build of mine) that the next Play replaces, next to my winemac.so
+    st = st.merging(["wine_ready": "switch", "wine_file": "other", "wine_commit": "", "wine_release": ""]) { $1 }
   case "ready-repair":
     // an earlier version's install whose engine graphics aren't the engine's own: Repair
     st["graphics"] = "other"; st["installed_version"] = "0.2.0-dev.0"
@@ -286,6 +301,9 @@ func renderAll(_ dir: URL, exports: URL?) async {
     ("main-ready-light", "ready", false, "3-ready-to-play.png"),
     ("main-ready-dark", "ready", true, "5-ready-to-play-dark.png"),
     ("main-ready-repair-light", "ready-repair", false, nil),
+    ("main-ready-engine-light", "ready-engine", false, nil),
+    ("main-ready-mixed-light", "ready-mixed", false, nil),
+    ("main-ready-other-light", "ready-other", false, nil),
     ("main-fresh-old-macos-light", "fresh-old-macos", false, nil),
     ("main-choose-dark", "choose", true, nil),
     ("main-installing-dark", "installing", true, nil),
@@ -320,6 +338,33 @@ func renderAll(_ dir: URL, exports: URL?) async {
     "session-signing-in": .starting, "session-loading": .starting, "session-arenanet": .starting,
     "session-playing": .playing, "session-playing-nohint": .playing, "session-closing": .ready,
     "session-steam-update": .starting]
+  // the Engine and Graphics checks' texts for the files gw2om.sh status can report (a model check)
+  do {
+    let engine = "Mach9 0.3.1 · Wine 11.21"
+    let other = ["wine_file": "other", "wine_commit": "", "wine_release": ""]
+    let cases: [(String, [String: String], String, String)] = [
+      ("ready", [:], "Wine 11.21 · d831f80", "DXMT 0.80 · 2483559"),
+      ("ready-engine", [:], engine, "DXMT · d903db8"),
+      ("ready-mixed", [:], "Mach9 0.3.1 · ntdll d831f80", "DXMT 0.80 · 2483559"),
+      ("ready-mixed", other, "Mach9 0.3.1 · another ntdll", "DXMT 0.80 · 2483559"),
+      ("ready-other", [:], "another ntdll · winemac d831f80", "DXMT 0.80 · 2483559"),
+      ("ready-engine", ["macdrv_file": "mine", "macdrv_commit": "d831f808236c", "macdrv_release": "11.21"],
+       "Mach9 0.3.1 · winemac d831f80", "DXMT · d903db8"),
+      ("ready", ["macdrv_commit": "1a2b3c4d5e6f"], "ntdll d831f80 · winemac 1a2b3c4", "DXMT 0.80 · 2483559"),
+      ("ready", ["macdrv_file": "other", "macdrv_commit": ""], "ntdll d831f80 · another winemac", "DXMT 0.80 · 2483559"),
+      ("ready", other.merging(["macdrv_file": "other", "macdrv_commit": ""]) { $1 },
+       "another ntdll · another winemac", "DXMT 0.80 · 2483559"),
+      ("ready", ["wine_release": "", "dxmt_release": ""], "Wine · d831f80", "DXMT · 2483559"),
+    ]
+    for (state, extra, wantWine, wantDXMT) in cases {
+      let s = installer(state).status.merging(extra) { $1 }
+      let wine = ThisMac.wine(s, engine: engine), dxmt = ThisMac.dxmt(s)
+      guard wine == wantWine, dxmt == wantDXMT else {
+        print("FAIL the checks' texts, \(state) \(extra): \"\(wine)\", \"\(dxmt)\", not \"\(wantWine)\", \"\(wantDXMT)\"")
+        exit(1)
+      }
+    }
+  }
   for (state, want) in panels where installer(state).panel != want {
     print("FAIL \(state): the panel is \(installer(state).panel), not \(want)")
     exit(1)

@@ -10,9 +10,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="${1:-$PWD/work/app-renders}"
 DESIGN_EXPORTS="${DESIGN_EXPORTS:-${GW2_ON_MAC_WORKSPACE:-$PWD/../gw2-on-mac}/docs/design/exports}"
-APP_NAME="$(sed -n 's/^APP_NAME="\(.*\)"$/\1/p' src/gw2om.sh)"
-[ -n "$APP_NAME" ] || { echo "No APP_NAME=\"…\" line in src/gw2om.sh" >&2; exit 1; }
-APP="$PWD/dist/$APP_NAME.app"
+APP_FOLDER="$(sed -n 's/^APP_FOLDER="\(.*\)"$/\1/p' src/gw2om.sh)"
+[ -n "$APP_FOLDER" ] || { echo "No APP_FOLDER=\"…\" line in src/gw2om.sh" >&2; exit 1; }
+APP="$PWD/dist/$APP_FOLDER.app"
 [ -d "$APP" ] || { echo "No $APP; run ./build.sh" >&2; exit 1; }
 SPARKLE="$PWD/.cache/sparkle-2.10.0"
 BIN="$PWD/.cache/ui-render"

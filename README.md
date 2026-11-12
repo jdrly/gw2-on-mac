@@ -14,11 +14,15 @@ them, and a setting switches back to each. It changes nothing you already have i
 > DXMT fork and my Wine pieces. This app puts my DXMT fork, built for the arm64 engine, into its
 > engine, and my Wine pieces for it: an `ntdll.so` with job wakes, the event pool, the msync fix
 > and fast locks, and a `winemac.so` with the launcher's frame copies. A build made without one of
-> those files leaves the engine's own in place. It has its own name, bundle id
-> (`cz.jandrly.gw2onmac.arm64`) and folders, so it installs next to GW2 on Mac 0.1.x and shares
-> nothing with it. The name is `APP_NAME` at the top of `src/gw2om.sh`, `collect-logs.sh` and
-> `session-report.sh`, and `appName` in `src/native/App.swift`. It has no updates, and 0.1.x stays
-> the release on `main`. The paths below are this app's.
+> those files leaves the engine's own in place. Its window, menus and About panel say *GW2 on Mac*,
+> as 0.1.x's do. On disk it has its own name, *GW2 on Mac arm64*: the app's file name and its
+> folders in `~/Library`, with its own bundle id (`cz.jandrly.gw2onmac.arm64`), so it installs
+> next to GW2 on Mac 0.1.x and shares nothing with it. A text that names one of its folders gives
+> the folder's real name. The shown name is `APP_NAME` at the top of `src/gw2om.sh` and
+> `collect-logs.sh` and `appName` in `src/native/App.swift`; the name on disk is `APP_FOLDER` in
+> those two scripts and `session-report.sh`, and `appFolder` in `App.swift`. The Dock and Finder
+> show the file name. It has no updates, and 0.1.x stays the release on `main`. The paths below
+> are this app's.
 
 Website: [gw2onmac.com](https://gw2onmac.com). Download: the
 [latest release](https://github.com/jdrly/gw2-on-mac/releases/latest).
@@ -424,6 +428,10 @@ build of mine, `other`) and `graphics`: `yes` when the tree is the one asked for
 next start puts it in (after a change during a session, or an update of the app with another build
 of my fork), and `other` when the tree is neither the engine's own nor mine. Repair then unpacks
 the engine again and puts the asked-for tree in.
+It also prints my fork's build in the app: `dxmt_version` (its `VERSION`'s first line, such as
+`v0.80-489-g2483559`), `dxmt_release` (`0.80`) and `dxmt_commit`. The *This Mac* panel's Graphics
+cell shows `DXMT 0.80 · 2483559` for my fork and `DXMT · d903db8`, athei's commit, for the
+engine's own.
 To tell my fork's tree from an earlier build, the script compares every file of
 `components/dxmt` (44 MB in `0.2.0-dev.3`) with the tree. Play and `status` do that once and
 reuse the answer for the rest of the command, until a swap changes the tree.
@@ -440,10 +448,14 @@ copied next to it first, so a switch cut short leaves one of the two files in pl
 between the renames, and the next switch finishes it.
 
 `status` prints `wine` (the setting), `wine_file` (`mine`, `engine`, `other` or `none`, the file
-in place), `wine_commit` (its commit), `wine_build` (my build's commit in this app) and
-`wine_ready`: `yes`, `switch` when the next start puts the asked-for file in, and `other` when the
-engine's own is neither in place nor next to it. Repair then unpacks the engine again. The *This
-Mac* panel shows my file with its commit in the Engine cell.
+in place), `wine_commit` (its commit), `wine_release` (the Wine release my file is on, `11.21` from
+its `VERSION`'s `wine-11.21-…`, empty for the others), `wine_build` (my build's commit in this app)
+and `wine_ready`: `yes`, `switch` when the next start puts the asked-for file in, and `other` when
+the engine's own is neither in place nor next to it. Repair then unpacks the engine again. The
+*This Mac* panel's Engine cell shows `Wine 11.21 · d831f80` when my `ntdll.so` and `winemac.so`
+from one build are in place, the engine's title with both of its own, and the engine's name with
+the other file, such as `Mach9 0.3.1 · ntdll d831f80` or `Mach9 0.3.1 · another winemac`, when
+only one is mine.
 
 The app tells my file from the engine's by comparing it with `components/ntdll/ntdll.so`, not by
 the fork's hash, because a release signed with my Developer ID changes the file's bytes. The
@@ -464,8 +476,9 @@ its web helper's, the game's launcher and the game. My build of it comes from th
 commit line as my `ntdll.so` and is in the app as `components/macdrv`. The app installs it the same
 way, with its own setting, `macdrv`, so I can take my driver out and keep my `ntdll.so`, or the
 other way round. The engine's own goes aside as `winemac.so.engine`, and the pin is its sha256,
-`ae468edc…`. `status` prints `macdrv`, `macdrv_ready`, `macdrv_file`, `macdrv_commit` and
-`macdrv_build`, and the *This Mac* panel names my driver with its commit next to my `ntdll.so`.
+`ae468edc…`. `status` prints `macdrv`, `macdrv_ready`, `macdrv_file`, `macdrv_commit`,
+`macdrv_release` and `macdrv_build`, and the *This Mac* panel counts my driver in with my
+`ntdll.so`.
 
 Its switches are `WINE_MACDRV_*` entries of the game's rule. My driver reads them once in each
 process, and the engine's own ignores them. They reach `Gw2-64.exe` only, which is the launcher too,
