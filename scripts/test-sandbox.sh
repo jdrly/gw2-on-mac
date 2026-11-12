@@ -72,6 +72,17 @@ drv() { [ "$MYDRV" = mine ]; }
 scale() { drv && { ! grep -q '^switches:' "$COMP/macdrv/VERSION" || in_switches WINE_MACDRV_MOUSE_SCALE; }; }
 in_switches() { sed -n 's/^switches://p' "$COMP/macdrv/VERSION" | head -1 | tr ' ' '\n' | grep -qx "$1"; }
 skipdrv() { echo "  skip   $* (this app has no winemac.so of mine)"; }
+# My Mac driver's win32u.so (components/macdrv/win32u.so), in a build of it that has one: the two
+# switch as one set, and the log names both (DRVSAYS: "<files>: <label of mine>"). The checks'
+# stand-in has none; the checks of the set give it one for a while.
+if [ -f "$COMP/macdrv/win32u.so" ]; then W32U=mine DRVNAME="winemac.so and win32u.so"; else W32U=engine DRVNAME=winemac.so; fi
+drvsays() { # mine|engine: the line the switch to that set logs
+  if [ "$W32U" = engine ] && [ "$1" = mine ]; then echo "winemac.so: my winemac.so (jdrly/wine ${MYDRV_COMMIT:0:11}) is in the engine, the engine's own kept next to it as winemac.so.engine"
+  elif [ "$W32U" = engine ]; then echo "winemac.so: the engine's own winemac.so (athei/wine $ENGINE_WINE) is in the engine"
+  elif [ "$1" = mine ]; then echo "winemac.so and win32u.so: my winemac.so and win32u.so (jdrly/wine ${MYDRV_COMMIT:0:11}) are in the engine, the engine's own kept next to each as <file>.engine"
+  else echo "winemac.so and win32u.so: the engine's own winemac.so and win32u.so (athei/wine $ENGINE_WINE) are in the engine"
+  fi
+}
 # My FEX (components/fex): in the app or not. The setting fex starts at engine either way, so the
 # engine's own FEX is in place until a check sets fex mine
 if [ -f "$COMP/fex/aarch64-windows/libarm64ecfex.dll" ]; then MYFEX=yes; else MYFEX=no; fi
@@ -176,6 +187,7 @@ echo "engine's winemetal.so" >"$S/lib/wine/aarch64-unix/winemetal.so"
 rm -f "$S/lib/wine/dxgi/dxmt/aarch64-unix/"*.dll && ln -s ../../../aarch64-unix/winemetal.so "$S/lib/wine/dxgi/dxmt/aarch64-unix/winemetal.so"
 echo "engine's ntdll.so" >"$S/lib/wine/aarch64-unix/ntdll.so"
 echo "engine's winemac.so" >"$S/lib/wine/aarch64-unix/winemac.so"
+echo "engine's win32u.so" >"$S/lib/wine/aarch64-unix/win32u.so"
 # (FEX's x86_64 half: one DLL under two names and its .so; and its i386 half, which the app leaves
 # alone)
 mkdir -p "$S/lib/wine/aarch64-windows"
@@ -229,7 +241,8 @@ export GW2_ON_MAC_ENGINE_D3D11_SHA256 GW2_ON_MAC_ENGINE_WINEMETAL_SHA256
 # (and its ntdll.so: what the app moves aside for mine, unix_lib)
 GW2_ON_MAC_ENGINE_NTDLL_SHA256="$(shasum -a 256 "$S/lib/wine/aarch64-unix/ntdll.so" | cut -d' ' -f1)"
 GW2_ON_MAC_ENGINE_WINEMAC_SHA256="$(shasum -a 256 "$S/lib/wine/aarch64-unix/winemac.so" | cut -d' ' -f1)"
-export GW2_ON_MAC_ENGINE_NTDLL_SHA256 GW2_ON_MAC_ENGINE_WINEMAC_SHA256
+GW2_ON_MAC_ENGINE_WIN32U_SHA256="$(shasum -a 256 "$S/lib/wine/aarch64-unix/win32u.so" | cut -d' ' -f1)"
+export GW2_ON_MAC_ENGINE_NTDLL_SHA256 GW2_ON_MAC_ENGINE_WINEMAC_SHA256 GW2_ON_MAC_ENGINE_WIN32U_SHA256
 GW2_ON_MAC_ENGINE_FEX_DLL_SHA256="$(shasum -a 256 "$S/lib/wine/aarch64-windows/libarm64ecfex.dll" | cut -d' ' -f1)"
 GW2_ON_MAC_ENGINE_FEX_SO_SHA256="$(shasum -a 256 "$S/lib/wine/aarch64-unix/libarm64ecfex.so" | cut -d' ' -f1)"
 export GW2_ON_MAC_ENGINE_FEX_DLL_SHA256 GW2_ON_MAC_ENGINE_FEX_SO_SHA256
@@ -329,9 +342,10 @@ unix_is() {
   fi
   same "$COMP/$2/$1" "$NT/$1" && same "$S/lib/wine/aarch64-unix/$1" "$NT/$1.engine"
 }
-# ntdll_is and winemac_is mine|engine: my ntdll.so's and my Mac driver's
+# ntdll_is, winemac_is and win32u_is mine|engine: my ntdll.so's and my Mac driver's two files
 ntdll_is() { unix_is ntdll.so ntdll "$1"; }
 winemac_is() { unix_is winemac.so macdrv "$1"; }
+win32u_is() { unix_is win32u.so macdrv "$1"; }
 # fex_is mine|engine: FEX's three files as the app leaves them. mine: the app's
 # components/fex/aarch64-windows/libarm64ecfex.dll as both DLLs and its libarm64ecfex.so, the
 # engine's own next to each as <file>.engine. engine: the engine's own, nothing next to them. Never
@@ -382,8 +396,10 @@ else
 fi
 if drv; then
   check "my winemac.so in the engine, the engine's own next to it as winemac.so.engine" winemac_is mine
+  check "  win32u.so: mine with it if its build has one ($W32U), the engine's own otherwise" \
+    eval 'win32u_is $W32U && [ "$(st win32u_bundled)/$(st win32u_file)" = "$([ $W32U = mine ] && echo yes || echo no)/$W32U" ]'
   check "  status names it, its commit and its Wine release" [ "$(st macdrv)/$(st macdrv_ready)/$(st macdrv_file)/$(st macdrv_commit)/$(st macdrv_build)/$(st macdrv_release)" = "mine/yes/mine/$MYDRV_COMMIT/$MYDRV_COMMIT/11.21" ]
-  check "  the install says so" has <(echo "$out") "^winemac.so: my winemac.so (jdrly/wine ${MYDRV_COMMIT:0:11}) is in the engine, the engine's own kept next to it as winemac.so.engine$"
+  check "  the install says so" eval 'echo "$out" | grep -qxF "$(drvsays mine)"'
 else
   check "no winemac.so of mine in this app: the engine's own stays in place" winemac_is engine
   check "  status names it and the engine's Wine" [ "$(st macdrv_ready)/$(st macdrv_file)/$(st macdrv_commit)/$(st macdrv_build)/$(st macdrv_release)" = "yes/engine/$ENGINE_WINE//" ]
@@ -398,9 +414,9 @@ check "stage=waiting_game" [ "$(st stage)" = waiting_game ]
 check "route=steam" [ "$(st route)" = steam ]
 check "game=no yet" [ "$(st game)" = no ]
 # (the engine as it ships: every file the stand-in's, minus the SDK, plus the app's record of the
-# archive; nothing of the app's in it but its DXMT trees, ntdll.so and winemac.so, which dxgi_is,
-# ntdll_is and winemac_is check)
-engine_diff() { diff -rq -x dxgi -x 'ntdll.so*' -x 'winemac.so*' "$S" "$ENG" 2>&1 | sed -e "s|$S|S|g" -e "s|$ENG|E|g" | LC_ALL=C sort | tr '\n' '|'; }
+# archive; nothing of the app's in it but its DXMT trees, ntdll.so, winemac.so and win32u.so, which
+# dxgi_is, ntdll_is, winemac_is and win32u_is check)
+engine_diff() { diff -rq -x dxgi -x 'ntdll.so*' -x 'winemac.so*' -x 'win32u.so*' "$S" "$ENG" 2>&1 | sed -e "s|$S|S|g" -e "s|$ENG|E|g" | LC_ALL=C sort | tr '\n' '|'; }
 SDK_DIFF="Only in E: .gw2om-source|Only in S/lib/wine: tests|Only in S/lib/wine: x86_64-windows|Only in S/share: man|Only in S: include|"
 check "the engine is the stand-in as it ships, without its SDK (include, tests, x86_64-windows, man)" [ "$(engine_diff)" = "$SDK_DIFF" ]
 check "  wine.app's files have the stand-in's hashes" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
@@ -603,7 +619,7 @@ if drv; then
   out=$(g set macdrv engine 2>&1) && rc=0 || rc=$?
   check "set macdrv engine: the engine's own winemac.so in place, nothing next to it, ntdll.so as it was" \
     eval '[ "$rc" = 0 ] && winemac_is engine && ntdll_is $MYWINE && [ "$(st macdrv_ready)/$(st macdrv_file)/$(st macdrv_commit)/$(st wine_file)" = "yes/engine/$ENGINE_WINE/$MYWINE" ] && ! echo "$out" | grep -q Repair'
-  check "  it says which" has <(echo "$out") "^winemac.so: the engine's own winemac.so (athei/wine $ENGINE_WINE) is in the engine$"
+  check "  it says which" eval 'echo "$out" | grep -qxF "$(drvsays engine)" && win32u_is engine'
   check "  launcher frames greyed with the reason; set launcherframes refused" \
     eval '[ "$(sett launcherframes_state)" = "off:Needs my Mac driver, and the engine'"'"'s own winemac.so is chosen." ] && ! "$G" set launcherframes on >/dev/null 2>&1'
   out=$(g set macdrv mine 2>&1) && rc=0 || rc=$?
@@ -614,16 +630,95 @@ if drv; then
       eval 'g set wine engine >/dev/null && ntdll_is engine && winemac_is mine && g set wine mine >/dev/null && ntdll_is mine && winemac_is mine'
   fi
   mv "$NT/winemac.so" "$NT/winemac.so.new"
-  check "cut short between the renames (no winemac.so): macdrv_ready=switch" [ "$(st macdrv_ready)/$(st macdrv_file)" = switch/none ]
+  check "cut short between the renames (no winemac.so): macdrv_ready=switch" \
+    [ "$(st macdrv_ready)/$(st macdrv_file)" = "switch/$([ $W32U = mine ] && echo mix || echo none)" ]
   check "  the next set macdrv mine puts it in" eval 'g set macdrv mine >/dev/null && winemac_is mine && [ "$(st macdrv_ready)" = yes ]'
   echo "an earlier build of mine" >"$NT/winemac.so"
-  check "an earlier build of mine in place: macdrv_ready=switch, macdrv_file=other" [ "$(st macdrv_ready)/$(st macdrv_file)/$(st macdrv_commit)" = switch/other/ ]
+  check "an earlier build of mine in place: macdrv_ready=switch, macdrv_file=other (mix next to this build's win32u.so)" \
+    [ "$(st macdrv_ready)/$(st macdrv_file)/$(st macdrv_commit)" = "switch/$([ $W32U = mine ] && echo mix || echo other)/" ]
   check "  set macdrv engine puts the engine's own back, set macdrv mine this build's" \
     eval 'g set macdrv engine >/dev/null && winemac_is engine && g set macdrv mine >/dev/null && winemac_is mine'
   check "  the engine's own winemac.so and wine.app as they ship through all of it" \
     eval 'same "$S/lib/wine/aarch64-unix/winemac.so" "$NT/winemac.so.engine" && [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]'
 else
   skipdrv "set macdrv engine and mine, and the switches cut short"
+fi
+# My Mac driver with win32u.so, as a build of jdrly/wine#61 has it: the two files switch as one set,
+# both mine or both the engine's own. The app's components/macdrv gets a stand-in win32u.so and its
+# VERSION line when its build has none (back at the end). The way to mine is two copies, then four
+# renames (winemac.so aside, mine in, win32u.so aside, mine in); the way back two renames.
+W32LEFT() { find "$NT" \( -name 'winemac.so.*' -o -name 'win32u.so.*' \) | LC_ALL=C sort; }
+if drv; then
+  W32U0=$W32U
+  cp "$COMP/macdrv/VERSION" "$SANDBOX/macdrv-VERSION.w32"
+  if [ "$W32U" = engine ]; then
+    echo "my win32u.so" >"$COMP/macdrv/win32u.so"
+    echo "win32u.so: sha256 $(shasum -a 256 "$COMP/macdrv/win32u.so" | cut -d' ' -f1)" >>"$COMP/macdrv/VERSION"
+  fi
+  cp "$COMP/macdrv/win32u.so" "$SANDBOX/win32u.keep"
+  if [ "$W32U" = engine ]; then
+    check "a build with win32u.so over one without: my winemac.so next to the engine's win32u.so is a mix, macdrv_ready=switch" \
+      [ "$(st macdrv_file)/$(st macdrv_ready)/$(st win32u_bundled)/$(st win32u_file)" = mix/switch/yes/engine ]
+  fi
+  out=$(g set macdrv mine 2>&1) && rc=0 || rc=$?
+  check "set macdrv mine: my winemac.so and win32u.so in the engine, the engine's own next to each as <file>.engine" \
+    eval '[ "$rc" = 0 ] && winemac_is mine && win32u_is mine && [ "$(st macdrv_file)/$(st macdrv_ready)/$(st macdrv_commit)/$(st win32u_file)" = "mine/yes/$MYDRV_COMMIT/mine" ]'
+  W32U=mine
+  out=$(g set macdrv engine 2>&1) && rc=0 || rc=$?
+  check "set macdrv engine: the engine's own winemac.so and win32u.so with the pinned hashes, nothing left over" \
+    eval '[ "$rc" = 0 ] && winemac_is engine && win32u_is engine && [ -z "$(W32LEFT)" ] && [ "$(st macdrv_file)/$(st macdrv_ready)/$(st win32u_file)" = engine/yes/engine ] &&
+      [ "$(shasum -a 256 "$NT/winemac.so" "$NT/win32u.so" | cut -d" " -f1 | tr "\n" " ")" = "$GW2_ON_MAC_ENGINE_WINEMAC_SHA256 $GW2_ON_MAC_ENGINE_WIN32U_SHA256 " ]'
+  check "  it says so, naming both" eval 'echo "$out" | grep -qxF "$(drvsays engine)"'
+  out=$(g set macdrv mine 2>&1)
+  check "  set macdrv mine says so, naming both" eval 'echo "$out" | grep -qxF "$(drvsays mine)" && winemac_is mine && win32u_is mine'
+  # A switch cut short after any of its renames, done here by hand in the switch's order, with the
+  # setting already saved: the next switch finishes it. drv_cut <to> <n>: the way to <to> from the
+  # other, cut after its first <n> renames (to mine after the copies)
+  drv_cut() {
+    local f i=0
+    sed -i '' "s/^macdrv=.*/macdrv=$1/" "$AD/settings.conf"
+    if [ "$1" = mine ]; then
+      for f in winemac.so win32u.so; do cp -p "$COMP/macdrv/$f" "$NT/$f.new"; done
+      for f in winemac.so win32u.so; do
+        [ $i -lt "$2" ] || return 0; mv "$NT/$f" "$NT/$f.engine"; i=$((i + 1))
+        [ $i -lt "$2" ] || return 0; mv "$NT/$f.new" "$NT/$f"; i=$((i + 1))
+      done
+    else
+      for f in winemac.so win32u.so; do [ $i -lt "$2" ] || return 0; mv -f "$NT/$f.engine" "$NT/$f"; i=$((i + 1)); done
+    fi
+  }
+  for n in 0 1 2 3; do
+    g set macdrv engine >/dev/null
+    drv_cut mine $n
+    want=mix; [ $n != 0 ] || want=engine
+    check "cut short on the way to mine after $n of 4 renames: macdrv_file=$want, macdrv_ready=switch; set macdrv mine finishes it$([ $n = 0 ] || echo ", saying so")" \
+      eval '[ "$(st macdrv_file)/$(st macdrv_ready)" = "$want/switch" ] && out=$(g set macdrv mine 2>&1) && winemac_is mine && win32u_is mine && [ -z "$(W32LEFT | grep "\.new$")" ] && { [ $n = 0 ] || echo "$out" | grep -q "^winemac.so and win32u.so: a mix of mine and the engine.s own winemac.so and win32u.so in the engine, a switch cut short; finishing the switch to my winemac.so and win32u.so"; }'
+  done
+  g set macdrv engine >/dev/null
+  drv_cut mine 3
+  check "cut short on the way to mine after 3 of 4 renames, then set macdrv engine: the engine's own pair, nothing left over" \
+    eval 'g set macdrv engine >/dev/null && winemac_is engine && win32u_is engine && [ -z "$(W32LEFT)" ]'
+  g set macdrv mine >/dev/null
+  drv_cut engine 1
+  check "cut short on the way back after 1 of 2 renames: a mix; set macdrv engine finishes it, nothing left over" \
+    eval '[ "$(st macdrv_file)/$(st macdrv_ready)" = mix/switch ] && g set macdrv engine >/dev/null && winemac_is engine && win32u_is engine && [ -z "$(W32LEFT)" ]'
+  # A build without win32u.so after one with it: my winemac.so alone, and the engine's own win32u.so
+  # back in place
+  g set macdrv mine >/dev/null
+  rm -f "$COMP/macdrv/win32u.so" && grep -v '^win32u\.so: ' "$SANDBOX/macdrv-VERSION.w32" >"$COMP/macdrv/VERSION"
+  check "a build without win32u.so over one with it: a mix (this build's winemac.so, the earlier build's win32u.so)" \
+    [ "$(st macdrv_file)/$(st macdrv_ready)/$(st win32u_bundled)/$(st win32u_file)" = mix/switch/no/other ]
+  out=$(g set macdrv mine 2>&1) && rc=0 || rc=$?
+  check "  set macdrv mine: my winemac.so alone, the engine's own win32u.so back in place, nothing next to it" \
+    eval '[ "$rc" = 0 ] && winemac_is mine && win32u_is engine && [ "$(st macdrv_file)/$(st macdrv_ready)/$(st win32u_file)" = mine/yes/engine ]'
+  # back to the app's own components, and the set its build asks for
+  cp "$SANDBOX/macdrv-VERSION.w32" "$COMP/macdrv/VERSION"
+  W32U=$W32U0
+  [ "$W32U" = engine ] || cp "$SANDBOX/win32u.keep" "$COMP/macdrv/win32u.so"
+  g set macdrv mine >/dev/null
+  check "  back to this app's own build: winemac.so mine, win32u.so $W32U" eval 'winemac_is mine && win32u_is $W32U && [ "$(st macdrv_ready)" = yes ]'
+else
+  skipdrv "my winemac.so and win32u.so as one set, and the switches cut short"
 fi
 # My FEX and the engine's own, and back (nothing runs: the three files switch at once). The way
 # there is three copies, then six renames; the way back three renames
@@ -1550,6 +1645,50 @@ if drv; then
 else
   skipdrv "set macdrv engine while a session runs"
 fi
+# A mix of my Mac driver's two files and the engine's own (a switch cut short): Play refuses it
+# while Steam runs, finishes the switch once Steam has quit, and refuses one it can't finish
+if drv; then
+  W32U0=$W32U
+  cp "$COMP/macdrv/VERSION" "$SANDBOX/macdrv-VERSION.w32"
+  if [ "$W32U" = engine ]; then
+    echo "my win32u.so" >"$COMP/macdrv/win32u.so"
+    echo "win32u.so: sha256 $(shasum -a 256 "$COMP/macdrv/win32u.so" | cut -d' ' -f1)" >>"$COMP/macdrv/VERSION"
+  fi
+  cp "$COMP/macdrv/win32u.so" "$SANDBOX/win32u.keep"
+  W32U=mine
+  g set macdrv mine >/dev/null
+  # (the way back to the engine's own, cut after its first rename: the engine's winemac.so, my
+  # win32u.so)
+  sed -i '' 's/^macdrv=.*/macdrv=engine/' "$AD/settings.conf"
+  mv -f "$NT/winemac.so.engine" "$NT/winemac.so"
+  mv "$ENG/bin/wineserver" "$ENG/bin/wineserver.heat" && cp "$SANDBOX/sleeper" "$ENG/bin/wineserver"
+  "$ENG/bin/wineserver" 60 & sp=$!
+  sleep 0.3
+  : >"$STANDIN_LOG"; out=$(g play 2>&1) && rc=0 || rc=$?
+  check "a mix of my Mac driver's two files while Steam runs: Play refuses, saying how to finish it, and starts nothing" \
+    eval '[ "$rc" != 0 ] && echo "$out" | grep -qxF "@error The engine'"'"'s winemac.so and win32u.so are a mix of mine and its own, a switch cut short. Quit Steam and click Play again to finish it." && ! has "$STANDIN_LOG" "^wine " && win32u_is mine'
+  kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
+  mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
+  : >"$STANDIN_LOG"; out=$(g play 2>&1); started
+  check "  once Steam has quit, Play finishes the switch to the engine's own pair before Wine starts" \
+    eval 'winemac_is engine && win32u_is engine && has "$LOGS/session.env" "^LIB_win32u=win32u.so engine $GW2_ON_MAC_ENGINE_WIN32U_SHA256$" && has "$STANDIN_LOG" "^wine "'
+  watch_done
+  # one it can't finish: my win32u.so over the engine's own, which is nowhere else
+  cp "$COMP/macdrv/win32u.so" "$NT/win32u.so"
+  : >"$STANDIN_LOG"; out=$(g play 2>&1) && rc=0 || rc=$?
+  check "my win32u.so next to the engine's own winemac.so, the engine's win32u.so gone: macdrv_ready=other, Play refuses and starts nothing" \
+    eval '[ "$(st macdrv_ready)/$(st macdrv_file)" = other/mix ] && [ "$rc" != 0 ] && echo "$out" | grep -qxF "@error The engine'"'"'s winemac.so and win32u.so are a mix of mine and its own. Click Repair." && ! has "$STANDIN_LOG" "^wine "'
+  out=$(g repair 2>&1) && rc=0 || rc=$?
+  check "  repair unpacks the engine again and puts the engine's own pair in, as macdrv=engine asks" \
+    eval '[ "$rc" = 0 ] && echo "$out" | grep -q "unpacking the engine again" && winemac_is engine && win32u_is engine && [ "$(st macdrv_ready)" = yes ]'
+  watch_done
+  cp "$SANDBOX/macdrv-VERSION.w32" "$COMP/macdrv/VERSION"
+  W32U=$W32U0
+  [ "$W32U" = mine ] || rm -f "$COMP/macdrv/win32u.so"
+  g set macdrv mine >/dev/null
+else
+  skipdrv "a mix of my Mac driver's two files, which Play refuses or finishes"
+fi
 if fexb; then
   mv "$ENG/bin/wineserver" "$ENG/bin/wineserver.heat" && cp "$SANDBOX/sleeper" "$ENG/bin/wineserver"
   "$ENG/bin/wineserver" 60 & sp=$!
@@ -2087,11 +2226,12 @@ fi
 out=$(g repair 2>&1) && rc=0 || rc=$?
 check "  repair unpacks the engine again and puts the ntdll.so Settings asks for in: $MYWINE" \
   eval '[ "$rc" = 0 ] && echo "$out" | grep -q "unpacking the engine again" && ntdll_is $MYWINE && [ "$(st wine_ready)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ]'
-check "  and says which ntdll.so, winemac.so and FEX are in the engine" has <(echo "$out") "^@done Repaired: .*, with $([ "$MYWINE" = mine ] && echo "my ntdll.so (jdrly/wine ${MYWINE_COMMIT:0:11})" || echo "the engine's own ntdll.so (athei/wine $ENGINE_WINE)"), with $(drv && echo "my winemac.so (jdrly/wine ${MYDRV_COMMIT:0:11})" || echo "the engine's own winemac.so (athei/wine $ENGINE_WINE)"), and runs on the engine's own FEX (athei/FEX $ENGINE_FEX)\.$"
+check "  and says which ntdll.so, winemac.so and FEX are in the engine" has <(echo "$out") "^@done Repaired: .*, with $([ "$MYWINE" = mine ] && echo "my ntdll.so (jdrly/wine ${MYWINE_COMMIT:0:11})" || echo "the engine's own ntdll.so (athei/wine $ENGINE_WINE)"), with $(drv && echo "my $DRVNAME (jdrly/wine ${MYDRV_COMMIT:0:11})" || echo "the engine's own $DRVNAME (athei/wine $ENGINE_WINE)"), and runs on the engine's own FEX (athei/FEX $ENGINE_FEX)\.$"
 check "  wine.app untouched" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
 # A winemac.so that is neither the engine's own nor mine, and no engine's own next to it
 echo "something else" >"$NT/winemac.so" && rm -f "$NT/winemac.so.engine"
-check "macdrv_ready=other: a winemac.so that is neither the engine's own nor mine, and none next to it" [ "$(st macdrv_ready)/$(st macdrv_file)" = other/other ]
+check "macdrv_ready=other: a winemac.so that is neither the engine's own nor mine, and none next to it (a mix next to my win32u.so)" \
+  [ "$(st macdrv_ready)/$(st macdrv_file)" = "other/$([ $W32U = mine ] && echo mix || echo other)" ]
 out=$(g repair 2>&1) && rc=0 || rc=$?
 check "  repair unpacks the engine again and puts the winemac.so Settings asks for in: $MYDRV, and the ntdll.so: $MYWINE" \
   eval '[ "$rc" = 0 ] && echo "$out" | grep -q "unpacking the engine again" && winemac_is $MYDRV && ntdll_is $MYWINE && [ "$(st macdrv_ready)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ]'
@@ -2166,7 +2306,7 @@ out=$(g reinstall-engine 2>&1) && rc=0 || rc=$?
 check "reinstall-engine from it: the verified download, unpacked again" eval '[ "$rc" = 0 ] && echo "$out" | grep -q "^@done" && echo "$out" | grep -q "using the verified download"'
 check "  no file of the engine has the quarantine attribute (my DXMT tree, ntdll.so and winemac.so, copied from the components, included)" sh -c "! xattr -r '$ENG' | grep -q com.apple.quarantine"
 check "  graphics=yes after it, the engine as it ships with my DXMT in its tree, the ntdll.so and winemac.so Settings asks for and the engine's own FEX" \
-  eval '[ "$(st graphics)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ] && dxgi_is fork && ntdll_is $MYWINE && winemac_is $MYDRV && fex_is engine'
+  eval '[ "$(st graphics)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ] && dxgi_is fork && ntdll_is $MYWINE && winemac_is $MYDRV && win32u_is $W32U && fex_is engine'
 if fexb; then
   check "  set fex mine from quarantined components: none of FEX's files in the engine has the attribute" \
     eval 'g set fex mine >/dev/null && fex_is mine && ! xattr -r "$FW" | grep -q com.apple.quarantine && g set fex engine >/dev/null && fex_is engine'
@@ -2454,6 +2594,9 @@ dev_expect() {
 # game_tail, cef_tail: the end the game's rule and CefHost.exe's have for dev_expect's lines
 game_tail() { dev_expect | sed 's/^/;env=/' | tr -d '\n'; }
 cef_tail() { dev_expect | sed 's/=.*/=/; s/^/;env=/' | tr -d '\n'; }
+# W32WHY: why the WINE_WIN32U_* lines stay out with the app's own Mac driver: its build has no
+# win32u.so, or its narrowed record doesn't name them
+if [ "$W32U" = mine ]; then W32WHY="my win32u.so doesn't have it"; else W32WHY="my win32u.so isn't in the engine"; fi
 rows_on() { # <settings.conf>: the rows of a development build on, once (dev_version=1)
   local k
   for k in dev_version=1 jobwakes=on eventpool=on fastlocks=on launcherframes=on warm=on metalfx=on rawmouse=on fex=mine; do
@@ -2499,18 +2642,41 @@ if mine; then
 fi
 out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
 check "  a dry run of Play prints that rule, and each line it leaves out with why" \
-  eval 'echo "$out" | grep -qxF "[dry-run] rule $(dg rules | head -1)" && echo "$out" | grep -qxF "[dry-run] dev-switches.conf leaves out WINE_WIN32U_SETCURSOR=shm (my win32u.so isn'"'"'t in the engine)" && { ! drv || echo "$out" | grep -qxF "[dry-run] dev-switches.conf leaves out WINE_MACDRV_CLIP=changes (my winemac.so doesn'"'"'t have it)"; }'
+  eval 'echo "$out" | grep -qxF "[dry-run] rule $(dg rules | head -1)" && echo "$out" | grep -qxF "[dry-run] dev-switches.conf leaves out WINE_WIN32U_SETCURSOR=shm ($W32WHY)" && { ! drv || echo "$out" | grep -qxF "[dry-run] dev-switches.conf leaves out WINE_MACDRV_CLIP=changes (my winemac.so doesn'"'"'t have it)"; }'
 check "  and doesn't write the file again" eval '! echo "$out" | grep -q "dev-switches.conf: version"'
 check "status lists the lines in the rule, and those left out" \
-  eval '[ "$(dg status | sed -n "s/^dev_switches=//p")" = "$(dev_expect | tr "\n" " " | sed "s/ \$//")" ] && dg status | sed -n "s/^dev_switches_out=//p" | grep -q "WINE_WIN32U_PEEK_YIELD=off (my win32u.so isn'"'"'t in the engine)"'
+  eval '[ "$(dg status | sed -n "s/^dev_switches=//p")" = "$(dev_expect | tr "\n" " " | sed "s/ \$//")" ] && dg status | sed -n "s/^dev_switches_out=//p" | grep -qF "WINE_WIN32U_PEEK_YIELD=off ($W32WHY)"'
 check "the install's start of Steam: session.env names the lines in the rule, install.log those left out" \
-  eval '[ "$(sed -n "s/^DEV_SWITCHES=//p" "$DLOGS/session.env")" = "$(dev_expect | tr "\n" " " | sed "s/ \$//")" ] && grep -q "dev-switches.conf: left out WINE_WIN32U_SETCURSOR=shm (my win32u.so isn'"'"'t in the engine)" "$DLOGS/install.log"'
+  eval '[ "$(sed -n "s/^DEV_SWITCHES=//p" "$DLOGS/session.env")" = "$(dev_expect | tr "\n" " " | sed "s/ \$//")" ] && grep -qF "dev-switches.conf: left out WINE_WIN32U_SETCURSOR=shm ($W32WHY)" "$DLOGS/install.log"'
 printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60\n' >"$DLOGS/Gw2-64_d3d11.log"
 # (the report to a file first: a grep -q on its pipe would end it with a broken pipe, which
 # pipefail counts as the check's failure)
 GW2_ON_MAC_ROOT="$DROOT" "$APP/Contents/Resources/session-report.sh" >"$CHECKS/devreport.txt" 2>&1
 check "  the session report's header prints them" \
   eval 'grep -qxF "Dev switches that were on (dev-switches.conf): $(dev_expect | tr "\n" " " | sed "s/ \$//")" "$CHECKS/devreport.txt"'
+# My win32u.so in the engine with my winemac.so, from a build whose record names its two switches:
+# the rule takes the WINE_WIN32U_* lines; with the engine's own pair, they stay out. The app's
+# components/macdrv gets a stand-in win32u.so when its build has none (back after)
+if drv; then
+  cp "$COMP/macdrv/VERSION" "$SANDBOX/dev-macdrv-VERSION.w32"
+  [ "$W32U" = mine ] || echo "my win32u.so" >"$COMP/macdrv/win32u.so"
+  { grep -v -e '^switches:' -e '^win32u\.so: ' "$SANDBOX/dev-macdrv-VERSION.w32"
+    echo "switches: WINE_MACDRV_SURFACE WINE_MACDRV_VIEW WINE_WIN32U_SETCURSOR WINE_WIN32U_PEEK_YIELD"
+    echo "win32u.so: sha256 $(shasum -a 256 "$COMP/macdrv/win32u.so" | cut -d' ' -f1)"; } >"$COMP/macdrv/VERSION"
+  dg set macdrv mine >/dev/null
+  out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
+  check "my win32u.so in the engine with my winemac.so: a dry run of Play prints the rule with the WINE_WIN32U_* lines, and leaves neither out" \
+    eval '[ "$(dg status | sed -n "s/^win32u_file=//p")" = mine ] && dg rules | head -1 | grep -q ";env=WINE_WIN32U_SETCURSOR=shm;env=WINE_WIN32U_PEEK_YIELD=off" && echo "$out" | grep -qxF "[dry-run] rule $(dg rules | head -1)" && ! echo "$out" | grep -q "leaves out WINE_WIN32U_"'
+  dg set macdrv engine >/dev/null
+  out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
+  check "  with the engine's own winemac.so and win32u.so: neither in the rule, each left out saying so" \
+    eval '[ "$(dg status | sed -n "s/^win32u_file=//p")" = engine ] && ! dg rules | grep -q WINE_WIN32U_ && echo "$out" | grep -qxF "[dry-run] dev-switches.conf leaves out WINE_WIN32U_SETCURSOR=shm (my win32u.so isn'"'"'t in the engine)" && echo "$out" | grep -qxF "[dry-run] dev-switches.conf leaves out WINE_WIN32U_PEEK_YIELD=off (my win32u.so isn'"'"'t in the engine)"'
+  cp "$SANDBOX/dev-macdrv-VERSION.w32" "$COMP/macdrv/VERSION"
+  [ "$W32U" = mine ] || rm -f "$COMP/macdrv/win32u.so"
+  dg set macdrv mine >/dev/null
+else
+  skipdrv "the WINE_WIN32U_* lines with my win32u.so in the engine"
+fi
 sed -i '' 's/^FEX_DYNAMICL1CACHE=/#FEX_DYNAMICL1CACHE=/' "$DEVF"
 echo "MY_OWN_SWITCH=1" >>"$DEVF"
 check "a line commented out is gone from the rule and status; a line I added is in, after the others" \

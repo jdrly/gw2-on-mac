@@ -17,7 +17,9 @@
 #               stage-components.sh refuses for another commit, another base or engine, a file its
 #               VERSION doesn't name or no valid signature, proved on copies too. Without one the app
 #               has no ntdll.so of mine and leaves the engine's own in place. The same for my
-#               winemac.so with a Mac driver commit: the asset macdrv-arm64-<commit>.tar.xz. With a
+#               winemac.so with a Mac driver commit: the asset macdrv-arm64-<commit>.tar.xz, and
+#               its win32u.so when the archive has one, refused too when it isn't the file VERSION
+#               names or is missing while VERSION names it. With a
 #               FEX commit, my FEX: the release asset fex-arm64-<commit>.tar.xz of jdrly/FEX's
 #               arm64-builds, checked against the digest GitHub reports, which stage-components.sh
 #               refuses for another commit, base or engine, a file its VERSION doesn't name or a
@@ -260,7 +262,7 @@ jobs:
             [ "sha256:$sha" = "$digest" ] || fail "$url is $sha, GitHub reports $digest"
             tar -xJf "$dl/$name.tar.xz" -C "$dir"
             find "$dir" -type f | LC_ALL=C sort
-            grep -E "^(wine-|commit:|base:|engine:|$3:)" "$dir/VERSION"
+            grep -E "^(wine-|commit:|switches:|base:|engine:|$3:|win32u\.so:)" "$dir/VERSION"
             { echo "$4_FROM=$WINE_REPO $2, release asset $url"; echo "$4_ARCHIVE_SHA256=$sha"; } >>"$GITHUB_ENV"
           }
           [ -z "$WINE_COMMIT" ] || fetch ntdll "$WINE_COMMIT" ntdll.so WINE
@@ -332,6 +334,15 @@ jobs:
             codesign --remove-signature "$c/$2"
             sed -i '' "s/^$2: sha256 .*/$2: sha256 $(shasum -a 256 "$c/$2" | cut -d' ' -f1)/" "$c/VERSION"
             refuse "has no valid signature" "$3" "$c" "with a $2 that codesign --verify rejects"
+            # (my Mac driver's win32u.so, when its build has one: changed, and missing)
+            if [ "$1" = macdrv ] && [ -f work/macdrv-arm64/install/win32u.so ]; then
+              c="$(copy macdrv)"
+              printf x >>"$c/win32u.so"
+              refuse "win32u.so is not the file its VERSION names" "$3" "$c" "with a win32u.so that isn't the file its VERSION names"
+              c="$(copy macdrv)"
+              rm "$c/win32u.so"
+              refuse "missing $c/win32u.so" "$3" "$c" "without the win32u.so its VERSION names"
+            fi
           }
           [ -z "$WINE_COMMIT" ] || refusals ntdll ntdll.so NTDLL_BUILD "$WINE_COMMIT"
           [ -z "$MACDRV_COMMIT" ] || refusals macdrv winemac.so MACDRV_BUILD "$MACDRV_COMMIT"
@@ -472,7 +483,10 @@ jobs:
             else
               wine="" ntdll="None in this build: the engine's own \`ntdll.so\` stays in place."
             fi
-            if [ -n "$MACDRV_COMMIT" ]; then
+            if [ -n "$MACDRV_COMMIT" ] && [ -f prebuilt/macdrv/win32u.so ]; then
+              wine="$wine and my \`winemac.so\` and \`win32u.so\` at \`$mshort\`"
+              macdrv="[\`$mshort\`](https://github.com/$WINE_REPO/commit/$MACDRV_COMMIT) of my Wine fork's \`$WINE_BRANCH\`, its \`winemac.so\` and \`win32u.so\` in place of the engine's own, as one set."
+            elif [ -n "$MACDRV_COMMIT" ]; then
               wine="$wine and my \`winemac.so\` at \`$mshort\`"
               macdrv="[\`$mshort\`](https://github.com/$WINE_REPO/commit/$MACDRV_COMMIT) of my Wine fork's \`$WINE_BRANCH\`, in place of the engine's own."
             else

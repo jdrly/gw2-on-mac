@@ -17,8 +17,10 @@
 #                       Optional: a build without it leaves the engine's own in place.
 #   prebuilt/macdrv/    my Mac driver's winemac.so (jdrly/wine, LGPL-2.1-or-later) built for this
 #                       line's engine (#57), from the same commit's run: the same files with
-#                       "winemac.so: sha256" in its VERSION. gw2om.sh puts winemac.so into the
-#                       engine, the engine's own kept next to it. Optional, as ntdll/ is.
+#                       "winemac.so: sha256" in its VERSION, and win32u.so with its own "win32u.so:
+#                       sha256" line when the build has one (jdrly/wine#61). gw2om.sh puts the two
+#                       into the engine as one set, the engine's own kept next to each. Optional, as
+#                       ntdll/ is.
 #   prebuilt/fex/       my FEX (jdrly/FEX, MIT, with the notices of what it links) built for
 #                       this line's engine (#110), its ARM64EC half in the engine's layout:
 #                       aarch64-windows/libarm64ecfex.dll and aarch64-unix/libarm64ecfex.so, with
@@ -74,7 +76,7 @@ DXMT_FILES="aarch64-windows/d3d11.dll aarch64-windows/dxgi.dll aarch64-windows/d
 i386-windows/d3d11.dll i386-windows/dxgi.dll i386-windows/d3d10core.dll i386-windows/winemetal.dll
 aarch64-unix/winemetal.so VERSION LICENSE COPYING.LIB"
 # My Wine builds, each an archive of jdrly/wine with its files at the root: ntdll (ntdll.so) and
-# macdrv (my Mac driver, winemac.so)
+# macdrv (my Mac driver, winemac.so, and win32u.so when its build has one)
 WINE_KINDS="ntdll macdrv"
 # wine_kind <kind>: WK_FILE, the library; WK_COMMIT, the commit asked for (WINE_COMMIT or
 # MACDRV_COMMIT, or none); WK_BUILD, the unpacked build in the workspace
@@ -102,26 +104,44 @@ record() {
   done) >"$1/SHA256SUMS.new"
   mv "$1/SHA256SUMS.new" "$1/SHA256SUMS"
 }
-# check_wine <kind> <dir>: my Wine build in <dir> is for this engine and on its Wine, of the commit
-# asked for if one is, the file its VERSION names, and has a valid signature (the linker's: nothing
-# signs it again before the engine loads it)
-check_wine() {
-  local f
+# wine_libs <kind> <dir>: the libraries of my Wine build in <dir>: WK_FILE, and for my Mac driver
+# win32u.so too when the build has it or its VERSION names it (need refuses it missing)
+wine_libs() {
   wine_kind "$1"
-  for f in $WK_FILE VERSION LICENSE COPYING.LIB; do need "$2/$f"; done
+  echo "$WK_FILE"
+  [ "$1" = macdrv ] || return 0
+  if [ -e "$2/win32u.so" ] || grep -q '^win32u\.so: sha256 ' "$2/VERSION" 2>/dev/null; then echo win32u.so; fi
+}
+# check_wine <kind> <dir>: my Wine build in <dir> is for this engine and on its Wine, of the commit
+# asked for if one is, its libraries the files its VERSION names, each with a valid signature (the
+# linker's: nothing signs it again before the engine loads it)
+check_wine() {
+  local f libs
+  wine_kind "$1"
+  libs=$(wine_libs "$1" "$2")
+  for f in $libs VERSION LICENSE COPYING.LIB; do need "$2/$f"; done
   grep -q "^engine: .*sha256 $engine_sha" "$2/VERSION" || die "$2/VERSION names another engine than ENGINE_SHA256 ($engine_sha)"
   grep -q "^base: $engine_wine" "$2/VERSION" || die "$2/VERSION names another base than ENGINE_WINE ($engine_wine)"
   [ -z "$WK_COMMIT" ] || grep -qx "commit: $WK_COMMIT" "$2/VERSION" || die "$2/VERSION is not commit $WK_COMMIT"
-  grep -qx "$WK_FILE: sha256 $(sha "$2/$WK_FILE")" "$2/VERSION" || die "$2/$WK_FILE is not the file its VERSION names"
-  codesign --verify "$2/$WK_FILE" || die "$2/$WK_FILE has no valid signature"
+  for f in $libs; do
+    grep -qx "$f: sha256 $(sha "$2/$f")" "$2/VERSION" || die "$2/$f is not the file its VERSION names"
+    codesign --verify "$2/$f" || die "$2/$f has no valid signature"
+  done
 }
 # copy_wine <kind> <from> <to>: its files and their record
 copy_wine() {
   local f
-  wine_kind "$1"
   mkdir -p "$3"
-  for f in $WK_FILE VERSION LICENSE COPYING.LIB; do cp "$2/$f" "$3/$f"; done
+  for f in $(wine_libs "$1" "$2") VERSION LICENSE COPYING.LIB; do cp "$2/$f" "$3/$f"; done
   record "$3"
+}
+# wine_line <kind> <dir>: its line in STAGED, without the source: "<kind> <commit> <file> <sha256>
+# ..." for each library
+wine_line() {
+  local f line
+  line="$1 $(sed -n 's/^commit: //p' "$2/VERSION")"
+  for f in $(wine_libs "$1" "$2"); do line="$line $f $(sha "$2/$f")"; done
+  echo "$line"
 }
 # My FEX: its ARM64EC half from jdrly/FEX's archive (the WoW64 half isn't staged), and the record
 FEX_FILES="aarch64-windows/libarm64ecfex.dll aarch64-unix/libarm64ecfex.so"
@@ -253,7 +273,7 @@ if [ "${1:-}" = --fetch ] || [ ! -d "$WS" ]; then
     tar -xJf "$wine_archive" -C "$P.wine"
     check_wine "$k" "$P.wine"
     copy_wine "$k" "$P.wine" "$P.new/$k"
-    echo "$k $(sed -n 's/^commit: //p' "$P.wine/VERSION") $WK_FILE $(sha "$P.wine/$WK_FILE"), fetched ${url##*/} ($sum)" >>"$P.new/STAGED"
+    echo "$(wine_line "$k" "$P.wine"), fetched ${url##*/} ($sum)" >>"$P.new/STAGED"
     rm -rf "$P.wine"
   done
   url="$(lock_get fex_url)" sum="$(lock_get fex_sha256)"
@@ -325,7 +345,7 @@ rel() { echo "${1#"$WS"/}"; }
     wine_kind "$k"
     b="$(in_ws "$WK_BUILD")"
     if [ -e "$b" ]; then
-      echo "$k $(sed -n 's/^commit: //p' "$b/VERSION") $WK_FILE $(sha "$b/$WK_FILE") from $(rel "$b")"
+      echo "$(wine_line "$k" "$b") from $(rel "$b")"
     else
       echo "$k none (no $(rel "$b")): the app leaves the engine's own $WK_FILE in place"
     fi
