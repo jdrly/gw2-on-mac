@@ -1,2 +1,2 @@
-exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=/Users/me/Library/Caches/GW2 on Mac arm64/fork/dxmt/Gw2-64.exe;env=DXMT_METAL4=0;env=WINE_HEAT_WAKE=one,skip;env=WINE_HEAT_MSYNC_UNREG=1;env=WINE_HEAT_COUNT=1;env=WINE_HEAT_LOG=/Users/me/Library/Logs/GW2 on Mac arm64;env=FEX_PROFILESTATS=1;env=FEX_SILENTLOG=0
-exe=CefHost.exe;env=DXMT_SHADER_CACHE_PATH=;env=DXMT_METAL4=;env=WINE_HEAT_WAKE=;env=WINE_HEAT_MSYNC_UNREG=;env=WINE_HEAT_COUNT=;env=WINE_HEAT_LOG=;env=FEX_PROFILESTATS=;env=FEX_SILENTLOG=
+exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=/Users/me/Library/Caches/GW2 on Mac arm64/fork/dxmt/Gw2-64.exe;env=DXMT_METAL4=0;env=WINE_HEAT_WAKE=one,skip;env=WINE_HEAT_COUNT=1;env=WINE_HEAT_LOG=/Users/me/Library/Logs/GW2 on Mac arm64;env=FEX_PROFILESTATS=1;env=FEX_SILENTLOG=0
+exe=CefHost.exe;env=DXMT_SHADER_CACHE_PATH=;env=DXMT_METAL4=;env=WINE_HEAT_WAKE=;env=WINE_HEAT_COUNT=;env=WINE_HEAT_LOG=;env=FEX_PROFILESTATS=;env=FEX_SILENTLOG=
