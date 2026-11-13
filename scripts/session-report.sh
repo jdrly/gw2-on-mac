@@ -547,16 +547,18 @@ fex_report() {
 }
 
 # crash_report: one line when the session ended in a crash that arcdps caught: its
-# arcdps_lastcrash.log in the game folder (the state file's game_dir, inside the bottle), written
-# since the session started (session.env). The line is arcdps's first "error: intercepted" line,
-# a game assertion ('intercepted gw2 assertion "frameId", file "...", line 2289') or an exception
-# ('intercepted crash from hardware exception in "..."', with the code from its exception block).
+# arcdps_lastcrash.log in the game folder (the state file's game_dir; its addons/arcdps with links
+# resolved must lie inside the bottle, and the file is no link), written since the session started
+# (session.env). The line is arcdps's first "error: intercepted" line, a game assertion
+# ('intercepted gw2 assertion "frameId", file "...", line 2289') or an exception ('intercepted
+# crash from hardware exception in "..."', with the code from its exception block).
 crash_report() {
-  local dir f
+  local dir b f
   dir=$(sed -n 's/^game_dir=//p' "$APPDIR/state" 2>/dev/null | tail -1 || true)
-  case "$dir" in "$APPDIR/bottle"/*) ;; *) return 0 ;; esac
-  f="$dir/addons/arcdps/arcdps_lastcrash.log"
-  [ -f "$f" ] && [ ! "$LOGS/session.env" -nt "$f" ] || return 0
+  dir=$(cd -P "$dir/addons/arcdps" 2>/dev/null && pwd) && b=$(cd -P "$APPDIR/bottle" 2>/dev/null && pwd) || return 0
+  case "$dir" in "$b"/*) ;; *) return 0 ;; esac
+  f="$dir/arcdps_lastcrash.log"
+  [ -f "$f" ] && [ ! -L "$f" ] && [ ! "$LOGS/session.env" -nt "$f" ] || return 0
   LC_ALL=C awk -v when="$(date -r "$f" '+%F %T')" '
     { sub(/\r$/, "") }
     !what && / error: intercepted / {

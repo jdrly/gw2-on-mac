@@ -81,6 +81,14 @@ mkdir -p "$out/logs" "$out/crash-reports"
 
 # The game folder (gw2om.sh's state file names it)
 GAME_DIR="$(sed -n 's/^game_dir=//p' "$APPDIR/state" 2>/dev/null | tail -1)"
+# in_bottle <dir>: prints the folder with its links resolved when that lies inside the bottle (also
+# resolved), else fails: the game folder and the dump folders are read only there, so a Steam
+# library on another drive or a link out of the bottle is not
+in_bottle() {
+  local d b
+  d=$(cd -P "$1" 2>/dev/null && pwd) && b=$(cd -P "$BOTTLE" 2>/dev/null && pwd) || return 1
+  case "$d" in "$b"/*) echo "$d" ;; *) return 1 ;; esac
+}
 
 # Steam account and persona names to hide (only these values are read from loginusers.vdf)
 accounts="$(sed -n -E 's/^[[:space:]]*"(AccountName|PersonaName)"[[:space:]]*"(.*)"[[:space:]]*$/\2/p' \
@@ -263,7 +271,7 @@ CRASH_MAX=20
 CRASH_MAX_BYTES=10000000
 CRASH_FILE_MAX=3000000
 # cap <count> <bytes together> <bytes each> <what>: of "<mtime> <size> <path>" lines, newest
-# first, "add <path>" for each that fits, else "skip <name> (<why>)"
+# first, "add <size> <path>" for each that fits, else "skip <name> (<why>)"
 cap() {
   local size f n=0 total=0
   while read -r _ size f; do
@@ -271,7 +279,7 @@ cap() {
     elif [ "$size" -gt "$3" ]; then echo "skip ${f##*/} ($(((size + 999) / 1000)) KB, too large)"
     elif [ $((total + size)) -gt "$2" ]; then echo "skip ${f##*/} (over $(($2 / 1000000)) MB together)"
     else
-      echo "add $f"
+      echo "add $size $f"
       n=$((n + 1)); total=$((total + size))
     fi
   done
@@ -299,17 +307,19 @@ recent() {
   awk -v since="$since" '$1 >= since' | sort -rn
 }
 # Crash dumps (*.dmp, RECENT) of Steam (its dumps folder), of the game folder and of the game's
-# AppData folder, each folder's own files only, and only inside the bottle (a Steam library outside
-# it is not read): at most DUMP_MAX, DUMP_MAX_BYTES together and DUMP_FILE_MAX each, the newest
-# first. Prints cap's lines.
+# AppData folder, each folder's own files only (no links), and only inside the bottle (in_bottle):
+# at most DUMP_MAX, DUMP_MAX_BYTES together and DUMP_FILE_MAX each, the newest first. Prints cap's
+# lines; each dump is copied at the size cap saw, so one still being written can't go over.
 DUMP_MAX=10
 DUMP_MAX_BYTES=10000000
 DUMP_FILE_MAX=5000000
+DUMPS_STEAM="$(in_bottle "$STEAM/dumps")"
+DUMPS_GAME="$(in_bottle "$GAME_DIR")"
+DUMPS_APPDATA="$(in_bottle "$GW2_APPDATA")"
 crash_dumps() {
   local d
-  for d in "$STEAM/dumps" "$GAME_DIR" "$GW2_APPDATA"; do
-    case "$d" in "$BOTTLE"/*) ;; *) continue ;; esac
-    [ -d "$d" ] || continue
+  for d in "$DUMPS_STEAM" "$DUMPS_GAME" "$DUMPS_APPDATA"; do
+    [ -n "$d" ] || continue
     find "$d" -maxdepth 1 -type f -iname '*.dmp' -exec stat -f '%m %z %N' {} + 2>/dev/null
   done | recent | cap "$DUMP_MAX" "$DUMP_MAX_BYTES" "$DUMP_FILE_MAX" dumps
 }
@@ -429,13 +439,12 @@ for f in bootstrap_log.txt content_log.txt gameprocess_log.txt shader_log.txt; d
   add_log "$STEAM/logs/$f" 2000000 game-logs/steam game
 done
 # arcdps's log and its crash log (the game's assertion or exception, then the game's threads and
-# modules), when RECENT and inside the bottle
-case "$GAME_DIR" in
-  "$BOTTLE"/*)
-    for f in arcdps.log arcdps_lastcrash.log; do
-      [ ! -f "$GAME_DIR/addons/arcdps/$f" ] || stat -f '%m %z %N' "$GAME_DIR/addons/arcdps/$f"
-    done | recent | while read -r _ _ f; do add_log "$f" 2000000 game-logs/arcdps game; done ;;
-esac
+# modules), when RECENT and inside the bottle (in_bottle; no links)
+if arc=$(in_bottle "$GAME_DIR/addons/arcdps"); then
+  for f in arcdps.log arcdps_lastcrash.log; do
+    [ ! -f "$arc/$f" ] || [ -L "$arc/$f" ] || stat -f '%m %z %N' "$arc/$f"
+  done | recent | while read -r _ _ f; do add_log "$f" 2000000 game-logs/arcdps game; done
+fi
 # the last game session in short
 if [ -f "$LOGS/Gw2-64_d3d11.log" ] && [ -x "$RES/session-report.sh" ]; then
   "$RES/session-report.sh" "$LOGS/Gw2-64_d3d11.log" 2>&1 | redact >"$out/session-report.txt"
@@ -443,7 +452,7 @@ fi
 crash_reports >"$work/crash-list"
 while IFS= read -r line; do
   case "$line" in
-    "add "*) f=${line#add }; add "$f" "crash-reports/${f##*/}" &&
+    "add "*) f=${line#add * }; add "$f" "crash-reports/${f##*/}" &&
       echo "  ${f##*/} ($(stat -f '%Sm' -t '%F %R' "$f"), $((($(stat -f %z "$f") + 999) / 1000)) KB)" ;;
     "skip "*) echo "  left out: ${line#skip }" ;;
   esac
@@ -453,14 +462,14 @@ crash_dumps >"$work/dump-list"
 while IFS= read -r line; do
   case "$line" in
     "add "*)
-      f=${line#add }
-      case "$f" in
-        "$STEAM/dumps/"*) d=steam ;;
-        "$GW2_APPDATA/"*) d=appdata ;;
+      f=${line#add * } size=${line#add }; size=${size%% *}
+      case "${f%/*}" in
+        "$DUMPS_STEAM") d=steam ;;
+        "$DUMPS_APPDATA") d=appdata ;;
         *) d=game ;;
       esac
-      mkdir -p "$out/crash-dumps/$d" && cp "$f" "$out/crash-dumps/$d/" &&
-        echo "  $d/${f##*/} ($(stat -f '%Sm' -t '%F %R' "$f"), $((($(stat -f %z "$f") + 999) / 1000)) KB)" ;;
+      mkdir -p "$out/crash-dumps/$d" && head -c "$size" "$f" >"$out/crash-dumps/$d/${f##*/}" &&
+        echo "  $d/${f##*/} ($(stat -f '%Sm' -t '%F %R' "$f"), $(((size + 999) / 1000)) KB)" ;;
     "skip "*) echo "  left out: ${line#skip }" ;;
   esac
 done <"$work/dump-list" >"$work/dump-index"
@@ -560,21 +569,30 @@ found_name() {  # <file> <grep options>
   LC_ALL=C sed -E 's/NAME|ACCOUNT|USER|REDACTED|TOKEN|EMAIL|MAC-ADDRESS|IP6|IP//g' "$f" | LC_ALL=C grep -q "$@"
   [ $? != 1 ]
 }
-# (a crash dump went in unredacted: the check reads it without its NUL bytes, so UTF-16 text reads
-# as ASCII, and looks for the Mac's and the bottle's user in a path too, and the full name)
+# found_raw <file> <grep options>: found, with found_name's arguments
+found_raw() { local f=$1; shift; found "$@" "$f"; }
+# A crash dump went in unredacted, so it holds no marker: the check reads its text as found_raw,
+# not found_name. Its text is the dump without its NUL bytes (ASCII and UTF-8), and the dump read
+# as UTF-16 at both byte offsets (a Windows name with letters outside ASCII). It also looks for the
+# Mac's and the bottle's user in a Windows path, the full name and GW2 account names (Name.1234,
+# as game_rules takes them out).
 for u in "$(id -un)" "$BOTTLE_USER"; do printf 'users\\%s\\\nusers/%s/\n' "$u" "$u"; done >"$work/dump-names"
 full_name="$(id -F 2>/dev/null)"
 [ "${#full_name}" -lt 3 ] || echo "$full_name" >>"$work/dump-names"
 ( cd "$out" && find . -type f ) | sed 's|^\./||' | while IFS= read -r rel; do
-  f="$out/$rel" c="$out/$rel"
+  f="$out/$rel" c="$out/$rel" names=found_name
   case "$rel" in
-    crash-dumps/*) c="$work/dump-text"; LC_ALL=C tr -d '\000' <"$f" >"$c" ;;
+    crash-dumps/*)
+      c="$work/dump-text" names=found_raw
+      { LC_ALL=C tr -d '\000' <"$f"; iconv -c -f UTF-16LE -t UTF-8 <"$f"
+        tail -c +2 "$f" | iconv -c -f UTF-16LE -t UTF-8; } >"$c" 2>/dev/null ;;
   esac
-  if { [ -s "$literals" ] && found_name "$c" -i -F -f "$literals"; } ||
-     { [ -s "$literals_short" ] && found_name "$c" -i -w -F -f "$literals_short"; } ||
+  if { [ -s "$literals" ] && "$names" "$c" -i -F -f "$literals"; } ||
+     { [ -s "$literals_short" ] && "$names" "$c" -i -w -F -f "$literals_short"; } ||
      found -F -e "$HOME/" -e "$H/" -e "/Users/$(id -un)/" "$c" ||
      found -E -f "$work/leak-patterns" "$c" ||
-     { [ "$c" != "$f" ] && found -i -F -f "$work/dump-names" "$c"; }; then
+     { [ "$c" != "$f" ] && { found -i -F -f "$work/dump-names" "$c" ||
+       found -E -e '[A-Za-z][A-Za-z0-9_ ]*[.][0-9]{4}([^0-9.]|$)' "$c"; }; }; then
     rm -f "$f"
     echo "$rel"
   fi

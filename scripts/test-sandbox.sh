@@ -1275,7 +1275,9 @@ printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60\ninfo
 # arcdps's crash log with the game's assertion and a module in the bottle user's Temp folder, and
 # arcdps.log with a GW2 account name; Steam's assert dump, one of the game folder and one of the
 # game's AppData folder; an older dump, one too large, one with the bottle user's folder in
-# UTF-16; and .dmp files outside the dump folders and outside the bottle)
+# UTF-16, one with a second Steam user's persona name outside ASCII in UTF-16 at an odd offset,
+# one with the account name in capitals (ZZ_ACCT_NAME: found_name would take NAME out), one with a
+# GW2 account name; and .dmp files outside the dump folders and outside the bottle)
 ARC="$GD/addons/arcdps" GW2A="$BOTTLE/drive_c/users/$BUSER/AppData/Roaming/Guild Wars 2"
 mkdir -p "$ARC" "$STEAM/dumps" "$H/Library/Logs/DiagnosticReports"
 printf '%s\n' '2026-11-13 13:23:24.244: info: build 20261023.230314-613-x64' \
@@ -1291,6 +1293,11 @@ printf 'MDMP\0\0\0\0steam.exe\0' >"$STEAM/dumps/assert_gameoverlayui64.exe_20250
 touch -t 202501010000 "$STEAM/dumps/assert_gameoverlayui64.exe_20250101000000_1.dmp"
 dd if=/dev/zero of="$STEAM/dumps/assert_large.dmp" bs=1 count=0 seek=6000000 2>/dev/null
 { printf 'MDMP\0\0\0\0'; printf 'C:\\users\\%s\\AppData' "$BUSER" | iconv -f ASCII -t UTF-16LE; } >"$STEAM/dumps/assert_userpath.dmp"
+cp "$STEAM/config/loginusers.vdf" "$SANDBOX/loginusers.keep"
+printf '\t"76561198000000043"\n\t{\n\t\t"AccountName"\t\t"zz_second"\n\t\t"PersonaName"\t\t"Zž Persona Ř"\n\t}\n' >>"$STEAM/config/loginusers.vdf"
+{ printf 'MDMP\0\0\0'; printf 'Zž Persona Ř' | iconv -f UTF-8 -t UTF-16LE; } >"$STEAM/dumps/assert_persona.dmp"
+printf 'MDMP\0\0\0\0ZZ_ACCT_NAME\0' >"$STEAM/dumps/assert_marker.dmp"
+printf 'MDMP\0\0\0\0self Zz Arc Acct.1234\0' >"$STEAM/dumps/assert_account.dmp"
 printf 'MDMP\0\0\0\0Gw2-64.exe\0' >"$GD/Crash.dmp"
 printf 'MDMP\0\0\0\0Gw2-64.exe appdata\0' >"$GW2A/Crash.dmp"
 for f in "$H/decoy.dmp" "$BOTTLE/drive_c/decoy.dmp" "$H/Library/Logs/DiagnosticReports/Gw2-64.exe.dmp"; do printf 'MDMP\0decoy\0' >"$f"; done
@@ -1661,8 +1668,10 @@ check "  not the older dump, nor a .dmp outside the dump folders or the bottle" 
   eval '[ -z "$(find "$Z" \( -name "assert_gameoverlayui64*" -o -name decoy.dmp -o -name Gw2-64.exe.dmp \))" ]'
 check "  the dump over 5 MB left out, and system-info says so" \
   eval '[ ! -e "$Z/crash-dumps/steam/assert_large.dmp" ] && has "$Z/system-info.txt" "^  left out: assert_large.dmp (6000 KB, too large)$"'
-check "  the dump with the bottle user's folder in UTF-16 left out by the leak check" \
-  eval '[ ! -e "$Z/crash-dumps/steam/assert_userpath.dmp" ] && has "$Z/left-out.txt" "crash-dumps/steam/assert_userpath.dmp"'
+for f in userpath persona marker account; do
+  check "  the dump with $f left out by the leak check" \
+    eval '[ ! -e "$Z/crash-dumps/steam/assert_$f.dmp" ] && has "$Z/left-out.txt" "crash-dumps/steam/assert_$f.dmp"'
+done
 # (the crash line from session-report.sh itself: a hardware exception with its code, a crash log
 # without an intercepted line, and one from before the session)
 SR="$APP/Contents/Resources/session-report.sh"
@@ -1691,7 +1700,21 @@ rm -rf "$SANDBOX/unzipped-release" && mkdir -p "$SANDBOX/unzipped-release" && (c
 Z="$SANDBOX/unzipped-release/$(basename "$zip" .zip)"
 check "a release build's Collect Logs: arcdps's crash log, the crash line and the dumps; not the older arcdps.log" \
   eval '[ -f "$Z/game-logs/arcdps/arcdps_lastcrash.log" ] && [ ! -e "$Z/game-logs/arcdps/arcdps.log" ] && has "$Z/session-report.txt" "^The last session ended in a crash: arcdps intercepted gw2 assertion" && [ -f "$Z/crash-dumps/steam/assert_steam.exe_20261113132231_1.dmp" ] && [ -f "$Z/crash-dumps/game/Crash.dmp" ]'
+# A game folder whose path goes through a link out of the bottle (as a Steam library on another
+# drive does): neither its dumps nor arcdps's logs are read, and the report has no crash line
+cp "$AD/state" "$SANDBOX/state.keep"
+mkdir -p "$SANDBOX/outside/Guild Wars 2/addons/arcdps" && ln -s "$SANDBOX/outside" "$BOTTLE/drive_c/library"
+cp "$ARC/arcdps_lastcrash.log" "$SANDBOX/outside/Guild Wars 2/addons/arcdps/" && printf 'MDMP\0outside\0' >"$SANDBOX/outside/Guild Wars 2/Crash.dmp"
+sed -i '' "s|^game_dir=.*|game_dir=$BOTTLE/drive_c/library/Guild Wars 2|" "$AD/state"
+zip=$("$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip-outside" 2>>"$SANDBOX/collect.err" | tail -1)
+rm -rf "$SANDBOX/unzipped-outside" && mkdir -p "$SANDBOX/unzipped-outside" && (cd "$SANDBOX/unzipped-outside" && unzip -q "$zip")
+Z="$SANDBOX/unzipped-outside/$(basename "$zip" .zip)"
+check "a game folder through a link out of the bottle: none of its dumps or arcdps's logs, no crash line" \
+  eval '[ ! -e "$Z/crash-dumps/game" ] && [ ! -e "$Z/game-logs/arcdps" ] && [ -f "$Z/session-report.txt" ] && ! has "$Z/session-report.txt" "ended in a crash"'
+mv -f "$SANDBOX/state.keep" "$AD/state"
+mv -f "$SANDBOX/loginusers.keep" "$STEAM/config/loginusers.vdf"
 rm -rf "$GD/addons" "$GD/d3d11.dll" "$AD/compatdb.local" "$STEAM/dumps" "$GD/Crash.dmp" "$GW2A/Crash.dmp" "$RELC" \
+  "$BOTTLE/drive_c/library" "$SANDBOX/outside" \
   "$H/decoy.dmp" "$BOTTLE/drive_c/decoy.dmp" "$H/Library/Logs/DiagnosticReports/Gw2-64.exe.dmp"
 
 section "Steam in the background after the first login"
