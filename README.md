@@ -205,7 +205,7 @@ chosen, and the main window's *Engine* and *Graphics* checks name the files in p
 |---|---|---|---|---|
 | Graphics | Retina | `retina` | on | draws at your display's full resolution, at some cost in frame rate |
 | | Frame cap | `fpscap` | off | a steady cap paced by Metal at 30, 40, 60 or 120. Use it with the game's own vsync |
-| | Metal | `metal` | 3 | Metal 3 or Metal 4 for my DXMT fork (`DXMT_METAL4=0` or `=1` in the game's rule). Metal 4 is the newer path. Switch to Metal 3 for better backwards compatibility. A `settings.conf` without the key reads 3. Greyed while the engine's own DXMT is chosen |
+| | Metal | `metal` | 4 | Metal 3 or Metal 4 for my DXMT fork (`DXMT_METAL4=0` or `=1` in the game's rule; at Metal 4 with `DXMT_MTL4_PRESENT=mtl3` too, see [The game's environment](#the-games-environment)). Metal 4 is the newer path. Switch to Metal 3 for better backwards compatibility. A `settings.conf` without the key reads 4, and one with `metal=3` keeps it: Install and Repair wrote the key into every file while Metal 3 was the default. Greyed while the engine's own DXMT is chosen |
 | | MetalFX for Subsample | `metalfx` | off | MetalFX upscales the 3D scene and the interface stays sharp. It works only with the game's Render Sampling set to Subsample, and does nothing at Native. Greyed while the engine's own DXMT is chosen |
 | | Metal HUD | `hud` | off | Apple's overlay with frame rate and frame times, over the game only and not over Steam's windows |
 | | Launcher frames | `launcherframes` | off | the launcher's window gets a copy of each frame, and a frame equal to the last is skipped (`WINE_MACDRV_SURFACE=copy,skip`). Against a launcher that flickers. Greyed while the engine's own `winemac.so` is chosen |
@@ -651,6 +651,14 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
 - `DXMT_METAL4` follows it while my fork is active: `0` with the *Metal* row at Metal 3, `1` at
   Metal 4. The engine's own DXMT doesn't read it, so it stays out then. `CefHost.exe` gets it
   removed.
+- `DXMT_MTL4_PRESENT=mtl3` follows at Metal 4, in release and development builds alike: my fork
+  presents each frame through a Metal 3 command buffer and keeps the rest on Metal 4
+  (jdrly/dxmt#227). On Metal 4's own present a moving cursor makes the frame interval saw between
+  one and two refreshes (jdrly/dxmt#223), whatever the present's order, and this way it's flat. In
+  my Lion's Arch laps Metal 4 with it ran about 58 fps median, against about 50.5 on Metal 3. It
+  goes in only while my fork's tree in the engine names the switch, read from its DLLs as for
+  `dev-switches.conf`'s DXMT lines below. Otherwise `status` prints the entry and why it stays out
+  as `metal_present_out=`, and `metal_present=` when it's in. `CefHost.exe` gets it removed.
 - The `WINE_HEAT_*` entries are my `ntdll.so`'s switches, which it acts on in `Gw2-64.exe` only.
   They follow the cache path, one `env=` field each, and only while my file is in place. The table
   `HEAT_SWITCHES` in `gw2om.sh` has one row per setting, `<key> <entry>`: *Job wakes* writes
@@ -693,10 +701,14 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   has every switch of my forks that is off by default, at the value that turns its new behaviour
   on, apart from diagnostics, anything that can cap the frame rate below 60 (DXMT's lower thread
   priorities and `DXMT_BG_POLICY=occlusion` among them), values only I can choose and the rows'
-  own variables. `DXMT_MTL4_PRESENT=mtl3` (jdrly/dxmt#227) is in to hunt the Metal 4 cursor
-  stutter, and acts only with the *Metal* row at Metal 4, like the other `DXMT_MTL4_*` lines.
+  own variables. The `DXMT_MTL4_*` lines act only with the *Metal* row at Metal 4.
   `DXMT_MTL4_LAYER_SET` (jdrly/dxmt#226) stays out: I turn that one on by hand, never with
-  `DXMT_MTL4_PRESENT`, so a change in play has one cause. A row whose variable a line of the file sets, *Faster locks* with the file's
+  another present switch, so a change in play has one cause. `DXMT_MTL4_PRESENT=mtl3` left the
+  table at version 4, since the rule has it at Metal 4 now. Version 4 changes a file of an older
+  version in one place: its `DXMT_MTL4_PRESENT=mtl3` line as the table wrote it goes, with its
+  comment. A `DXMT_MTL4_PRESENT` line I changed, such as `=done`, stays and still wins: the file's
+  lines come after the rule's entries. One I commented out to play Metal 4's own present becomes
+  `DXMT_MTL4_PRESENT=mtl4` under a comment, so it stays off. A row whose variable a line of the file sets, *Faster locks* with the file's
   `WINE_HEAT_SPIN`, is greyed while that line is there, since the file's entry wins. A line of the table goes in only while the file of mine that
   reads it is in place and has the switch: the `switches:` line of my `ntdll.so`'s,
   `winemac.so`'s or FEX's `VERSION` (a `VERSION` without that line names none). My `win32u.so`'s
@@ -915,7 +927,10 @@ last session from DXMT's own log lines:
 - shader compiles and DXMT's encode thread's waits for them: how many, their total and the
   longest
 - shader warming, presentation, and the Metal the session drew with, from `DXMT_METAL4` on my
-  fork's first line: `Metal 3`, or for Metal 4 its commits and errors. The header names it too.
+  fork's first line: `Metal 3`, or for Metal 4 its commits and errors. The header names it too,
+  and for Metal 4 the present that ran, from the `present=` field of the fork's `METAL4` lines:
+  through a Metal 3 command buffer (`mtl3`), once the pass's commit completed (`done`), or Metal
+  4's own (`mtl4`). A fork from before jdrly/dxmt#227 writes no such field.
 - which `ntdll.so` ran and its switches, and with Debug logging the game thread's row of the
   session's heat log, a second. The game thread is the thread with the most semaphore releases: it
   hands the job workers their jobs, about 49,000 a second, and the workers make a few thousand

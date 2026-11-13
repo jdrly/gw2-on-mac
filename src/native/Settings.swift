@@ -359,7 +359,7 @@ struct SettingsView: View {
       }
       SettingsGroup {
         SettingRow("Metal", "Metal 4 is the newer path. Switch to Metal 3 for better backwards compatibility.", off: off("metal")) {
-          InkPopup(selection: settings.choice("metal", "3"), options: GameSettings.metals)
+          InkPopup(selection: settings.choice("metal", "4"), options: GameSettings.metals)
         }
         SettingRow("MetalFX for Subsample", "MetalFX upscales the 3D scene and the interface stays sharp. It works only with the game's Render Sampling set to Subsample, and does nothing at Native. Experimental.", off: off("metalfx")) {
           InkSwitch(isOn: settings.toggle("metalfx"))
