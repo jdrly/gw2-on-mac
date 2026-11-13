@@ -454,6 +454,50 @@ func renderAll(_ dir: URL, exports: URL?) async {
     if let exports, let design { compare(design: exports.appendingPathComponent(design), render: rep,
                                          to: dir.appendingPathComponent("compare-" + name + ".png")) }
   }
+  // The checks' long texts, each in full (#134): the Engine's from 38 characters on, its Repair,
+  // and every check at its longest at once. The Engine text a render shows is checked first.
+  do {
+    let fex = ["fex": "mine", "fex_file": "mine", "fex_commit": "bff3f7c3686b"]
+    let others = ["wine_file": "other", "wine_commit": "", "wine_release": "", "macdrv_file": "other",
+                  "macdrv_commit": "", "macdrv_release": ""]
+    let longest = fex.merging([
+      "wine_ready": "switch", "wine_file": "other", "wine_commit": "", "wine_release": "",
+      "macdrv_ready": "switch", "macdrv_file": "mix", "macdrv_commit": "", "macdrv_release": "",
+      "graphics": "switch", "macos": "26.3", "macos_ok": "no", "route": "arenanet"]) { $1 }
+    let long: [(String, String, [String: String], Bool, String)] = [
+      ("engine-own-fex", "ready-engine", fex, false, "Mach9 0.3.1 · Wine 11.21 · FEX bff3f7c"),
+      ("engine-switch", "ready", ["wine_ready": "switch"], false, "Wine 11.21 · d831f80 · at the next Play"),
+      ("engine-ntdll-fex", "ready-mixed", fex, false, "Mach9 0.3.1 · ntdll d831f80 · FEX bff3f7c"),
+      ("engine-winemac-fex", "ready-engine",
+       fex.merging(["macdrv_file": "mine", "macdrv_commit": "d831f808236c", "macdrv_release": "11.21"]) { $1 }, false,
+       "Mach9 0.3.1 · winemac d831f80 · FEX bff3f7c"),
+      ("engine-two-builds-fex", "ready", fex.merging(["macdrv_commit": "1a2b3c4d5e6f"]) { $1 }, false,
+       "ntdll d831f80 · winemac 1a2b3c4 · FEX bff3f7c"),
+      ("engine-others-fex", "ready", fex.merging(others) { $1 }, false, "another ntdll · another winemac · FEX bff3f7c"),
+      ("engine-switch-fex", "ready-fex", ["wine_ready": "switch"], false,
+       "Wine 11.21 · d831f80 · FEX bff3f7c · at the next Play"),
+      ("engine-switch-fex", "ready-fex", ["wine_ready": "switch"], true,
+       "Wine 11.21 · d831f80 · FEX bff3f7c · at the next Play"),
+      ("engine-repair", "ready", fex.merging(others).merging(["wine_ready": "other", "macdrv_ready": "other",
+                                                               "fex_ready": "other", "fex_file": "other"]) { $1 }, false,
+       "Mach9 0.3.1 · ntdll and winemac and FEX needs Repair"),
+      ("longest", "ready", longest, false,
+       "another ntdll · winemac and win32u mixed · FEX bff3f7c · at the next Play"),
+      ("longest", "ready", longest, true,
+       "another ntdll · winemac and win32u mixed · FEX bff3f7c · at the next Play"),
+    ]
+    for (name, state, extra, dark, want) in long {
+      let i = installer(state)
+      i.status = i.status.merging(extra) { $1 }
+      let engine = ThisMac(installer: i).checks.first { $0.id == "Engine" }?.value ?? ""
+      guard engine == want else {
+        print("FAIL the Engine check in main-\(name): \"\(engine)\", not \"\(want)\"")
+        exit(1)
+      }
+      write(await render(MainView(installer: i, settings: settings()), size: size, dark: dark),
+            dir.appendingPathComponent("main-\(name)-\(dark ? "dark" : "light").png"))
+    }
+  }
   for pane in SettingsPane.allCases {
     for dark in [false, true] where !dark || [.graphics, .performance, .interface, .game, .mouse].contains(pane) {
       UserDefaults.standard.set(pane.rawValue, forKey: SettingsView.selectedPaneKey)
