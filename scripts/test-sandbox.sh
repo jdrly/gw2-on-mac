@@ -1271,8 +1271,30 @@ printf '[2026-11-04] AppID 1284210 update started : download 0/58900000000\nUser
 printf 'Crash\nName: ZZ-MACHINE\nIpAddr: 192.168.77.5\nLogin: zz.person@example.com\nException: c0000005\n' >"$BOTTLE/drive_c/users/$BUSER/AppData/Roaming/Guild Wars 2/ArenaNet.log"
 printf 'started by %s from %s/Library, mail zz.person@example.com, token=abcDEF123secret\n' "$(id -un)" "$HOME" >>"$LOGS/wine.log"
 printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60\ninfo:  STATS fps=60.0 ms=16.7/24.8 cb=1.1 rp=31.7(+0.0 merged) encode=0.23+1.03/10.3\ninfo:  HITCH frame=52 ms=120.0 dxmt(ms/calls): create=4.0/37 flush=3.5/1\n' >"$LOGS/Gw2-64_d3d11.log"
-mkdir -p "$GD/addons/arcdps" && printf 'crash\nself: Zz Charname Q, zz_arc_acct.1234\n' >"$GD/addons/arcdps/arcdps_lastcrash.log"
-echo "info: build" >"$GD/addons/arcdps/arcdps.log"; cp "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll"
+# (arcdps's logs and the crash dumps as the game's crash of 2026-11-13 left them, shortened:
+# arcdps's crash log with the game's assertion and a module in the bottle user's Temp folder, and
+# arcdps.log with a GW2 account name; Steam's assert dump, one of the game folder and one of the
+# game's AppData folder; an older dump, one too large, one with the bottle user's folder in
+# UTF-16; and .dmp files outside the dump folders and outside the bottle)
+ARC="$GD/addons/arcdps" GW2A="$BOTTLE/drive_c/users/$BUSER/AppData/Roaming/Guild Wars 2"
+mkdir -p "$ARC" "$STEAM/dumps" "$H/Library/Logs/DiagnosticReports"
+printf '%s\n' '2026-11-13 13:23:24.244: info: build 20261023.230314-613-x64' \
+  '2026-11-13 13:23:24.536: info: detected wine 11.21' \
+  '2026-11-13 13:42:39.573: error: intercepted gw2 assertion "frameId", file "D:\Perforce\Live\NAEU\v2\Code\Gw2\Engine\Frame\FrApi.cpp", line 2289' \
+  '	---- client -------' '	build: 210361' '	map: The Silverwastes (1015)' \
+  "	0x6FFFD6FB1000 0x6FFFD6FFF000 C:\\users\\$BUSER\\AppData\\Local\\Temp\\21363cb5\\steam_api64.dll" \
+  '	0x0001409DBEBD: 0x0000FFFFFFFF :0+09DBEBD gw2-64' >"$ARC/arcdps_lastcrash.log"
+{ cat "$ARC/arcdps_lastcrash.log"; echo '2026-11-13 13:42:40.000: info: self Zz Arc Acct.1234'; } >"$ARC/arcdps.log"
+printf 'MDMP\0\0\0\0Assert( Couldn'"'"'t get string length ):C:\\buildworker\\steam_rel_client_win64\\build\\src\\vgui2\\vgui_surfacelib\\Win32Font.cpp:1129\0' \
+  >"$STEAM/dumps/assert_steam.exe_20261113132231_1.dmp"
+printf 'MDMP\0\0\0\0steam.exe\0' >"$STEAM/dumps/assert_gameoverlayui64.exe_20250101000000_1.dmp"
+touch -t 202501010000 "$STEAM/dumps/assert_gameoverlayui64.exe_20250101000000_1.dmp"
+dd if=/dev/zero of="$STEAM/dumps/assert_large.dmp" bs=1 count=0 seek=6000000 2>/dev/null
+{ printf 'MDMP\0\0\0\0'; printf 'C:\\users\\%s\\AppData' "$BUSER" | iconv -f ASCII -t UTF-16LE; } >"$STEAM/dumps/assert_userpath.dmp"
+printf 'MDMP\0\0\0\0Gw2-64.exe\0' >"$GD/Crash.dmp"
+printf 'MDMP\0\0\0\0Gw2-64.exe appdata\0' >"$GW2A/Crash.dmp"
+for f in "$H/decoy.dmp" "$BOTTLE/drive_c/decoy.dmp" "$H/Library/Logs/DiagnosticReports/Gw2-64.exe.dmp"; do printf 'MDMP\0decoy\0' >"$f"; done
+cp "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll"
 # (the heat counters of 4 games in the logs folder, whose name has spaces, each with its server
 # requests, older than session.env so the session report leaves them alone, and a profile)
 n=0
@@ -1627,9 +1649,50 @@ check "  the token value is gone" sh -c "! grep -rq abcDEF123secret '$Z'"
 check "  the home folder is gone" sh -c "! grep -rqF '$HOME/' '$Z'"
 check "  never Local.dat or Steam's config" sh -c "! find '$Z' -name Local.dat -o -name loginusers.vdf | grep -q ."
 check "  the crash log kept its exception" has "$Z/game-logs/ArenaNet.log" "Exception: c0000005"
-check "  no arcdps log (its crash log may hold character names)" sh -c "! find '$Z' -iname 'arcdps*' | grep -q . && ! grep -rq 'Zz Charname Q' '$Z'"
 check "  system-info names the d3d11.dll addon: arcdps" has "$Z/system-info.txt" "d3d11.dll addon: arcdps"
-rm -rf "$GD/addons" "$GD/d3d11.dll" "$AD/compatdb.local"
+check "  arcdps's crash log, with the game's assertion and the bottle user's folder as USER" \
+  eval 'has "$Z/game-logs/arcdps/arcdps_lastcrash.log" "error: intercepted gw2 assertion \"frameId\"" && has "$Z/game-logs/arcdps/arcdps_lastcrash.log" "C:.users.USER.AppData.Local.Temp" && ! has "$Z/game-logs/arcdps/arcdps_lastcrash.log" "users.$BUSER.AppData"'
+check "  arcdps.log, the GW2 account name gone" eval '[ -f "$Z/game-logs/arcdps/arcdps.log" ] && ! grep -rq "Arc Acct" "$Z"'
+check "  the session report's crash line, from arcdps's crash log" \
+  has "$Z/session-report.txt" '^The last session ended in a crash: arcdps intercepted gw2 assertion "frameId", file "D:.Perforce.Live.NAEU.v2.Code.Gw2.Engine.Frame.FrApi.cpp", line 2289 (arcdps_lastcrash.log, 2026-11-13 13:42:39.573)$'
+check "  Steam's assert dump byte for byte, the game folder's and the game's AppData folder's" \
+  eval 'same "$STEAM/dumps/assert_steam.exe_20261113132231_1.dmp" "$Z/crash-dumps/steam/assert_steam.exe_20261113132231_1.dmp" && same "$GD/Crash.dmp" "$Z/crash-dumps/game/Crash.dmp" && same "$GW2A/Crash.dmp" "$Z/crash-dumps/appdata/Crash.dmp"'
+check "  not the older dump, nor a .dmp outside the dump folders or the bottle" \
+  eval '[ -z "$(find "$Z" \( -name "assert_gameoverlayui64*" -o -name decoy.dmp -o -name Gw2-64.exe.dmp \))" ]'
+check "  the dump over 5 MB left out, and system-info says so" \
+  eval '[ ! -e "$Z/crash-dumps/steam/assert_large.dmp" ] && has "$Z/system-info.txt" "^  left out: assert_large.dmp (6000 KB, too large)$"'
+check "  the dump with the bottle user's folder in UTF-16 left out by the leak check" \
+  eval '[ ! -e "$Z/crash-dumps/steam/assert_userpath.dmp" ] && has "$Z/left-out.txt" "crash-dumps/steam/assert_userpath.dmp"'
+# (the crash line from session-report.sh itself: a hardware exception with its code, a crash log
+# without an intercepted line, and one from before the session)
+SR="$APP/Contents/Resources/session-report.sh"
+cp "$ARC/arcdps_lastcrash.log" "$SANDBOX/lastcrash.keep"
+printf '2026-11-13 13:42:39.573: error: intercepted crash from hardware exception in "Gw2-64.exe"\r\n\t---- exception ----\r\n\tcode: 0x00000000C0000005\r\n' >"$ARC/arcdps_lastcrash.log"
+"$SR" >"$SANDBOX/report.txt" 2>&1
+check "the session report's crash line for an exception: arcdps's line and the exception's code" \
+  has "$SANDBOX/report.txt" '^The last session ended in a crash: arcdps intercepted crash from hardware exception in "Gw2-64.exe", code 0x00000000C0000005 (arcdps_lastcrash.log, 2026-11-13 13:42:39.573)$'
+echo "arcdps" >"$ARC/arcdps_lastcrash.log"
+"$SR" >"$SANDBOX/report.txt" 2>&1
+check "  a crash log without such a line: the crash, and that" \
+  has "$SANDBOX/report.txt" '^The last session ended in a crash: arcdps wrote arcdps_lastcrash.log at .*, with no assertion or exception line$'
+touch -t 202501010000 "$ARC/arcdps_lastcrash.log"
+"$SR" >"$SANDBOX/report.txt" 2>&1
+check "  a crash log from before the session: no crash line" eval '[ -s "$SANDBOX/report.txt" ] && ! has "$SANDBOX/report.txt" "^The last session ended in a crash"'
+mv -f "$SANDBOX/lastcrash.keep" "$ARC/arcdps_lastcrash.log"; rm -f "$SANDBOX/report.txt"
+# A release build's Collect Logs (its Resources with an app.properties without channel=dev) takes
+# them too; arcdps.log from 2025 stays out
+RELC="$SANDBOX/res-collect"
+mkdir -p "$RELC" "$SANDBOX/zip-release"
+for f in "$APP/Contents/Resources"/*; do ln -s "$f" "$RELC/${f##*/}"; done
+rm -f "$RELC/app.properties" && grep -v '^channel=' "$APP/Contents/Resources/app.properties" >"$RELC/app.properties"
+touch -t 202501010000 "$ARC/arcdps.log"
+zip=$("$RELC/collect-logs.sh" "$SANDBOX/zip-release" 2>>"$SANDBOX/collect.err" | tail -1)
+rm -rf "$SANDBOX/unzipped-release" && mkdir -p "$SANDBOX/unzipped-release" && (cd "$SANDBOX/unzipped-release" && unzip -q "$zip")
+Z="$SANDBOX/unzipped-release/$(basename "$zip" .zip)"
+check "a release build's Collect Logs: arcdps's crash log, the crash line and the dumps; not the older arcdps.log" \
+  eval '[ -f "$Z/game-logs/arcdps/arcdps_lastcrash.log" ] && [ ! -e "$Z/game-logs/arcdps/arcdps.log" ] && has "$Z/session-report.txt" "^The last session ended in a crash: arcdps intercepted gw2 assertion" && [ -f "$Z/crash-dumps/steam/assert_steam.exe_20261113132231_1.dmp" ] && [ -f "$Z/crash-dumps/game/Crash.dmp" ]'
+rm -rf "$GD/addons" "$GD/d3d11.dll" "$AD/compatdb.local" "$STEAM/dumps" "$GD/Crash.dmp" "$GW2A/Crash.dmp" "$RELC" \
+  "$H/decoy.dmp" "$BOTTLE/drive_c/decoy.dmp" "$H/Library/Logs/DiagnosticReports/Gw2-64.exe.dmp"
 
 section "Steam in the background after the first login"
 LU="$STEAM/config/loginusers.vdf"

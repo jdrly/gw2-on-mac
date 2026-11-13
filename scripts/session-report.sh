@@ -61,6 +61,9 @@
 # regions) by size. FEX starts a new buffer twice the size, up to 128 MB, each time it throws its
 # code away, so the largest is the one in use and the others are full; the buffers less one is how
 # often it threw its code away.
+# When arcdps caught a crash that ended the session (arcdps_lastcrash.log in the game folder's
+# addons/arcdps, from after Play), the report's second line says so and what it caught
+# (crash_report).
 # Sources, all from the fork's own lines (DXMT_STATS is on by default):
 #   "GW2 fork <version>: …"  the start of a session: DXMT's version, its switches, cpus, refresh,
 #            and DXMT_METAL4, the Metal it drew with: 1 is Metal 4, and 0 (the Metal row at
@@ -104,6 +107,7 @@ ROOT="${GW2_ON_MAC_ROOT:-}"
 H="${ROOT:+$ROOT/home}"
 H="${H:-$HOME}"
 LOGS="$H/Library/Logs/$APP_FOLDER"
+APPDIR="$H/Library/Application Support/$APP_FOLDER"
 
 # summary <log>: KEY=VALUE lines of its last session
 summary() {
@@ -542,6 +546,31 @@ fex_report() {
   echo "Its switches: ${switches:-none}"
 }
 
+# crash_report: one line when the session ended in a crash that arcdps caught: its
+# arcdps_lastcrash.log in the game folder (the state file's game_dir, inside the bottle), written
+# since the session started (session.env). The line is arcdps's first "error: intercepted" line,
+# a game assertion ('intercepted gw2 assertion "frameId", file "...", line 2289') or an exception
+# ('intercepted crash from hardware exception in "..."', with the code from its exception block).
+crash_report() {
+  local dir f
+  dir=$(sed -n 's/^game_dir=//p' "$APPDIR/state" 2>/dev/null | tail -1 || true)
+  case "$dir" in "$APPDIR/bottle"/*) ;; *) return 0 ;; esac
+  f="$dir/addons/arcdps/arcdps_lastcrash.log"
+  [ -f "$f" ] && [ ! "$LOGS/session.env" -nt "$f" ] || return 0
+  LC_ALL=C awk -v when="$(date -r "$f" '+%F %T')" '
+    { sub(/\r$/, "") }
+    !what && / error: intercepted / {
+      t = $0; sub(/:? *error: intercepted .*/, "", t); when = t
+      what = $0; sub(/.* error: /, "", what)
+      next
+    }
+    what && code == "" && match($0, /code: *0x[0-9A-Fa-f]+/) { code = substr($0, RSTART + 5, RLENGTH - 5); sub(/^ */, "", code) }
+    END {
+      if (what) print "The last session ended in a crash: arcdps " what (code != "" ? ", code " code : "") " (arcdps_lastcrash.log, " when ")"
+      else print "The last session ended in a crash: arcdps wrote arcdps_lastcrash.log at " when ", with no assertion or exception line"
+    }' "$f"
+}
+
 report() {  # <log>
   local s ran="" s_dev m metal="" way=""
   s=$(summary "$1")
@@ -560,6 +589,7 @@ report() {  # <log>
   fi
   echo "Session: $1 (the last of $(get "$s" sessions) in it)"
   if [ -f "$LOGS/session.env" ] && [ "$(dirname "$1")" = "$LOGS" ]; then
+    crash_report
     case "$(sed -n 's/^DXMT_TREE=//p' "$LOGS/session.env")" in
       fork) ran="my DXMT fork, $(sed -n 's/^DXMT_FORK=//p' "$LOGS/session.env")" ;;
       engine) ran="the engine's own DXMT, athei/dxmt $(sed -n 's/^ENGINE_DXMT=//p' "$LOGS/session.env")" ;;

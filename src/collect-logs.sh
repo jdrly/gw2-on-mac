@@ -18,13 +18,19 @@
 #   session-report.txt  the last game session in short (session-report.sh)
 #   game-logs/     the game's and Steam's own logs, with game_rules: ArenaNet.log (crash entries;
 #                  their computer, account and address fields taken out), the game's graphics
-#                  settings (GFXSettings.Gw2-64.exe.xml), the addon's log in the game folder, and
+#                  settings (GFXSettings.Gw2-64.exe.xml), the addon's log in the game folder,
 #                  Steam's bootstrap_log, content_log, gameprocess_log and shader_log (Steam IDs
-#                  taken out). Not arcdps's logs (addons/arcdps): its crash log dumps the game's
-#                  threads and modules, which may hold account or character names. Never Local.dat (the game's saved login), Steam's config or its
-#                  login, connection or account logs, nor anything else of the bottle.
+#                  taken out), and arcdps's arcdps.log and arcdps_lastcrash.log (addons/arcdps;
+#                  GW2 account names, Name.1234, taken out) when they are recent (see RECENT).
+#                  Never Local.dat (the game's saved login), Steam's config or its login,
+#                  connection or account logs, nor anything else of the bottle.
+#   crash-dumps/   the recent crash dumps (*.dmp, see RECENT) of Steam (steam/, its dumps folder:
+#                  assert_*.dmp), of the game folder (game/) and of the game's AppData folder
+#                  (appdata/, where ArenaNet.log is), byte for byte: a dump can't be redacted, so
+#                  the leak check reads it with its NUL bytes taken out (UTF-16 text then reads as
+#                  ASCII) and also looks for the Mac's and the bottle's user in a Windows path
 #   system-info.txt  macOS, chip, memory, displays, versions, the state of the install and its
-#                  engine, which crash reports are in the zip, the GPU error count
+#                  engine, which crash reports and crash dumps are in the zip, the GPU error count
 #   gpu-errors.txt  the GPU errors of the game and Wine in macOS's unified log of the last 2 hours
 #   crash-reports/  macOS's crash, hang and spin reports of the last 7 days for the game, Wine,
 #                  Steam's Windows processes and the app
@@ -173,7 +179,20 @@ redact() {  # [game] stdin → stdout (game: also game_rules)
       gsub(/[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]/, "MAC-ADDRESS", s)
       s = ipv4(s)
       s = ipv6(s)
+      s = gw2_accounts(s)
       return s
+    }
+    # GW2 account names (arcdps logs them): a name of letters, digits, spaces or underscores, a dot
+    # and 4 digits, then no digit or dot ("Some Name.1234", not "build 20261023.230314" or
+    # "Version 1.2026.1023")
+    function gw2_accounts(s,    out) {
+      out = ""
+      while (match(s, /[A-Za-z][A-Za-z0-9_ ]*\.[0-9][0-9][0-9][0-9]/)) {
+        if (substr(s, RSTART + RLENGTH, 1) ~ /[0-9.]/) out = out substr(s, 1, RSTART + RLENGTH - 1)
+        else out = out substr(s, 1, RSTART - 1) "ACCOUNT"
+        s = substr(s, RSTART + RLENGTH)
+      }
+      return out s
     }
     BEGIN {
       secret_key = "(password|passwd|pwd|username|user_name|accountname|account|email|token|ticket|session|" \
@@ -243,23 +262,56 @@ add_log() {  # file max-bytes [folder in the zip [game]]: the end of a log
 CRASH_MAX=20
 CRASH_MAX_BYTES=10000000
 CRASH_FILE_MAX=3000000
-crash_reports() {
+# cap <count> <bytes together> <bytes each> <what>: of "<mtime> <size> <path>" lines, newest
+# first, "add <path>" for each that fits, else "skip <name> (<why>)"
+cap() {
   local size f n=0 total=0
+  while read -r _ size f; do
+    if [ "$n" -ge "$1" ]; then echo "skip ${f##*/} (more than $1 $4)"
+    elif [ "$size" -gt "$3" ]; then echo "skip ${f##*/} ($(((size + 999) / 1000)) KB, too large)"
+    elif [ $((total + size)) -gt "$2" ]; then echo "skip ${f##*/} (over $(($2 / 1000000)) MB together)"
+    else
+      echo "add $f"
+      n=$((n + 1)); total=$((total + size))
+    fi
+  done
+}
+crash_reports() {
+  local m size f
   find "$DIAG" -maxdepth 1 -type f \( -iname '*wine*' -o -iname 'Gw2*' -o -iname 'steam*' \
     -o -name "$APP_FOLDER*" -o -name 'GW2onMac*' -o -name 'MTLCompilerService*' \) \
     \( -name '*.ips' -o -name '*.crash' -o -name '*.hang' -o -name '*.spin' -o -name '*.diag' \) \
-    -mtime -7 -exec stat -f '%m %z %N' {} + 2>/dev/null | sort -rn | while read -r _ size f; do
+    -mtime -7 -exec stat -f '%m %z %N' {} + 2>/dev/null | sort -rn | while read -r m size f; do
       case "${f##*/}" in
         MTLCompilerService*) LC_ALL=C grep -q -i -E '"responsibleProc" : "(gw2|wine)' "$f" || continue ;;
       esac
-      if [ "$n" -ge "$CRASH_MAX" ]; then echo "skip ${f##*/} (more than $CRASH_MAX reports)"
-      elif [ "$size" -gt "$CRASH_FILE_MAX" ]; then echo "skip ${f##*/} ($(((size + 999) / 1000)) KB, too large)"
-      elif [ $((total + size)) -gt "$CRASH_MAX_BYTES" ]; then echo "skip ${f##*/} (over $((CRASH_MAX_BYTES / 1000000)) MB together)"
-      else
-        echo "add $f"
-        n=$((n + 1)); total=$((total + size))
-      fi
-    done
+      echo "$m $size $f"
+    done | cap "$CRASH_MAX" "$CRASH_MAX_BYTES" "$CRASH_FILE_MAX" reports
+}
+
+# RECENT: the game's crash files Collect Logs takes are those of the last session or the last day:
+# written since the session started (session.env, which Play writes) or in the last 24 hours.
+# recent: of "<mtime> <size> <path>" lines, those, newest first.
+recent() {
+  local since s
+  since=$(($(date +%s) - 86400))
+  s=$(stat -f %m "$LOGS/session.env" 2>/dev/null) && [ "$s" -lt "$since" ] && since=$s
+  awk -v since="$since" '$1 >= since' | sort -rn
+}
+# Crash dumps (*.dmp, RECENT) of Steam (its dumps folder), of the game folder and of the game's
+# AppData folder, each folder's own files only, and only inside the bottle (a Steam library outside
+# it is not read): at most DUMP_MAX, DUMP_MAX_BYTES together and DUMP_FILE_MAX each, the newest
+# first. Prints cap's lines.
+DUMP_MAX=10
+DUMP_MAX_BYTES=10000000
+DUMP_FILE_MAX=5000000
+crash_dumps() {
+  local d
+  for d in "$STEAM/dumps" "$GAME_DIR" "$GW2_APPDATA"; do
+    case "$d" in "$BOTTLE"/*) ;; *) continue ;; esac
+    [ -d "$d" ] || continue
+    find "$d" -maxdepth 1 -type f -iname '*.dmp' -exec stat -f '%m %z %N' {} + 2>/dev/null
+  done | recent | cap "$DUMP_MAX" "$DUMP_MAX_BYTES" "$DUMP_FILE_MAX" dumps
 }
 
 # GPU errors: macOS's unified log of the last GPU_HOURS hours, as SWTOR on Mac's: the game's
@@ -376,6 +428,14 @@ add_log "$GW2_APPDATA/GFXSettings.Gw2-64.exe.xml" 1000000 game-logs game
 for f in bootstrap_log.txt content_log.txt gameprocess_log.txt shader_log.txt; do
   add_log "$STEAM/logs/$f" 2000000 game-logs/steam game
 done
+# arcdps's log and its crash log (the game's assertion or exception, then the game's threads and
+# modules), when RECENT and inside the bottle
+case "$GAME_DIR" in
+  "$BOTTLE"/*)
+    for f in arcdps.log arcdps_lastcrash.log; do
+      [ ! -f "$GAME_DIR/addons/arcdps/$f" ] || stat -f '%m %z %N' "$GAME_DIR/addons/arcdps/$f"
+    done | recent | while read -r _ _ f; do add_log "$f" 2000000 game-logs/arcdps game; done ;;
+esac
 # the last game session in short
 if [ -f "$LOGS/Gw2-64_d3d11.log" ] && [ -x "$RES/session-report.sh" ]; then
   "$RES/session-report.sh" "$LOGS/Gw2-64_d3d11.log" 2>&1 | redact >"$out/session-report.txt"
@@ -388,6 +448,22 @@ while IFS= read -r line; do
     "skip "*) echo "  left out: ${line#skip }" ;;
   esac
 done <"$work/crash-list" >"$work/crash-index"
+# (byte for byte: a dump is binary, so redact can't read it; the leak check below can)
+crash_dumps >"$work/dump-list"
+while IFS= read -r line; do
+  case "$line" in
+    "add "*)
+      f=${line#add }
+      case "$f" in
+        "$STEAM/dumps/"*) d=steam ;;
+        "$GW2_APPDATA/"*) d=appdata ;;
+        *) d=game ;;
+      esac
+      mkdir -p "$out/crash-dumps/$d" && cp "$f" "$out/crash-dumps/$d/" &&
+        echo "  $d/${f##*/} ($(stat -f '%Sm' -t '%F %R' "$f"), $((($(stat -f %z "$f") + 999) / 1000)) KB)" ;;
+    "skip "*) echo "  left out: ${line#skip }" ;;
+  esac
+done <"$work/dump-list" >"$work/dump-index"
 gpu_errors 2>&1 | redact >"$out/gpu-errors.txt"
 
 m() { plutil -extract "$1" raw -o - "$APPDIR/install-manifest.json" 2>/dev/null || echo -; }
@@ -418,7 +494,7 @@ pin() { sed -n "s/^$1=\([^ ]*\).*/\1/p" "$RES/gw2om.sh"; }
   echo "Game: $([ -n "$GAME_DIR" ] && [ -f "$GAME_DIR/Gw2-64.exe" ] && echo "installed, Gw2-64.exe $(stat -f '%z bytes, %Sm' "$GAME_DIR/Gw2-64.exe")" || echo "not found")"
   [ -z "$GAME_DIR" ] || echo "  interface addon (version.dll): $([ -f "$GAME_DIR/version.dll" ] && { grep -aq 'gw2-on-mac ui-scale' "$GAME_DIR/version.dll" && echo "$APP_NAME's" || echo "another program's"; } || echo none)"
   # d3d11.dll and dxgi.dll addons (arcdps, Nexus): which, by a quick look (gw2om.sh's arcdps_state
-  # reads the exports); arcdps's own logs stay out (its crash log dumps the game's memory)
+  # reads the exports)
   for f in d3d11.dll dxgi.dll; do
     [ -n "$GAME_DIR" ] && [ -f "$GAME_DIR/$f" ] || continue
     echo "  $f addon: $(LC_ALL=C grep -aq addextension2 "$GAME_DIR/$f" && LC_ALL=C grep -aq arcdps "$GAME_DIR/$f" && echo arcdps || echo "another program's"), $(stat -f '%z bytes, %Sm' "$GAME_DIR/$f")"
@@ -448,6 +524,9 @@ pin() { sed -n "s/^$1=\([^ ]*\).*/\1/p" "$RES/gw2om.sh"; }
   echo
   echo "Crash reports of the last 7 days (newest first; in crash-reports/):"
   if [ -s "$work/crash-index" ]; then cat "$work/crash-index"; else echo "  none"; fi
+  echo
+  echo "Crash dumps of the last session or day (newest first; in crash-dumps/):"
+  if [ -s "$work/dump-index" ]; then cat "$work/dump-index"; else echo "  none"; fi
   echo
   echo "GPU errors of the last $GPU_HOURS hours (in gpu-errors.txt):"
   echo "  $(cat "$work/gpu-summary" 2>/dev/null || echo "not read")"
@@ -481,12 +560,21 @@ found_name() {  # <file> <grep options>
   LC_ALL=C sed -E 's/NAME|ACCOUNT|USER|REDACTED|TOKEN|EMAIL|MAC-ADDRESS|IP6|IP//g' "$f" | LC_ALL=C grep -q "$@"
   [ $? != 1 ]
 }
+# (a crash dump went in unredacted: the check reads it without its NUL bytes, so UTF-16 text reads
+# as ASCII, and looks for the Mac's and the bottle's user in a path too, and the full name)
+for u in "$(id -un)" "$BOTTLE_USER"; do printf 'users\\%s\\\nusers/%s/\n' "$u" "$u"; done >"$work/dump-names"
+full_name="$(id -F 2>/dev/null)"
+[ "${#full_name}" -lt 3 ] || echo "$full_name" >>"$work/dump-names"
 ( cd "$out" && find . -type f ) | sed 's|^\./||' | while IFS= read -r rel; do
-  f="$out/$rel"
-  if { [ -s "$literals" ] && found_name "$f" -i -F -f "$literals"; } ||
-     { [ -s "$literals_short" ] && found_name "$f" -i -w -F -f "$literals_short"; } ||
-     found -F -e "$HOME/" -e "$H/" -e "/Users/$(id -un)/" "$f" ||
-     found -E -f "$work/leak-patterns" "$f"; then
+  f="$out/$rel" c="$out/$rel"
+  case "$rel" in
+    crash-dumps/*) c="$work/dump-text"; LC_ALL=C tr -d '\000' <"$f" >"$c" ;;
+  esac
+  if { [ -s "$literals" ] && found_name "$c" -i -F -f "$literals"; } ||
+     { [ -s "$literals_short" ] && found_name "$c" -i -w -F -f "$literals_short"; } ||
+     found -F -e "$HOME/" -e "$H/" -e "/Users/$(id -un)/" "$c" ||
+     found -E -f "$work/leak-patterns" "$c" ||
+     { [ "$c" != "$f" ] && found -i -F -f "$work/dump-names" "$c"; }; then
     rm -f "$f"
     echo "$rel"
   fi
