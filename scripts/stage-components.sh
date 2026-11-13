@@ -244,7 +244,7 @@ if [ "${1:-}" = --standin ]; then
     for f in $FEX_FILES $FEX_META; do mkdir -p "$P/fex.new/$(dirname "$f")" && echo "stand-in $f" >"$P/fex.new/$f"; done
     { echo "stand-in FEX-2610-0-g0000000 (not a build: scripts/stage-components.sh --standin)"
       echo "commit: 0000000000000000000000000000000000000000"
-      echo "switches: FEX_HARDWARETSOSYSCALLS FEX_INITIALCODEBUFFERMB"
+      echo "switches: FEX_DISPATCHERL1LOOKUP FEX_ENTRYHEADERLOOKUP FEX_HARDWARETSOSYSCALLS FEX_INITIALCODEBUFFERMB"
       for f in $FEX_FILES; do echo "$f: sha256 $(sha "$P/fex.new/$f")"; done
       echo "libarm64ecfex.dll: build id 0123456789abcdef0123456789abcdef age 1, SizeOfImage 0x426000"; } >"$P/fex.new/VERSION"
     record "$P/fex.new"

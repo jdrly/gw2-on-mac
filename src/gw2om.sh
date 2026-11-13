@@ -1102,7 +1102,9 @@ fex_entries() {
 # (jdrly/dxmt#226), a diagnostic for the same stutter, stays out: I turn it on by hand, so a change
 # in play has one cause. My ntdll.so's other changes
 # have no line: #99's counts act only with WINE_HEAT_COUNT=1, which Debug logging sets; the app sets
-# WINE_HEAT_PROF_FEX itself (#111); #101 and #104 have no switch.
+# WINE_HEAT_PROF_FEX itself (#111); #101 and #104 have no switch. FEX_ENTRYHEADERLOOKUP (#162) stays
+# out of the rule while it can start my ntdll.so's sampler (heat_prof_on): with it on FEX no longer
+# stores the block a thread entered last, which the sampler reads (jdrly/FEX's GW2Contract.h).
 DEV_SWITCHES="
 1 wine #14,#45 unplayed WINE_HEAT_SPIN=lock=20:game,event=30:game,sem=5:game the Faster locks row's two spins, and the job workers spin 5 µs on their semaphore before they sleep. While this line is here, its value replaces the row's.
 1 macdrv #62 unplayed WINE_MACDRV_VIEW=changes a window's view frame goes to the main thread only when it changed
@@ -1124,6 +1126,8 @@ DEV_SWITCHES="
 1 dxmt jdrly/dxmt#75 unplayed DXMT_PSO_GENERATIONS=1 the archives published as generations instead of one file a session
 1 dxmt jdrly/dxmt#73 unplayed DXMT_COMPILE_DEMAND=1 the compile service's declared policy (Shader warming turns it on too)
 3 dxmt jdrly/dxmt#204 unplayed DXMT_MTL4_ALLOCATOR_POOL=1 only with the Metal row at Metal 4, nothing on Metal 3: a Metal 4 queue's chunks take their command allocator from a pool that keeps at most 8 idle, instead of one allocator per ring slot
+5 fex #161 unplayed FEX_DISPATCHERL1LOOKUP=1 the dispatcher looks in the thread's L1 before it leaves for the lookup in C++
+5 fex #162 unplayed FEX_ENTRYHEADERLOOKUP=1 a block's entry stores nothing, and faults, suspends and self-modifying code find the block from the host PC. Stays out while the sampler can run (WINE_HEAT_PROF or WINE_HEAT_CONTROL), which reads what the entries stored.
 "
 # Rows taken out of the table, "<version> <issue> <NAME=value> <off value>". dev_update brings a file
 # older than <version> up to it (dev_gone): the line as the table wrote it goes, with the comment and
@@ -1241,13 +1245,23 @@ dxmt_names() {
   find "$d" -type f -name '*.dll' -exec cat {} + 2>/dev/null | LC_ALL=C tr -c 'A-Z0-9_' '\n' |
     LC_ALL=C grep -x 'DXMT_[A-Z0-9_]*' | LC_ALL=C sort -u || true
 }
+# heat_prof_on: the game's rule can start my ntdll.so's sampler: WINE_HEAT_PROF=on or =1, or
+# WINE_HEAT_CONTROL, whose file can say prof=on during a session, in a line of dev-switches.conf (a
+# development build's) or an env= entry of compatdb.local. (awk reads all of it: nothing ends the
+# pipe early under pipefail.)
+heat_prof_on() {
+  { if [ -n "$DEV_ON" ] && [ -f "$DEV_FILE" ]; then cat "$DEV_FILE"; fi
+    if [ -f "$RULES_LOCAL" ]; then tr ';' '\n' <"$RULES_LOCAL" | sed -n 's/^env=//p'; fi; } |
+    awk '/^WINE_HEAT_PROF=(on|1)$/ || /^WINE_HEAT_CONTROL=./ { f = 1 } END { exit !f }'
+}
 # dev_lines: dev-switches.conf's switch lines in a development build, one a line: "in NAME=value"
 # for one that goes into the game's rule, "out NAME=value <why>" for one that stays out
 dev_lines() {
   [ -n "$DEV_ON" ] && [ -f "$DEV_FILE" ] || return 0
-  local l row piece wine macdrv fex dxmt dnames="" why
+  local l row piece wine macdrv fex dxmt dnames="" why prof=off
   wine=$(lib_in_use wine) macdrv=$(lib_in_use macdrv) fex=$(fex_in_use) dxmt=$(dxmt_in_use)
   [ "$dxmt" != fork ] || dnames=$(dxmt_names)
+  if heat_prof_on; then prof=on; fi
   awk '/^[A-Za-z_][A-Za-z0-9_]*=/ && !/^version=/' "$DEV_FILE" | while IFS= read -r l; do
     row=$(printf '%s\n' "$DEV_SWITCHES" | awk -v n="${l%%=*}" '{ e = $5; sub(/=.*/, "", e) } e == n { print $2; exit }')
     # (a line of mine that isn't in the table: no piece, it goes in as it is)
@@ -1263,6 +1277,8 @@ dev_lines() {
       fex)
         if [ "$fex" != mine ]; then why="$(dev_piece_label fex) isn't in the engine"
         elif ! fex_in_version "$l"; then why="$(dev_piece_label fex) doesn't have it"
+        elif [ "${l%%=*}" = FEX_ENTRYHEADERLOOKUP ] && [ "$prof" = on ]; then
+          why="the sampler can run (WINE_HEAT_PROF or WINE_HEAT_CONTROL), and it reads the block header this switch stops FEX from storing"
         fi ;;
       dxmt)
         if [ "$dxmt" != fork ]; then why="$(dev_piece_label dxmt) isn't in the engine"
@@ -1277,10 +1293,13 @@ dev_entries() {
   local l
   dev_lines | sed -n 's/^in //p' | while IFS= read -r l; do cdb_value "$l"; echo; done
 }
-# dev_session_line <dev_lines' output>: session.env's DEV_SWITCHES= (what went in, the session
-# report's header prints it), in a development build only
+# dev_session_line <dev_lines' output>: session.env's DEV_SWITCHES= (what went in) and
+# DEV_SWITCHES_OUT= (what stayed out, each with why, joined by "; "), which the session report's
+# header prints, in a development build only
 dev_session_line() {
-  [ -z "$DEV_ON" ] || echo "DEV_SWITCHES=$(printf '%s\n' "$1" | sed -n 's/^in //p' | tr '\n' ' ' | sed 's/ $//')"
+  [ -n "$DEV_ON" ] || return 0
+  echo "DEV_SWITCHES=$(printf '%s\n' "$1" | sed -n 's/^in //p' | tr '\n' ' ' | sed 's/ $//')"
+  echo "DEV_SWITCHES_OUT=$(printf '%s\n' "$1" | sed -n 's/^out //p' | awk '{ printf "%s%s", s, $0; s = "; " }')"
 }
 # and a rename, so a process that starts meanwhile reads the old rules or the new, never half)
 write_rules() {
@@ -2757,7 +2776,7 @@ launch() {
   elif [ -f "$LOGS/session.env" ] && { [ "$1" = "${GAME_EXE:-}" ] || in_list -applaunch "$*"; }; then
     # (a game start in a running session, with Steam still open: this start's rules and dev
     # switches, the rest as the session started)
-    { sed -e '/^RULE=/d' -e '/^DEV_SWITCHES=/d' "$LOGS/session.env"; dev_session_line "$dev"; sed 's/^/RULE=/' "$RULES"; } >"$LOGS/session.env.new.$$"
+    { sed -e '/^RULE=/d' -e '/^DEV_SWITCHES=/d' -e '/^DEV_SWITCHES_OUT=/d' "$LOGS/session.env"; dev_session_line "$dev"; sed 's/^/RULE=/' "$RULES"; } >"$LOGS/session.env.new.$$"
     mv -f "$LOGS/session.env.new.$$" "$LOGS/session.env"
   fi
   echo "=== $(date '+%F %T') $*" >>"$LOGS/wine.log"
