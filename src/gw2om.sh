@@ -1100,6 +1100,7 @@ DEV_SWITCHES="
 1 dxmt jdrly/dxmt#75 unplayed DXMT_PSO_GENERATIONS=1 the archives published as generations instead of one file a session
 1 dxmt jdrly/dxmt#73 unplayed DXMT_COMPILE_DEMAND=1 the compile service's declared policy (Shader warming turns it on too)
 2 dxmt jdrly/dxmt#227 unplayed DXMT_MTL4_PRESENT=mtl3 only with the Metal row at Metal 4, nothing on Metal 3: each frame is presented the Metal 3 way, through a Metal 3 command buffer, and everything else stays on Metal 4
+3 dxmt jdrly/dxmt#204 unplayed DXMT_MTL4_ALLOCATOR_POOL=1 only with the Metal row at Metal 4, nothing on Metal 3: a Metal 4 queue's chunks take their command allocator from a pool that keeps at most 8 idle, instead of one allocator per ring slot
 "
 DEV_SWITCHES_VERSION=$(printf '%s\n' "$DEV_SWITCHES" | awk 'NF && $1 > v { v = $1 } END { print v + 0 }')
 # dev_piece_label <piece>: what the file and the log call it
