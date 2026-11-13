@@ -608,6 +608,9 @@ report() {  # <log>
     if grep -q '^DEV_SWITCHES=' "$LOGS/session.env"; then
       s_dev=$(sed -n 's/^DEV_SWITCHES=//p' "$LOGS/session.env" | head -1)
       echo "Dev switches that were on (dev-switches.conf): ${s_dev:-none}"
+      # (and those the rule left out, each with why; a session.env from before has no such line)
+      s_dev=$(sed -n 's/^DEV_SWITCHES_OUT=//p' "$LOGS/session.env" | head -1)
+      [ -z "$s_dev" ] || echo "Dev switches left out: $s_dev"
     fi
     wine_report "$(get "$s" gpu_frames)"
     fex_report

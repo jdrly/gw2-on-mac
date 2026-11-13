@@ -721,8 +721,12 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   lines need it in place with my `winemac.so`, as one set. My DXMT fork's build has no such
   record: the app looks for the name in the DLLs of the fork's tree in the engine, where each
   switch it reads is a string. That tree can be an earlier build while Steam still runs with it.
-  `FEX_DYNAMICL1CACHE` is FEX's own and goes in with either FEX. The log says at each start what
-  stays out and why, and `status` prints `dev_switches=` and `dev_switches_out=`.
+  `FEX_DYNAMICL1CACHE` is FEX's own and goes in with either FEX. `FEX_ENTRYHEADERLOOKUP=1`
+  (#162, version 5 with `FEX_DISPATCHERL1LOOKUP=1`, #161) also stays out while the rule can start
+  my `ntdll.so`'s sampler: `WINE_HEAT_PROF=on` or `=1`, or `WINE_HEAT_CONTROL`, whose file can say
+  `prof=on` in a session, in a line of the file or of `compatdb.local`. With that switch FEX no
+  longer stores the block a thread entered last, which the sampler reads. The log says at each
+  start what stays out and why, and `status` prints `dev_switches=` and `dev_switches_out=`.
 - A `compatdb.local` that I put in the app's folder is appended as it is, for trying FEX switches
   such as `exe=Gw2-64.exe;env=FEX_HOSTFEATURES=disableavx`. Nothing in the app writes it, and
   Collect Logs includes it. It comes last, so a line of it wins over the app's: with
@@ -984,7 +988,7 @@ last session from DXMT's own log lines:
 - "FEX that ran": my FEX with its commit or the engine's own, and the `FEX_*` entries of the game's
   rule
 - in a development build, the lines of `dev-switches.conf` the game's rule had (`DEV_SWITCHES` in
-  `session.env`)
+  `session.env`), and those it left out, each with why (`DEV_SWITCHES_OUT`)
 - for each `vmmap` file taken since the session started: the minutes in, the footprint and FEX's
   code buffers by size, as "16M full, 32M full, 64M 25.4M resident; FEX has thrown its code away 2
   times"
@@ -1223,7 +1227,9 @@ Without one, those checks are skipped. It covers:
   `channel=dev` and one without a channel, in roots of their own: a development build's fresh
   install with every switch of the table in `dev-switches.conf` and the rows on, the rule with
   each line whose file has the switch and none whose file hasn't, status, `session.env`, the log
-  and the session report, a line commented out or added, the engine's own DXMT, a second start
+  and the session report, my FEX's two lookup lines in and out (`FEX_ENTRYHEADERLOOKUP` out with
+  each of the sampler's lines, in `dev-switches.conf` or `compatdb.local`, also through a third
+  root's install to the session report), a line commented out or added, the engine's own DXMT, a second start
   that changes nothing, an update that adds a newer switch and keeps the rest, a row turned off
   that stays off, a release that writes no file and reads none, and a release's install updated
   by a development build
