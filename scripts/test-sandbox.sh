@@ -1006,13 +1006,14 @@ check "the HUD on: metal_hud=true for the game, false for CefHost.exe" rules_are
 g set hud off >/dev/null; g set uiscale on >/dev/null
 check "the larger interface on: version native first" rules_are addon
 g set hud on >/dev/null; cp "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll"
-check "the HUD and the larger interface on, arcdps in the game folder: d3d11 and dxgi native first too" rules_are hud-addon-arcdps
+check "the HUD and the larger interface on, arcdps in the game folder: d3d11 and dxgi native first too, for the game and for rundll32.exe (arcdps's crash window)" rules_are hud-addon-arcdps
 rm -f "$GD/version.dll"
 check "  the addon's version.dll missing: the override stays (n,b loads Wine's own)" rules_are hud-addon-arcdps
 cp "$SANDBOX/pe/nexus.dll" "$GD/d3d11.dll"
-check "  another addon's d3d11.dll (Nexus): native first as well" eval 'g rules | grep "^exe=Gw2-64.exe;metal_hud=true;dll_overrides=d3d11,dxgi=n,b;" >/dev/null'
+check "  another addon's d3d11.dll (Nexus): native first as well, for the game and for rundll32.exe" \
+  eval 'g rules | grep "^exe=Gw2-64.exe;metal_hud=true;dll_overrides=d3d11,dxgi=n,b;" >/dev/null && [ "$(g rules | tail -1)" = "exe=rundll32.exe;dll_overrides=d3d11,dxgi=n,b" ]'
 g set hud off >/dev/null; g set uiscale off >/dev/null; rm -f "$GD/d3d11.dll"
-check "  all off again" rules_are off
+check "  all off again, with no rule for rundll32.exe" rules_are off
 g set rawmouse off >/dev/null
 check "raw mouse-look off: gcmouse=false for the game, nothing for CefHost.exe" \
   eval '[ "$(g rules | head -1)" = "exe=Gw2-64.exe;gcmouse=false;env=DXMT_SHADER_CACHE_PATH=$DXMT_CACHE;env=DXMT_METAL4=0" ] && [ "$(g rules | tail -1)" = "exe=CefHost.exe;env=DXMT_SHADER_CACHE_PATH=;env=DXMT_METAL4=" ]'
