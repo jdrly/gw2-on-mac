@@ -63,6 +63,9 @@
 # --standin adds a stand-in for each of dxmt/, ntdll/, macdrv/ and fex/ that prebuilt/ lacks (files
 # in the layout of the fork's build that only name themselves), for the checks and the sandbox
 # until prebuilt.lock pins the real ones. build.sh takes them; scripts/release.sh refuses them.
+# Their VERSIONs' switches: lines are the real builds' (jdrly/wine 29db621e187, jdrly/FEX
+# c2e25accebc), so a pull request's sandbox reads the switches a dev build's does: when a build
+# drops or adds one, these lines change with it.
 #
 #   scripts/stage-components.sh [--fetch | --pack <tag> | --standin]
 set -euo pipefail
@@ -227,6 +230,10 @@ if [ "${1:-}" = --standin ]; then
     for f in $WK_FILE VERSION LICENSE COPYING.LIB; do echo "stand-in $f" >"$P/$k.new/$f"; done
     { echo "stand-in wine-11.21-0-g0000000 (not a build: scripts/stage-components.sh --standin)"
       echo "commit: 0000000000000000000000000000000000000000"
+      case "$k" in
+        ntdll) echo "switches: WINE_HEAT_COUNT WINE_HEAT_EVPOOL WINE_HEAT_EXE WINE_HEAT_LOG WINE_HEAT_PROF WINE_HEAT_PROF_FEX WINE_HEAT_PROF_HZ WINE_HEAT_PROF_THREADS WINE_HEAT_SPIN WINE_HEAT_SPIN_PAUSE WINE_HEAT_WAKE" ;;
+        macdrv) echo "switches: WINE_MACDRV_MOUSE_SCALE WINE_MACDRV_SURFACE WINE_WIN32U_PEEK_YIELD WINE_WIN32U_SETCURSOR" ;;
+      esac
       echo "$WK_FILE: sha256 $(sha "$P/$k.new/$WK_FILE")"; } >"$P/$k.new/VERSION"
     record "$P/$k.new"
     mv "$P/$k.new" "$P/$k"
@@ -237,7 +244,7 @@ if [ "${1:-}" = --standin ]; then
     for f in $FEX_FILES $FEX_META; do mkdir -p "$P/fex.new/$(dirname "$f")" && echo "stand-in $f" >"$P/fex.new/$f"; done
     { echo "stand-in FEX-2610-0-g0000000 (not a build: scripts/stage-components.sh --standin)"
       echo "commit: 0000000000000000000000000000000000000000"
-      echo "switches:"
+      echo "switches: FEX_HARDWARETSOSYSCALLS FEX_INITIALCODEBUFFERMB"
       for f in $FEX_FILES; do echo "$f: sha256 $(sha "$P/fex.new/$f")"; done
       echo "libarm64ecfex.dll: build id 0123456789abcdef0123456789abcdef age 1, SizeOfImage 0x426000"; } >"$P/fex.new/VERSION"
     record "$P/fex.new"

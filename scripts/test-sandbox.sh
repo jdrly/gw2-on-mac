@@ -68,7 +68,7 @@ if [ -f "$COMP/macdrv/winemac.so" ]; then MYDRV=mine; else MYDRV=engine; fi
 MYDRV_COMMIT="$(sed -n 's/^commit: //p' "$COMP/macdrv/VERSION" 2>/dev/null || true)"
 drv() { [ "$MYDRV" = mine ]; }
 # my winemac.so has the mouse-look factor: its VERSION's switches: line names it, or it has no such
-# line (the checks' stand-in). A dev build from before the factor lists WINE_MACDRV_SURFACE alone
+# line. A dev build from before the factor lists WINE_MACDRV_SURFACE alone
 scale() { drv && { ! grep -q '^switches:' "$COMP/macdrv/VERSION" || in_switches WINE_MACDRV_MOUSE_SCALE; }; }
 in_switches() { sed -n 's/^switches://p' "$COMP/macdrv/VERSION" | head -1 | tr ' ' '\n' | grep -qx "$1"; }
 skipdrv() { echo "  skip   $* (this app has no winemac.so of mine)"; }
@@ -1048,11 +1048,12 @@ if mine; then
   # dry_rule: the game's rule a dry run of Play prints, which has to be the rules' first line
   dry_rule() { GW2_ON_MAC_DRY_RUN=1 g play 2>&1 | sed -n 's/^\[dry-run\] rule \(exe=Gw2-64\.exe;.*\)/\1/p'; }
   g set wine mine >/dev/null; g set jobwakes off >/dev/null; g set eventpool off >/dev/null
-  check "my ntdll.so, every switch off: WINE_HEAT_MSYNC_UNREG=1 alone, unset for CefHost.exe" rules_are heat-off
-  check "  a dry run of Play prints the game's rule with it" eval '[ "$(dry_rule)" = "$(g rules | head -1)" ]'
-  # (with my FEX in place too: the FEX my ntdll.so's sampler may read, from my FEX's VERSION, after
-  # WINE_HEAT_MSYNC_UNREG=1, only for an ntdll.so whose VERSION names it on its switches: line; no
-  # line, an empty one or one without it is no. The staged VERSION back after)
+  check "my ntdll.so, every switch off: no WINE_HEAT_* entry, not even WINE_HEAT_MSYNC_UNREG (#105)" rules_are off
+  check "  a dry run of Play prints the same rule" eval '[ "$(dry_rule)" = "$(g rules | head -1)" ]'
+  # (with my FEX in place too: the FEX my ntdll.so's sampler may read, from my FEX's VERSION, only
+  # for an ntdll.so whose VERSION names it on its switches: line; no line, an empty one or one
+  # without it is no. WINE_HEAT_MSYNC_UNREG on that line, as an ntdll.so from before #104 has it,
+  # adds nothing. The staged VERSION back after)
   if fexb; then
     FEXID=$(sed -n 's/^libarm64ecfex\.dll: build id \([0-9a-f]\{32\}\) age \([0-9]\{1,\}\), SizeOfImage \(0x[0-9a-f]\{1,\}\)$/\1:\2:\3/p' "$COMP/fex/VERSION")
     cp "$COMP/ntdll/VERSION" "$SANDBOX/ntdll-VERSION.prof"
@@ -1060,7 +1061,7 @@ if mine; then
     g set fex mine >/dev/null
     nt_switches " WINE_HEAT_MSYNC_UNREG WINE_HEAT_PROF_FEX"
     check "  and my FEX in place, my ntdll.so's VERSION naming it: WINE_HEAT_PROF_FEX=<build id>:<age>:<SizeOfImage> after it, unset for CefHost.exe" \
-      eval '[ -n "$FEXID" ] && [ "$(g rules | sed "s|$H|/Users/me|g" | tr "\n" "|")" = "$(head -1 "$FIX/heat-off.rules");env=WINE_HEAT_PROF_FEX=$FEXID|$(tail -1 "$FIX/heat-off.rules");env=WINE_HEAT_PROF_FEX=|" ]'
+      eval '[ -n "$FEXID" ] && [ "$(g rules | sed "s|$H|/Users/me|g" | tr "\n" "|")" = "$(head -1 "$FIX/off.rules");env=WINE_HEAT_PROF_FEX=$FEXID|$(tail -1 "$FIX/off.rules");env=WINE_HEAT_PROF_FEX=|" ]'
     for sw in none - " WINE_HEAT_MSYNC_UNREG"; do
       nt_switches "$sw"
       check "  an ntdll.so VERSION with $([ "$sw" = none ] && echo "no switches: line" || { [ "$sw" = - ] && echo "an empty switches: line" || echo "a switches: line without it"; }): no WINE_HEAT_PROF_FEX" \
@@ -1070,7 +1071,7 @@ if mine; then
     g set wine engine >/dev/null
     check "  my FEX with the engine's own ntdll.so: no WINE_HEAT_PROF_FEX" eval '! g rules | grep -q WINE_HEAT_PROF_FEX'
     g set wine mine >/dev/null; g set fex engine >/dev/null
-    check "  the engine's own FEX with my ntdll.so: none either" rules_are heat-off
+    check "  the engine's own FEX with my ntdll.so: none either" rules_are off
     cp "$SANDBOX/ntdll-VERSION.prof" "$COMP/ntdll/VERSION"
   fi
   g set jobwakes on >/dev/null
@@ -1091,14 +1092,17 @@ if mine; then
   check "  a dry run of Play prints the game's rule with them" eval '[ "$(dry_rule)" = "$(g rules | head -1)" ]'
   # A VERSION with a switches: line (switch_in_file): an entry whose variable it doesn't name stays
   # out, and its row is greyed. The app reads the first switches: line, so the narrowed line
-  # replaces any the VERSION has. Twice: from the staged VERSION as it is (a pull request's ntdll.so
-  # has no switches: line), and from that VERSION with the full line of my d831f80 build added
-  # (the dev build's ntdll.so has one). The staged VERSION back after
+  # replaces any the VERSION has. Twice: from the staged VERSION as it is (the stand-in's line or the
+  # dev build's, without WINE_HEAT_MSYNC_UNREG since #104), and from that VERSION with the line of
+  # dev.11's 8752da04c30, which still names it. Neither rule has the entry. The staged VERSION back
+  # after
   cp "$COMP/ntdll/VERSION" "$SANDBOX/ntdll-VERSION.keep"
-  for from in "the staged VERSION" "a VERSION with every switch"; do
-    cp "$SANDBOX/ntdll-VERSION.keep" "$SANDBOX/ntdll-VERSION.from"
-    [ "$from" = "the staged VERSION" ] ||
-      echo "switches: WINE_HEAT_COUNT WINE_HEAT_EVPOOL WINE_HEAT_EXE WINE_HEAT_LOG WINE_HEAT_MSYNC_UNREG WINE_HEAT_PROF WINE_HEAT_PROF_HZ WINE_HEAT_PROF_THREADS WINE_HEAT_SPIN WINE_HEAT_SPIN_PAUSE WINE_HEAT_WAKE" >>"$SANDBOX/ntdll-VERSION.from"
+  for from in "the staged VERSION" "dev.11's VERSION"; do
+    if [ "$from" = "the staged VERSION" ]; then cp "$SANDBOX/ntdll-VERSION.keep" "$SANDBOX/ntdll-VERSION.from"
+    else
+      { grep -v '^switches:' "$SANDBOX/ntdll-VERSION.keep"
+        echo "switches: WINE_HEAT_COUNT WINE_HEAT_EVPOOL WINE_HEAT_EXE WINE_HEAT_LOG WINE_HEAT_MSYNC_UNREG WINE_HEAT_PROF WINE_HEAT_PROF_HZ WINE_HEAT_PROF_THREADS WINE_HEAT_SPIN WINE_HEAT_SPIN_PAUSE WINE_HEAT_WAKE"; } >"$SANDBOX/ntdll-VERSION.from"
+    fi
     { grep -v '^switches:' "$SANDBOX/ntdll-VERSION.from"
       echo "switches: WINE_HEAT_COUNT WINE_HEAT_EXE WINE_HEAT_LOG WINE_HEAT_MSYNC_UNREG WINE_HEAT_WAKE"; } >"$COMP/ntdll/VERSION"
     check "from $from, a VERSION that lists WINE_HEAT_WAKE and WINE_HEAT_MSYNC_UNREG only: event pool and fast locks stay out" rules_are jobwakes
@@ -1221,7 +1225,7 @@ check "  and which DXMT the session loads: my fork, its build" \
   eval 'has "$LOGS/session.env" "^DXMT_TREE=fork$" && [ "$(sed -n "s/^DXMT_FORK=//p" "$LOGS/session.env")" = "$(head -1 "$COMP/dxmt/VERSION")" ] && has "$LOGS/session.env" "^SETTING_dxmt=fork$"'
 if mine; then
   check "  and which ntdll.so: mine, its commit and the sha256 of the file in the engine; its switches in the game's rule" \
-    eval '[ "$(sed -n "s/^LIB_wine=//p" "$LOGS/session.env")" = "ntdll.so mine $MYWINE_COMMIT $(shasum -a 256 "$COMP/ntdll/ntdll.so" | cut -d" " -f1)" ] && grep -q "^RULE=exe=Gw2-64.exe;.*;env=WINE_HEAT_WAKE=one,skip;env=WINE_HEAT_EVPOOL=1;env=WINE_HEAT_MSYNC_UNREG=1$" "$LOGS/session.env"'
+    eval '[ "$(sed -n "s/^LIB_wine=//p" "$LOGS/session.env")" = "ntdll.so mine $MYWINE_COMMIT $(shasum -a 256 "$COMP/ntdll/ntdll.so" | cut -d" " -f1)" ] && grep -q "^RULE=exe=Gw2-64.exe;.*;env=WINE_HEAT_WAKE=one,skip;env=WINE_HEAT_EVPOOL=1$" "$LOGS/session.env"'
 else
   check "  and which ntdll.so: the engine's own, no WINE_HEAT_* in the rules" \
     eval '[ "$(sed -n "s/^LIB_wine=//p" "$LOGS/session.env")" = "ntdll.so engine $ENGINE_WINE $GW2_ON_MAC_ENGINE_NTDLL_SHA256" ] && ! grep -q WINE_HEAT_ "$LOGS/session.env"'
@@ -1347,7 +1351,7 @@ check "  and says which DXMT ran: my fork, its build" has "$Z/session-report.txt
 check "  and which mouse the game had: GameController's (raw mouse-look on)" has "$Z/session-report.txt" "^Mouse the game had: the mouse's own counts from GameController"
 if mine; then
   check "  and which ntdll.so ran, with its switches" \
-    eval 'has "$Z/session-report.txt" "^ntdll.so that ran: my Wine build, jdrly/wine ${MYWINE_COMMIT:0:11} (sha256 " && has "$Z/session-report.txt" "^Its switches: WINE_HEAT_WAKE=one,skip WINE_HEAT_EVPOOL=1 WINE_HEAT_MSYNC_UNREG=1$"'
+    eval 'has "$Z/session-report.txt" "^ntdll.so that ran: my Wine build, jdrly/wine ${MYWINE_COMMIT:0:11} (sha256 " && has "$Z/session-report.txt" "^Its switches: WINE_HEAT_WAKE=one,skip WINE_HEAT_EVPOOL=1$"'
   # (a heat log of the session: three threads, the game thread the one with the most releases)
   printf 'heat pid 4242 exe Gw2-64.exe mode count one skip seconds 10.0 threads 3\ntotal release 520000 wake_skipped 410000 wake_one 1 wake_none 3\nthread 0024 release 20000 wake_skipped 1000 wake_one 19000 wake_none 0 server_ms 0.5\nthread 00a4 release 490000 wake_skipped 410000 wake_one 80000 wake_none 3 server 70 server_ms 0.2\nthread 00b0 release 10000 wake_skipped 0 wake_one 1 wake_none 0 server_ms 0.1\n' >"$LOGS/heat-4242.log"
   touch -t 202601010000 "$LOGS/session.env"

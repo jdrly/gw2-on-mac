@@ -945,17 +945,16 @@ EOF
 #   mousespeed      my winemac.so multiplies GameController's mouse counts by the factor before
 #                   the game gets them; only while Raw mouse-look is on, as with it off the game
 #                   doesn't get those counts
-#   wine            no setting of its own: WINE_HEAT_MSYNC_UNREG=1 goes in whenever my ntdll.so is
-#                   in place, as 0.1.x always sets it (#44)
-#   fex             the FEX my ntdll.so's sampler may read (#111): while my FEX is in place, its
+#   fex            the FEX my ntdll.so's sampler may read (#111): while my FEX is in place, its
 #                   libarm64ecfex.dll's build id, age and SizeOfImage from its VERSION
 #                   (fex_prof_id). A build id can't tell that a FEX is mine; the app installed it.
 #                   Only for an ntdll.so whose switches: line names it (no line is no)
+# No row for WINE_HEAT_MSYNC_UNREG: since #104 my ntdll.so unregisters without a switch. An older
+# one that still reads it runs with the unregister off, as the engine's own does (#105).
 HEAT_SWITCHES="
 jobwakes WINE_HEAT_WAKE=one,skip
 eventpool WINE_HEAT_EVPOOL=1
 fastlocks WINE_HEAT_SPIN=lock=20:game,event=30:game
-wine WINE_HEAT_MSYNC_UNREG=1
 fex WINE_HEAT_PROF_FEX=
 launcherframes WINE_MACDRV_SURFACE=copy,skip
 mousespeed WINE_MACDRV_MOUSE_SCALE=

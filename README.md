@@ -655,9 +655,10 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   They follow the cache path, one `env=` field each, and only while my file is in place. The table
   `HEAT_SWITCHES` in `gw2om.sh` has one row per setting, `<key> <entry>`: *Job wakes* writes
   `WINE_HEAT_WAKE=one,skip`, *Event pool* `WINE_HEAT_EVPOOL=1` and *Faster locks*
-  `WINE_HEAT_SPIN=lock=20:game,event=30:game`. `WINE_HEAT_MSYNC_UNREG=1` has no setting and goes
-  in whenever my file is in place, as on 0.1.x. `WINE_HEAT_PROF_FEX=<build id>:<age>:<SizeOfImage>`
-  tells my file's sampler which FEX it may read: it goes in while my FEX is in place too, with the
+  `WINE_HEAT_SPIN=lock=20:game,event=30:game`. My file unregisters a wait that found its object
+  signaled without a switch (#104), so the rule has no `WINE_HEAT_MSYNC_UNREG`. An older file of
+  mine that still reads it runs with the unregister off, as the engine's own does.
+  `WINE_HEAT_PROF_FEX=<build id>:<age>:<SizeOfImage>` tells my file's sampler which FEX it may read: it goes in while my FEX is in place too, with the
   values its `VERSION` gives for `libarm64ecfex.dll`, since a build id can't say that a FEX is mine
   and the app, which installed it, can. It needs my file's `switches:` line to name it; a file
   without the line doesn't get it. Any other entry whose variable the file's `VERSION`
