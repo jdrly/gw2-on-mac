@@ -2701,6 +2701,30 @@ check "  a dry run of Play prints that rule, and each line it leaves out with wh
 check "  and doesn't write the file again" eval '! echo "$out" | grep -q "dev-switches.conf: version"'
 check "status lists the lines in the rule, and those left out" \
   eval '[ "$(dg status | sed -n "s/^dev_switches=//p")" = "$(dev_expect | tr "\n" " " | sed "s/ \$//")" ] && dg status | sed -n "s/^dev_switches_out=//p" | grep -qF "WINE_WIN32U_PEEK_YIELD=off ($W32WHY)"'
+# The table's WINE_MACDRV_* lines with the staged Mac driver's own record for a moment (#144): each
+# one its switches: line names is in the rule, each other one out, saying why. The stand-in's line
+# is jdrly/wine 472d777's, which names all four; a dev build's names what its commit has
+drv_lines_ok() {
+  local st piece e in out
+  st=$(dg status)
+  in=" $(printf '%s\n' "$st" | sed -n 's/^dev_switches=//p') "
+  out=";$(printf '%s\n' "$st" | sed -n 's/^dev_switches_out=//p');"
+  printf '%s\n' "$DEVTABLE" | {
+    while read -r piece e; do
+      [ "$piece" = macdrv ] || continue
+      if in_switches "${e%%=*}"; then
+        case "$in" in *" $e "*) ;; *) exit 1 ;; esac
+      else
+        case "$out" in *";$e (my winemac.so doesn't have it);"*) ;; *) exit 1 ;; esac
+      fi
+    done
+  }
+}
+if drv; then
+  cp "$DEVKEEP/macdrv" "$COMP/macdrv/VERSION"
+  check "  the staged Mac driver's record: each of the table's WINE_MACDRV_* lines it names in the rule, each other one out, saying so" drv_lines_ok
+  dev_switches_line macdrv WINE_MACDRV_SURFACE WINE_MACDRV_VIEW
+fi
 check "the install's start of Steam: session.env names the lines in the rule, install.log those left out" \
   eval '[ "$(sed -n "s/^DEV_SWITCHES=//p" "$DLOGS/session.env")" = "$(dev_expect | tr "\n" " " | sed "s/ \$//")" ] && grep -qF "dev-switches.conf: left out WINE_WIN32U_SETCURSOR=shm ($W32WHY)" "$DLOGS/install.log"'
 printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60\n' >"$DLOGS/Gw2-64_d3d11.log"
