@@ -650,8 +650,10 @@ apply_registry() {
 # macdrv (mine: my winemac.so, and my win32u.so when its build has one; engine: the engine's own),
 # fex (mine: my FEX; engine: the engine's own, the default), and jobwakes, launcherframes and
 # eventpool (rows of HEAT_SWITCHES, as fastlocks is), and metal (3 or 4: the Metal my DXMT fork
-# draws with, DXMT_METAL4 in the game's rule; 3 by default, and in a file without the key, while
-# Metal 4 stutters as the cursor moves, jdrly/dxmt#223). dxmt, wine, macdrv and fex have no row in the
+# draws with, DXMT_METAL4 in the game's rule; 4 by default, and in a file without the key, with its
+# frames presented through a Metal 3 command buffer, metal_present). A file that has metal= keeps
+# it: Install and Repair wrote metal=3 into every file while 3 was the default, and that reads as
+# my choice, so no reset. dxmt, wine, macdrv and fex have no row in the
 # Settings window: they are for my comparisons from Terminal (gw2om.sh set …). On this engine some
 # of the keys need pieces of mine that come in later steps: setting_state says so, the Settings
 # window greys them with the reason, set refuses them, and they keep what settings.conf says without
@@ -723,7 +725,7 @@ setting_default() {
     dxmt) echo fork ;;
     wine|macdrv) echo mine ;;
     fex) echo engine ;;
-    metal) echo 3 ;;
+    metal) echo 4 ;;
   esac
 }
 setting_valid() { # <key> <value>
@@ -896,7 +898,8 @@ cdb_value() {
 #   env                DXMT's shader cache in the app's cache folder (dxmt_cache: my fork's, or
 #                      the engine's DXMT's own), with my fork in place the Metal it draws with
 #                      (DXMT_METAL4=0 for Metal 3, =1 for Metal 4: the Metal row; the engine's
-#                      DXMT doesn't read it), then the switches of my ntdll.so and my Mac
+#                      DXMT doesn't read it) and at Metal 4 its present (metal_present), then the
+#                      switches of my ntdll.so and my Mac
 #                      driver (heat_entries), then FEX's (fex_entries), then, in a development
 #                      build, the lines of dev-switches.conf (dev_entries)
 # CefHost.exe, which the game starts for its launcher and the Trading Post, inherits the game's
@@ -904,7 +907,7 @@ cdb_value() {
 # unsets a variable), and the HUD while it is on. A line of compatdb.local comes after the rules
 # (write_rules), so its DXMT_METAL4 wins over the row's.
 rules_text() {
-  local game="exe=Gw2-64.exe" cef="exe=CefHost.exe" entries="" removed="" e metal=""
+  local game="exe=Gw2-64.exe" cef="exe=CefHost.exe" entries="" removed="" e metal="" present=""
   [ "$(setting rawmouse)" = on ] || game="$game;gcmouse=false"
   if [ "$(setting hud)" = on ]; then game="$game;metal_hud=true" cef="$cef;metal_hud=false"; fi
   arcdps_state
@@ -914,17 +917,36 @@ rules_text() {
   dxmt_look "$DXGI/dxmt"
   if [ "$(dxmt_in_use)" = fork ]; then
     if [ "$(setting metal)" = 4 ]; then metal=DXMT_METAL4=1; else metal=DXMT_METAL4=0; fi
+    present=$(metal_present | sed -n 's/^in //p')
   fi
   while IFS= read -r e; do
     if [ -n "$e" ]; then entries="$entries;env=$e" removed="$removed;env=${e%%=*}="; fi
   done <<EOF
 $metal
+$present
 $(heat_entries)
 $(fex_entries)
 $(dev_entries)
 EOF
   echo "$game;env=DXMT_SHADER_CACHE_PATH=$(cdb_value "$(dxmt_cache)")$entries"
   echo "$cef;env=DXMT_SHADER_CACHE_PATH=$removed"
+}
+# metal_present: my fork's present on Metal 4 for the game's rule, "in DXMT_MTL4_PRESENT=mtl3", or
+# "out DXMT_MTL4_PRESENT=mtl3 (<why>)". On Metal 4 a moving cursor makes macOS hand a present's
+# drawable back a refresh late, whatever the order of Metal 4's own present (jdrly/dxmt#223).
+# Through a Metal 3 command buffer (jdrly/dxmt#227) it is flat, and Metal 4 with it ran about 58 fps
+# median in my Lion's Arch laps, against 50.5 on Metal 3. It goes in with the Metal row at Metal 4,
+# in release and development builds alike, while my fork's tree in the engine names the switch
+# (dxmt_names, as for the DXMT lines of dev-switches.conf). A line of dev-switches.conf with the same
+# variable comes later in the rule and wins.
+metal_present() {
+  local e=DXMT_MTL4_PRESENT=mtl3 why=""
+  if [ "$(dxmt_in_use)" != fork ]; then why="$(dev_piece_label dxmt) isn't in the engine"
+  elif [ "$(setting metal)" != 4 ]; then why="the Metal row is at Metal 3"
+  else
+    case "$NL$(dxmt_names)$NL" in *"${NL}DXMT_MTL4_PRESENT$NL"*) ;; *) why="$(dev_piece_label dxmt) doesn't have it" ;; esac
+  fi
+  if [ -z "$why" ]; then echo "in $e"; else echo "out $e ($why)"; fi
 }
 
 # The game's switches in my Wine builds (jdrly/wine; they act on them in Gw2-64.exe only, which is
@@ -1067,9 +1089,10 @@ fex_entries() {
 # greyed while the line is there (dev_sets): the file's entry comes later in the rule and wins. A fork's issues are
 # jdrly/<fork>#n, the app's #n. Unplayed: no session of the game has run with it. My fork's Metal 4
 # switches (DXMT_MTL4_*) stay in with the Metal row at Metal 3, where they do nothing, so my lines
-# last through a switch of Metal; their comments say so. DXMT_MTL4_PRESENT=mtl3 is in for the Metal 4
-# cursor stutter (jdrly/dxmt#223); DXMT_MTL4_LAYER_SET (jdrly/dxmt#226), its other suspect, stays out:
-# I turn that diagnostic on by hand, so a change in play has one cause. My ntdll.so's other changes
+# last through a switch of Metal; their comments say so. DXMT_MTL4_PRESENT=mtl3 left the table at
+# version 4: the game's rule has it at Metal 4 in every build (metal_present). DXMT_MTL4_LAYER_SET
+# (jdrly/dxmt#226), a diagnostic for the same stutter, stays out: I turn it on by hand, so a change
+# in play has one cause. My ntdll.so's other changes
 # have no line: #99's counts act only with WINE_HEAT_COUNT=1, which Debug logging sets; the app sets
 # WINE_HEAT_PROF_FEX itself (#111); #101 and #104 have no switch.
 DEV_SWITCHES="
@@ -1092,10 +1115,18 @@ DEV_SWITCHES="
 1 dxmt jdrly/dxmt#5 played DXMT_PSO_ARCHIVE=1 Metal binary archives of the pipelines, looked up in the last 4 sessions' archives
 1 dxmt jdrly/dxmt#75 unplayed DXMT_PSO_GENERATIONS=1 the archives published as generations instead of one file a session
 1 dxmt jdrly/dxmt#73 unplayed DXMT_COMPILE_DEMAND=1 the compile service's declared policy (Shader warming turns it on too)
-2 dxmt jdrly/dxmt#227 unplayed DXMT_MTL4_PRESENT=mtl3 only with the Metal row at Metal 4, nothing on Metal 3: each frame is presented the Metal 3 way, through a Metal 3 command buffer, and everything else stays on Metal 4
 3 dxmt jdrly/dxmt#204 unplayed DXMT_MTL4_ALLOCATOR_POOL=1 only with the Metal row at Metal 4, nothing on Metal 3: a Metal 4 queue's chunks take their command allocator from a pool that keeps at most 8 idle, instead of one allocator per ring slot
 "
-DEV_SWITCHES_VERSION=$(printf '%s\n' "$DEV_SWITCHES" | awk 'NF && $1 > v { v = $1 } END { print v + 0 }')
+# Rows taken out of the table, "<version> <issue> <NAME=value> <off value>". dev_update brings a file
+# older than <version> up to it (dev_gone): the line as the table wrote it goes, with the comment and
+# the empty line above it. A line with another value stays, and like every line of the file it comes
+# after the rule's entries and wins. A line I commented out becomes NAME=<off value> under a comment
+# saying why, so what I turned off stays off. Version 4: DXMT_MTL4_PRESENT=mtl3, which the game's
+# rule has at Metal 4 (metal_present); mtl4 is my fork's name for Metal 4's own present.
+DEV_GONE="
+4 jdrly/dxmt#227 DXMT_MTL4_PRESENT=mtl3 mtl4
+"
+DEV_SWITCHES_VERSION=$(printf '%s\n' "$DEV_SWITCHES" "$DEV_GONE" | awk 'NF && $1 > v { v = $1 } END { print v + 0 }')
 # dev_piece_label <piece>: what the file and the log call it
 dev_piece_label() {
   case "$1" in
@@ -1121,7 +1152,7 @@ dev_file_version() {
 # dev-switches.conf written, or brought up to the table's version (the header above DEV_SWITCHES)
 dev_update() {
   [ -n "$DEV_ON" ] || return 0
-  local v since piece ref played entry text added=""
+  local v since piece ref played entry text added="" gone=""
   if [ "$(dev_version)" -lt "$DEV_ROWS_VERSION" ]; then
     say "Development build: the switch rows on, once: $(printf '%s\n' "$DEV_ROWS" | awk -v v="$(dev_version)" 'NF && $1 > v { for (i = 2; i <= NF; i++) { printf "%s%s", s, $i; s = " " } }')"
     write_settings
@@ -1133,6 +1164,8 @@ dev_update() {
     [ -n "$since" ] && [ "$since" -gt "$v" ] || continue
     grep -qE "^[#[:space:]]*${entry%%=*}=" "$DEV_FILE" 2>/dev/null || echo "$entry"
   done)
+  # (the rows taken out of the table since the file's version, for an existing file)
+  [ ! -f "$DEV_FILE" ] || gone=$(printf '%s\n' "$DEV_GONE" | awk -v v="$v" 'NF && $1 > v { print $3 }')
   {
     if [ ! -f "$DEV_FILE" ]; then
       echo "version=$DEV_SWITCHES_VERSION"
@@ -1140,12 +1173,13 @@ dev_update() {
       echo "# with what it does above it: the piece that reads it, its issue, and whether a session of"
       echo "# the game has run with it (played or unplayed). A line I comment out (#) or delete is off. The"
       echo "# game gets every line left, while the file that reads it is in place and has the switch. A"
-      echo "# newer build adds its new switches at the end, on, and changes nothing else here."
+      echo "# newer build adds its new switches at the end, on. It changes a line here only when its"
+      echo "# switch leaves the list: a line as the build wrote it goes, a line I commented out stays off."
     elif grep -q '^version=' "$DEV_FILE"; then
-      sed "s/^version=.*/version=$DEV_SWITCHES_VERSION/" "$DEV_FILE"
+      sed "s/^version=.*/version=$DEV_SWITCHES_VERSION/" "$DEV_FILE" | dev_gone "$v"
     else
       echo "version=$DEV_SWITCHES_VERSION"
-      cat "$DEV_FILE"
+      dev_gone "$v" <"$DEV_FILE"
     fi
     printf '%s\n' "$DEV_SWITCHES" | while read -r since piece ref played entry text; do
       in_list "$entry" "$added" || continue
@@ -1154,7 +1188,41 @@ dev_update() {
       echo "$entry"
     done
   } | put "$DEV_FILE" 644
-  say "dev-switches.conf: version $DEV_SWITCHES_VERSION, switched on: $(printf '%s' "${added:-nothing}" | tr '\n' ' ')"
+  say "dev-switches.conf: version $DEV_SWITCHES_VERSION, switched on: $(printf '%s' "${added:-nothing}" | tr '\n' ' ')${gone:+; out of the list: $(printf '%s' "$gone" | tr '\n' ' ')}"
+}
+# dev_gone <the file's version>: dev-switches.conf from stdin to stdout, without the rows of DEV_GONE
+# newer than the file (the header above DEV_GONE). A line commented out with spaces or more than one
+# # counts too, as dev_update's search for a name does. With a line of the variable on, one
+# commented out stays as it is. (The rows go in through the environment: macOS's awk refuses a -v
+# value with a newline.)
+dev_gone() {
+  GONE_ROWS="$DEV_GONE" awk -v v="$1" '
+    BEGIN {
+      n = split(ENVIRON["GONE_ROWS"], r, "\n")
+      for (i = 1; i <= n; i++) {
+        if (split(r[i], f, " ") < 4 || f[1] + 0 <= v + 0) continue
+        k = f[3]; sub(/=.*/, "", k); line[k] = f[3]; ref[k] = f[2]; off[k] = f[4]; since[k] = f[1]
+      }
+    }
+    { l[NR] = $0 }
+    END {
+      for (i = 1; i <= NR; i++) if (match(l[i], /^[A-Za-z_][A-Za-z0-9_]*=/)) on[substr(l[i], 1, RLENGTH - 1)] = 1
+      for (i = 1; i <= NR; i++) {
+        for (k in line) {
+          if (l[i] == line[k]) {
+            drop[i] = 1
+            if (i > 1 && index(l[i - 1], "# ") == 1 && index(l[i - 1], "(" ref[k] ")")) {
+              drop[i - 1] = 1
+              if (i > 2 && l[i - 2] == "") drop[i - 2] = 1
+            }
+          } else if (!(k in on) && l[i] ~ ("^[[:space:]]*#[#[:space:]]*" k "=")) {
+            l[i] = "# Commented out before version " since[k] ". The game\047s rule has " line[k] " now, so this keeps it off. Take this line out to use the rule\047s.\n" k "=" off[k]
+            on[k] = 1
+          }
+        }
+      }
+      for (i = 1; i <= NR; i++) if (!drop[i]) print l[i]
+    }'
 }
 # dxmt_names: the DXMT_* names in the DLLs the game loads (aarch64-windows) of my DXMT fork's tree
 # in the engine, or of this app's build without an engine, one a line (every byte that can't be in a
@@ -2339,6 +2407,11 @@ status() {
   echo "dxmt_commit=$DXMT_COMMIT"
   # (the Metal my fork draws with at the next start: 3 or 4, the Metal row)
   echo "metal=$(setting metal)"
+  # (my fork's present on Metal 4, metal_present: the game's rule's entry, or the entry and why it
+  # stays out)
+  b=$(metal_present)
+  echo "metal_present=$(printf '%s\n' "$b" | sed -n 's/^in //p')"
+  echo "metal_present_out=$(printf '%s\n' "$b" | sed -n 's/^out //p')"
   # (each of my unix libraries: the setting, the set Settings asks for (lib_state), the one in the
   # engine now (mine, engine, other, mix, none) with its commit and, if mine, its Wine release, and
   # my build's commit in this app)

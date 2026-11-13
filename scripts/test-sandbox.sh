@@ -540,13 +540,21 @@ check "  rawmouse off: mousespeed greyed, saying so first; set mousespeed 1.5 re
 g set rawmouse on >/dev/null
 check "  ok for the ones my DXMT fork brings back: metal, metalfx, warm; dxmt=fork by default" \
   [ "$(sett metal_state)/$(sett metalfx_state)/$(sett warm_state)/$(sett dxmt)/$(sett dxmt_state)" = ok/ok/ok/fork/ok ]
-check "  metal: 3 by default, in settings.conf and status; set metal 5 refused" \
-  eval '[ "$(sett metal)/$(st metal)" = 3/3 ] && grep -qx metal=3 "$AD/settings.conf" && ! "$G" set metal 5 >/dev/null 2>&1'
+check "  metal: 4 by default, in settings.conf and status; set metal 5 refused" \
+  eval '[ "$(sett metal)/$(st metal)" = 4/4 ] && grep -qx metal=4 "$AD/settings.conf" && ! "$G" set metal 5 >/dev/null 2>&1'
 # (a settings.conf from before the row: no metal= line)
 sed -i '' '/^metal=/d' "$AD/settings.conf"
-check "  a settings.conf without the key reads 3" eval '[ "$(sett metal)" = 3 ] && g rules | sed -n 1p | grep -q ";env=DXMT_METAL4=0"'
+check "  a settings.conf without the key reads 4" eval '[ "$(sett metal)" = 4 ] && g rules | sed -n 1p | grep -q ";env=DXMT_METAL4=1"'
 g set hud on >/dev/null; g set hud off >/dev/null
-check "  and the next write adds metal=3" eval 'grep -qx metal=3 "$AD/settings.conf"'
+check "  and the next write adds metal=4" eval 'grep -qx metal=4 "$AD/settings.conf"'
+# (metal=3, as Install and Repair wrote it into every file while 3 was the default, at
+# settings_version 1 and 2: my choice, never reset. The checks below run at Metal 3; the compatdb
+# rules' Metal 4 checks set 4.)
+g set metal 3 >/dev/null
+sed -i '' 's/^settings_version=.*/settings_version=1/' "$AD/settings.conf"
+check "  metal=3 in a file at settings_version 1 reads 3" [ "$(sett metal)" = 3 ]
+g set hud on >/dev/null; g set hud off >/dev/null
+check "  and stays 3 through later writes" eval '[ "$(sett metal)" = 3 ] && grep -qx metal=3 "$AD/settings.conf" && grep -qx settings_version=2 "$AD/settings.conf"'
 out=$(g set coolworkers 5 2>&1) && rc=0 || rc=$?
 check "set coolworkers 5: refused as an unknown setting" eval '[ "$rc" = 2 ] && [ "$out" = "@error Unknown setting: coolworkers=5" ]'
 check "set gamemode off: refused" sh -c "! '$G' set gamemode off >/dev/null"
@@ -961,12 +969,31 @@ rules_are() { g rules | sed "s|$H|/Users/me|g" | cmp -s - "$FIX/$1.rules"; }
 ! mine || g set wine engine >/dev/null
 check "everything off: the cache path and Metal 3 (DXMT_METAL4=0) for the game, both taken away from CefHost.exe" rules_are off
 g set metal 4 >/dev/null
-check "Metal 4: DXMT_METAL4=1 for the game, unset for CefHost.exe" rules_are metal4
+# (Metal 4's present, DXMT_MTL4_PRESENT=mtl3: in the rule only while my fork's tree in the engine
+# names it. The app's build may or may not, so the tree's DLLs give way to one without the name,
+# then to one with it, and come back after; status to a file, for grep)
+MTREE="$ENG/lib/wine/dxgi/dxmt/aarch64-windows"
+rm -rf "$SANDBOX/mtree.keep" && cp -Rp "$MTREE" "$SANDBOX/mtree.keep"
+for f in "$MTREE"/*.dll; do echo "an earlier build" >"$f"; done
+g status >"$SANDBOX/m-status.txt" 2>&1
+check "Metal 4 with a fork that doesn't name DXMT_MTL4_PRESENT: DXMT_METAL4=1 alone for the game, unset for CefHost.exe; status says why the present stays out" \
+  eval 'rules_are metal4 && grep -qx "metal_present=" "$SANDBOX/m-status.txt" && grep -qxF "metal_present_out=DXMT_MTL4_PRESENT=mtl3 (my DXMT fork doesn'"'"'t have it)" "$SANDBOX/m-status.txt"'
+printf 'x\0DXMT_MTL4_PRESENT\0' >"$MTREE/d3d11.dll"
+g status >"$SANDBOX/m-status.txt" 2>&1
+check "  one that names it: DXMT_MTL4_PRESENT=mtl3 right after DXMT_METAL4=1, unset for CefHost.exe; status says it's in" \
+  eval 'rules_are metal4-present && grep -qx "metal_present=DXMT_MTL4_PRESENT=mtl3" "$SANDBOX/m-status.txt" && grep -qx "metal_present_out=" "$SANDBOX/m-status.txt"'
+g set metal 3 >/dev/null
+g status >"$SANDBOX/m-status.txt" 2>&1
+check "  at Metal 3: none, and status says why" \
+  eval 'rules_are off && grep -qxF "metal_present_out=DXMT_MTL4_PRESENT=mtl3 (the Metal row is at Metal 3)" "$SANDBOX/m-status.txt"'
+g set metal 4 >/dev/null
+rm -rf "$MTREE" && cp -Rp "$SANDBOX/mtree.keep" "$MTREE"
+# (the app's own tree again, which may name it: the rule ends either way)
 out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
-check "  a dry run of Play prints the game's rule with it" eval 'echo "$out" | grep -qxF "[dry-run] rule $(g rules | head -1)" && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;.*;env=DXMT_METAL4=1$"'
+check "  a dry run of Play prints the game's rule with it" eval 'echo "$out" | grep -qxF "[dry-run] rule $(g rules | head -1)" && echo "$out" | grep -qE "^\[dry-run\] rule exe=Gw2-64.exe;.*;env=DXMT_METAL4=1(;env=DXMT_MTL4_PRESENT=mtl3)?$"'
 printf 'exe=Gw2-64.exe;env=DXMT_METAL4=0\n' >"$AD/compatdb.local"
 check "  a compatdb.local line comes after the rules, so its DXMT_METAL4=0 is the last word" \
-  eval '[ "$(g rules | sed -n 3p)" = "exe=Gw2-64.exe;env=DXMT_METAL4=0" ] && g rules | sed -n 1p | grep -q ";env=DXMT_METAL4=1$"'
+  eval '[ "$(g rules | sed -n 3p)" = "exe=Gw2-64.exe;env=DXMT_METAL4=0" ] && g rules | sed -n 1p | grep -qE ";env=DXMT_METAL4=1(;env=DXMT_MTL4_PRESENT=mtl3)?$"'
 rm -f "$AD/compatdb.local"
 g set dxmt engine >/dev/null
 out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
@@ -1183,15 +1210,15 @@ else
 fi
 ! mine || g set wine mine >/dev/null
 # A home with odd characters, in a fresh root: its settings.conf (the engine's ntdll.so, Debug logging off,
-# at settings_version 2 so wine=engine isn't reset) is all there is in it
+# at settings_version 2 so wine=engine isn't reset, and Metal 3, so no tree's names count) is all there is in it
 ODD="$SANDBOX/a%b;c$(printf '\t')d é"
 ODD_CONF="$ODD/home/Library/Application Support/$APP_FOLDER/settings.conf"
-mkdir -p "${ODD_CONF%/*}" && printf 'settings_version=2\nwine=engine\ndebug=off\n' >"$ODD_CONF"
+mkdir -p "${ODD_CONF%/*}" && printf 'settings_version=2\nwine=engine\ndebug=off\nmetal=3\n' >"$ODD_CONF"
 odd_rules_are() { GW2_ON_MAC_ROOT="$ODD" "$G" rules | sed "s|$SANDBOX/a%25b%3Bc%09d é/home|/Users/a%25b%3Bc%09d é|g" | cmp -s - "$FIX/$1.rules"; }
 odd_only_conf() { [ "$(cd "$ODD" && find . | LC_ALL=C sort | tr '\n' '|')" = ".|./home|./home/Library|./home/Library/Application Support|./home/Library/Application Support/$APP_FOLDER|./home/Library/Application Support/$APP_FOLDER/settings.conf|" ]; }
 check "a home with %, ; and a tab: escaped as %XX, the é as it is" eval 'odd_rules_are escaped && odd_only_conf'
 if mine; then
-  printf 'jobwakes=on\neventpool=off\ndebug=on\n' >"$ODD_CONF"
+  printf 'jobwakes=on\neventpool=off\ndebug=on\nmetal=3\n' >"$ODD_CONF"
   check "  with job wakes and Debug logging on: the logs folder escaped the same way" eval 'odd_rules_are escaped-heat && odd_only_conf'
 fi
 rm -rf "$ODD"
@@ -1568,11 +1595,21 @@ check "the session report of a Metal 3 session: Metal 3 in its header, and in pl
   eval 'echo "$out" | grep -qx "DXMT v0.80-492-g1dcb12d, Metal 3, 8 CPUs seen, display at 60 Hz" && echo "$out" | grep -qx "Metal 3" && ! echo "$out" | grep -q "^Metal 4"'
 printf 'info:  GW2 fork v0.80-489-g2483559: DXMT_STATS=1 DXMT_METAL4=1 cpus=8 refresh=60\ninfo:  METAL4 commits=159 buffers=3 allocmb=4.84 slow=0 errors=0 resadds=1124\ninfo:  METAL4 commits=309 buffers=3 allocmb=8.53 slow=0 errors=1 resadds=35987\n' >"$SANDBOX/metal4_d3d11.log"
 out=$("$APP/Contents/Resources/session-report.sh" "$SANDBOX/metal4_d3d11.log" 2>&1)
-check "  of a Metal 4 session: Metal 4 in its header, and its commits and errors" \
+check "  of a Metal 4 session from a fork without present= (before jdrly/dxmt#227): Metal 4 in its header, no present, and its commits and errors" \
   eval 'echo "$out" | grep -qx "DXMT v0.80-489-g2483559, Metal 4, 8 CPUs seen, display at 60 Hz" && echo "$out" | grep -qx "Metal 4: 468 commits, 1 errors"'
+# (the present that ran, from the METAL4 lines' present=: DXMT's log ends its lines with CR LF, so
+# the field at a line's end carries a CR)
+printf 'info:  GW2 fork v0.80-502-gfd2a772: DXMT_STATS=1 DXMT_METAL4=1 cpus=8 refresh=60\r\ninfo:  METAL4 commits=110 buffers=2 errors=0 present=mtl3\r\n' >"$SANDBOX/mtl3_d3d11.log"
+printf 'info:  GW2 fork v0.80-503-gb765673: DXMT_STATS=1 DXMT_METAL4=1 cpus=8 refresh=60\r\ninfo:  METAL4 commits=144 buffers=2 errors=0 present=done beforepass=0\r\n' >"$SANDBOX/done_d3d11.log"
+printf 'info:  GW2 fork v0.80-502-gfd2a772: DXMT_STATS=1 DXMT_METAL4=1 cpus=8 refresh=60\r\ninfo:  METAL4 commits=178 buffers=2 errors=0 present=mtl4\r\n' >"$SANDBOX/mtl4_d3d11.log"
+for k in mtl3 "done" mtl4; do "$APP/Contents/Resources/session-report.sh" "$SANDBOX/${k}_d3d11.log" >"$SANDBOX/${k}_report.txt" 2>&1; done
+check "  the present that ran on Metal 4 in the header: through a Metal 3 command buffer, after the pass's commit, or Metal 4's own" \
+  eval 'grep -qx "DXMT v0.80-502-gfd2a772, Metal 4 (present through a Metal 3 command buffer), 8 CPUs seen, display at 60 Hz" "$SANDBOX/mtl3_report.txt" && grep -qx "DXMT v0.80-503-gb765673, Metal 4 (the drawable presented once its pass.s commit completed), 8 CPUs seen, display at 60 Hz" "$SANDBOX/done_report.txt" && grep -qx "DXMT v0.80-502-gfd2a772, Metal 4 (Metal 4.s own present), 8 CPUs seen, display at 60 Hz" "$SANDBOX/mtl4_report.txt"'
 out=$("$APP/Contents/Resources/session-report.sh" --compare "$SANDBOX/metal3_d3d11.log" "$SANDBOX/metal4_d3d11.log" 2>&1 | awk '$1 == "metal4" { print $2, $3 }')
 check "  and --compare prints each one's DXMT_METAL4" [ "$out" = "0 1" ]
-rm -f "$SANDBOX/metal3_d3d11.log" "$SANDBOX/metal4_d3d11.log"
+out=$("$APP/Contents/Resources/session-report.sh" --compare "$SANDBOX/mtl3_d3d11.log" "$SANDBOX/done_d3d11.log" 2>&1 | awk '$1 == "metal4_present" { print $2, $3 }')
+check "  and each one's present" [ "$out" = "mtl3 done" ]
+rm -f "$SANDBOX/metal3_d3d11.log" "$SANDBOX/metal4_d3d11.log" "$SANDBOX"/mtl3_* "$SANDBOX"/done_* "$SANDBOX"/mtl4_*
 cp "$LOGS/session.env" "$SANDBOX/session.env.keep"
 sed -i '' -e 's/^DXMT_TREE=.*/DXMT_TREE=engine/' -e 's/^RULE=exe=Gw2-64.exe;/&gcmouse=false;/' "$LOGS/session.env"
 echo "info:  Using feature level D3D_FEATURE_LEVEL_11_1" >"$LOGS/engine-only_d3d11.log"
@@ -2608,9 +2645,10 @@ dgr() { GW2OM="$DEVR/gw2om.sh" GW2_ON_MAC_ROOT="$RROOT" GW2_ON_MAC_DEV_SWITCHES=
 DAD="$DROOT/home/Library/Application Support/$APP_FOLDER" DLOGS="$DROOT/home/Library/Logs/$APP_FOLDER"
 RAD="$RROOT/home/Library/Application Support/$APP_FOLDER"
 DEVF="$DAD/dev-switches.conf" RDEVF="$RAD/dev-switches.conf"
-# The table's rows, "<piece> <NAME=value>", and its version, read from gw2om.sh
+# The table's rows, "<piece> <NAME=value>", and its version, read from gw2om.sh: the newest of its
+# rows and of the rows taken out of it (DEV_GONE)
 DEVTABLE=$(sed -n '/^DEV_SWITCHES="$/,/^"$/p' "$APP/Contents/Resources/gw2om.sh" | awk 'NF > 4 { print $2, $5 }')
-DEVVER=$(sed -n '/^DEV_SWITCHES="$/,/^"$/p' "$APP/Contents/Resources/gw2om.sh" | awk 'NF > 4 && $1 > v { v = $1 } END { print v + 0 }')
+DEVVER=$(sed -n -e '/^DEV_SWITCHES="$/,/^"$/p' -e '/^DEV_GONE="$/,/^"$/p' "$APP/Contents/Resources/gw2om.sh" | awk 'NF > 3 && $1 > v { v = $1 } END { print v + 0 }')
 table_pieces() { local p; [ "$DEVVER" -ge 1 ] || return 1; for p in wine macdrv win32u fex fexany dxmt; do printf '%s\n' "$DEVTABLE" | grep -q "^$p " || return 1; done; }
 check "the table has switches of each piece" table_pieces
 # The components' records, narrowed: my ntdll.so names WINE_HEAT_SPIN, my winemac.so
@@ -2773,21 +2811,28 @@ check "an earlier build of my DXMT fork in the engine: its DXMT_* lines out, say
 printf 'x\0DXMT_PRESENT_QUEUE\0' >"$DTREE/d3d11.dll"
 check "  one that has DXMT_PRESENT_QUEUE: that line in, the others out" \
   eval 'dg status | grep "^dev_switches=" | grep -q DXMT_PRESENT_QUEUE=pace && dg status | sed -n "s/^dev_switches_out=//p" | grep -q "DXMT_PRESENTER_FREE=1 (my DXMT fork doesn'"'"'t have it)"'
-check "  DXMT_MTL4_PRESENT=mtl3 and DXMT_MTL4_ALLOCATOR_POOL=1 among those out, saying so" \
-  eval 'dg status | sed -n "s/^dev_switches_out=//p" >"$SANDBOX/dev-out.txt" && grep -qF "DXMT_MTL4_PRESENT=mtl3 (my DXMT fork doesn'"'"'t have it)" "$SANDBOX/dev-out.txt" && grep -qF "DXMT_MTL4_ALLOCATOR_POOL=1 (my DXMT fork doesn'"'"'t have it)" "$SANDBOX/dev-out.txt"'
-# (jdrly/dxmt#227's present switch and #204's allocator pool: in the rule only with a build that
-# names them, whatever the Metal row says, as they act only on Metal 4; status and the rules to
-# files, for grep)
-printf 'x\0DXMT_MTL4_PRESENT\0DXMT_MTL4_ALLOCATOR_POOL\0' >"$DTREE/d3d11.dll"
+dg status >"$SANDBOX/dev-status.txt" 2>&1
+check "  DXMT_MTL4_ALLOCATOR_POOL=1 among those out, and the rule's own DXMT_MTL4_PRESENT=mtl3 out at Metal 4, the default, each saying so" \
+  eval 'sed -n "s/^dev_switches_out=//p" "$SANDBOX/dev-status.txt" | grep -qF "DXMT_MTL4_ALLOCATOR_POOL=1 (my DXMT fork doesn'"'"'t have it)" && grep -qx metal=4 "$SANDBOX/dev-status.txt" && grep -qxF "metal_present_out=DXMT_MTL4_PRESENT=mtl3 (my DXMT fork doesn'"'"'t have it)" "$SANDBOX/dev-status.txt"'
+# (jdrly/dxmt#204's allocator pool: in the rule only with a build that names it, whatever the Metal
+# row says, as it acts only on Metal 4. jdrly/dxmt#227's present: the rule's own entry at Metal 4,
+# before the file's lines. Status and the rules to files, for grep)
+dtree_names() { printf 'x\0DXMT_MTL4_PRESENT\0DXMT_MTL4_ALLOCATOR_POOL\0' >"$DTREE/d3d11.dll"; }
+dtree_names
 dg status >"$SANDBOX/dev-status.txt" 2>&1; dg rules >"$SANDBOX/dev-rules.txt" 2>&1
-check "  one that has DXMT_MTL4_PRESENT: DXMT_MTL4_PRESENT=mtl3 in the game's rule with the Metal row at 3, unset for CefHost.exe" \
-  eval 'grep -q "^dev_switches=.*DXMT_MTL4_PRESENT=mtl3" "$SANDBOX/dev-status.txt" && sed -n 1p "$SANDBOX/dev-rules.txt" | grep -q ";env=DXMT_METAL4=0;.*;env=DXMT_MTL4_PRESENT=mtl3" && sed -n 2p "$SANDBOX/dev-rules.txt" | grep -qE ";env=DXMT_MTL4_PRESENT=(;|\$)"'
-check "  and DXMT_MTL4_ALLOCATOR_POOL: DXMT_MTL4_ALLOCATOR_POOL=1 in it too, unset for CefHost.exe" \
-  eval 'grep -q "^dev_switches=.*DXMT_MTL4_ALLOCATOR_POOL=1" "$SANDBOX/dev-status.txt" && sed -n 1p "$SANDBOX/dev-rules.txt" | grep -q ";env=DXMT_METAL4=0;.*;env=DXMT_MTL4_ALLOCATOR_POOL=1" && sed -n 2p "$SANDBOX/dev-rules.txt" | grep -qE ";env=DXMT_MTL4_ALLOCATOR_POOL=(;|\$)"'
-dg set metal 4 >/dev/null
-dg rules >"$SANDBOX/dev-rules.txt" 2>&1
-check "  and at Metal 4" eval 'sed -n 1p "$SANDBOX/dev-rules.txt" | grep -q ";env=DXMT_METAL4=1;.*;env=DXMT_MTL4_PRESENT=mtl3" && sed -n 1p "$SANDBOX/dev-rules.txt" | grep -q ";env=DXMT_METAL4=1;.*;env=DXMT_MTL4_ALLOCATOR_POOL=1"'
+check "  one that has both, at Metal 4: DXMT_MTL4_PRESENT=mtl3 right after DXMT_METAL4=1 and not a line of the file, DXMT_MTL4_ALLOCATOR_POOL=1 among the file's; both unset for CefHost.exe" \
+  eval 'sed -n 1p "$SANDBOX/dev-rules.txt" | grep -q ";env=DXMT_METAL4=1;env=DXMT_MTL4_PRESENT=mtl3;.*;env=DXMT_MTL4_ALLOCATOR_POOL=1" && grep -qx "metal_present=DXMT_MTL4_PRESENT=mtl3" "$SANDBOX/dev-status.txt" && grep -q "^dev_switches=.*DXMT_MTL4_ALLOCATOR_POOL=1" "$SANDBOX/dev-status.txt" && ! grep -q "^dev_switches=.*DXMT_MTL4_PRESENT" "$SANDBOX/dev-status.txt" && sed -n 2p "$SANDBOX/dev-rules.txt" | grep -q ";env=DXMT_METAL4=;env=DXMT_MTL4_PRESENT=;" && sed -n 2p "$SANDBOX/dev-rules.txt" | grep -qE ";env=DXMT_MTL4_ALLOCATOR_POOL=(;|\$)"'
+# (a line of mine with the same variable: after the rule's entry, so it wins)
+echo DXMT_MTL4_PRESENT=done >>"$DEVF"
+dg status >"$SANDBOX/dev-status.txt" 2>&1; dg rules >"$SANDBOX/dev-rules.txt" 2>&1
+check "  a DXMT_MTL4_PRESENT=done line of mine: in the rule after the rule's own entry, and in status" \
+  eval 'sed -n 1p "$SANDBOX/dev-rules.txt" | grep -qE ";env=DXMT_METAL4=1;env=DXMT_MTL4_PRESENT=mtl3;(.*;)?env=DXMT_MTL4_PRESENT=done(;|\$)" && grep -q "^dev_switches=.*DXMT_MTL4_PRESENT=done" "$SANDBOX/dev-status.txt"'
+sed -i '' '/^DXMT_MTL4_PRESENT=done$/d' "$DEVF"
 dg set metal 3 >/dev/null
+dg status >"$SANDBOX/dev-status.txt" 2>&1; dg rules >"$SANDBOX/dev-rules.txt" 2>&1
+check "  at Metal 3: no DXMT_MTL4_PRESENT, status says why; DXMT_MTL4_ALLOCATOR_POOL=1 still in" \
+  eval 'sed -n 1p "$SANDBOX/dev-rules.txt" | grep -q ";env=DXMT_METAL4=0;.*;env=DXMT_MTL4_ALLOCATOR_POOL=1" && ! grep -q DXMT_MTL4_PRESENT "$SANDBOX/dev-rules.txt" && grep -qxF "metal_present_out=DXMT_MTL4_PRESENT=mtl3 (the Metal row is at Metal 3)" "$SANDBOX/dev-status.txt"'
+dg set metal 4 >/dev/null
 rm -rf "$DTREE" && cp -Rp "$SANDBOX/dtree.keep" "$DTREE"
 if mine; then
   # (a VERSION without a switches: line names nothing for a development build's lines)
@@ -2806,44 +2851,80 @@ check "a second start (Repair) changes neither file and adds nothing" \
 sed -i '' -e 's/^version=.*/version=0/' -e '/DXMT_COMPILE_DEMAND/d' -e '/compile service.s declared policy/d' "$DEVF"
 out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
 check "Play with the file older than the table: it would write the file (dry run)" \
-  eval 'echo "$out" | grep -qxF "[dry-run] write $DEVF" && echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: DXMT_COMPILE_DEMAND=1"'
+  eval 'echo "$out" | grep -qxF "[dry-run] write $DEVF" && echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: DXMT_COMPILE_DEMAND=1; out of the list: DXMT_MTL4_PRESENT=mtl3"'
 dg repair >/dev/null 2>&1
 check "  updated: the newer switch at the end, on, under its comment; the commented-out line and mine kept" \
   eval '[ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && [ "$(tail -1 "$DEVF")" = DXMT_COMPILE_DEMAND=1 ] && tail -2 "$DEVF" | head -1 | grep -q "^# my DXMT fork " && grep -qx "#FEX_DYNAMICL1CACHE=0" "$DEVF" && ! grep -qx "FEX_DYNAMICL1CACHE=0" "$DEVF" && grep -qx MY_OWN_SWITCH=1 "$DEVF"'
 dg set metalfx off >/dev/null
 dg repair >/dev/null 2>&1
 check "a row I turn off stays off through the next update" eval 'grep -qx metalfx=off "$DAD/settings.conf" && grep -qx dev_version=1 "$DAD/settings.conf"'
-# The table's version 3 (DXMT_MTL4_ALLOCATOR_POOL) over the file of a build at version 2: that line
-# added at the end, on, under its comment, and nothing else in the file changes
+# A file at version 2: DXMT_MTL4_ALLOCATOR_POOL (version 3) added at the end, on, under its comment,
+# and nothing else changes. (A version-2 build's file had DXMT_MTL4_PRESENT=mtl3 too: the version-4
+# checks below have it.)
 sed -i '' -e 's/^version=.*/version=2/' -e '/DXMT_MTL4_ALLOCATOR_POOL/d' -e '/jdrly\/dxmt#204/d' "$DEVF"
 sed 1d "$DEVF" >"$SANDBOX/devf.v2"
 out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
-check "a file at version 2: Play would add DXMT_MTL4_ALLOCATOR_POOL=1 alone (dry run)" \
-  eval '[ "$DEVVER" = 3 ] && echo "$out" | grep -qxF "dev-switches.conf: version 3, switched on: DXMT_MTL4_ALLOCATOR_POOL=1"'
+check "a file at version 2: Play would add DXMT_MTL4_ALLOCATOR_POOL=1 alone, and say DXMT_MTL4_PRESENT=mtl3 left the list (dry run)" \
+  eval '[ "$DEVVER" = 4 ] && echo "$out" | grep -qxF "dev-switches.conf: version 4, switched on: DXMT_MTL4_ALLOCATOR_POOL=1; out of the list: DXMT_MTL4_PRESENT=mtl3"'
 dg repair >/dev/null 2>&1
 n=$(wc -l <"$DEVF" | tr -d ' ')
-awk -v n="$n" 'NR > 1 && NR <= n - 3' "$DEVF" >"$SANDBOX/devf.v3"
+awk -v n="$n" 'NR > 1 && NR <= n - 3' "$DEVF" >"$SANDBOX/devf.v4"
 tail -3 "$DEVF" >"$SANDBOX/devf.added"
-check "  updated: version=3, the line at the end under a comment saying it acts only with the Metal row at Metal 4, the rest as it was" \
-  eval '[ "$(head -1 "$DEVF")" = version=3 ] && same "$SANDBOX/devf.v2" "$SANDBOX/devf.v3" && [ -z "$(sed -n 1p "$SANDBOX/devf.added")" ] && sed -n 2p "$SANDBOX/devf.added" | grep -q "^# my DXMT fork (jdrly/dxmt#204), unplayed: only with the Metal row at Metal 4, nothing on Metal 3: " && [ "$(sed -n 3p "$SANDBOX/devf.added")" = DXMT_MTL4_ALLOCATOR_POOL=1 ]'
-# The same over a file at version 1, which has neither of the newer lines: both added, in the
-# table's order
-sed -i '' -e 's/^version=.*/version=1/' -e '/DXMT_MTL4_PRESENT/d' -e '/jdrly\/dxmt#227/d' -e '/DXMT_MTL4_ALLOCATOR_POOL/d' -e '/jdrly\/dxmt#204/d' "$DEVF"
-sed 1d "$DEVF" >"$SANDBOX/devf.v1"
+check "  updated: version=4, the line at the end under a comment saying it acts only with the Metal row at Metal 4, the rest as it was" \
+  eval '[ "$(head -1 "$DEVF")" = version=4 ] && same "$SANDBOX/devf.v2" "$SANDBOX/devf.v4" && [ -z "$(sed -n 1p "$SANDBOX/devf.added")" ] && sed -n 2p "$SANDBOX/devf.added" | grep -q "^# my DXMT fork (jdrly/dxmt#204), unplayed: only with the Metal row at Metal 4, nothing on Metal 3: " && [ "$(sed -n 3p "$SANDBOX/devf.added")" = DXMT_MTL4_ALLOCATOR_POOL=1 ]'
+# The same over a file at version 1: DXMT_MTL4_PRESENT=mtl3 isn't added any more
+sed -i '' -e 's/^version=.*/version=1/' -e '/DXMT_MTL4_ALLOCATOR_POOL/d' -e '/jdrly\/dxmt#204/d' "$DEVF"
 out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
-check "a file at version 1: Play would add DXMT_MTL4_PRESENT=mtl3 and DXMT_MTL4_ALLOCATOR_POOL=1 (dry run)" \
-  eval 'echo "$out" | grep -qxF "dev-switches.conf: version 3, switched on: DXMT_MTL4_PRESENT=mtl3 DXMT_MTL4_ALLOCATOR_POOL=1"'
+check "a file at version 1: Play would add DXMT_MTL4_ALLOCATOR_POOL=1 alone, not DXMT_MTL4_PRESENT=mtl3 (dry run)" \
+  eval 'echo "$out" | grep -qxF "dev-switches.conf: version 4, switched on: DXMT_MTL4_ALLOCATOR_POOL=1; out of the list: DXMT_MTL4_PRESENT=mtl3"'
+dg repair >/dev/null 2>&1
+# The table's version 4 over the file of a build at version 3, which has DXMT_MTL4_PRESENT=mtl3
+# under the comment that build wrote (here at the end): as written, the line and its comment go; a
+# value I changed stays; commented out, it becomes DXMT_MTL4_PRESENT=mtl4. Nothing else changes.
+cp "$DEVF" "$SANDBOX/devf.now"
+v3_present() { # <line>: the file as a version-3 build would have it, <line> last under its comment
+  { echo version=3; sed 1d "$SANDBOX/devf.now"; echo
+    echo "# my DXMT fork (jdrly/dxmt#227), unplayed: only with the Metal row at Metal 4, nothing on Metal 3: each frame is presented the Metal 3 way, through a Metal 3 command buffer, and everything else stays on Metal 4"
+    echo "$1"; } >"$DEVF"
+}
+v3_present DXMT_MTL4_PRESENT=mtl3
+out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
+check "a file at version 3 with DXMT_MTL4_PRESENT=mtl3: Play would switch nothing on and say it left the list (dry run)" \
+  eval 'echo "$out" | grep -qxF "dev-switches.conf: version 4, switched on: nothing; out of the list: DXMT_MTL4_PRESENT=mtl3"'
+dg repair >/dev/null 2>&1
+check "  updated: the line, its comment and the empty line above them gone, version=4, the rest as it was" same "$DEVF" "$SANDBOX/devf.now"
+v3_present DXMT_MTL4_PRESENT=done
+sed 1d "$DEVF" >"$SANDBOX/devf.v3"
+dg repair >/dev/null 2>&1
+dtree_names
+dg rules >"$SANDBOX/dev-rules.txt" 2>&1
+check "  a DXMT_MTL4_PRESENT=done line (a value I changed): kept with its comment, and in the rule after the rule's own entry, so it wins" \
+  eval '[ "$(head -1 "$DEVF")" = version=4 ] && [ "$(sed 1d "$DEVF")" = "$(cat "$SANDBOX/devf.v3")" ] && sed -n 1p "$SANDBOX/dev-rules.txt" | grep -qE ";env=DXMT_METAL4=1;env=DXMT_MTL4_PRESENT=mtl3;(.*;)?env=DXMT_MTL4_PRESENT=done(;|\$)"'
+rm -rf "$DTREE" && cp -Rp "$SANDBOX/dtree.keep" "$DTREE"
+v3_present '#DXMT_MTL4_PRESENT=mtl3'
+n=$(wc -l <"$DEVF" | tr -d ' ')
+awk -v n="$n" 'NR > 1 && NR < n' "$DEVF" >"$SANDBOX/devf.v3"
 dg repair >/dev/null 2>&1
 n=$(wc -l <"$DEVF" | tr -d ' ')
-awk -v n="$n" 'NR > 1 && NR <= n - 6' "$DEVF" >"$SANDBOX/devf.v3"
-tail -6 "$DEVF" >"$SANDBOX/devf.added"
-check "  updated: version=3, the two lines at the end in the table's order, each under its comment, the rest as it was" \
-  eval '[ "$(head -1 "$DEVF")" = version=3 ] && same "$SANDBOX/devf.v1" "$SANDBOX/devf.v3" && [ -z "$(sed -n 1p "$SANDBOX/devf.added")" ] && sed -n 2p "$SANDBOX/devf.added" | grep -q "^# my DXMT fork (jdrly/dxmt#227), unplayed: " && [ "$(sed -n 3p "$SANDBOX/devf.added")" = DXMT_MTL4_PRESENT=mtl3 ] && [ -z "$(sed -n 4p "$SANDBOX/devf.added")" ] && sed -n 5p "$SANDBOX/devf.added" | grep -q "^# my DXMT fork (jdrly/dxmt#204), unplayed: " && [ "$(sed -n 6p "$SANDBOX/devf.added")" = DXMT_MTL4_ALLOCATOR_POOL=1 ]'
+awk -v n="$n" 'NR > 1 && NR < n - 1' "$DEVF" >"$SANDBOX/devf.v4"
+dtree_names
+dg rules >"$SANDBOX/dev-rules.txt" 2>&1
+check "  commented out (to play Metal 4's own present): DXMT_MTL4_PRESENT=mtl4 in its place under a comment saying why, the rest as it was, and in the rule after the rule's own entry" \
+  eval '[ "$(head -1 "$DEVF")" = version=4 ] && same "$SANDBOX/devf.v3" "$SANDBOX/devf.v4" && [ "$(tail -1 "$DEVF")" = DXMT_MTL4_PRESENT=mtl4 ] && tail -2 "$DEVF" | head -1 | grep -q "^# Commented out before version 4\. The game.s rule has DXMT_MTL4_PRESENT=mtl3 now, so this keeps it off\." && sed -n 1p "$SANDBOX/dev-rules.txt" | grep -qE ";env=DXMT_METAL4=1;env=DXMT_MTL4_PRESENT=mtl3;(.*;)?env=DXMT_MTL4_PRESENT=mtl4(;|\$)"'
+rm -rf "$DTREE" && cp -Rp "$SANDBOX/dtree.keep" "$DTREE"
 
 # A release: no file, its defaults; a file there anyway changes nothing
 out=$(rg install steam 2>&1) && rc=0 || rc=$?
 check "a release's install: no dev-switches.conf, the rows at their defaults, no dev_version" \
   eval '[ "$rc" = 0 ] && [ ! -e "$RDEVF" ] && grep -qx fastlocks=off "$RAD/settings.conf" && grep -qx launcherframes=off "$RAD/settings.conf" && grep -qx fex=engine "$RAD/settings.conf" && ! grep -q "^dev_version=" "$RAD/settings.conf"'
+# (Metal 4's present in a release too: the release's tree given a DLL that names it, and back)
+RTREE="$RAD/engine/lib/wine/dxgi/dxmt/aarch64-windows"
+rm -rf "$SANDBOX/rtree.keep" && cp -Rp "$RTREE" "$SANDBOX/rtree.keep"
+printf 'x\0DXMT_MTL4_PRESENT\0' >"$RTREE/d3d11.dll"
+rg rules >"$SANDBOX/rel-rules.txt" 2>&1
+check "  at Metal 4, its default, with a fork that names DXMT_MTL4_PRESENT: DXMT_MTL4_PRESENT=mtl3 right after DXMT_METAL4=1, unset for CefHost.exe" \
+  eval 'grep -qx metal=4 "$RAD/settings.conf" && sed -n 1p "$SANDBOX/rel-rules.txt" | grep -qE ";env=DXMT_METAL4=1;env=DXMT_MTL4_PRESENT=mtl3(;|\$)" && sed -n 2p "$SANDBOX/rel-rules.txt" | grep -qE ";env=DXMT_METAL4=;env=DXMT_MTL4_PRESENT=(;|\$)"'
+rm -rf "$RTREE" && cp -Rp "$SANDBOX/rtree.keep" "$RTREE"
 rules_before=$(rg rules)
 cp "$DEVF" "$RDEVF"
 check "  dev-switches.conf there by hand: the rules, status and a dry run of Play don't read it" \

@@ -74,7 +74,10 @@
 #            window's count, total and longest (wait=Nx total/max ms)
 #   WARM     shader warming: pipelines planned and built ahead (DXMT_WARM)
 #   PRESENT  presentation: presented-to-display latency, missed and dropped frames
-#   METAL4   Metal 4 commits and errors
+#   METAL4   Metal 4 commits and errors, and present=, the present that ran on Metal 4: mtl3
+#            through a Metal 3 command buffer (DXMT_MTL4_PRESENT=mtl3, which the game's rule has at
+#            Metal 4), done once the pass's commit completed, mtl4 Metal 4's own. A fork from before
+#            jdrly/dxmt#227 writes none, and the report names none.
 # Also in Collect Logs (session-report.txt). Runs under macOS's /bin/bash 3.2 and awk.
 set -euo pipefail
 # The app's logs folder (as gw2om.sh's APP_FOLDER)
@@ -108,7 +111,7 @@ summary() {
     /GW2 fork .*: DXMT_STATS=/ {
       # a new session: forget the one before
       n = 0; delete fps; summs = 0; maxms = 0; hitches = 0; worst = 0; delete dx; variants = 0; builtp = 0
-      failed = 0; waits = 0; waitms = 0; waitmax = 0; warm = ""; warmp = 0; present = ""; m4commits = 0; m4errors = 0; cb = 0; rp = 0
+      failed = 0; waits = 0; waitms = 0; waitmax = 0; warm = ""; warmp = 0; present = ""; m4commits = 0; m4errors = 0; m4present = ""; cb = 0; rp = 0
       enc = 0; missed = 0; dropped = 0; slowc = 0
       v = $0; sub(/.*GW2 fork /, "", v); sub(/:.*/, "", v); version = v
       c = $0; cpus = (match(c, /cpus=[0-9]+/) ? substr(c, RSTART + 5, RLENGTH - 5) : "?")
@@ -148,7 +151,7 @@ summary() {
     /info: +PRESENT presented=/ {
       present = val($0, "presented"); missed += val($0, "missed") + 0; dropped += val($0, "dropped") + 0; next
     }
-    /info: +METAL4 commits=/ { m4commits += val($0, "commits") + 0; m4errors += val($0, "errors") + 0; next }
+    /info: +METAL4 commits=/ { m4commits += val($0, "commits") + 0; m4errors += val($0, "errors") + 0; p = val($0, "present"); sub(/\r$/, "", p); if (p != "") m4present = p; next }
     /info: +GPU .*frames=/ { frames += val($0, "frames"); next }
     END {
       if (!sessions) { print "sessions=0"; exit }
@@ -169,7 +172,7 @@ summary() {
       print "variants=" variants; print "pipelines_built=" builtp; print "compile_failed=" failed
       printf "compile_waits=%d\ncompile_wait_ms=%.0f\ncompile_wait_max=%.1f\n", waits, waitms, waitmax
       print "warm=" warm; print "present=" present; print "missed=" missed; print "dropped=" dropped
-      print "metal4=" metal4; print "metal4_commits=" m4commits; print "metal4_errors=" m4errors
+      print "metal4=" metal4; print "metal4_present=" m4present; print "metal4_commits=" m4commits; print "metal4_errors=" m4errors
       print "gpu_frames=" frames
     }' "$1"
 }
@@ -540,11 +543,18 @@ fex_report() {
 }
 
 report() {  # <log>
-  local s ran="" s_dev m metal=""
+  local s ran="" s_dev m metal="" way=""
   s=$(summary "$1")
-  # (the Metal it drew with, from the fork's startup line; nothing from a fork that doesn't name it)
+  # (the Metal it drew with, from the fork's startup line; nothing from a fork that doesn't name it;
+  # on Metal 4 the present that ran, from the METAL4 lines)
   m=$(get "$s" metal4)
-  if [ "$m" = 1 ]; then metal="Metal 4"
+  if [ "$m" = 1 ]; then
+    metal="Metal 4"
+    case "$(get "$s" metal4_present)" in
+      mtl3) way="present through a Metal 3 command buffer" ;;
+      done) way="the drawable presented once its pass's commit completed" ;;
+      mtl4) way="Metal 4's own present" ;;
+    esac
   elif [ "$m" = unsupported ]; then metal="Metal 3 (Metal 4 asked for, not available)"
   elif [ -n "$m" ]; then metal="Metal 3"
   fi
@@ -580,7 +590,7 @@ report() {  # <log>
     esac
     return
   fi
-  echo "DXMT $(get "$s" version),${metal:+ $metal,} $(get "$s" cpus) CPUs seen, display at $(get "$s" refresh) Hz"
+  echo "DXMT $(get "$s" version),${metal:+ $metal${way:+ ($way)},} $(get "$s" cpus) CPUs seen, display at $(get "$s" refresh) Hz"
   if [ -f "$LOGS/session.env" ] && [ "$(dirname "$1")" = "$LOGS" ]; then
     echo "Settings at the start: $(sed -n 's/^SETTING_//p' "$LOGS/session.env" | tr '\n' ' ')"
   fi
@@ -611,7 +621,7 @@ compare() {  # <A> <B>
   a=$(summary "$1"); b=$(summary "$2")
   printf '%-34s %18s %18s\n' "" "A" "B"
   printf '%-34s %18s %18s\n' "log" "$(basename "$1")" "$(basename "$2")"
-  for k in version metal4 fps_median fps_low fps_min ms_avg ms_max cb rp encode hitches hitch_worst variants pipelines_built \
+  for k in version metal4 metal4_present fps_median fps_low fps_min ms_avg ms_max cb rp encode hitches hitch_worst variants pipelines_built \
     compile_waits compile_wait_ms compile_wait_max missed dropped metal4_errors; do
     printf '%-34s %18s %18s\n' "$k" "$(get "$a" "$k" | cut -c1-18)" "$(get "$b" "$k" | cut -c1-18)"
   done

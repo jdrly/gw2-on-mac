@@ -123,7 +123,7 @@ func installer(_ state: String) -> Installer {
   var st: [String: String] = [
     "version": "0.2.0-dev.2", "engine": "mach9-v0.3.1", "engine_title": "Mach9 0.3.1 · Wine 11.21",
     "engine_dxmt": "d903db89036", "dxmt": "fork", "dxmt_tree": "fork", "dxmt_version": "v0.80-489-g2483559",
-    "dxmt_release": "0.80", "dxmt_commit": "2483559", "metal": "3",
+    "dxmt_release": "0.80", "dxmt_commit": "2483559", "metal": "4",
     "wine": "mine", "wine_ready": "yes", "wine_file": "mine", "wine_commit": "d831f808236c", "wine_release": "11.21",
     "wine_build": "d831f808236c",
     "macdrv": "mine", "macdrv_ready": "yes", "macdrv_file": "mine", "macdrv_commit": "d831f808236c", "macdrv_release": "11.21",
@@ -274,7 +274,7 @@ func session(_ state: String) -> Installer.LaunchSession {
 @MainActor
 func settings(_ extra: [String: String] = [:]) -> GameSettings {
   let s = GameSettings()
-  s.preview(["installed": "yes", "running": "no", "retina": "on", "fpscap": "off", "metal": "3", "metalfx": "off", "hud": "off",
+  s.preview(["installed": "yes", "running": "no", "retina": "on", "fpscap": "off", "metal": "4", "metalfx": "off", "hud": "off",
              "warm": "on", "fastlocks": "off", "ncpu": "8", "uiscale": "off", "uiscale_addon": "off",
              "uiscale_size": "1.75", "uiscale_sans": "on", "uiscale_cinema": "off", "gamemode": "on", "launchopts": "",
              "route": "steam", "updates": "off", "debug": "off", "steambg": "on", "quitsteam": "on", "cpus": "12",
@@ -378,9 +378,9 @@ func renderAll(_ dir: URL, exports: URL?) async {
   do {
     let ready = installer("ready").status
     let cases: [([String: String], String)] = [
-      (ready, "DXMT 0.80 · 2483559 · Metal 3"),
-      (ready.merging(["metal": "4"]) { $1 }, "DXMT 0.80 · 2483559 · Metal 4"),
-      (installer("ready-engine").status.merging(["metal": "4"]) { $1 }, "DXMT · d903db8"),
+      (ready, "DXMT 0.80 · 2483559 · Metal 4"),
+      (ready.merging(["metal": "3"]) { $1 }, "DXMT 0.80 · 2483559 · Metal 3"),
+      (installer("ready-engine").status, "DXMT · d903db8"),
       (ready.filter { $0.key != "metal" }, "DXMT 0.80 · 2483559"),
     ]
     for (s, want) in cases where ThisMac.dxmtMetal(s) != want {
