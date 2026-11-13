@@ -1076,7 +1076,9 @@ fex_entries() {
 # switches (DXMT_MTL4_*) stay in with the Metal row at Metal 3, where they do nothing, so my lines
 # last through a switch of Metal; their comments say so. DXMT_MTL4_PRESENT=mtl3 is in for the Metal 4
 # cursor stutter (jdrly/dxmt#223); DXMT_MTL4_LAYER_SET (jdrly/dxmt#226), its other suspect, stays out:
-# I turn that diagnostic on by hand, so a change in play has one cause.
+# I turn that diagnostic on by hand, so a change in play has one cause. My ntdll.so's other changes
+# have no line: #99's counts act only with WINE_HEAT_COUNT=1, which Debug logging sets; the app sets
+# WINE_HEAT_PROF_FEX itself (#111); #101 and #104 have no switch.
 DEV_SWITCHES="
 1 wine #14,#45 unplayed WINE_HEAT_SPIN=lock=20:game,event=30:game,sem=5:game the Faster locks row's two spins, and the job workers spin 5 µs on their semaphore before they sleep. While this line is here, its value replaces the row's.
 1 macdrv #62 unplayed WINE_MACDRV_VIEW=changes a window's view frame goes to the main thread only when it changed
