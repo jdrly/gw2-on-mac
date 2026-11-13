@@ -6,8 +6,7 @@
 // time the game starts.
 //
 // On this line some settings need pieces of mine that come in later steps. gw2om.sh settings says
-// which (<key>_state=off:<reason>): their rows are greyed with the reason under them. A setting
-// that works but is untested here has a note instead (<key>_note).
+// which (<key>_state=off:<reason>): their rows are greyed with the reason under them.
 
 import AppKit
 import SwiftUI
@@ -347,11 +346,6 @@ struct SettingsView: View {
     return String(state.dropFirst(4))
   }
 
-  // a setting that works but is untested on this engine (<key>_note)
-  private func untested(_ key: String) -> String? {
-    settings.values["\(key)_note"].flatMap { $0.isEmpty ? nil : $0 }
-  }
-
   @ViewBuilder private func pane(_ pane: SettingsPane) -> some View {
     switch pane {
     case .graphics:
@@ -364,7 +358,7 @@ struct SettingsView: View {
         }
       }
       SettingsGroup {
-        SettingRow("Metal", "Metal 3 draws smoothly. Metal 4 is the newer path, and for now it stutters while the cursor moves.", off: off("metal")) {
+        SettingRow("Metal", "Metal 4 is the newer path. Switch to Metal 3 for better backwards compatibility.", off: off("metal")) {
           InkPopup(selection: settings.choice("metal", "3"), options: GameSettings.metals)
         }
         SettingRow("MetalFX for Subsample", "MetalFX upscales the 3D scene and the interface stays sharp. It works only with the game's Render Sampling set to Subsample, and does nothing at Native. Experimental.", off: off("metalfx")) {
@@ -403,12 +397,12 @@ struct SettingsView: View {
 
     case .interface:
       SettingsGroup {
-        SettingRow("Larger interface", interfaceDescription, note: untested("uiscale")) {
+        SettingRow("Larger interface", interfaceDescription) {
           InkSwitch(isOn: Binding(get: { settings.values["uiscale"] == "on" }, set: { on in
             if on { confirmInterface = true } else { settings.set("uiscale", "off") }
           }))
         }
-        SettingRow("arcdps", arcdpsDescription, progress: arcdpsFraction, note: untested("arcdps")) {
+        SettingRow("arcdps", arcdpsDescription, progress: arcdpsFraction) {
           InkSwitch(isOn: Binding(get: { settings.values["arcdps"] == "on" }, set: { on in
             if on { confirmArcdps = true } else { settings.setArcdps(false) }
           }))
@@ -424,13 +418,13 @@ struct SettingsView: View {
         note("info", result, Brand.fg3)
       }
       SettingsGroup {
-        SettingRow("Interface Size \"Larger\"", "How large the game's Larger size draws, from the game's own pre-rendered fonts.", note: untested("uiscale_size")) {
+        SettingRow("Interface Size \"Larger\"", "How large the game's Larger size draws, from the game's own pre-rendered fonts.") {
           InkPopup(selection: settings.choice("uiscale_size", "1.75"), options: GameSettings.interfaceScales)
         }
-        SettingRow("Small text in Cronos", "Chat, the tracker and labels have no larger font of their own: draws them in the game's Cronos face at the larger size, sharp.", note: untested("uiscale_sans")) {
+        SettingRow("Small text in Cronos", "Chat, the tracker and labels have no larger font of their own: draws them in the game's Cronos face at the larger size, sharp.") {
           InkSwitch(isOn: settings.toggle("uiscale_sans"))
         }
-        SettingRow("Cinematic dialogue", "Story cinematics' dialogue sizes itself apart from the interface. Draws it at the same size as the rest (a small code patch).", note: untested("uiscale_cinema")) {
+        SettingRow("Cinematic dialogue", "Story cinematics' dialogue sizes itself apart from the interface. Draws it at the same size as the rest (a small code patch).") {
           InkSwitch(isOn: settings.toggle("uiscale_cinema"))
         }
       }
@@ -703,17 +697,14 @@ struct SettingRow<Control: View>: View {
   var progress: Double?
   // why the setting is off on this engine: the control is greyed and this shows under the detail
   var off: String?
-  // a warning that shows under the detail, the control staying as it is (untested on this engine)
-  var note: String?
   @ViewBuilder var control: Control
 
-  init(_ title: String, _ detail: String, progress: Double? = nil, off: String? = nil, note: String? = nil,
+  init(_ title: String, _ detail: String, progress: Double? = nil, off: String? = nil,
        @ViewBuilder control: () -> Control) {
     self.title = title
     self.detail = detail
     self.progress = progress
     self.off = off
-    self.note = note
     self.control = control()
   }
 
@@ -723,12 +714,12 @@ struct SettingRow<Control: View>: View {
         Text(title).font(.body(14, .bold)).bodyBox(14).foregroundStyle(Brand.fg)
         Text(detail).font(.body(12.5)).bodyBox(12.5, 1.3).foregroundStyle(Brand.fg2)
           .fixedSize(horizontal: false, vertical: true)
-        if let line = off ?? note {
+        if let off {
           HStack(alignment: .top, spacing: 6) {
-            LucideIcon(name: off != nil ? "info" : "triangle-alert", size: 12).padding(.top, 1)
-            Text(line).font(.body(12.5, .semibold)).bodyBox(12.5, 1.3).fixedSize(horizontal: false, vertical: true)
+            LucideIcon(name: "info", size: 12).padding(.top, 1)
+            Text(off).font(.body(12.5, .semibold)).bodyBox(12.5, 1.3).fixedSize(horizontal: false, vertical: true)
           }
-          .foregroundStyle(off != nil ? Brand.fg3 : Brand.accent)
+          .foregroundStyle(Brand.fg3)
           .padding(.top, 3)
         }
         if let progress {

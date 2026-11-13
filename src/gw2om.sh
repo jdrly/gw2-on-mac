@@ -52,7 +52,7 @@
 #                              DXMT's log and the watcher's session file; the window polls it
 #   gw2om.sh show-steam        brings Steam's window up (steam.exe steam://open/main in the bottle)
 #   gw2om.sh settings          KEY=VALUE lines: the settings (Settings window), and for each
-#                              <key>_state=ok or off:<reason> (setting_state) and maybe <key>_note
+#                              <key>_state=ok or off:<reason> (setting_state)
 #   gw2om.sh set K V           change one setting (see setting_valid); refuses one that is off
 #   gw2om.sh set arcdps on|off arcdps into the game folder (downloaded from deltaconnected.com,
 #                              checked against its published md5) or out of it (only arcdps; its
@@ -789,13 +789,6 @@ setting_state() {
       elif [ "$l" = macdrv ]; then echo "off:My Mac driver in this app (jdrly/wine $(lib_commit macdrv | cut -c1-11)) doesn't have this switch."
       else echo "off:My Wine build in this app (jdrly/wine $(lib_commit wine | cut -c1-11)) doesn't have this switch."
       fi ;;
-  esac
-}
-# setting_note <key>: what the window shows under a setting that works but is untested here
-setting_note() {
-  case "$1" in
-    uiscale|uiscale_size|uiscale_sans) echo "Untested on this engine." ;;
-    uiscale_cinema|arcdps) echo "A code patch, untested under FEX." ;;
   esac
 }
 write_settings() { # [<key> <value>]: settings.conf with every key, one of them changed
@@ -2407,17 +2400,14 @@ status() {
 }
 
 settings() {
-  local k n
+  local k
   echo "installed=$([ -f "$MANIFEST" ] && echo yes || echo no)"
   if session_running; then echo "running=yes"; else echo "running=no"; fi
   echo "route=$(state route)"
   for k in $SETTING_KEYS; do
     echo "$k=$(setting "$k")"
     echo "${k}_state=$(setting_state "$k")"
-    n=$(setting_note "$k")
-    [ -z "$n" ] || echo "${k}_note=$n"
   done
-  echo "arcdps_note=$(setting_note arcdps)"
   echo "uiscale_addon=$(uiscale_state)"
   arcdps_state
   echo "arcdps=$([ "$ARC" = on ] && echo on || echo off)"

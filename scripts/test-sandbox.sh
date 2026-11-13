@@ -547,8 +547,6 @@ sed -i '' '/^metal=/d' "$AD/settings.conf"
 check "  a settings.conf without the key reads 3" eval '[ "$(sett metal)" = 3 ] && g rules | sed -n 1p | grep -q ";env=DXMT_METAL4=0"'
 g set hud on >/dev/null; g set hud off >/dev/null
 check "  and the next write adds metal=3" eval 'grep -qx metal=3 "$AD/settings.conf"'
-check "  the larger interface's settings and arcdps carry a note" \
-  [ "$(g settings | sed -n 's/^\([a-z_]*\)_note=.*/\1/p' | tr '\n' ' ')" = "uiscale uiscale_size uiscale_sans uiscale_cinema arcdps " ]
 out=$(g set coolworkers 5 2>&1) && rc=0 || rc=$?
 check "set coolworkers 5: refused as an unknown setting" eval '[ "$rc" = 2 ] && [ "$out" = "@error Unknown setting: coolworkers=5" ]'
 check "set gamemode off: refused" sh -c "! '$G' set gamemode off >/dev/null"
