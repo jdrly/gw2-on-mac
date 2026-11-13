@@ -69,8 +69,8 @@ open it.
 
 The window offers three ways in. Pick one and its card opens. The *This Mac* panel checks macOS,
 the engine, the graphics, Game Mode, the game and the free space. A check whose text is too long
-for one line, such as the engine's while a switch waits for the next Play, goes on to a second
-line between two of its parts, and its row grows with it.
+for one line, such as the engine's while a switch waits for the next Play, goes on to the next
+line, between two of its parts where it can, and its row grows with it.
 
 **Steam.** The app downloads the engine, creates the bottle, installs Steam from Valve's CDN and
 opens Steam's install page for Guild Wars 2. You sign in to Steam and the download starts. Your

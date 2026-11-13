@@ -500,11 +500,13 @@ struct CheckCell: View {
     .accessibilityElement(children: .combine)
   }
 
-  // The value in full: too long for one line, it wraps after a " · ", never inside a part ("at the
-  // next Play") or before its dot (no-break spaces there)
+  // The value in full: too long for one line, it wraps after a " · ", never before its dot or
+  // inside a part of up to 24 characters ("at the next Play", "winemac and win32u mixed": no-break
+  // spaces there). A longer part, Repair's "ntdll and winemac and FEX needs Repair", is wider than
+  // the cell, so it wraps between its words.
   private var wrapping: String {
     check.value.components(separatedBy: " · ")
-      .map { $0.replacingOccurrences(of: " ", with: "\u{00A0}") }
+      .map { $0.count > 24 ? $0 : $0.replacingOccurrences(of: " ", with: "\u{00A0}") }
       .joined(separator: "\u{00A0}· ")
   }
 
