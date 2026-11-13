@@ -904,14 +904,21 @@ cdb_value() {
 #                      build, the lines of dev-switches.conf (dev_entries)
 # CefHost.exe, which the game starts for its launcher and the Trading Post, inherits the game's
 # variables: the rule takes the cache path and the switches away from it again (an empty value
-# unsets a variable), and the HUD while it is on. A line of compatdb.local comes after the rules
-# (write_rules), so its DXMT_METAL4 wins over the row's.
+# unsets a variable), and the HUD while it is on. rundll32.exe gets the game's d3d11 and dxgi
+# order while an addon is there. arcdps's crash handler shows its crash window through rundll32,
+# with the game folder's d3d11.dll and the entry point c_exceptionerrormsg. In Wine's default
+# order rundll32 loads Wine's own d3d11 in place of that file, since arcdps's version block names
+# no company (version_heuristics in Wine's loadorder.c), and that d3d11 has no such entry point
+# (#155). A line of compatdb.local comes after the rules (write_rules), so its DXMT_METAL4 wins
+# over the row's.
 rules_text() {
-  local game="exe=Gw2-64.exe" cef="exe=CefHost.exe" entries="" removed="" e metal="" present=""
+  local game="exe=Gw2-64.exe" cef="exe=CefHost.exe" rundll="" entries="" removed="" e metal="" present=""
   [ "$(setting rawmouse)" = on ] || game="$game;gcmouse=false"
   if [ "$(setting hud)" = on ]; then game="$game;metal_hud=true" cef="$cef;metal_hud=false"; fi
   arcdps_state
-  case "$ARC" in on|foreign) game="$game;dll_overrides=d3d11,dxgi=n,b" ;; esac
+  case "$ARC" in
+    on|foreign) game="$game;dll_overrides=d3d11,dxgi=n,b" rundll="exe=rundll32.exe;dll_overrides=d3d11,dxgi=n,b" ;;
+  esac
   [ "$(setting uiscale)" != on ] || game="$game;dll_overrides=version=n,b"
   # (the tree read once for this run: dxmt_cache asks again)
   dxmt_look "$DXGI/dxmt"
@@ -930,6 +937,7 @@ $(dev_entries)
 EOF
   echo "$game;env=DXMT_SHADER_CACHE_PATH=$(cdb_value "$(dxmt_cache)")$entries"
   echo "$cef;env=DXMT_SHADER_CACHE_PATH=$removed"
+  [ -z "$rundll" ] || echo "$rundll"
 }
 # metal_present: my fork's present on Metal 4 for the game's rule, "in DXMT_MTL4_PRESENT=mtl3", or
 # "out DXMT_MTL4_PRESENT=mtl3 (<why>)". On Metal 4 a moving cursor makes macOS hand a present's

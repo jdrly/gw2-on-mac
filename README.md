@@ -891,6 +891,13 @@ came up.
 Without an addon the game gets the built-in directly. Steam and the launcher keep Wine's default
 order.
 
+`rundll32.exe` gets the same `n,b` while an addon is there. When the game crashes, arcdps's crash
+handler starts `rundll32` with the game folder's `d3d11.dll` and its `c_exceptionerrormsg` entry
+point to show its crash window. In Wine's default order rundll32 would load Wine's own `d3d11`
+instead of that file, because arcdps's version information names no company (Wine's
+`version_heuristics`). The entry point would then be missing, and the game would close without a
+word (#155).
+
 arcdps updates itself, so the app can't recognise it by hash. A `d3d11.dll` or `dxgi.dll` counts as
 arcdps when it's a PE whose export directory lists `addextension2`, arcdps's extension API, and the
 file names arcdps. Other addons may mention arcdps and look up its exports, but they don't export
