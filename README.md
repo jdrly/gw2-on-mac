@@ -68,7 +68,9 @@ open it.
 ## Installing the game
 
 The window offers three ways in. Pick one and its card opens. The *This Mac* panel checks macOS,
-the engine, the graphics, Game Mode, the game and the free space.
+the engine, the graphics, Game Mode, the game and the free space. A check whose text is too long
+for one line, such as the engine's while a switch waits for the next Play, goes on to the next
+line, between two of its parts where it can, and its row grows with it.
 
 **Steam.** The app downloads the engine, creates the bottle, installs Steam from Valve's CDN and
 opens Steam's install page for Guild Wars 2. You sign in to Steam and the download starts. Your
@@ -446,9 +448,9 @@ the engine again and puts the asked-for tree in.
 It also prints my fork's build in the app: `dxmt_version` (its `VERSION`'s first line, such as
 `v0.80-489-g2483559`), `dxmt_release` (`0.80`) and `dxmt_commit`. The *This Mac* panel's Graphics
 cell shows `DXMT 0.80 · 2483559 · Metal 3` for my fork, with the Metal the next start uses
-(`status` prints it as `metal`), and `DXMT · d903db8`, athei's commit, for the engine's own. The
-cell has no room for the Metal next to `at the next Play` or `needs Repair`, so it shows it only
-when the tree is in place.
+(`status` prints it as `metal`), and `DXMT · d903db8`, athei's commit, for the engine's own. It
+shows the Metal only when the tree is in place; otherwise it says `at the next Play` or
+`needs Repair`.
 To tell my fork's tree from an earlier build, the script compares every file of
 `components/dxmt` (44 MB in `0.2.0-dev.3`) with the tree. Play and `status` do that once and
 reuse the answer for the rest of the command, until a swap changes the tree.

@@ -365,7 +365,8 @@ struct ThisMac: View {
     return good == 6 ? "6 checks · all good" : "\(good) of 6 ready"
   }
 
-  private var checks: [Check] {
+  // (not private: ui-render.swift checks the Engine's text in its renders of the long ones)
+  var checks: [Check] {
     let s = installer.status
     guard installer.loaded else {
       return ["macOS", "Engine", "Graphics", "Game Mode", "Guild Wars 2", "Disk space"].map {
@@ -426,7 +427,7 @@ struct ThisMac: View {
                       "Guild Wars 2": "swords", "Disk space": "hard-drive"]
 
   // The Wine the engine runs, from the ntdll.so and winemac.so in it (gw2om.sh status wine_*,
-  // macdrv_*), on one line, and " · FEX <commit>" after it while my FEX is in place (fex_file).
+  // macdrv_*), and " · FEX <commit>" after it while my FEX is in place (fex_file).
   static func wine(_ s: [String: String], engine: String) -> String {
     let fex = s["fex_file"] == "mine" ? " · FEX \((s["fex_commit"] ?? "").prefix(7))" : ""
     return wineFiles(s, engine: engine) + fex
@@ -465,8 +466,8 @@ struct ThisMac: View {
   }
 
   // The Graphics check with that tree in place: my fork's with the Metal its next start uses (the
-  // Metal row, gw2om.sh status metal), "DXMT 0.80 · 2483559 · Metal 3". With the check's other
-  // states the cell is already full, so only here.
+  // Metal row, gw2om.sh status metal), "DXMT 0.80 · 2483559 · Metal 3". Only here: in its
+  // other states the check says the tree waits for the next Play, needs Repair or isn't set up.
   static func dxmtMetal(_ s: [String: String]) -> String {
     guard s["dxmt"] != "engine", let metal = s["metal"] else { return dxmt(s) }
     return "\(dxmt(s)) · Metal \(metal)"
@@ -485,17 +486,28 @@ struct CheckCell: View {
       .frame(width: 30, height: 30)
       VStack(alignment: .leading, spacing: 1) {
         Text(check.id).font(.body(13, .bold)).bodyBox(13).foregroundStyle(Brand.fg)
-        HStack(spacing: 5) {
-          Pip(color: pip)
-          Text(check.value).font(.body(12.5)).bodyBox(12.5).foregroundStyle(Brand.fg2).lineLimit(1).truncationMode(.tail)
+        // (the pip in the middle of the first line, a 12.5 line box, when the value wraps)
+        HStack(alignment: .top, spacing: 5) {
+          Pip(color: pip).frame(height: 12.5)
+          Text(wrapping).font(.body(12.5)).bodyBox(12.5).foregroundStyle(Brand.fg2)
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
     }
     .padding(.vertical, 11)
     .padding(.horizontal, 14)
-    .frame(maxWidth: .infinity, alignment: .leading)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     .accessibilityElement(children: .combine)
+  }
+
+  // The value in full: too long for one line, it wraps after a " · ", never before its dot or
+  // inside a part of up to 24 characters ("at the next Play", "winemac and win32u mixed": no-break
+  // spaces there). A longer part, Repair's "ntdll and winemac and FEX needs Repair", is wider than
+  // the cell, so it wraps between its words.
+  private var wrapping: String {
+    check.value.components(separatedBy: " · ")
+      .map { $0.count > 24 ? $0 : $0.replacingOccurrences(of: " ", with: "\u{00A0}") }
+      .joined(separator: "\u{00A0}· ")
   }
 
   private var disc: Color {
