@@ -172,8 +172,7 @@ scripting.
 On this line some settings need pieces of mine that come in later steps. Settings greys them and
 says why under each, `gw2om.sh set` refuses them with the same reason, and `settings.conf` keeps
 their values, which do nothing here. `gw2om.sh settings` prints `<key>_state=ok` or
-`<key>_state=off:<reason>` for every key, and a `<key>_note` for the ones that work but are
-untested on this engine.
+`<key>_state=off:<reason>` for every key.
 
 A switch of my `ntdll.so` or my `winemac.so` is also greyed when the file in this app doesn't
 have it, which the file's `VERSION` says with a line `switches: <variable> …`. A `VERSION` without
@@ -206,7 +205,7 @@ chosen, and the main window's *Engine* and *Graphics* checks name the files in p
 |---|---|---|---|---|
 | Graphics | Retina | `retina` | on | draws at your display's full resolution, at some cost in frame rate |
 | | Frame cap | `fpscap` | off | a steady cap paced by Metal at 30, 40, 60 or 120. Use it with the game's own vsync |
-| | Metal | `metal` | 3 | Metal 3 or Metal 4 for my DXMT fork (`DXMT_METAL4=0` or `=1` in the game's rule). Metal 3 draws smoothly. Metal 4 is the newer path, and for now it stutters while the cursor moves. A `settings.conf` without the key reads 3. Greyed while the engine's own DXMT is chosen |
+| | Metal | `metal` | 3 | Metal 3 or Metal 4 for my DXMT fork (`DXMT_METAL4=0` or `=1` in the game's rule). Metal 4 is the newer path. Switch to Metal 3 for better backwards compatibility. A `settings.conf` without the key reads 3. Greyed while the engine's own DXMT is chosen |
 | | MetalFX for Subsample | `metalfx` | off | MetalFX upscales the 3D scene and the interface stays sharp. It works only with the game's Render Sampling set to Subsample, and does nothing at Native. Greyed while the engine's own DXMT is chosen |
 | | Metal HUD | `hud` | off | Apple's overlay with frame rate and frame times, over the game only and not over Steam's windows |
 | | Launcher frames | `launcherframes` | off | the launcher's window gets a copy of each frame, and a frame equal to the last is skipped (`WINE_MACDRV_SURFACE=copy,skip`). Against a launcher that flickers. Greyed while the engine's own `winemac.so` is chosen |
@@ -215,11 +214,11 @@ chosen, and the main window's *Engine* and *Graphics* checks name the files in p
 | | Job wakes | `jobwakes` | on | a job the game hands out wakes one sleeping worker, and none when no worker sleeps (`WINE_HEAT_WAKE=one,skip`). Greyed while the engine's own `ntdll.so` is chosen |
 | | Event pool | `eventpool` | on | closed events are kept and handed out again, without a request to the Wine server (`WINE_HEAT_EVPOOL=1`). Greyed while the engine's own `ntdll.so` is chosen |
 | | Faster locks | `fastlocks` | off | short spins before the game thread sleeps on a busy lock, a job group or an event (`WINE_HEAT_SPIN=lock=20:game,event=30:game`). Greyed while the engine's own `ntdll.so` is chosen |
-| Interface | Larger interface | `uiscale` | off | my interface addon, see below. Untested on this engine |
+| Interface | Larger interface | `uiscale` | off | my interface addon, see below |
 | | Interface Size "Larger" | `uiscale_size` | 1.75 | the addon's scale: 1.5, 1.75, 1.8 or 2.0 |
 | | Small text in Cronos | `uiscale_sans` | on | chat, the tracker and labels have no larger font, so the addon draws them in Cronos at the larger size |
-| | Cinematic dialogue | `uiscale_cinema` | off | story cinematics size their dialogue apart from the interface. This draws it at the same size, with a small code patch, untested under FEX |
-| | arcdps | `arcdps` | off | downloads or removes arcdps, see below. Untested under FEX |
+| | Cinematic dialogue | `uiscale_cinema` | off | story cinematics size their dialogue apart from the interface. This draws it at the same size, with a small code patch |
+| | arcdps | `arcdps` | off | downloads or removes arcdps, see below |
 | Game | Game Mode | `gamemode` | on | greyed and shown on: the engine's loader is a Game Mode app, see [Game Mode](#game-mode) |
 | | Start Steam in the background | `steambg` | on | Steam starts without a window once it remembers your login |
 | | Quit Steam when the game quits | `quitsteam` | on | shown while the previous setting is on |
@@ -356,8 +355,7 @@ Storage, stays where it is.
   the ArenaNet route's 1 GB rule are still unchecked against a real download.
 - Raw mouse-look comes from SWTOR on Mac, where people have used it for a long time. In Guild
   Wars 2 this Mac driver build has had one in-game test so far, on 2026-11-08.
-- arcdps on DXMT has had one check, on 2026-11-08 with arcdps 1.2026.1023.2303. It loads and
-  creates its device through DXMT. I haven't tested its overlay in play, or the Nexus loader.
+- I've played with arcdps on this engine, and it works. I haven't tested the Nexus loader.
 - While Steam verifies the game's files, *Checking game files* shows no percentage, because Steam's
   logs don't give one. A game update shows its progress.
 - There's no Keyboard pane. SWTOR on Mac's game keys by keyboard position are in the Mac driver,
