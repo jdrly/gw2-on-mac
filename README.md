@@ -290,6 +290,10 @@ with what I need for a bug report:
 - a session report
 - the game's `ArenaNet.log` and `GFXSettings.Gw2-64.exe.xml`
 - Steam's bootstrap, content, gameprocess and shader logs
+- arcdps's `arcdps.log` and `arcdps_lastcrash.log`, and the crash dumps (`*.dmp`) of Steam's
+  `dumps` folder, the game folder and the game's AppData folder, when they're from the last session
+  or the last 24 hours. Dumps go in as they are, at most 10, 5 MB each and 10 MB together; one
+  that's left out is named in `system-info.txt`
 - crash reports from the last 7 days, GPU errors from the last 2 hours, and `system-info.txt`
 - while the game runs, `vmmap-<date>-<time>.txt`: how much memory the game uses and how full
   FEX's code buffers are, from macOS's `vmmap`. The game stands still while `vmmap` reads its
@@ -299,9 +303,11 @@ with what I need for a bug report:
 On the way into the zip it removes account, persona and Mac names, Steam IDs, e-mail addresses,
 home folders, tokens and the crash logs' machine, account and address fields. `Local.dat`, Steam's
 config and Steam's login and connection logs never go in. If a file still holds one of those after
-redaction, the zip leaves it out and lists it in `left-out.txt`. arcdps's logs stay out too. Its
-crash log dumps the game's threads and modules, and I can't be sure it holds no account or character
-names. If I ask for it, look through it before you attach it.
+redaction, the zip leaves it out and lists it in `left-out.txt`. arcdps's logs lose GW2 account
+names (`Name.1234`) on the way in, but its crash log dumps the game's threads, modules and stack,
+and a character name there can't be told from other text. A crash dump can't be redacted at all:
+it goes in only when the leak check finds none of those names, no Steam ID and no user folder in
+it, also in its UTF-16 text. Look through the zip before you post it anywhere public.
 
 Send the zip with a short description to Pharaphobia on [Discord](https://discord.gg/AnV3fZWz2b),
 or attach it to a [GitHub issue](https://github.com/jdrly/gw2-on-mac/issues). The *Discord* button
@@ -930,6 +936,9 @@ redaction, crash reports, unified-log GPU errors and leak check.
 The session report, `Resources/session-report.sh [--keep] [--from S] [--to S] [log]` or `--compare A B`, sums up the
 last session from DXMT's own log lines:
 
+- when arcdps caught a crash that ended the session (its `arcdps_lastcrash.log` in the game
+  folder is from after Play), one line with what it caught: the game's assertion, as `intercepted
+  gw2 assertion "frameId", file "...\FrApi.cpp", line 2289`, or an exception with its code
 - frame rate as median, 10th percentile and minimum, frame times, hitches and DXMT's share of them
 - shader compiles and DXMT's encode thread's waits for them: how many, their total and the
   longest
@@ -1192,7 +1201,9 @@ Without one, those checks are skipped. It covers:
   after reading a live owner, and gets refused. A missing piece refuses Play, and this version's
   pieces under 0.1.0's manifest count as set up.
 - play, the busy checks, repair, reset-shaders, reinstall-engine and the lock
-- Collect Logs' redaction, with no arcdps log, uninstall, and a failed install's rollback
+- Collect Logs' redaction, arcdps's logs and the crash dumps (recent ones in, older ones, one
+  too large, one with the user's folder in UTF-16 and `.dmp` files elsewhere out), the session
+  report's crash line, a release build's Collect Logs, uninstall, and a failed install's rollback
 - Steam's `-silent` with and without a remembered login, and the CPU counts
 - the session's watcher, with stand-in Steam and game processes and shorter times
   (`GW2_ON_MAC_WATCH_TIMEOUT`, `GW2_ON_MAC_WATCH_GRACE`, `GW2_ON_MAC_WATCH_QUITWAIT`,
