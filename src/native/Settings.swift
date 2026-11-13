@@ -165,6 +165,8 @@ final class GameSettings {
   static let frameCaps: [(String, String)] = [
     ("off", "Off"), ("30", "30 fps"), ("40", "40 fps"), ("60", "60 fps"), ("120", "120 fps"),
   ]
+  // Metal: the Metal my DXMT fork draws with (gw2om.sh metal: DXMT_METAL4 in the game's rule)
+  static let metals: [(String, String)] = [("3", "Metal 3"), ("4", "Metal 4")]
   // CPUs the game sees: 2 up to this Mac's logical CPUs (gw2om.sh settings: cpus, sysctl
   // hw.logicalcpu), or all
   var cpuCount: Int { Int(values["cpus"] ?? "") ?? ProcessInfo.processInfo.processorCount }
@@ -362,6 +364,9 @@ struct SettingsView: View {
         }
       }
       SettingsGroup {
+        SettingRow("Metal", "Metal 3 draws smoothly. Metal 4 is the newer path, and for now it stutters while the cursor moves.", off: off("metal")) {
+          InkPopup(selection: settings.choice("metal", "3"), options: GameSettings.metals)
+        }
         SettingRow("MetalFX for Subsample", "MetalFX upscales the 3D scene and the interface stays sharp. It works only with the game's Render Sampling set to Subsample, and does nothing at Native. Experimental.", off: off("metalfx")) {
           InkSwitch(isOn: settings.toggle("metalfx"))
         }

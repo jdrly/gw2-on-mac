@@ -649,12 +649,14 @@ apply_registry() {
 # fork; engine: the engine's own, to compare), wine (mine: my ntdll.so; engine: the engine's own),
 # macdrv (mine: my winemac.so, and my win32u.so when its build has one; engine: the engine's own),
 # fex (mine: my FEX; engine: the engine's own, the default), and jobwakes, launcherframes and
-# eventpool (rows of HEAT_SWITCHES, as fastlocks is). dxmt, wine, macdrv and fex have no row in the
+# eventpool (rows of HEAT_SWITCHES, as fastlocks is), and metal (3 or 4: the Metal my DXMT fork
+# draws with, DXMT_METAL4 in the game's rule; 3 by default, and in a file without the key, while
+# Metal 4 stutters as the cursor moves, jdrly/dxmt#223). dxmt, wine, macdrv and fex have no row in the
 # Settings window: they are for my comparisons from Terminal (gw2om.sh set …). On this engine some
 # of the keys need pieces of mine that come in later steps: setting_state says so, the Settings
 # window greys them with the reason, set refuses them, and they keep what settings.conf says without
 # an effect.
-SETTING_KEYS="retina fpscap metalfx hud warm fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam dxmt wine jobwakes macdrv launcherframes eventpool fex"
+SETTING_KEYS="retina fpscap metal metalfx hud warm fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam dxmt wine jobwakes macdrv launcherframes eventpool fex"
 # settings.conf's version, its line settings_version=. Install and Repair write every key with its
 # value, so a file holds the defaults it was written with, as if I had chosen them. A default that
 # changes for the files that exist gets a row here, "<version> <keys>": in a file older than
@@ -721,6 +723,7 @@ setting_default() {
     dxmt) echo fork ;;
     wine|macdrv) echo mine ;;
     fex) echo engine ;;
+    metal) echo 3 ;;
   esac
 }
 setting_valid() { # <key> <value>
@@ -736,6 +739,7 @@ setting_valid() { # <key> <value>
     launchopts) case "$2" in *[!A-Za-z0-9\ _.:=,/+-]*) false ;; *) [ ${#2} -le 200 ] ;; esac ;;
     dxmt) [ "$2" = fork ] || [ "$2" = engine ] ;;
     wine|macdrv|fex) [ "$2" = mine ] || [ "$2" = engine ] ;;
+    metal) [ "$2" = 3 ] || [ "$2" = 4 ] ;;
     *) false ;;
   esac
 }
@@ -763,7 +767,7 @@ setting_state() {
   local e l n
   if [ "$1" = mousespeed ] && [ "$(setting rawmouse)" != on ]; then echo "off:Needs Raw mouse-look, which is off."; return; fi
   case "$1" in
-    metalfx|warm) if [ "$(setting dxmt)" = fork ]; then echo ok; else echo "off:Needs my DXMT fork, and the engine's own DXMT is chosen."; fi ;;
+    metal|metalfx|warm) if [ "$(setting dxmt)" = fork ]; then echo ok; else echo "off:Needs my DXMT fork, and the engine's own DXMT is chosen."; fi ;;
     gamemode) echo "off:The engine's loader is a Game Mode app. Nothing to switch." ;;
     wine) if lib_bundled wine; then echo ok; else echo "off:This build of the app has no Wine build of mine."; fi ;;
     macdrv) if lib_bundled macdrv; then echo ok; else echo "off:This build of the app has no Mac driver of mine."; fi ;;
@@ -897,22 +901,31 @@ cdb_value() {
 #                      there (arcdps, Nexus), version while the larger interface is on. With no
 #                      such file Wine loads its own (n,b).
 #   env                DXMT's shader cache in the app's cache folder (dxmt_cache: my fork's, or
-#                      the engine's DXMT's own), then the switches of my ntdll.so and my Mac
+#                      the engine's DXMT's own), with my fork in place the Metal it draws with
+#                      (DXMT_METAL4=0 for Metal 3, =1 for Metal 4: the Metal row; the engine's
+#                      DXMT doesn't read it), then the switches of my ntdll.so and my Mac
 #                      driver (heat_entries), then FEX's (fex_entries), then, in a development
 #                      build, the lines of dev-switches.conf (dev_entries)
 # CefHost.exe, which the game starts for its launcher and the Trading Post, inherits the game's
 # variables: the rule takes the cache path and the switches away from it again (an empty value
-# unsets a variable), and the HUD while it is on.
+# unsets a variable), and the HUD while it is on. A line of compatdb.local comes after the rules
+# (write_rules), so its DXMT_METAL4 wins over the row's.
 rules_text() {
-  local game="exe=Gw2-64.exe" cef="exe=CefHost.exe" entries="" removed="" e
+  local game="exe=Gw2-64.exe" cef="exe=CefHost.exe" entries="" removed="" e metal=""
   [ "$(setting rawmouse)" = on ] || game="$game;gcmouse=false"
   if [ "$(setting hud)" = on ]; then game="$game;metal_hud=true" cef="$cef;metal_hud=false"; fi
   arcdps_state
   case "$ARC" in on|foreign) game="$game;dll_overrides=d3d11,dxgi=n,b" ;; esac
   [ "$(setting uiscale)" != on ] || game="$game;dll_overrides=version=n,b"
+  # (the tree read once for this run: dxmt_cache asks again)
+  dxmt_look "$DXGI/dxmt"
+  if [ "$(dxmt_in_use)" = fork ]; then
+    if [ "$(setting metal)" = 4 ]; then metal=DXMT_METAL4=1; else metal=DXMT_METAL4=0; fi
+  fi
   while IFS= read -r e; do
     if [ -n "$e" ]; then entries="$entries;env=$e" removed="$removed;env=${e%%=*}="; fi
   done <<EOF
+$metal
 $(heat_entries)
 $(fex_entries)
 $(dev_entries)
@@ -1060,7 +1073,11 @@ fex_entries() {
 # mouse speed, DXMT_CHUNKS), a switch that brings back upstream's behaviour (DXMT_DEPTH_PFV,
 # DXMT_STENCIL_PFV), and the rows' own variables. A row whose variable a line of the file sets is
 # greyed while the line is there (dev_sets): the file's entry comes later in the rule and wins. A fork's issues are
-# jdrly/<fork>#n, the app's #n. Unplayed: no session of the game has run with it.
+# jdrly/<fork>#n, the app's #n. Unplayed: no session of the game has run with it. My fork's Metal 4
+# switches (DXMT_MTL4_*) stay in with the Metal row at Metal 3, where they do nothing, so my lines
+# last through a switch of Metal; their comments say so. DXMT_MTL4_PRESENT=mtl3 is in for the Metal 4
+# cursor stutter (jdrly/dxmt#223); DXMT_MTL4_LAYER_SET (jdrly/dxmt#226), its other suspect, stays out:
+# I turn that diagnostic on by hand, so a change in play has one cause.
 DEV_SWITCHES="
 1 wine #14,#45 unplayed WINE_HEAT_SPIN=lock=20:game,event=30:game,sem=5:game the Faster locks row's two spins, and the job workers spin 5 µs on their semaphore before they sleep. While this line is here, its value replaces the row's.
 1 macdrv #62 unplayed WINE_MACDRV_VIEW=changes a window's view frame goes to the main thread only when it changed
@@ -1072,8 +1089,8 @@ DEV_SWITCHES="
 1 fex #112 unplayed FEX_INITIALCODEBUFFERMB=128 the first code buffer is 128 MB instead of 16
 1 fex #113 unplayed FEX_HARDWARETSOSYSCALLS=keep the hardware memory ordering stays on through Wine's system calls
 1 fexany #47 unplayed FEX_DYNAMICL1CACHE=0 a fixed L1 lookup cache instead of the dynamic one (16 MB of address space a thread). Hung once at process start on the runner (jdrly/FEX run 43315659403, #132): if a development build doesn't start, take this line out first.
-1 dxmt jdrly/dxmt#153 unplayed DXMT_MTL4_DEVICE_RESIDENCY=1 on Metal 4, pipelines and argument buffers stay in the device's residency set, out of each chunk's
-1 dxmt jdrly/dxmt#154 unplayed DXMT_MTL4_TIMESTAMP_REUSE=1 on Metal 4, timestamp queries read the chunk's last command buffer, with no empty one after it
+1 dxmt jdrly/dxmt#153 unplayed DXMT_MTL4_DEVICE_RESIDENCY=1 Metal 4 only, nothing on Metal 3: pipelines and argument buffers stay in the device's residency set, out of each chunk's
+1 dxmt jdrly/dxmt#154 unplayed DXMT_MTL4_TIMESTAMP_REUSE=1 Metal 4 only, nothing on Metal 3: timestamp queries read the chunk's last command buffer, with no empty one after it
 1 dxmt jdrly/dxmt#185 unplayed DXMT_PRESENTER_FREE=1 a swap chain's presenter is freed with its last reference
 1 dxmt jdrly/dxmt#157 unplayed DXMT_PRESENT_QUEUE=pace Present sleeps after a frame whose nextDrawable blocked (never two, which can latch 30 fps). Needs DXMT_STATS, on by default.
 1 dxmt jdrly/dxmt#159 unplayed DXMT_WARM_JOBS=2 with Shader warming, two speculative jobs at once while Metal's cache is cold
@@ -1081,6 +1098,7 @@ DEV_SWITCHES="
 1 dxmt jdrly/dxmt#5 played DXMT_PSO_ARCHIVE=1 Metal binary archives of the pipelines, looked up in the last 4 sessions' archives
 1 dxmt jdrly/dxmt#75 unplayed DXMT_PSO_GENERATIONS=1 the archives published as generations instead of one file a session
 1 dxmt jdrly/dxmt#73 unplayed DXMT_COMPILE_DEMAND=1 the compile service's declared policy (Shader warming turns it on too)
+2 dxmt jdrly/dxmt#227 unplayed DXMT_MTL4_PRESENT=mtl3 only with the Metal row at Metal 4, nothing on Metal 3: each frame is presented the Metal 3 way, through a Metal 3 command buffer, and everything else stays on Metal 4
 "
 DEV_SWITCHES_VERSION=$(printf '%s\n' "$DEV_SWITCHES" | awk 'NF && $1 > v { v = $1 } END { print v + 0 }')
 # dev_piece_label <piece>: what the file and the log call it
@@ -2324,6 +2342,8 @@ status() {
   echo "dxmt_version=$DXMT_VERSION"
   echo "dxmt_release=$DXMT_RELEASE"
   echo "dxmt_commit=$DXMT_COMMIT"
+  # (the Metal my fork draws with at the next start: 3 or 4, the Metal row)
+  echo "metal=$(setting metal)"
   # (each of my unix libraries: the setting, the set Settings asks for (lib_state), the one in the
   # engine now (mine, engine, other, mix, none) with its commit and, if mine, its Wine release, and
   # my build's commit in this app)
