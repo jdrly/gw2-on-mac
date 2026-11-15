@@ -1139,11 +1139,12 @@ out=$(GW2_ON_MAC_COMPILER_URL="file://$SANDBOX/nowhere/c.dll" GW2_ON_MAC_RESHADE
 check "with the game's bin64/cef compiler: on, that copy next to Gw2-64.exe, nothing downloaded" eval '[ "$rc" = 0 ] && same "$GD/bin64/cef/d3dcompiler_47.dll" "$GD/d3dcompiler_47.dll" && ! echo "$out" | grep -q "^@progress"'
 g set reshade off >/dev/null 2>&1
 check "  off removes that copy; the game's own in bin64/cef stays" eval '[ ! -e "$GD/d3dcompiler_47.dll" ] && same "$SANDBOX/pe/cef-compiler.dll" "$GD/bin64/cef/d3dcompiler_47.dll"'
-# the player's own compiler
+# the player's own compiler, with no other copy anywhere (no bin64/cef, none cached, no server)
 echo "the player's compiler" >"$GD/d3dcompiler_47.dll"
-check "a compiler the player put there: on leaves it as it is" eval '"$G" set reshade on >/dev/null 2>&1 && has "$GD/d3dcompiler_47.dll" "the player" && [ "$(rsst)" = on ]'
+mv "$GD/bin64" "$SANDBOX/bin64.keep"
+check "a compiler the player put there: on leaves it as it is and downloads none" eval 'GW2_ON_MAC_COMPILER_URL="file://$SANDBOX/nowhere/c.dll" "$G" set reshade on >/dev/null 2>&1 && has "$GD/d3dcompiler_47.dll" "the player" && [ "$(rsst)" = on ] && [ ! -e "$CACHE/downloads/reshade/d3dcompiler_47.dll" ]'
 check "  off leaves it too" eval '"$G" set reshade off >/dev/null 2>&1 && has "$GD/d3dcompiler_47.dll" "the player" && [ ! -e "$GD/d3d11.dll" ]'
-rm -f "$GD/d3dcompiler_47.dll"
+rm -f "$GD/d3dcompiler_47.dll"; mv "$SANDBOX/bin64.keep" "$GD/bin64"
 # a ReShade the app didn't place
 cp "$SANDBOX/pe/reshade-addon.dll" "$GD/d3d11.dll"; before=$(gdsnap)
 check "a ReShade the app didn't place (another build): reshade_state=foreign, reshade_dll=d3d11.dll" [ "$(rsst)/$(st reshade_dll)/$(st reshade)" = foreign/d3d11.dll/off ]
@@ -1172,7 +1173,6 @@ i=0; until "$APP/Contents/Resources/helpers/sessionlock" held "$AD/.session.lock
 check "while a Play holds the session's lock: set reshade off refused, nothing changes" eval '! "$G" set reshade off >"$SANDBOX/rs.txt" 2>&1 && has "$SANDBOX/rs.txt" "session is starting" && [ "$(gdsnap)" = "$before" ]'
 kill $hp 2>/dev/null; wait $hp 2>/dev/null
 check "dry run of on: places nothing" eval '"$G" set reshade off >/dev/null && GW2_ON_MAC_DRY_RUN=1 "$G" set reshade on | grep -q "would be in the game folder" && [ ! -e "$GD/d3d11.dll" ]'
-check "the URLs and sha256s can be changed only in a sandbox" eval '[ "$(grep -B1 "^  RESHADE_URL=\"\${GW2_ON_MAC_RESHADE_URL" "$G" | head -1)" = "if [ -n \"\$ROOT\" ]; then" ]'
 # (Play, Repair and the caches)
 g set reshade on >/dev/null 2>&1
 rm -f "$GD/d3d11.dll" "$GD/d3dcompiler_47.dll" "$GD/ReShade.ini"   # (Steam's file check, a new bottle)

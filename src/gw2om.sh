@@ -1478,8 +1478,8 @@ check_download() {
 }
 
 # unpack_pack <zip or folder> <pack> <into>: a pack of ReShade effects into <into>/Shaders/<pack>/
-# and <into>/Textures/<pack>/ (into a new folder, then moved, or straight into the ReShade
-# folder): the contents of each folder named Shaders or Textures in it, at any depth, which is the
+# and <into>/Textures/<pack>/, which must not exist yet (a staging folder of the caller's, moved
+# into the ReShade folder afterwards): the contents of each folder named Shaders or Textures in it, at any depth, which is the
 # layout of every pack on ReShade's list. Only regular files, and of those only .fx and .fxh from
 # Shaders and images from Textures; at most PACK_LIMIT bytes. A path that climbs out (..), an
 # absolute path or a link in a zip refuses the whole pack (what was written by then stays in
@@ -1489,6 +1489,10 @@ unpack_pack() {
   local src=$1 pack=$2 into=$3 list plan line kind rel name dest n rc left tab
   tab=$(printf '\t')
   case "$pack" in ""|.*|*[!A-Za-z0-9._\ -]*) die "\"$pack\" can't be the name of a pack of effects: use letters, digits, spaces, dots, dashes and underscores." ;; esac
+  # (made here, so no link in them leads elsewhere)
+  for n in Shaders Textures; do
+    [ ! -e "$into/$n/$pack" ] && [ ! -L "$into/$n/$pack" ] || die "GW2 on Mac unpacks $pack only into a new folder, and $into/$n/$pack is there already."
+  done
   # "<kind> <bytes> <path>" lines (kind f: a file, d: a folder, l: a link)
   if [ -d "$src" ] && [ ! -L "$src" ]; then
     # (find doesn't follow links, so a linked folder's files aren't in it)
@@ -1683,7 +1687,8 @@ set_reshade() {
   mkdir -p "$RS_DOWNLOADS"
   rm -rf "$stage"
   [ "$RSH" = on ] || reshade_fetch
-  reshade_compiler download
+  COMPILER_SRC=""
+  [ -e "$GAME_DIR/d3dcompiler_47.dll" ] || reshade_compiler download
   if [ -z "$(ls -A "$RS/Shaders" 2>/dev/null)" ]; then
     mkdir -p "$stage"
     step "Downloading ReShade's standard effects and SweetFX from github.com"
@@ -1742,7 +1747,7 @@ sync_reshade() {
     if [ -n "$DRY" ]; then echo "[dry-run] download ReShade and its compiler again"; registry_unlock; return 0; fi
     mkdir -p "$RS_DOWNLOADS"
     [ "$RSH" != off ] || reshade_fetch
-    reshade_compiler download
+    [ -e "$GAME_DIR/d3dcompiler_47.dll" ] || reshade_compiler download
   fi
   say "ReShade: its files back into the game folder"
   reshade_place
