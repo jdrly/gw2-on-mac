@@ -251,7 +251,8 @@ func settings(_ extra: [String: String] = [:]) -> GameSettings {
              "uiscale_size": "1.75", "uiscale_sans": "on", "uiscale_cinema": "on", "gamemode": "on", "launchopts": "",
              "route": "steam", "updates": "off", "debug": "off", "steambg": "on", "quitsteam": "on", "cpus": "12",
              "steam_login": "no", "rawmouse": "on", "mousespeed": "1", "arcdps": "off", "arcdps_state": "off",
-             "arcdps_foreign": ""].merging(extra) { $1 })
+             "arcdps_foreign": "", "reshade": "off", "reshade_state": "off", "reshade_version": "6.8.0",
+             "reshade_dll": "", "reshade_blocker": "", "reshade_folder": ""].merging(extra) { $1 })
   return s
 }
 
@@ -380,17 +381,17 @@ func renderAll(_ dir: URL, exports: URL?) async {
     ("on", false, ["arcdps": "on", "arcdps_state": "on"], { _ in }),
     ("on", true, ["arcdps": "on", "arcdps_state": "on"], { _ in }),
     ("downloading", false, ["arcdps": "on"], { s in
-      s.arcdpsWorking = true
-      s.arcdpsProgress = .init(label: "arcdps", done: 620_000, total: 1_506_304)
+      s.arcdps.working = true
+      s.arcdps.progress = .init(label: "arcdps", done: 620_000, total: 1_506_304)
     }),
     ("downloading", true, ["arcdps": "on"], { s in
-      s.arcdpsWorking = true
-      s.arcdpsProgress = .init(label: "arcdps", done: 620_000, total: 1_506_304)
+      s.arcdps.working = true
+      s.arcdps.progress = .init(label: "arcdps", done: 620_000, total: 1_506_304)
     }),
     ("foreign", false, ["arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"], { _ in }),
     ("foreign", true, ["arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"], { _ in }),
     ("placed", false, ["arcdps": "on", "arcdps_state": "on"], { s in
-      s.arcdpsResult = "arcdps is in the game folder (d3d11.dll from deltaconnected.com). It loads the next time the game starts, and from then on it updates itself."
+      s.arcdps.result = "arcdps is in the game folder (d3d11.dll from deltaconnected.com). It loads the next time the game starts, and from then on it updates itself."
     }),
   ]
   for (name, dark, values, adjust) in arcdps {
@@ -403,8 +404,66 @@ func renderAll(_ dir: URL, exports: URL?) async {
     let sheet = InterfaceWarning(isPresented: .constant(true)) {}
     write(await render(sheet, size: CGSize(width: 460, height: 300), dark: dark, chrome: false),
           dir.appendingPathComponent("sheet-interface-warning-\(dark ? "dark" : "light").png"))
-    let arcSheet = ArcdpsWarning(isPresented: .constant(true)) {}
+    let arcSheet = AddonWarning.arcdps(isPresented: .constant(true)) {}
     write(await render(arcSheet, size: CGSize(width: 460, height: 248), dark: dark, chrome: false),
           dir.appendingPathComponent("sheet-arcdps-warning-\(dark ? "dark" : "light").png"))
+    let reshadeSheet = AddonWarning.reshade(isPresented: .constant(true), version: "6.8.0") {}
+    write(await render(reshadeSheet, size: CGSize(width: 460, height: 278), dark: dark, chrome: false),
+          dir.appendingPathComponent("sheet-reshade-warning-\(dark ? "dark" : "light").png"))
+  }
+  // A row's line of buttons with two of them, at the pane's width in the narrowest window (a layout
+  // check for a second button in the ReShade row; the row itself has one)
+  let rowWidth = SettingsView.designSize.width - 214 - 48 + 24
+  for dark in [false, true] {
+    let row = SettingsGroup {
+      SettingRow("ReShade", "Post-processing effects by crosire, drawn over the finished picture. Downloads ReShade 6.8.0 from reshade.me. Open its menu in the game with the Home key (fn + Left Arrow on a MacBook).") {
+        InkSwitch(isOn: .constant(true))
+      } buttons: {
+        SmallButton("Open ReShade folder", icon: "folder-open") {}
+        SmallButton("Add preset or shaders…", icon: "file-down") {}
+      }
+    }
+    // (a fixed size, as the sheets have)
+    .padding(12)
+    .frame(width: rowWidth, height: 160, alignment: .top)
+    .background(Brand.bg)
+    write(await render(row, size: CGSize(width: rowWidth, height: 160), dark: dark, chrome: false),
+          dir.appendingPathComponent("row-two-buttons-\(dark ? "dark" : "light").png"))
+  }
+  // ReShade in the Interface pane: off with its folder from an earlier time (the pane's own render
+  // has no folder yet), downloading, just placed, another ReShade, arcdps in the way, another
+  // program's file in the way, the game running. (The folder: any one that exists.)
+  let folder = dir.path
+  let reshade: [(String, Bool, [String: String], (GameSettings) -> Void)] = [
+    ("off", false, ["reshade_folder": folder], { _ in }),
+    ("off", true, ["reshade_folder": folder], { _ in }),
+    ("downloading", false, ["reshade": "on"], { s in
+      s.reshade.working = true
+      s.reshade.progress = .init(label: "ReShade", done: 1_650_000, total: 4_075_064)
+    }),
+    ("downloading", true, ["reshade": "on"], { s in
+      s.reshade.working = true
+      s.reshade.progress = .init(label: "ReShade's standard effects", done: 2_300_000, total: 0)
+    }),
+    ("on", false, ["reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll", "reshade_folder": folder,
+                   "arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"], { s in
+      s.reshade.result = "ReShade 6.8.0 is in the game folder as d3d11.dll. It loads the next time the game starts."
+    }),
+    ("on", true, ["reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll", "reshade_folder": folder,
+                  "arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"], { _ in }),
+    ("foreign", false, ["reshade_state": "foreign", "reshade_dll": "d3d11.dll",
+                        "arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"], { _ in }),
+    ("blocked", false, ["reshade_state": "blocked", "reshade_blocker": "d3d11.dll", "arcdps": "on", "arcdps_state": "on"],
+     { _ in }),
+    ("blocked-other", false, ["reshade_state": "blocked", "reshade_blocker": "d3d11.dll",
+                              "arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"], { _ in }),
+    ("running", false, ["running": "yes", "reshade": "on", "reshade_state": "on", "reshade_folder": folder,
+                        "arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"], { _ in }),
+  ]
+  for (name, dark, values, adjust) in reshade {
+    let s = settings(values)
+    adjust(s)
+    write(await render(SettingsView(settings: s), size: SettingsView.designSize, dark: dark),
+          dir.appendingPathComponent("settings-interface-reshade-\(name)-\(dark ? "dark" : "light").png"))
   }
 }

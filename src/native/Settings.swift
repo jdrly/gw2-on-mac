@@ -24,14 +24,21 @@ final class GameSettings {
   // last one's answer
   var action: String?
   var actionResult: String?
-  // arcdps (gw2om.sh set arcdps on|off): placing it means a download from deltaconnected.com, whose
-  // progress the row shows; whether it is on comes from the game folder (arcdps, arcdps_state)
-  var arcdpsWorking = false
-  var arcdpsProgress: Installer.Progress?
-  var arcdpsResult: String?
-  private var arcdpsProcess: Process?
-  private var arcdpsDone: String?
-  private var arcdpsFailure: String?
+  // arcdps and ReShade (gw2om.sh set arcdps|reshade on|off): placing one means downloads, whose
+  // progress its row shows. Whether arcdps is on comes from the game folder (arcdps,
+  // arcdps_state); for ReShade, reshade is the player's wish and reshade_state the game folder.
+  struct AddonJob {
+    var working = false
+    var progress: Installer.Progress?
+    var result: String?
+    fileprivate var process: Process?
+    fileprivate var done: String?
+    fileprivate var failure: String?
+  }
+  var arcdps = AddonJob()
+  var reshade = AddonJob()
+  // (both take the session's lock: while one works, the other would be refused)
+  var addonWorking: Bool { arcdps.working || reshade.working }
 
   private let script = Brand.resources.appendingPathComponent("gw2om.sh")
 
@@ -82,20 +89,20 @@ final class GameSettings {
     }
   }
 
-  // arcdps on or off, with gw2om.sh's lines as they come (its @progress while it downloads)
-  func setArcdps(_ on: Bool) {
-    guard !arcdpsWorking else { return }
-    let previous = values["arcdps"]
-    values["arcdps"] = on ? "on" : "off"
-    arcdpsWorking = true
-    arcdpsProgress = nil
-    arcdpsResult = nil
+  func setArcdps(_ on: Bool) { setAddon(\.arcdps, key: "arcdps", name: "arcdps", on) }
+  func setReshade(_ on: Bool) { setAddon(\.reshade, key: "reshade", name: "ReShade", on) }
+
+  // An addon on or off, with gw2om.sh's lines as they come (its @progress while it downloads).
+  // Without its @done the switch goes back.
+  private func setAddon(_ job: ReferenceWritableKeyPath<GameSettings, AddonJob>, key: String, name: String, _ on: Bool) {
+    guard !addonWorking else { return }
+    let previous = values[key]
+    values[key] = on ? "on" : "off"
+    self[keyPath: job] = AddonJob(working: true)
     error = nil
-    arcdpsDone = nil
-    arcdpsFailure = nil
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/bin/bash")
-    process.arguments = [script.path, "set", "arcdps", on ? "on" : "off"]
+    process.arguments = [script.path, "set", key, on ? "on" : "off"]
     process.standardInput = FileHandle.nullDevice
     let pipe = Pipe()
     process.standardOutput = pipe
@@ -104,14 +111,16 @@ final class GameSettings {
       Task { @MainActor in
         guard let self else { return }
         if line.hasPrefix("@progress ") {
+          // (@progress <label, maybe with spaces> <bytes> <total>)
           let parts = line.split(separator: " ")
           if parts.count >= 4, let d = Int64(parts[parts.count - 2]), let t = Int64(parts[parts.count - 1]) {
-            self.arcdpsProgress = Installer.Progress(label: "arcdps", done: d, total: t)
+            let label = parts[1..<(parts.count - 2)].joined(separator: " ")
+            self[keyPath: job].progress = Installer.Progress(label: label, done: d, total: t)
           }
         } else if line.hasPrefix("@error ") {
-          self.arcdpsFailure = String(line.dropFirst(7))
+          self[keyPath: job].failure = String(line.dropFirst(7))
         } else if line.hasPrefix("@done ") {
-          self.arcdpsDone = String(line.dropFirst(6))
+          self[keyPath: job].done = String(line.dropFirst(6))
         }
       }
     }
@@ -124,14 +133,11 @@ final class GameSettings {
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
         MainActor.assumeIsolated {
           guard let self else { return }
-          self.arcdpsProcess = nil
-          self.arcdpsWorking = false
-          self.arcdpsProgress = nil
-          if let done = self.arcdpsDone {
-            self.arcdpsResult = done
-          } else {
-            self.values["arcdps"] = previous
-            self.error = self.arcdpsFailure ?? "arcdps could not be turned \(on ? "on" : "off")."
+          let finished = self[keyPath: job]
+          self[keyPath: job] = AddonJob(result: finished.done)
+          if finished.done == nil {
+            self.values[key] = previous
+            self.error = finished.failure ?? "\(name) could not be turned \(on ? "on" : "off")."
           }
           self.reload()
         }
@@ -139,11 +145,11 @@ final class GameSettings {
     }
     do {
       try process.run()
-      arcdpsProcess = process
+      self[keyPath: job].process = process
     } catch {
-      arcdpsWorking = false
-      values["arcdps"] = previous
-      self.error = "arcdps could not be turned \(on ? "on" : "off"): \(error.localizedDescription)"
+      self[keyPath: job] = AddonJob()
+      values[key] = previous
+      self.error = "\(name) could not be turned \(on ? "on" : "off"): \(error.localizedDescription)"
     }
   }
 
@@ -225,6 +231,7 @@ struct SettingsView: View {
   @AppStorage(Self.selectedPaneKey) private var selectedPane: SettingsPane = .graphics
   @State private var confirmInterface = false
   @State private var confirmArcdps = false
+  @State private var confirmReshade = false
   @State private var confirmAction: String?
   @Environment(\.colorScheme) private var scheme
 
@@ -264,7 +271,12 @@ struct SettingsView: View {
       InterfaceWarning(isPresented: $confirmInterface) { settings.set("uiscale", "on") }
     }
     .sheet(isPresented: $confirmArcdps) {
-      ArcdpsWarning(isPresented: $confirmArcdps) { settings.setArcdps(true) }
+      AddonWarning.arcdps(isPresented: $confirmArcdps) { settings.setArcdps(true) }
+    }
+    .sheet(isPresented: $confirmReshade) {
+      AddonWarning.reshade(isPresented: $confirmReshade, version: settings.values["reshade_version"]) {
+        settings.setReshade(true)
+      }
     }
     .alert(confirmAction == "reset-shaders" ? "Reset the shader cache?" : "Reinstall the engine?",
            isPresented: Binding(get: { confirmAction != nil }, set: { if !$0 { confirmAction = nil } })) {
@@ -391,11 +403,21 @@ struct SettingsView: View {
             if on { confirmInterface = true } else { settings.set("uiscale", "off") }
           }))
         }
-        SettingRow("arcdps", arcdpsDescription, progress: arcdpsFraction) {
+        SettingRow("arcdps", arcdpsDescription, progress: addonFraction(settings.arcdps)) {
           InkSwitch(isOn: Binding(get: { settings.values["arcdps"] == "on" }, set: { on in
             if on { confirmArcdps = true } else { settings.setArcdps(false) }
           }))
           .disabled(!arcdpsCanSwitch)
+        }
+        SettingRow("ReShade", reshadeDescription, progress: addonFraction(settings.reshade)) {
+          InkSwitch(isOn: Binding(get: { settings.values["reshade"] == "on" }, set: { on in
+            if on { confirmReshade = true } else { settings.setReshade(false) }
+          }))
+          .disabled(!reshadeCanSwitch)
+        } buttons: {
+          if let folder = reshadeFolder {
+            SmallButton("Open ReShade folder", icon: "folder-open") { NSWorkspace.shared.open(folder) }
+          }
         }
       }
       if let state = settings.values["uiscale_state"], state != "off", state != "on" {
@@ -403,7 +425,12 @@ struct SettingsView: View {
       }
       if let text = arcdpsStateNote {
         note("triangle-alert", text, Brand.accent)
-      } else if let result = settings.arcdpsResult, !settings.arcdpsWorking {
+      } else if let result = settings.arcdps.result, !settings.arcdps.working {
+        note("info", result, Brand.fg3)
+      }
+      if let text = reshadeStateNote {
+        note("triangle-alert", text, Brand.accent)
+      } else if let result = settings.reshade.result, !settings.reshade.working {
         note("info", result, Brand.fg3)
       }
       SettingsGroup {
@@ -516,39 +543,102 @@ struct SettingsView: View {
 
   // arcdps: what it is, or the download while it runs
   private var arcdpsDescription: String {
-    if settings.arcdpsWorking {
+    if settings.arcdps.working {
       if settings.values["arcdps"] != "on" { return "Removing arcdps from the game folder…" }
-      guard let p = settings.arcdpsProgress, p.total > 0 else { return "Downloading arcdps from deltaconnected.com…" }
+      guard let p = settings.arcdps.progress, p.total > 0 else { return "Downloading arcdps from deltaconnected.com…" }
       return "Downloading arcdps from deltaconnected.com… \(Installer.megabytes(p.done)) of \(Installer.megabytes(p.total)) MB"
     }
     return "deltaconnected's addon (d3d11.dll), downloaded from deltaconnected.com; it updates itself. "
       + "It reads the game's memory, which ArenaNet doesn't support."
   }
 
-  private var arcdpsFraction: Double? {
-    guard settings.arcdpsWorking else { return nil }
-    guard let p = settings.arcdpsProgress, p.total > 0 else { return 0 }
+  private func addonFraction(_ job: GameSettings.AddonJob) -> Double? {
+    guard job.working else { return nil }
+    guard let p = job.progress, p.total > 0 else { return 0 }
     return min(1, Double(p.done) / Double(p.total))
   }
 
   // on: always (it can be removed); off: only into an empty place, with the game installed and closed
   private var arcdpsCanSwitch: Bool {
-    guard !settings.arcdpsWorking, !settings.running else { return false }
+    guard !settings.addonWorking, !settings.running else { return false }
     if settings.values["arcdps"] == "on" { return true }
     return settings.values["arcdps_state"] == "off"
   }
 
   private var arcdpsStateNote: String? {
-    if settings.arcdpsWorking { return nil }
-    let foreign = settings.values["arcdps_foreign"].flatMap { $0.isEmpty ? nil : $0 } ?? "d3d11.dll"
+    if settings.arcdps.working { return nil }
+    let foreign = names(settings.values["arcdps_foreign"]) ?? "d3d11.dll"
     switch settings.values["arcdps_state"] {
     case "foreign":
-      return "The game folder has another \(foreign.replacingOccurrences(of: " ", with: " and ")) (Nexus or another addon?). GW2 on Mac leaves it alone, so it doesn't add arcdps."
+      // (ReShade's d3d11.dll in the way: gw2om.sh's refusal names it)
+      switch settings.values["reshade_state"] {
+      case "on": return "ReShade is in the game folder as \(foreign). Turn ReShade off first, then turn arcdps on."
+      case "foreign": return "The game folder has a ReShade that GW2 on Mac didn't put there (\(foreign)). GW2 on Mac leaves it alone, so it doesn't add arcdps."
+      default: return "The game folder has another \(foreign) (Nexus or another addon?). GW2 on Mac leaves it alone, so it doesn't add arcdps."
+      }
     case "nogame":
       return "The game is not installed yet: arcdps can go in once it is."
     default:
       return settings.running && settings.loaded ? "Quit the game and Steam to turn arcdps on or off." : nil
     }
+  }
+
+  // gw2om.sh's space-separated file names ("d3d11.dll dxgi.dll") as a sentence's, or nil for none
+  private func names(_ value: String?) -> String? {
+    guard let value, !value.isEmpty else { return nil }
+    return value.replacingOccurrences(of: " ", with: " and ")
+  }
+
+  // ReShade: what it is, or the download while it runs (gw2om.sh's @progress labels: ReShade's
+  // installer from reshade.me; the compiler and the two effect packs from GitHub)
+  private var reshadeDescription: String {
+    if settings.reshade.working {
+      if settings.values["reshade"] != "on" { return "Removing ReShade from the game folder…" }
+      guard let p = settings.reshade.progress else { return "Downloading ReShade from reshade.me…" }
+      let what = "Downloading \(p.label) from \(p.label == "ReShade" ? "reshade.me" : "GitHub")…"
+      return p.total > 0 ? "\(what) \(Installer.megabytes(p.done)) of \(Installer.megabytes(p.total)) MB" : what
+    }
+    let version = settings.values["reshade_version"].flatMap { $0.isEmpty ? nil : " " + $0 } ?? ""
+    return "Post-processing effects by crosire, drawn over the finished picture. Downloads ReShade\(version) "
+      + "from reshade.me. Open its menu in the game with the Home key (fn + Left Arrow on a MacBook)."
+  }
+
+  // As gw2om.sh refuses: off goes whenever the player's wish is on (it leaves another ReShade or
+  // another program's file alone); on only into an empty place, with the game installed and
+  // closed. Disabled in foreign, blocked and nogame unless the wish is still on.
+  private var reshadeCanSwitch: Bool {
+    guard !settings.addonWorking, !settings.running else { return false }
+    let state = settings.values["reshade_state"]
+    if settings.values["reshade"] == "on" { return state != "nogame" }
+    return state == "off" || state == "on"
+  }
+
+  private var reshadeStateNote: String? {
+    if settings.reshade.working { return nil }
+    switch settings.values["reshade_state"] {
+    case "foreign":
+      let dll = settings.values["reshade_dll"].flatMap { $0.isEmpty ? nil : " (\($0))" } ?? ""
+      return "Another ReShade is in the game folder\(dll). GW2 on Mac leaves it as it is."
+    case "blocked":
+      let blocker = names(settings.values["reshade_blocker"]) ?? "d3d11.dll"
+      if settings.values["arcdps_state"] == "on" {
+        return "arcdps is in the game folder as \(blocker). Turn arcdps off first, then turn ReShade on."
+      }
+      let files = blocker.contains(" and ") ? "those files" : "that file"
+      return "The game folder has another \(blocker) (Nexus or another addon?). GW2 on Mac leaves it alone, so it can't add ReShade: remove \(files) first."
+    case "nogame":
+      return "The game is not installed yet: ReShade can go in once it is."
+    default:
+      return settings.running && settings.loaded ? "Quit the game and Steam to turn ReShade on or off." : nil
+    }
+  }
+
+  // The ReShade folder, once it exists (gw2om.sh prints it always): it stays when ReShade is off
+  private var reshadeFolder: URL? {
+    guard let path = settings.values["reshade_folder"], !path.isEmpty else { return nil }
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else { return nil }
+    return URL(fileURLWithPath: path, isDirectory: true)
   }
 
   private func interfaceStateNote(_ state: String) -> String {
@@ -624,23 +714,42 @@ struct InterfaceWarning: View {
   }
 }
 
-// The warning before arcdps goes in (as the larger interface's: off by default, a clear warning,
-// installed only after the user confirms)
-struct ArcdpsWarning: View {
+// The warning before an addon is downloaded and goes in (as the larger interface's: off by
+// default, a clear warning, installed only after the user confirms)
+struct AddonWarning: View {
+  let title: String
+  let bullets: [String]
   @Binding var isPresented: Bool
   let confirm: () -> Void
+
+  static func arcdps(isPresented: Binding<Bool>, confirm: @escaping () -> Void) -> AddonWarning {
+    AddonWarning(title: "Turn on arcdps?", bullets: [
+      "arcdps is a third-party addon by deltaconnected. It is not made or supported by ArenaNet, NCSOFT or GW2 on Mac.",
+      "It reads the game's memory while it runs. Use it at your own risk: there is no help or warranty for it from GW2 on Mac.",
+      "GW2 on Mac downloads it from deltaconnected.com and puts it into the game folder as d3d11.dll. From then on arcdps updates itself.",
+      "Turning it off removes d3d11.dll and keeps arcdps's settings (addons/arcdps).",
+    ], isPresented: isPresented, confirm: confirm)
+  }
+
+  // (version: gw2om.sh's reshade_version, the pinned one)
+  static func reshade(isPresented: Binding<Bool>, version: String?, confirm: @escaping () -> Void) -> AddonWarning {
+    let version = version.flatMap { $0.isEmpty ? nil : " " + $0 } ?? ""
+    return AddonWarning(title: "Turn on ReShade?", bullets: [
+      "ReShade is a third-party program by crosire. ArenaNet doesn't review, approve or endorse third-party programs, and neither ArenaNet nor I support it. You use it at your own risk.",
+      "GW2 on Mac downloads ReShade\(version) from reshade.me and two effect packs from their authors on GitHub. ReShade goes into the game folder as d3d11.dll.",
+      "Your presets and shaders live in a folder of their own, which stays when you turn ReShade off.",
+      "Effects that read the depth buffer (ambient occlusion, depth of field) stay off in online games with this build of ReShade.",
+    ], isPresented: isPresented, confirm: confirm)
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack(spacing: 10) {
         LucideIcon(name: "triangle-alert", size: 22).foregroundStyle(Brand.accent)
-        Text("Turn on arcdps?").font(.head(19)).foregroundStyle(Brand.fg)
+        Text(title).font(.head(19)).foregroundStyle(Brand.fg)
       }
       VStack(alignment: .leading, spacing: 8) {
-        bullet("arcdps is a third-party addon by deltaconnected. It is not made or supported by ArenaNet, NCSOFT or GW2 on Mac.")
-        bullet("It reads the game's memory while it runs. Use it at your own risk: there is no help or warranty for it from GW2 on Mac.")
-        bullet("GW2 on Mac downloads it from deltaconnected.com and puts it into the game folder as d3d11.dll. From then on arcdps updates itself.")
-        bullet("Turning it off removes d3d11.dll and keeps arcdps's settings (addons/arcdps).")
+        ForEach(bullets, id: \.self) { bullet($0) }
       }
       HStack {
         Spacer()
@@ -677,19 +786,24 @@ struct SettingsGroup<Content: View>: View {
   }
 }
 
-// One setting: its title and description on the left, the control on the right
-struct SettingRow<Control: View>: View {
+// One setting: its title and description on the left, the control on the right, and under the
+// description, for a few rows, a line of SmallButtons
+struct SettingRow<Control: View, Buttons: View>: View {
   let title: String
   let detail: String
   // a bar under the detail while something runs (0 to 1), as the install's steps draw theirs
   var progress: Double?
   @ViewBuilder var control: Control
+  // (outside the control's VoiceOver label: each button reads its own title)
+  @ViewBuilder var buttons: Buttons
 
-  init(_ title: String, _ detail: String, progress: Double? = nil, @ViewBuilder control: () -> Control) {
+  init(_ title: String, _ detail: String, progress: Double? = nil, @ViewBuilder control: () -> Control,
+       @ViewBuilder buttons: () -> Buttons) {
     self.title = title
     self.detail = detail
     self.progress = progress
     self.control = control()
+    self.buttons = buttons()
   }
 
   var body: some View {
@@ -708,6 +822,17 @@ struct SettingRow<Control: View>: View {
           .frame(height: 5)
           .padding(.top, 4)
         }
+        // (no buttons, no line: the other rows stay as they were; one under the other when the
+        // line doesn't fit)
+        Group(subviews: buttons) { list in
+          if !list.isEmpty {
+            ViewThatFits(in: .horizontal) {
+              HStack(spacing: 8) { buttons }
+              VStack(alignment: .leading, spacing: 6) { buttons }
+            }
+            .padding(.top, 4)
+          }
+        }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       control.labelsHidden().accessibilityLabel(Text(title))
@@ -715,6 +840,12 @@ struct SettingRow<Control: View>: View {
     .padding(.vertical, 11)
     .padding(.horizontal, 14)
     .accessibilityElement(children: .contain)
+  }
+}
+
+extension SettingRow where Buttons == EmptyView {
+  init(_ title: String, _ detail: String, progress: Double? = nil, @ViewBuilder control: () -> Control) {
+    self.init(title, detail, progress: progress, control: control) { EmptyView() }
   }
 }
 
