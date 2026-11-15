@@ -1445,6 +1445,9 @@ check "a link in the ReShade folder where the source's folder goes: refused, not
 rm -f "$RSF/Shaders/Evil"; mv "$RSF/Textures" "$SANDBOX/textures.keep"; ln -s "$OUT" "$RSF/Textures"
 check "  Textures itself a link: refused, nothing through it" eval '! imp "$IM/Golden Hour.zip" && err_has "Textures in the ReShade folder is a link or a file" && [ -z "$(ls -A "$OUT")" ]'
 rm -f "$RSF/Textures"; mv "$SANDBOX/textures.keep" "$RSF/Textures"
+rmdir "$RSF/Screenshots" && ln -s "$SANDBOX/nowhere/shots" "$RSF/Screenshots"
+check "  a dangling link for Screenshots: refused, saying so" eval '! imp "$IM/Fresh.ini" && err_has "Screenshots in the ReShade folder is a link or a file"'
+rm -f "$RSF/Screenshots"; mkdir "$RSF/Screenshots"
 check "  the refusals wrote nothing outside the ReShade folder, and changed nothing in it" eval '[ -z "$(outside_changed)" ] && [ "$(rssnap)" = "$before" ] || { outside_changed; false; }'
 # names that break careless scripts
 printf 'Techniques=Vibrance@Vibrance.fx\n' >"$IM/-n \"it's\" 4K.ini"
@@ -1455,7 +1458,7 @@ line.ini" && presets_are "$(printf "%s\n" "-n _it'\''s_ 4K.ini" new_line.ini)" &
 line.ini" "$RSF/Presets/new_line.ini" && done_is "Added 2 presets to Presets. These 2 presets use 1 effect, which is in Shaders."'
 mkdir -p "$IM/dash/Shaders" && echo '// d' >"$IM/dash/-d.fx" && echo '// q' >"$IM/dash/Shaders/q[1].fx" && echo '// star' >"$IM/dash/Shaders/a*b.fx"
 ( cd "$IM/dash" && zip -q "../-x [v2].zip" -- -d.fx Shaders/q\[1\].fx 'Shaders/a*b.fx' )
-check "a zip with a leading dash and brackets in its name and its files' names: each file on its own" eval 'imp "$IM/-x [v2].zip" && same "$IM/dash/-d.fx" "$RSF/Shaders/-x _v2_/-d.fx" && same "$IM/dash/Shaders/q[1].fx" "$RSF/Shaders/-x _v2_/q[1].fx" && same "$IM/dash/Shaders/a*b.fx" "$RSF/Shaders/-x _v2_/a*b.fx"'
+check "a zip with a leading dash and brackets in its name and its files' names, named from its folder: each file on its own" eval '(cd "$IM" && imp "-x [v2].zip") && same "$IM/dash/-d.fx" "$RSF/Shaders/-x _v2_/-d.fx" && same "$IM/dash/Shaders/q[1].fx" "$RSF/Shaders/-x _v2_/q[1].fx" && same "$IM/dash/Shaders/a*b.fx" "$RSF/Shaders/-x _v2_/a*b.fx"'
 # a name that is there already: replaced only from a source of the same name
 echo "the player's own" >"$RSF/Presets/ReShadePreset.ini"
 mkdir -p "$IM/pack" && printf 'Techniques=Vibrance@Vibrance.fx\n' >"$IM/pack/ReShadePreset.ini" && printf 'Techniques=CAS@CAS.fx\n' >"$IM/pack/Lumen.ini"

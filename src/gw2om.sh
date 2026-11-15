@@ -1985,8 +1985,11 @@ reshade_import() {
   # Each source into its own staging folder, with only what it may bring
   for p in "$@"; do
     i=$((i + 1))
+    # (a relative path with a leading dash isn't an option to unzip; the name in sentences without
+    # control characters)
     case "$p" in ?*/) p=${p%/} ;; esac
-    base=${p##*/}
+    case "$p" in -*) p="./$p" ;; esac
+    base=$(printf '%s' "${p##*/}" | LC_ALL=C tr '\001-\037\177' '_')
     [ ! -L "$p" ] || die "$base is a link. Add the file or folder it leads to instead."
     [ -e "$p" ] || die "$base is not there any more."
     name=$(import_name "$base")
@@ -2053,6 +2056,9 @@ EOF
 $moves
 EOF
   [ -z "$records" ] || rs_safe "$RS_IMPORTS" || die "${RS_BAD#"$RS"/} in the ReShade folder is a link or a folder. Move it out of $RS, then try again."
+  for d in Presets Shaders Textures Screenshots; do
+    rs_safe "$RS/$d/-" || die "${RS_BAD#"$RS"/} in the ReShade folder is a link or a file where GW2 on Mac puts a folder, so it adds nothing. Move it out of $RS, then try again."
+  done
   reshade_folder
   while IFS= read -r line; do
     [ -n "$line" ] || continue
