@@ -1124,7 +1124,7 @@ check "  both packs: each Shaders and Textures folder's contents under the pack'
 check "  only effects and images: no README, LICENSE or notes.txt" eval '[ -z "$(find "$RSF" -name README.md -o -name LICENSE -o -name notes.txt)" ]'
 check "  reshade=on, reshade_state=on, reshade_dll=d3d11.dll, no blocker" eval '[ "$(sett reshade)/$(rsst)/$(st reshade_dll)/$(st reshade_blocker)" = on/on/d3d11.dll/ ] && grep -qx reshade=on "$AD/settings.conf"'
 check "  d3dcompiler_47=native,builtin for Gw2-64.exe" reg "$GW2_DLLS" d3dcompiler_47 native,builtin
-check "  the checked ReShade64.dll and the compiler stay in the cache; no installer, zip or temporary file" eval 'same "$SANDBOX/pe/ReShade64.dll" "$CACHE/downloads/reshade/ReShade64.dll" && [ "$(ls -A "$CACHE/downloads/reshade" | tr "\n" " ")" = "ReShade64.dll d3dcompiler_47.dll " ] && ! ls -a "$GD" | grep -q gw2om-new'
+check "  the checked ReShade64.dll and the compiler stay in the cache; no installer, zip or temporary file" eval 'same "$SANDBOX/pe/ReShade64.dll" "$CACHE/downloads/reshade/ReShade64.dll" && [ "$(ls -A "$CACHE/downloads/reshade" | LC_ALL=C sort | tr "\n" " ")" = "ReShade64.dll d3dcompiler_47.dll " ] && ! ls -a "$GD" | grep -q gw2om-new || { ls -lA "$CACHE/downloads/reshade" "$GD"; false; }'
 check "  ReShade's effect cache folder is there" [ -d "$CACHE/reshade" ]
 check "set reshade on again: already there" sh -c "'$G' set reshade on | grep -q 'already in the game folder (d3d11.dll)'"
 echo "the player's preset" >"$RSF/Presets/Mine.ini"
