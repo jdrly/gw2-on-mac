@@ -1270,6 +1270,11 @@ g set reshade on >/dev/null 2>&1; g set arcdps off >/dev/null 2>&1
 cp "$SANDBOX/pe/nexus.dll" "$GD/dxgi.dll"; before=$(gdsnap)
 check "  with ReShade as d3d11.dll: set arcdps on refused, naming dxgi.dll, nothing changes" eval '! "$G" set arcdps on >"$SANDBOX/arc.txt" 2>&1 && has "$SANDBOX/arc.txt" "^@error The game folder has another dxgi.dll (Nexus" && [ "$(gdsnap)" = "$before" ]'
 rm -f "$GD/dxgi.dll"; g set reshade off >/dev/null 2>&1
+cp "$SANDBOX/pe/nexus.dll" "$GD/d3d11.dll"; cp "$SANDBOX/pe/arcdps.dll" "$GD/dxgi.dll"; before=$(gdsnap)
+check "Nexus as d3d11.dll, arcdps as dxgi.dll: arcdps on, ReShade blocked by d3d11.dll alone" eval '[ "$(arcst)/$(st arcdps_foreign)/$(rsst)/$(st reshade_blocker)" = on/d3d11.dll/blocked/d3d11.dll ]'
+check "  set reshade on refused, naming Nexus's d3d11.dll and not arcdps; nothing changes" eval '! "$G" set reshade on >"$SANDBOX/rs.txt" 2>&1 && has "$SANDBOX/rs.txt" "^@error The game folder has another d3d11.dll (Nexus" && ! has "$SANDBOX/rs.txt" "Turn arcdps off" && [ "$(gdsnap)" = "$before" ]'
+check "  Repair leaves both where they are" eval '"$G" repair >/dev/null 2>&1 && [ "$(gdsnap)" = "$before" ]'
+rm -f "$GD/d3d11.dll" "$GD/dxgi.dll"
 
 # the exclusive layout: each switch refuses while the other is in, naming it
 g set arcdps on >/dev/null 2>&1; before=$(gdsnap)

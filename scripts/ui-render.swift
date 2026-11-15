@@ -252,7 +252,7 @@ func settings(_ extra: [String: String] = [:]) -> GameSettings {
              "route": "steam", "updates": "off", "debug": "off", "steambg": "on", "quitsteam": "on", "cpus": "12",
              "steam_login": "no", "rawmouse": "on", "mousespeed": "1", "arcdps": "off", "arcdps_state": "off",
              "arcdps_foreign": "", "reshade": "off", "reshade_state": "off", "reshade_version": "6.8.0",
-             "reshade_dll": "", "reshade_blocker": "", "reshade_folder": ""].merging(extra) { $1 })
+             "reshade_dll": "", "reshade_blocker": "", "reshade_folder": "", "addons_layout": "together"].merging(extra) { $1 })
   return s
 }
 
@@ -431,8 +431,9 @@ func renderAll(_ dir: URL, exports: URL?) async {
           dir.appendingPathComponent("row-two-buttons-\(dark ? "dark" : "light").png"))
   }
   // ReShade in the Interface pane: off with its folder from an earlier time (the pane's own render
-  // has no folder yet), downloading, just placed, another ReShade, arcdps in the way, another
-  // program's file in the way, the game running. (The folder: any one that exists.)
+  // has no folder yet), downloading, just placed, both on (arcdps as dxgi.dll), another ReShade,
+  // another program's file in the way (alone, and next to arcdps as dxgi.dll), the game running;
+  // in the exclusive layout each addon waiting for the other. (The folder: any one that exists.)
   let folder = dir.path
   let reshade: [(String, Bool, [String: String], (GameSettings) -> Void)] = [
     ("off", false, ["reshade_folder": folder], { _ in }),
@@ -445,20 +446,30 @@ func renderAll(_ dir: URL, exports: URL?) async {
       s.reshade.working = true
       s.reshade.progress = .init(label: "ReShade's standard effects", done: 2_300_000, total: 0)
     }),
-    ("on", false, ["reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll", "reshade_folder": folder,
-                   "arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"], { s in
+    ("on", false, ["reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll", "reshade_folder": folder], { s in
       s.reshade.result = "ReShade 6.8.0 is in the game folder as d3d11.dll. It loads the next time the game starts."
     }),
-    ("on", true, ["reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll", "reshade_folder": folder,
-                  "arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"], { _ in }),
+    ("on", true, ["reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll", "reshade_folder": folder], { _ in }),
+    ("both-on", false, ["reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll", "reshade_folder": folder,
+                        "arcdps": "on", "arcdps_state": "on"], { s in
+      s.reshade.result = "ReShade 6.8.0 is in the game folder as d3d11.dll. It loads the next time the game starts. arcdps is dxgi.dll now, so both load."
+    }),
+    ("both-on", true, ["reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll", "reshade_folder": folder,
+                       "arcdps": "on", "arcdps_state": "on"], { _ in }),
     ("foreign", false, ["reshade_state": "foreign", "reshade_dll": "d3d11.dll",
                         "arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"], { _ in }),
-    ("blocked", false, ["reshade_state": "blocked", "reshade_blocker": "d3d11.dll", "arcdps": "on", "arcdps_state": "on"],
-     { _ in }),
     ("blocked-other", false, ["reshade_state": "blocked", "reshade_blocker": "d3d11.dll",
                               "arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"], { _ in }),
+    ("blocked-nexus", false, ["reshade_state": "blocked", "reshade_blocker": "d3d11.dll", "arcdps": "on", "arcdps_state": "on",
+                              "arcdps_foreign": "d3d11.dll"], { _ in }),
     ("running", false, ["running": "yes", "reshade": "on", "reshade_state": "on", "reshade_folder": folder,
-                        "arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"], { _ in }),
+                        "arcdps": "on", "arcdps_state": "on"], { _ in }),
+    ("exclusive-arcdps-in", false, ["addons_layout": "exclusive", "reshade_state": "blocked", "reshade_blocker": "d3d11.dll",
+                                    "arcdps": "on", "arcdps_state": "on"], { _ in }),
+    ("exclusive-arcdps-in", true, ["addons_layout": "exclusive", "reshade_state": "blocked", "reshade_blocker": "d3d11.dll",
+                                   "arcdps": "on", "arcdps_state": "on"], { _ in }),
+    ("exclusive-reshade-in", false, ["addons_layout": "exclusive", "reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll",
+                                     "reshade_folder": folder, "arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"], { _ in }),
   ]
   for (name, dark, values, adjust) in reshade {
     let s = settings(values)
