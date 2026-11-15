@@ -447,7 +447,7 @@ func renderAll(_ dir: URL, exports: URL?) async {
     }),
     ("on", false, ["reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll", "reshade_folder": folder,
                    "arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"], { s in
-      s.reshade.result = "ReShade 6.8.0 is in the game folder as d3d11.dll. It loads the next time the game starts. Open its menu with Home (fn + Left Arrow on a MacBook)."
+      s.reshade.result = "ReShade 6.8.0 is in the game folder as d3d11.dll. It loads the next time the game starts."
     }),
     ("on", true, ["reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll", "reshade_folder": folder,
                   "arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"], { _ in }),
