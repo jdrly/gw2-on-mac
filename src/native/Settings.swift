@@ -619,7 +619,7 @@ struct SettingsView: View {
       guard let p = settings.arcdps.progress, p.total > 0 else { return "Downloading arcdps from deltaconnected.com…" }
       return "Downloading arcdps from deltaconnected.com… \(Installer.megabytes(p.done)) of \(Installer.megabytes(p.total)) MB"
     }
-    return "deltaconnected's addon (d3d11.dll), downloaded from deltaconnected.com; it updates itself. "
+    return "deltaconnected's addon, downloaded from deltaconnected.com; it updates itself. "
       + "It reads the game's memory, which ArenaNet doesn't support."
   }
 

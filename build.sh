@@ -37,7 +37,7 @@ cd "$(dirname "$0")"
 ROOT="$PWD"
 
 # GW2_ON_MAC_VERSION overrides the version for test builds.
-APP_VERSION=${GW2_ON_MAC_VERSION:-0.1.3}
+APP_VERSION=${GW2_ON_MAC_VERSION:-0.1.4}
 
 # Development builds: X.Y.Z-dev.N, as SWTOR on Mac's. CFBundleShortVersionString is the version as
 # is; CFBundleVersion (what Sparkle compares) is numeric and sorts above the previous release and
@@ -242,6 +242,9 @@ patches, Wine 11.0, LGPL-2.1-or-later; built by athei) is downloaded at install 
 https://github.com/jdrly/wine-engine/releases/tag/$(sed -n 's/^ENGINE_NAME=//p' src/gw2om.sh),
 with its source.
 Steam comes from Valve, Guild Wars 2 from Valve (Steam) or ArenaNet.
+ReShade (by crosire, BSD-3-Clause), two effect packs and, when the game has none, Microsoft's
+d3dcompiler_47.dll are downloaded from their publishers only when the ReShade switch is turned on:
+see THIRD_PARTY_NOTICES.md.
 EOF
 
 # channel: release, or dev (development build; gw2om.sh and the app read it)
