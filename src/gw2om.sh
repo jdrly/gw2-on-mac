@@ -58,7 +58,8 @@
 #                              remembered as reshade= in the settings, so Play, Install and Repair
 #                              put missing files back; status and settings print reshade,
 #                              reshade_state (on|off|foreign|blocked|nogame), reshade_version,
-#                              reshade_dll, reshade_blocker, reshade_folder
+#                              reshade_dll, reshade_blocker, reshade_folder. ReShade's menu opens
+#                              in the game with Home (fn + Left Arrow on a MacBook).
 #   gw2om.sh check-setup FILE  is FILE ArenaNet's Gw2Setup-64.exe: a PE x86_64 executable with a
 #                              valid Authenticode signature by ArenaNet ("@done <what>")
 #   gw2om.sh reset-shaders     deletes DXMT's caches (shaders, pipelines, recipes) in the app's
@@ -1714,7 +1715,7 @@ set_reshade() {
   write_settings reshade on
   registry_unlock
   apply_registry
-  echo "@done ReShade $RESHADE_VERSION is in the game folder as d3d11.dll. It loads the next time the game starts. Open its menu with Home (fn + Left Arrow on a MacBook)."
+  echo "@done ReShade $RESHADE_VERSION is in the game folder as d3d11.dll. It loads the next time the game starts."
 }
 
 # sync_reshade [download]: with the setting on, puts ReShade's missing files back into the game
