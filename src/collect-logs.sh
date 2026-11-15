@@ -20,17 +20,22 @@
 #                  taken out). Not arcdps's logs (addons/arcdps): its crash log dumps the game's
 #                  threads and modules, which may hold account or character names. Never Local.dat (the game's saved login), Steam's config or its
 #                  login, connection or account logs, nor anything else of the bottle.
+#   reshade/       from the ReShade folder (gw2om.sh's reshade_folder): ReShade.log (its end),
+#                  ReShade.ini, the current preset in preset/ (the file PresetPath names, only one
+#                  inside the folder) and shaders.txt, the names of the files under Shaders
 #   system-info.txt  macOS, chip, memory, displays, versions, the state of the install and its
-#                  engine pieces, which crash reports are in the zip, the GPU error count
+#                  engine pieces, ReShade and arcdps (gw2om.sh's status), which crash reports are in
+#                  the zip, the GPU error count
 #   gpu-errors.txt  the GPU errors of the game and Wine in macOS's unified log of the last 2 hours
 #   crash-reports/  macOS's crash, hang and spin reports of the last 7 days for the game, Wine,
 #                  Steam's Windows processes and GW2 on Mac
-# Every file is redacted on the way in, as SWTOR on Mac's: home folder → ~, user and full name →
+# Every file is redacted on the way in, as SWTOR on Mac's: home folder (also as Wine writes it,
+# Z:\Users\...) → ~, user and full name →
 # USER and NAME, Steam account and persona names (read from the bottle's Steam loginusers.vdf, only
 # the names) → ACCOUNT, e-mail addresses → EMAIL, password/user name/token settings → REDACTED,
 # Steam IDs → STEAMID, serial numbers and device identifiers left out, the Mac's names → NAME.
-# Then a leak check: a file that still has one of those names, a home folder path, a Steam ID or a
-# token is left out of the zip (named in left-out.txt).
+# Then a leak check: a file that still has one of those names, a home folder path (/ or \), a Steam
+# ID or a token is left out of the zip (named in left-out.txt).
 #
 # GW2_ON_MAC_ROOT=/abs/dir: a sandbox (as for gw2om.sh); the zip then goes to its Desktop.
 set -u
@@ -56,6 +61,12 @@ mkdir -p "$out/logs" "$out/crash-reports"
 
 # The game folder (gw2om.sh's state file names it)
 GAME_DIR="$(sed -n 's/^game_dir=//p' "$APPDIR/state" 2>/dev/null | tail -1)"
+# ReShade and arcdps as gw2om.sh sees them (its status keys), and the ReShade folder
+"$RES/gw2om.sh" status >"$work/status" 2>/dev/null
+key() { sed -n "s/^$1=//p" "$work/status" | head -1; }
+RSF="$(key reshade_folder)"
+# winform <path>: the path as Wine writes it, without the Z: (Z:\Users\...)
+winform() { printf '%s' "$1" | tr / '\\'; }
 
 # Steam account and persona names to hide (only these values are read from loginusers.vdf)
 accounts="$(sed -n -E 's/^[[:space:]]*"(AccountName|PersonaName)"[[:space:]]*"(.*)"[[:space:]]*$/\2/p' \
@@ -75,7 +86,8 @@ awk 'length($0) >= 4' "$work/names" >"$literals"
 awk 'length($0) < 4' "$work/names" >"$literals_short"
 
 redact() {  # [game] stdin → stdout (game: also game_rules)
-  SOM_HOME_PATH="$HOME" SOM_ROOT_HOME="$H" SOM_USER="$(id -un)" SOM_NAME="$(id -F 2>/dev/null)" SOM_ACCOUNTS="$accounts" \
+  SOM_HOME_PATH="$HOME" SOM_ROOT_HOME="$H" SOM_WHOME="$(winform "$HOME")" SOM_WROOT_HOME="$(winform "$H")" \
+  SOM_USER="$(id -un)" SOM_NAME="$(id -F 2>/dev/null)" SOM_ACCOUNTS="$accounts" \
   LC_ALL=C awk -v litfile="$literals" -v shortfile="$literals_short" -v gamelog="${1:+1}" '
     # Replace w with r in s, ignoring case; only where w is a whole word if whole is set.
     function rep(s, w, r, whole,    ls, lw, res, p, n, before, after, last) {
@@ -140,6 +152,17 @@ redact() {  # [game] stdin → stdout (game: also game_rules)
       }
       return out s
     }
+    # e-mail addresses → EMAIL; not a ReShade preset'"'"'s technique@file.fx (.fx and .fxh are no
+    # domains)
+    function emails(s,    out, m) {
+      out = ""
+      while (match(s, /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z][A-Za-z]+/)) {
+        m = substr(s, RSTART, RLENGTH)
+        out = out substr(s, 1, RSTART - 1) (tolower(m) ~ /\.fxh?$/ ? m : "EMAIL")
+        s = substr(s, RSTART + RLENGTH)
+      }
+      return out s
+    }
     # The game and Steam logs (ArenaNet.log, Steam logs): crash entries name the computer, the
     # account and its addresses; Steam logs carry Steam IDs and the account paths
     function game_rules(s) {
@@ -161,6 +184,7 @@ redact() {  # [game] stdin → stdout (game: also game_rules)
         "crashreporterkey|deviceidentifierforvendor|bootsessionuuid|sleepwakeuuid|steamid|accountid|personaname)[\"\047]?[ \t]*[:=][ \t]*[\"\047]?"
       secret_value = "^[^\"\047&,; \t}]+"
       home = ENVIRON["SOM_HOME_PATH"]; rhome = ENVIRON["SOM_ROOT_HOME"]
+      whome = ENVIRON["SOM_WHOME"]; wrhome = ENVIRON["SOM_WROOT_HOME"]
       user = ENVIRON["SOM_USER"]; fullname = ENVIRON["SOM_NAME"]
       # A user name that is a common word is only replaced in paths, not everywhere.
       split("admin user users mac test game wine guest root home apple steam shared crossover", w, " ")
@@ -173,8 +197,8 @@ redact() {  # [game] stdin → stdout (game: also game_rules)
       line = tolower($0)
       if (line ~ /serial number|hardware uuid|provisioning udid/) next
       s = $0
-      if (rhome != home) s = rep(s, rhome, "~", 0)
-      s = rep(s, home, "~", 0)
+      if (rhome != home) { s = rep(s, rhome, "~", 0); s = rep(s, wrhome, "~", 0) }
+      s = rep(s, home, "~", 0); s = rep(s, whome, "~", 0)
       s = rep(s, "/Users/" user, "/Users/USER", 1)
       s = rep(s, "\\users\\" user, "\\users\\USER", 1)
       if (length(user) >= 2 && !(tolower(user) in common)) s = rep(s, user, "USER", 1)
@@ -194,8 +218,7 @@ redact() {  # [game] stdin → stdout (game: also game_rules)
       gsub(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)?/, "TOKEN", s)
       s = setargs(s)
       s = secrets(s)
-      gsub(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z][A-Za-z]+/, "EMAIL", s)
-      print s
+      print emails(s)
     }'
 }
 
@@ -348,6 +371,49 @@ add_log "$GW2_APPDATA/GFXSettings.Gw2-64.exe.xml" 1000000 game-logs game
 for f in bootstrap_log.txt content_log.txt gameprocess_log.txt shader_log.txt; do
   add_log "$STEAM/logs/$f" 2000000 game-logs/steam game
 done
+# ReShade's folder: its log and ini, the current preset and the names of the files under Shaders.
+# No links: only the folder's own files.
+# reshade_preset: PRESET, the file ReShade.ini's [GENERAL] PresetPath names, if it is one inside the
+# folder (relative paths start at the folder, Z: is /); PRESET_NOTE says what was found
+lc() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+reshade_preset() {
+  local v p dir root
+  PRESET="" PRESET_NOTE="none set"
+  v=$(LC_ALL=C awk '{ sub(/\r$/, "") } /^[ \t]*\[/ { g = $0 ~ /^[ \t]*\[GENERAL\][ \t]*$/; next }
+    g && /^[ \t]*PresetPath[ \t]*=/ { sub(/^[^=]*=[ \t]*/, ""); sub(/[ \t]+$/, ""); print; exit }' "$RSF/ReShade.ini" 2>/dev/null)
+  [ -n "$v" ] || return 0
+  PRESET_NOTE="outside the ReShade folder, not collected"
+  case "$v" in
+    [Zz]:\\*) p=${v#??} ;;
+    ?:*|\\*) return 0 ;;
+    *) p="$RSF/$v" ;;
+  esac
+  p=$(printf '%s' "$p" | tr '\\' /)
+  case "/$p/" in */../*) return 0 ;; esac
+  dir=$(cd "$(dirname "$p")" 2>/dev/null && pwd -P) && root=$(cd "$RSF" && pwd -P) || { PRESET_NOTE="not there"; return 0; }
+  case "$(lc "$dir")/" in "$(lc "$root")"/*) ;; *) return 0 ;; esac
+  [ -f "$p" ] && [ ! -L "$p" ] || { PRESET_NOTE="not there"; return 0; }
+  PRESET="$dir/${p##*/}" PRESET_NOTE="${p##*/}, in reshade/preset/"
+}
+PRESET="" PRESET_NOTE=""
+if [ -n "$RSF" ] && [ -d "$RSF" ] && [ ! -L "$RSF" ]; then
+  mkdir -p "$out/reshade"
+  [ -L "$RSF/ReShade.log" ] || add_log "$RSF/ReShade.log" 5000000 reshade
+  [ -L "$RSF/ReShade.ini" ] || add_log "$RSF/ReShade.ini" 1000000 reshade
+  reshade_preset
+  [ -z "$PRESET" ] || add_log "$PRESET" 1000000 reshade/preset
+  # (the first SHADER_NAMES names; find doesn't follow links)
+  SHADER_NAMES=2000 SHADERS_NOTE="no Shaders folder"
+  if [ -d "$RSF/Shaders" ] && [ ! -L "$RSF/Shaders" ]; then
+    ( cd "$RSF/Shaders" && find . -type f ) 2>/dev/null | sed 's|^\./||' | LC_ALL=C sort >"$work/shaders"
+    n=$(wc -l <"$work/shaders" | tr -d ' ')
+    { echo "Files under Shaders in the ReShade folder: $n"
+      head -n "$SHADER_NAMES" "$work/shaders"
+      [ "$n" -le "$SHADER_NAMES" ] || echo "[GW2 on Mac: only the first $SHADER_NAMES names]"
+    } | redact >"$out/reshade/shaders.txt"
+    SHADERS_NOTE="$n files under Shaders (their names in shaders.txt)"
+  fi
+fi
 # the last game session in short
 if [ -f "$LOGS/Gw2-64_d3d11.log" ] && [ -x "$RES/session-report.sh" ]; then
   "$RES/session-report.sh" "$LOGS/Gw2-64_d3d11.log" 2>&1 | redact >"$out/session-report.txt"
@@ -380,12 +446,35 @@ sha12() { shasum -a 256 "$1" 2>/dev/null | cut -c1-12; }
   echo "Game Mode bundle: $([ -x "$APPDIR/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe" ] && echo present || echo none)"
   echo "Game: $([ -n "$GAME_DIR" ] && [ -f "$GAME_DIR/Gw2-64.exe" ] && echo "installed, Gw2-64.exe $(stat -f '%z bytes, %Sm' "$GAME_DIR/Gw2-64.exe")" || echo "not found")"
   [ -z "$GAME_DIR" ] || echo "  interface addon (version.dll): $([ -f "$GAME_DIR/version.dll" ] && { grep -aq 'gw2-on-mac ui-scale' "$GAME_DIR/version.dll" && echo "GW2 on Mac's" || echo "another program's"; } || echo none)"
-  # d3d11.dll and dxgi.dll addons (arcdps, Nexus): which, by a quick look (gw2om.sh's arcdps_state
-  # reads the exports); arcdps's own logs stay out (its crash log dumps the game's memory)
+  # d3d11.dll and dxgi.dll addons (ReShade, arcdps, Nexus): which, by gw2om.sh's status keys;
+  # arcdps's own logs stay out (its crash log dumps the game's memory)
   for f in d3d11.dll dxgi.dll; do
     [ -n "$GAME_DIR" ] && [ -f "$GAME_DIR/$f" ] || continue
-    echo "  $f addon: $(LC_ALL=C grep -aq addextension2 "$GAME_DIR/$f" && LC_ALL=C grep -aq arcdps "$GAME_DIR/$f" && echo arcdps || echo "another program's"), $(stat -f '%z bytes, %Sm' "$GAME_DIR/$f")"
+    case " $(key reshade_dll) | $(key arcdps_foreign) " in
+      *" $f "*"|"*) what=ReShade ;;
+      *"|"*" $f "*) what="another program's" ;;
+      *) [ "$(key arcdps_state)" = on ] && what=arcdps || what="another program's" ;;
+    esac
+    echo "  $f addon: $what, $(stat -f '%z bytes, %Sm' "$GAME_DIR/$f")"
   done
+  # ReShade (gw2om.sh's reshade_state), arcdps, the compiler ReShade loads, and the ReShade folder
+  s=$(key reshade_state)
+  case "$s" in
+    on) s="on, $(key reshade_version) as $(key reshade_dll)" ;;
+    foreign) s="foreign (a ReShade GW2 on Mac didn't place, version unknown) as $(key reshade_dll)" ;;
+    blocked) s="blocked (another $(key reshade_blocker) in the game folder)" ;;
+    "") s="not known (gw2om.sh's status said nothing)" ;;
+  esac
+  echo "ReShade: $s; arcdps $(key arcdps)"
+  c=$([ -z "$GAME_DIR" ] || [ ! -f "$GAME_DIR/d3dcompiler_47.dll" ] || shasum -a 256 "$GAME_DIR/d3dcompiler_47.dll" | cut -d' ' -f1)
+  echo "  d3dcompiler_47.dll next to Gw2-64.exe: ${c:+sha256 }${c:-none}"
+  if [ -d "$out/reshade" ]; then
+    kb() { [ -f "$1" ] && echo "$((($(stat -f %z "$1") + 999) / 1000)) KB" || echo none; }
+    echo "  ReShade folder (in reshade/): ReShade.log $(kb "$RSF/ReShade.log"), ReShade.ini $(kb "$RSF/ReShade.ini")," \
+      "preset $PRESET_NOTE, $SHADERS_NOTE"
+  else
+    echo "  ReShade folder: none"
+  fi
   echo "DXMT's cache for the game: $(du -sk "$DXMT_CACHE" 2>/dev/null | awk '{ printf "%.1f MB", $1 / 1024 }' || echo none)"
   echo "Mac: $(sysctl -n hw.model), $(sysctl -n machdep.cpu.brand_string)" \
     "($(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null)+$(sysctl -n hw.perflevel1.physicalcpu 2>/dev/null) cores)," \
@@ -448,7 +537,8 @@ found_name() {  # <file> <grep options>
   f="$out/$rel"
   if { [ -s "$literals" ] && found_name "$f" -i -F -f "$literals"; } ||
      { [ -s "$literals_short" ] && found_name "$f" -i -w -F -f "$literals_short"; } ||
-     found -F -e "$HOME/" -e "$H/" -e "/Users/$(id -un)/" "$f" ||
+     found -F -e "$HOME/" -e "$H/" -e "/Users/$(id -un)/" \
+       -e "$(winform "$HOME")\\" -e "$(winform "$H")\\" -e "\\Users\\$(id -un)\\" "$f" ||
      found -E -f "$work/leak-patterns" "$f"; then
     rm -f "$f"
     echo "$rel"

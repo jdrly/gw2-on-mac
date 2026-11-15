@@ -2,7 +2,8 @@
 # Summary of one game session from DXMT's log (the jdrly/dxmt fork writes it for Gw2-64.exe into
 # ~/Library/Logs/GW2 on Mac/Gw2-64_d3d11.log; gw2om.sh keeps the 4 before as .1-.4): frame rate,
 # hitches (and DXMT's share of them), shader and pipeline compile waits, shader warming,
-# presentation, Metal 4. As SWTOR on Mac's session report, for DXMT's lines.
+# presentation, Metal 4, and ReShade and arcdps as the session started (gw2om.sh's session.env).
+# As SWTOR on Mac's session report, for DXMT's lines.
 #
 #   session-report.sh [--keep] [Gw2-64_d3d11.log]   one session (default: the current log; the
 #                                                   last session in it)
@@ -112,6 +113,21 @@ summary() {
 
 get() { printf '%s\n' "$1" | sed -n "s/^$2=//p"; }
 
+# reshade_line <keys> <label>: ReShade's state from gw2om.sh's keys (reshade_state, reshade_version,
+# reshade_dll, reshade_blocker, arcdps, d3dcompiler_47: its sha256), as gw2om.sh writes them
+# into session.env at the start of a session
+reshade_line() {
+  local k=$1 s c
+  s=$(get "$k" reshade_state) c=$(get "$k" d3dcompiler_47)
+  case "$s" in
+    on) s="on, $(get "$k" reshade_version) as $(get "$k" reshade_dll)" ;;
+    foreign) s="foreign (a ReShade GW2 on Mac didn't place, version unknown) as $(get "$k" reshade_dll)" ;;
+    blocked) s="blocked (another $(get "$k" reshade_blocker) in the game folder)" ;;
+  esac
+  echo "$2: $s; arcdps $(get "$k" arcdps)"
+  echo "  d3dcompiler_47.dll next to Gw2-64.exe: ${c:+sha256 }${c:-none}"
+}
+
 report() {  # <log>
   local s
   s=$(summary "$1")
@@ -120,6 +136,7 @@ report() {  # <log>
   echo "DXMT $(get "$s" version), $(get "$s" cpus) CPUs seen, display at $(get "$s" refresh) Hz"
   if [ -f "$LOGS/session.env" ] && [ "$(dirname "$1")" = "$LOGS" ]; then
     echo "Settings at the start: $(sed -n 's/^SETTING_//p' "$LOGS/session.env" | tr '\n' ' ')"
+    ! grep -q '^reshade_state=' "$LOGS/session.env" || reshade_line "$(cat "$LOGS/session.env")" "ReShade at the start"
   fi
   echo
   if [ "$(get "$s" samples)" -gt 0 ]; then

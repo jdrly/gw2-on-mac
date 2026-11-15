@@ -2453,7 +2453,8 @@ rotate_logs() {
 }
 
 # launch <program> <args...>: a program in the bottle with the game's environment, detached; the
-# session's environment goes to logs/session.env (Collect Logs, the session report)
+# session's environment goes to logs/session.env (Collect Logs, the session report), with ReShade's
+# keys (reshade_lines), arcdps (on, off) and the sha256 of the d3dcompiler_47.dll next to Gw2-64.exe
 launch() {
   local e
   game_env
@@ -2469,6 +2470,9 @@ launch() {
     rotate_logs
     { echo "STARTED=$(date '+%F %T')"; echo "APP=$VERSION"; echo "ROUTE=$(state route)"; echo "DXMT=$DXMT_VERSION"
       for k in $SETTING_KEYS; do echo "SETTING_$k=$(setting "$k")"; done
+      # (ReShade and arcdps as the session starts with them: the session report's ReShade line)
+      reshade_lines; arcdps_state; echo "arcdps=$([ "$ARC" = on ] && echo on || echo off)"
+      echo "d3dcompiler_47=$([ -z "$GAME_DIR" ] || [ ! -f "$GAME_DIR/d3dcompiler_47.dll" ] || sha256 "$GAME_DIR/d3dcompiler_47.dll")"
       printf '%s\n' "${E[@]}" | grep -v '^WINE_COMPATDB='; } >"$LOGS/session.env"
     printf '%s\n' "${E[@]}" | shasum | cut -c1-12 >"$LOGS/session.key"
   fi
