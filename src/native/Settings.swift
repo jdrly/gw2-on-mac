@@ -423,12 +423,16 @@ struct SettingsView: View {
       if let state = settings.values["uiscale_state"], state != "off", state != "on" {
         note("triangle-alert", interfaceStateNote(state), Brand.accent)
       }
-      if let text = arcdpsStateNote {
+      if let text = otherAddonNote(arcdps: true) {
+        note("info", text, Brand.fg3)
+      } else if let text = arcdpsStateNote {
         note("triangle-alert", text, Brand.accent)
       } else if let result = settings.arcdps.result, !settings.arcdps.working {
         note("info", result, Brand.fg3)
       }
-      if let text = reshadeStateNote {
+      if let text = otherAddonNote(arcdps: false) {
+        note("info", text, Brand.fg3)
+      } else if let text = reshadeStateNote {
         note("triangle-alert", text, Brand.accent)
       } else if let result = settings.reshade.result, !settings.reshade.working {
         note("info", result, Brand.fg3)
@@ -570,9 +574,7 @@ struct SettingsView: View {
     let foreign = names(settings.values["arcdps_foreign"]) ?? "d3d11.dll"
     switch settings.values["arcdps_state"] {
     case "foreign":
-      // (ReShade's d3d11.dll in the way: gw2om.sh's refusal names it)
       switch settings.values["reshade_state"] {
-      case "on": return "ReShade is in the game folder as \(foreign). Turn ReShade off first, then turn arcdps on."
       case "foreign": return "The game folder has a ReShade that GW2 on Mac didn't put there (\(foreign)). GW2 on Mac leaves it alone, so it doesn't add arcdps."
       default: return "The game folder has another \(foreign) (Nexus or another addon?). GW2 on Mac leaves it alone, so it doesn't add arcdps."
       }
@@ -581,6 +583,22 @@ struct SettingsView: View {
     default:
       return settings.running && settings.loaded ? "Quit the game and Steam to turn arcdps on or off." : nil
     }
+  }
+
+  // In the exclusive layout (gw2om.sh's ADDONS_LAYOUT) each addon's switch waits until the other is
+  // off: a normal state, so a calm note (gw2om.sh's refusal names the other). In the together
+  // layout they share the game folder, and a file in the way is another program's.
+  private func otherAddonNote(arcdps: Bool) -> String? {
+    guard settings.values["addons_layout"] == "exclusive" else { return nil }
+    if arcdps, !settings.arcdps.working, settings.values["arcdps_state"] == "foreign", settings.values["reshade_state"] == "on" {
+      let dll = names(settings.values["reshade_dll"]) ?? "d3d11.dll"
+      return "ReShade is in the game folder as \(dll). Turn ReShade off first, then turn arcdps on."
+    }
+    if !arcdps, !settings.reshade.working, settings.values["reshade_state"] == "blocked", settings.values["arcdps_state"] == "on" {
+      let dll = names(settings.values["reshade_blocker"]) ?? "d3d11.dll"
+      return "arcdps is in the game folder as \(dll). Turn arcdps off first, then turn ReShade on."
+    }
+    return nil
   }
 
   // gw2om.sh's space-separated file names ("d3d11.dll dxgi.dll") as a sentence's, or nil for none
@@ -621,9 +639,6 @@ struct SettingsView: View {
       return "Another ReShade is in the game folder\(dll). GW2 on Mac leaves it as it is."
     case "blocked":
       let blocker = names(settings.values["reshade_blocker"]) ?? "d3d11.dll"
-      if settings.values["arcdps_state"] == "on" {
-        return "arcdps is in the game folder as \(blocker). Turn arcdps off first, then turn ReShade on."
-      }
       let files = blocker.contains(" and ") ? "those files" : "that file"
       return "The game folder has another \(blocker) (Nexus or another addon?). GW2 on Mac leaves it alone, so it can't add ReShade: remove \(files) first."
     case "nogame":
