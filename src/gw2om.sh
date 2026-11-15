@@ -1038,8 +1038,10 @@ FEX_SWITCHES="
 [ -z "$ROOT" ] || FEX_SWITCHES="${GW2_ON_MAC_FEX_SWITCHES:-$FEX_SWITCHES}"
 # fex_switch_row <setting>: its row's entry and needs, or nothing
 fex_switch_row() { printf '%s\n' "$FEX_SWITCHES" | awk -v k="$1" '$1 == k { print $2, $3 }'; }
-# fex_in_version <entry>: my FEX's VERSION names the entry's variable on its switches: line
-fex_in_version() { in_list "${1%%=*}" "$(sed -n 's/^switches://p' "$FEX_COMP/VERSION" 2>/dev/null | head -1)"; }
+# fex_in_version <entry>: my FEX's VERSION names the entry's variable on its switches: line. A
+# word there can carry a value, FEX_HOSTFEATURES=disableavx (jdrly/FEX#12: upstream's variable, a
+# value only mine honours); the name counts.
+fex_in_version() { in_list "${1%%=*}" "$(sed -n 's/^switches://p' "$FEX_COMP/VERSION" 2>/dev/null | head -1 | sed 's/=[^ ]*//g')"; }
 # fex_switch_state <entry> <needs>: setting_state for a row of FEX_SWITCHES
 fex_switch_state() {
   if [ "$2" != fork ]; then echo ok
@@ -1105,6 +1107,10 @@ fex_entries() {
 # WINE_HEAT_PROF_FEX itself (#111); #101 and #104 have no switch. FEX_ENTRYHEADERLOOKUP (#162) stays
 # out of the rule while it can start my ntdll.so's sampler (heat_prof_on): with it on FEX no longer
 # stores the block a thread entered last, which the sampler reads (jdrly/FEX's GW2Contract.h).
+# FEX_HOSTFEATURES (#118) is a comma list that FEX ORs into one mask, and in a compatdb rule a later
+# entry for a variable replaces the earlier one. So the file's FEX_HOSTFEATURES lines go into the
+# rule as one entry (hf_join), and while a rule of compatdb.local for Gw2-64.exe sets it
+# (local_hostfeatures), that rule replaces them: they stay out, saying what to write there instead.
 DEV_SWITCHES="
 1 wine #14,#45 unplayed WINE_HEAT_SPIN=lock=20:game,event=30:game,sem=5:game the Faster locks row's two spins, and the job workers spin 5 µs on their semaphore before they sleep. While this line is here, its value replaces the row's.
 1 macdrv #62 unplayed WINE_MACDRV_VIEW=changes a window's view frame goes to the main thread only when it changed
@@ -1128,6 +1134,11 @@ DEV_SWITCHES="
 3 dxmt jdrly/dxmt#204 unplayed DXMT_MTL4_ALLOCATOR_POOL=1 only with the Metal row at Metal 4, nothing on Metal 3: a Metal 4 queue's chunks take their command allocator from a pool that keeps at most 8 idle, instead of one allocator per ring slot
 5 fex #161 unplayed FEX_DISPATCHERL1LOOKUP=1 the dispatcher looks in the thread's L1 before it leaves for the lookup in C++
 5 fex #162 unplayed FEX_ENTRYHEADERLOOKUP=1 a block's entry stores nothing, and faults, suspends and self-modifying code find the block from the host PC. Stays out while the sampler can run (WINE_HEAT_PROF or WINE_HEAT_CONTROL), which reads what the entries stored.
+6 fex #164 unplayed FEX_LEA32BITADDS=1 lea with a 32-bit destination computes its address with 32-bit adds, one instruction instead of two
+6 fex #164 unplayed FEX_SIGNEXTENDINGLOADS=1 movsx and movsxd from memory load and sign-extend in one instruction when the load needs no TSO emulation, which hardware TSO turns off
+6 fex #165 unplayed FEX_ENTRYCOMPILELOCK=1 threads that miss on the same entry at once compile it once, and FEX's pool allocators read the CPU's counter for their clock instead of QueryPerformanceCounter
+6 fex #118 unplayed FEX_HOSTFEATURES=disableavx the game sees no AVX, AVX2, BMI, FMA or F16C and takes its SSE paths. Another FEX_HOSTFEATURES line here joins this one. A compatdb.local rule for Gw2-64.exe that sets FEX_HOSTFEATURES replaces them, and status says what to write there instead. If the game crashes at start or in play, take this line out first.
+6 dxmt jdrly/dxmt#265 unplayed DXMT_RENAME_TRIM=600 every 2 s, the rename queues give back the allocations the GPU finished with more than 600 sequence ids (about 10 s) ago
 "
 # Rows taken out of the table, "<version> <issue> <NAME=value> <off value>". dev_update brings a file
 # older than <version> up to it (dev_gone): the line as the table wrote it goes, with the comment and
@@ -1174,7 +1185,7 @@ dev_update() {
   # (the rows newer than the file whose variable it doesn't name, not even commented out)
   added=$(printf '%s\n' "$DEV_SWITCHES" | while read -r since piece ref played entry text; do
     [ -n "$since" ] && [ "$since" -gt "$v" ] || continue
-    grep -qE "^[#[:space:]]*${entry%%=*}=" "$DEV_FILE" 2>/dev/null || echo "$entry"
+    dev_names "$entry" || echo "$entry"
   done)
   # (the rows taken out of the table since the file's version, for an existing file)
   [ ! -f "$DEV_FILE" ] || gone=$(printf '%s\n' "$DEV_GONE" | awk -v v="$v" 'NF && $1 > v { print $3 }')
@@ -1201,6 +1212,46 @@ dev_update() {
     done
   } | put "$DEV_FILE" 644
   say "dev-switches.conf: version $DEV_SWITCHES_VERSION, switched on: $(printf '%s' "${added:-nothing}" | tr '\n' ' ')${gone:+; out of the list: $(printf '%s' "$gone" | tr '\n' ' ')}"
+}
+# dev_names <entry of a row>: dev-switches.conf has a line for the entry's variable, on or commented
+# out. For FEX_HOSTFEATURES only a line with one of the row's features, enabled or disabled, counts:
+# a line of mine with other items (enableafp) isn't a choice about AVX.
+dev_names() {
+  [ -f "$DEV_FILE" ] || return 1
+  if [ "${1%%=*}" != FEX_HOSTFEATURES ]; then grep -qE "^[#[:space:]]*${1%%=*}=" "$DEV_FILE"; return; fi
+  awk -v row="${1#*=}" '
+    BEGIN { n = split(row, r, ","); for (i = 1; i <= n; i++) { k = r[i]; sub(/^(enable|disable)/, "", k); want[k] = 1 } }
+    /^[#[:space:]]*FEX_HOSTFEATURES=/ {
+      v = $0; sub(/^[^=]*=/, "", v); n = split(v, it, ",")
+      for (i = 1; i <= n; i++) { k = it[i]; sub(/^(enable|disable)/, "", k); if (k in want) f = 1 }
+    }
+    END { exit !f }' "$DEV_FILE"
+}
+# hf_join <value>...: FEX_HOSTFEATURES values (comma lists; an argument can hold several, one a line)
+# as one, their items in order. Of two items for one feature (enableX, disableX) the later stays: FEX
+# refuses a value with both (ENABLE_DISABLE_OPTION in jdrly/FEX's Source/Common/HostFeatures.cpp). An
+# item twice stays once.
+hf_join() {
+  printf '%s\n' "$@" | tr ',' '\n' | awk '
+    NF { k = $0; if (!sub(/^(enable|disable)/, "", k)) k = "=" k
+         if (k in at) del[at[k]] = 1
+         at[k] = NR; item[NR] = $0 }
+    END { for (i = 1; i <= NR; i++) if ((i in item) && !(i in del)) { printf "%s%s", s, item[i]; s = "," } }'
+}
+# local_hostfeatures: "FEX_HOSTFEATURES=<value>" when a rule of compatdb.local for Gw2-64.exe sets it
+# (the last such rule's value), else nothing. Matched as compatdb matches them, without case. That
+# rule comes after the app's, so its entry replaces the app's.
+local_hostfeatures() {
+  [ -f "$RULES_LOCAL" ] || return 0
+  awk -F';' '
+    { exe = 0; set = 0
+      for (i = 1; i <= NF; i++) {
+        f = tolower($i)
+        if (f == "exe=gw2-64.exe") exe = 1
+        else if (index(f, "env=fex_hostfeatures=") == 1) { set = 1; v = substr($i, 22) }
+      }
+      if (exe && set) { found = 1; out = v } }
+    END { if (found) printf "FEX_HOSTFEATURES=%s", out }' "$RULES_LOCAL"
 }
 # dev_gone <the file's version>: dev-switches.conf from stdin to stdout, without the rows of DEV_GONE
 # newer than the file (the header above DEV_GONE). A line commented out with spaces or more than one
@@ -1255,13 +1306,18 @@ heat_prof_on() {
     awk '/^WINE_HEAT_PROF=(on|1)$/ || /^WINE_HEAT_CONTROL=./ { f = 1 } END { exit !f }'
 }
 # dev_lines: dev-switches.conf's switch lines in a development build, one a line: "in NAME=value"
-# for one that goes into the game's rule, "out NAME=value <why>" for one that stays out
+# for one that goes into the game's rule, "out NAME=value <why>" for one that stays out. The
+# FEX_HOSTFEATURES lines that go in are one "in" line, at the first one's place (hf_join).
 dev_lines() {
   [ -n "$DEV_ON" ] && [ -f "$DEV_FILE" ] || return 0
-  local l row piece wine macdrv fex dxmt dnames="" why prof=off
+  local l row piece wine macdrv fex dxmt dnames="" why prof=off hf lhf hfdone=""
   wine=$(lib_in_use wine) macdrv=$(lib_in_use macdrv) fex=$(fex_in_use) dxmt=$(dxmt_in_use)
   [ "$dxmt" != fork ] || dnames=$(dxmt_names)
   if heat_prof_on; then prof=on; fi
+  # (the file's FEX_HOSTFEATURES as one value, and compatdb.local's for the game, which replaces it)
+  hf=$(sed -n 's/^FEX_HOSTFEATURES=//p' "$DEV_FILE")
+  hf=$(hf_join "$hf")
+  lhf=$(local_hostfeatures)
   awk '/^[A-Za-z_][A-Za-z0-9_]*=/ && !/^version=/' "$DEV_FILE" | while IFS= read -r l; do
     row=$(printf '%s\n' "$DEV_SWITCHES" | awk -v n="${l%%=*}" '{ e = $5; sub(/=.*/, "", e) } e == n { print $2; exit }')
     # (a line of mine that isn't in the table: no piece, it goes in as it is)
@@ -1279,6 +1335,11 @@ dev_lines() {
         elif ! fex_in_version "$l"; then why="$(dev_piece_label fex) doesn't have it"
         elif [ "${l%%=*}" = FEX_ENTRYHEADERLOOKUP ] && [ "$prof" = on ]; then
           why="the sampler can run (WINE_HEAT_PROF or WINE_HEAT_CONTROL), and it reads the block header this switch stops FEX from storing"
+        elif [ "${l%%=*}" = FEX_HOSTFEATURES ] && [ -n "$lhf" ]; then
+          why="compatdb.local's rule for Gw2-64.exe sets $lhf, which comes later and replaces it. For both, write FEX_HOSTFEATURES=$(hf_join "$hf" "${lhf#*=}") there"
+        elif [ "${l%%=*}" = FEX_HOSTFEATURES ]; then
+          [ -z "$hfdone" ] || continue
+          hfdone=1 l=FEX_HOSTFEATURES=$hf
         fi ;;
       dxmt)
         if [ "$dxmt" != fork ]; then why="$(dev_piece_label dxmt) isn't in the engine"
