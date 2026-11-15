@@ -427,11 +427,22 @@ printf 'started by %s from %s/Library, mail zz.person@example.com, token=abcDEF1
 printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60\ninfo:  STATS fps=60.0 ms=16.7/24.8 cb=1.1 rp=31.7(+0.0 merged) encode=0.23+1.03/10.3\ninfo:  HITCH frame=52 ms=120.0 dxmt(ms/calls): create=4.0/37 flush=3.5/1\n' >"$LOGS/Gw2-64_d3d11.log"
 mkdir -p "$GD/addons/arcdps" && printf 'crash\nself: Zz Charname Q, zz_arc_acct.1234\n' >"$GD/addons/arcdps/arcdps_lastcrash.log"
 echo "info: build" >"$GD/addons/arcdps/arcdps.log"; cp "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll"
-mkdir -p "$SANDBOX/zip"
-zip=$("$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip" 2>"$SANDBOX/collect.err" | tail -1)
+# collect: Collect Logs into $SANDBOX/zip, unzipped into $SANDBOX/unzipped (Z: its folder)
+collect() {
+  rm -rf "$SANDBOX/zip" "$SANDBOX/unzipped" && mkdir -p "$SANDBOX/zip" "$SANDBOX/unzipped"
+  zip=$("$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip" 2>"$SANDBOX/collect.err" | tail -1)
+  Z="$SANDBOX/unzipped/$(basename "$zip" .zip)"
+  [ -f "$zip" ] && (cd "$SANDBOX/unzipped" && unzip -q "$zip")
+}
+# winf <path>: the path as Wine writes it, without the Z:; no_home <files or folders>: no home
+# folder (as / or \ paths) and no user name in them
+winf() { printf '%s' "$1" | tr / '\\'; }
+no_home() {
+  ! grep -rqiF -e "$HOME/" -e "$H/" -e "$(winf "$HOME")\\" -e "$(winf "$H")\\" -e "\\Users\\$(id -un)\\" "$@" &&
+    ! grep -rqiw -e "$(id -un)" "$@"
+}
+collect
 check "collect-logs makes a zip" [ -f "$zip" ]
-rm -rf "$SANDBOX/unzipped" && mkdir -p "$SANDBOX/unzipped" && (cd "$SANDBOX/unzipped" && unzip -q "$zip")
-Z="$SANDBOX/unzipped/$(basename "$zip" .zip)"
 for f in logs/install.log logs/wine.log logs/Gw2-64_d3d11.log settings.conf install-manifest.json session-report.txt system-info.txt gpu-errors.txt game-logs/ArenaNet.log game-logs/steam/content_log.txt; do
   check "  has $f" [ -f "$Z/$f" ]
 done
@@ -447,7 +458,13 @@ check "  never Local.dat or Steam's config" sh -c "! find '$Z' -name Local.dat -
 check "  the crash log kept its exception" has "$Z/game-logs/ArenaNet.log" "Exception: c0000005"
 check "  no arcdps log (its crash log may hold character names)" sh -c "! find '$Z' -iname 'arcdps*' | grep -q . && ! grep -rq 'Zz Charname Q' '$Z'"
 check "  system-info names the d3d11.dll addon: arcdps" has "$Z/system-info.txt" "d3d11.dll addon: arcdps"
+check "  system-info: ReShade off, arcdps in" grep -qxF "ReShade: off; arcdps on" "$Z/system-info.txt"
+check "  the session report: ReShade and arcdps off as the session started, no compiler" \
+  eval 'grep -qxF "ReShade at the start: off; arcdps off" "$Z/session-report.txt" && grep -qxF "  d3dcompiler_47.dll next to Gw2-64.exe: none" "$Z/session-report.txt"'
 rm -rf "$GD/addons" "$GD/d3d11.dll"
+collect
+check "no ReShade folder and nothing in the game folder: Collect Logs works and says ReShade is off" \
+  eval '[ ! -e "$AD/ReShade" ] && [ -f "$Z/system-info.txt" ] && grep -qxF "ReShade: off; arcdps off" "$Z/system-info.txt" && grep -qxF "  ReShade folder: none" "$Z/system-info.txt" && [ ! -e "$Z/reshade" ]'
 # (DXMT's wait field is count, the window's total and its longest: two windows with waits and one
 # without, which adds nothing)
 printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60
@@ -1183,6 +1200,44 @@ out=$(GW2_ON_MAC_RESHADE_URL="file://$SANDBOX/nowhere/r.exe" GW2_ON_MAC_COMPILER
 check "the next Play puts them back from the cache, without a download, and starts the game" eval 'same "$SANDBOX/pe/ReShade64.dll" "$GD/d3d11.dll" && same "$GD/bin64/cef/d3dcompiler_47.dll" "$GD/d3dcompiler_47.dll" && our_ini && ! echo "$out" | grep -q "^@progress" && has "$STANDIN_LOG" "^wine "'
 check "  with the override" reg "$GW2_DLLS" d3dcompiler_47 native,builtin
 watch_done
+# Collect Logs with ReShade on: what ReShade writes into its folder after a session (its log with
+# Wine's Z:\ paths, cut at 5 MB, a line of binary bytes at its end), the current preset, a 20 MB
+# file under Shaders; the session report from a DXMT log of that session
+{ echo "FIRST LINE, cut away"; head -c 6000000 /dev/zero | tr '\0' '.' | fold -w 99
+  printf '%s\n' "INFO | Initializing crosire's ReShade version '6.8.0.2091' (64-bit) loaded from 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Guild Wars 2\\d3d11.dll'" \
+    "INFO | Loading effects from 'Z:$(winf "$RSF")\\Shaders\\Standard\\Deband.fx' and 'Z:\\Users\\$(id -un)\\Documents\\Mine.fx'"
+  printf 'binary \001\002\377\376\0 end\n'; echo "LAST LINE"; } >"$RSF/ReShade.log"
+# (the preset under a file name with the user's name, chosen in a ReShade.ini that starts with a
+# UTF-8 BOM, as an editor may save it)
+PRESET_FILE="$RSF/Presets/$(id -un) look.ini"
+printf '[Deband.fx]\nIterations=4\n; from Z:%s\\Downloads\n\nTechniques=Deband@Deband.fx\n' "$(winf "$H")" >"$PRESET_FILE"
+cp "$RSF/ReShade.ini" "$SANDBOX/ReShade.ini.keep"
+# setpreset <PresetPath>: ReShade.ini with that PresetPath, after a BOM
+setpreset() { { printf '\357\273\277'; P=$1 awk '/^PresetPath=/ { $0 = "PresetPath=" ENVIRON["P"] } { print }' "$SANDBOX/ReShade.ini.keep"; } >"$RSF/ReShade.ini"; }
+setpreset ".\\Presets\\$(id -un) look.ini"
+head -c 20000000 /dev/urandom >"$RSF/Shaders/big.bin"
+printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60\ninfo:  STATS fps=60.0 ms=16.7/24.8 cb=1.1 rp=31.7(+0.0 merged) encode=0.23+1.03/10.3\n' >"$LOGS/Gw2-64_d3d11.log"
+collect
+check "Collect Logs with ReShade on: ReShade.log, ReShade.ini, the current preset and the names under Shaders" \
+  eval 'for f in ReShade.log ReShade.ini preset.ini shaders.txt; do [ -f "$Z/reshade/$f" ] || exit 1; done'
+check "  none of them, nor the reports, holds the home folder or the user name; nor does a name in the zip" \
+  eval 'no_home "$Z/reshade" "$Z/system-info.txt" "$Z/session-report.txt" && ! unzip -Z1 "$zip" | grep -qiw "$(id -un)"'
+check "  the Z:\\ paths kept, from ~ on; the preset's techniques kept" eval 'grep -qxF "IntermediateCachePath=Z:~\\Library\\Caches\\GW2 on Mac\\reshade" "$Z/reshade/ReShade.ini" && has "$Z/reshade/preset.ini" "^Techniques=Deband@Deband.fx$"'
+check "  ReShade.log: its last 5 MB, the binary line and the last line in, the first out" \
+  eval 'head -1 "$Z/reshade/ReShade.log" | grep -qxF "[GW2 on Mac: only the last 5 MB of ReShade.log]" && has "$Z/reshade/ReShade.log" "^LAST LINE" && has "$Z/reshade/ReShade.log" "^binary " && ! has "$Z/reshade/ReShade.log" "FIRST LINE" && [ "$(stat -f %z "$Z/reshade/ReShade.log")" -lt 5100000 ]'
+check "  shaders.txt names the files, the 20 MB one too; no file of Shaders in the zip" \
+  eval 'grep -qxF "Standard/Deband.fx" "$Z/reshade/shaders.txt" && grep -qxF "big.bin" "$Z/reshade/shaders.txt" && [ "$(find "$Z/reshade" -type f | wc -l | tr -d " ")" = 4 ] && [ "$(stat -f %z "$zip")" -lt 3000000 ]'
+check "  system-info: ReShade on, 6.8.0 as d3d11.dll, the compiler's sha256, the folder" \
+  eval 'grep -qxF "ReShade: on, 6.8.0 as d3d11.dll; arcdps off" "$Z/system-info.txt" && grep -qxF "  d3dcompiler_47.dll next to Gw2-64.exe: sha256 $(sum "$GD/d3dcompiler_47.dll")" "$Z/system-info.txt" && grep -qF "look.ini, in reshade/preset.ini" "$Z/system-info.txt" && has "$Z/system-info.txt" "d3d11.dll addon: ReShade"'
+check "  the session report's ReShade line matches reshade_state and the compiler's sha256" \
+  eval 'grep -qxF "ReShade at the start: $(rsst), $(st reshade_version) as $(st reshade_dll); arcdps $(st arcdps)" "$Z/session-report.txt" && grep -qxF "  d3dcompiler_47.dll next to Gw2-64.exe: sha256 $(sum "$GD/d3dcompiler_47.dll")" "$Z/session-report.txt" && [ "$(rsst)" = on ]'
+# a preset outside the ReShade folder (an absolute Z:\ path) stays out
+echo "zz secret preset" >"$SANDBOX/secret-preset.ini"
+setpreset "Z:$(winf "$SANDBOX")\\secret-preset.ini"
+collect
+check "a PresetPath outside the ReShade folder: that file is not collected, system-info says so" \
+  eval 'grep -q "^PresetPath=Z:.*secret-preset.ini" "$RSF/ReShade.ini" && [ ! -e "$Z/reshade/preset.ini" ] && ! grep -rq "zz secret preset" "$Z" && grep -qF "preset outside the ReShade folder, not collected" "$Z/system-info.txt"'
+mv -f "$SANDBOX/ReShade.ini.keep" "$RSF/ReShade.ini"; rm -f "$RSF/Shaders/big.bin" "$RSF/ReShade.log" "$PRESET_FILE" "$SANDBOX/secret-preset.ini"
 rm -f "$GD/d3d11.dll" "$GD/d3dcompiler_47.dll" "$GD/ReShade.ini"; rm -rf "$CACHE/downloads/reshade" "$GD/bin64"
 : >"$STANDIN_LOG"
 out=$(g play 2>&1); started
@@ -1249,6 +1304,12 @@ out=$(g play 2>&1); started
 check "  the next Play: the newer arcdps as dxgi.dll, ReShade back as d3d11.dll, the game starts" eval '[ "$(lay)" = "reshade arcdps" ] && same "$SANDBOX/pe/arcdps-new.dll" "$GD/dxgi.dll" && has "$STANDIN_LOG" "^wine "'
 check "  the log says which arcdps stayed" has "$LOGS/install.log" "arcdps: in the game folder as d3d11.dll and dxgi.dll (it updated itself); keeping the newer d3d11.dll"
 watch_done
+# Collect Logs with both in, after that session
+printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60\ninfo:  STATS fps=60.0 ms=16.7/24.8 cb=1.1 rp=31.7(+0.0 merged) encode=0.23+1.03/10.3\n' >"$LOGS/Gw2-64_d3d11.log"
+collect
+check "  Collect Logs: system-info names ReShade as d3d11.dll and arcdps as dxgi.dll, and arcdps in" \
+  eval 'has "$Z/system-info.txt" "^  d3d11.dll addon: ReShade, " && has "$Z/system-info.txt" "^  dxgi.dll addon: arcdps, " && grep -qxF "ReShade: on, 6.8.0 as d3d11.dll; arcdps on" "$Z/system-info.txt"'
+check "  the session report: ReShade and arcdps on as that session started" grep -qxF "ReShade at the start: on, 6.8.0 as d3d11.dll; arcdps on" "$Z/session-report.txt"
 # with ReShade off, the newer one under the second name: it becomes d3d11.dll
 g set reshade off >/dev/null 2>&1
 cp "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll"; touch -t 202611010000 "$GD/d3d11.dll"; cp "$SANDBOX/pe/arcdps-new.dll" "$GD/dxgi.dll"
