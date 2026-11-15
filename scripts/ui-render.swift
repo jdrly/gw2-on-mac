@@ -63,12 +63,18 @@ func render<V: View>(_ view: V, size: CGSize, dark: Bool, chrome: Bool = true,
 
 // The accessibility tree under an element: each element's role and label (what VoiceOver reads)
 @MainActor
-func accessibilityTree(_ element: NSAccessibilityProtocol, depth: Int = 0) -> [(role: String, label: String)] {
+func accessibilityTree(_ element: Any, depth: Int = 0) -> [(role: String, label: String)] {
   guard depth < 64 else { return [] }
-  var out = [(role: element.accessibilityRole?()?.rawValue ?? "", label: element.accessibilityLabel?() ?? "")]
-  for child in element.accessibilityChildren?() ?? [] {
-    if let child = child as? NSAccessibilityProtocol { out += accessibilityTree(child, depth: depth + 1) }
+  let role: NSAccessibility.Role?, label: String?, children: [Any]?
+  if let view = element as? NSView {
+    (role, label, children) = (view.accessibilityRole(), view.accessibilityLabel(), view.accessibilityChildren())
+  } else if let node = element as? NSAccessibilityElement {
+    (role, label, children) = (node.accessibilityRole(), node.accessibilityLabel(), node.accessibilityChildren())
+  } else {
+    return [(role: "?\(type(of: element))", label: "")]
   }
+  var out = [(role: role?.rawValue ?? "", label: label ?? "")]
+  for child in children ?? [] { out += accessibilityTree(child, depth: depth + 1) }
   return out
 }
 
@@ -483,7 +489,8 @@ func renderAll(_ dir: URL, exports: URL?) async {
     print("accessibility, ReShade off: " + named.filter { $0.label.contains("ReShade") }
       .map { "\($0.role) \"\($0.label)\"" }.joined(separator: ", "))
     if named.isEmpty {
-      print("notice: no accessibility tree off screen, so VoiceOver's names are not checked here")
+      print("notice: no accessibility labels off screen (\(tree.count) elements: "
+            + Set(tree.map(\.role)).sorted().joined(separator: " ") + "), so VoiceOver's names are not checked here")
     } else if !named.contains(where: { $0.role == "AXButton" && $0.label == "Open ReShade folder" })
                 || !named.contains(where: { $0.label == "ReShade" && $0.role != "AXStaticText" }) {
       print("FAIL the ReShade row's switch or its button lacks its VoiceOver name")
