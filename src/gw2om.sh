@@ -62,6 +62,20 @@
 #                              reshade_dll, reshade_blocker, reshade_folder, addons_layout
 #                              (together|exclusive, ADDONS_LAYOUT). ReShade's menu opens
 #                              in the game with Home (fn + Left Arrow on a MacBook).
+#   gw2om.sh reshade import <path>...
+#                              presets (.ini with a Techniques line), zips and folders into the
+#                              ReShade folder, whether ReShade is on or off and while the game runs
+#                              (never into the game folder): presets into Presets (one of the same
+#                              name stays unless it came from a source of the same name), the
+#                              contents of Shaders and Textures folders at any depth and loose .fx,
+#                              .fxh and images into Shaders/<name> and Textures/<name>; nothing
+#                              else. "@preset <name>" for each preset that came in, and a report
+#                              as @done: what went where, the effects the presets use that aren't
+#                              in Shaders, those that read the depth buffer
+#   gw2om.sh reshade use <preset>
+#                              that preset in Presets as ReShade's current one (PresetPath in the
+#                              ReShade folder's ReShade.ini, nothing else of it), while no session
+#                              runs
 #   gw2om.sh check-setup FILE  is FILE ArenaNet's Gw2Setup-64.exe: a PE x86_64 executable with a
 #                              valid Authenticode signature by ArenaNet ("@done <what>")
 #   gw2om.sh reset-shaders     deletes DXMT's caches (shaders, pipelines, recipes) in the app's
@@ -91,7 +105,9 @@
 #   GW2_ON_MAC_COMPILER_URL, GW2_ON_MAC_COMPILER_SIZE, GW2_ON_MAC_COMPILER_SHA256   another
 #                              d3dcompiler_47.dll to download
 #   GW2_ON_MAC_RESHADE_SHADERS_URL, GW2_ON_MAC_SWEETFX_URL   other effect pack zips
-#   GW2_ON_MAC_PACK_LIMIT      the most bytes one effect pack may unpack to
+#   GW2_ON_MAC_PACK_LIMIT, GW2_ON_MAC_PACK_MAX_FILES   the most bytes one effect pack (or one
+#                              zip, folder or preset of reshade import) may unpack to, and the
+#                              most files it may have
 #   GW2_ON_MAC_ADDONS_LAYOUT   exclusive: arcdps and ReShade refuse each other (ADDONS_LAYOUT)
 #   GW2_ON_MAC_OLD_COMPONENTS  a file of "<path in the engine> <sha256>" lines: stand-ins for an
 #                              earlier version's engine pieces (graphics_state update)
@@ -112,7 +128,8 @@
 # 3 Steam or ArenaNet's installer, 4 the game's download, 5 finishing touches; install import
 # 1 engine, 2 bottle, then Steam's route 3 Steam, 4 the files, 5 finishing touches, or ArenaNet's
 # 3 the files, 4 finishing touches; uninstall 1 stop, 2 bottle, 3 the rest), "@step <text>", "@progress <label> <bytes> <total>", "@warn <text>",
-# "@notice <text>", "@error <text>", "@done <text>". Everything else is plain log text.
+# "@notice <text>", "@error <text>", "@done <text>", "@preset <name>" (reshade import). Everything
+# else is plain log text.
 # Runs under macOS's /bin/bash 3.2.
 set -euo pipefail
 RES="$(cd "$(dirname "$0")" && pwd)"
@@ -1447,13 +1464,14 @@ RESHADE_SHADERS_URL=https://github.com/crosire/reshade-shaders/archive/fd0022170
 SWEETFX_URL=https://github.com/CeeJayDK/SweetFX/archive/93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361.zip
 PACK_DOWNLOAD_MAX=$((64 * 1048576))
 PACK_LIMIT=$((256 * 1048576))
+PACK_MAX_FILES=10000
 if [ -n "$ROOT" ]; then
   RESHADE_URL="${GW2_ON_MAC_RESHADE_URL:-$RESHADE_URL}" RESHADE_SIZE="${GW2_ON_MAC_RESHADE_SIZE:-$RESHADE_SIZE}"
   RESHADE_SHA256="${GW2_ON_MAC_RESHADE_SHA256:-$RESHADE_SHA256}" RESHADE_DLL_SHA256="${GW2_ON_MAC_RESHADE_DLL_SHA256:-$RESHADE_DLL_SHA256}"
   COMPILER_URL="${GW2_ON_MAC_COMPILER_URL:-$COMPILER_URL}" COMPILER_SIZE="${GW2_ON_MAC_COMPILER_SIZE:-$COMPILER_SIZE}"
   COMPILER_SHA256="${GW2_ON_MAC_COMPILER_SHA256:-$COMPILER_SHA256}"
   RESHADE_SHADERS_URL="${GW2_ON_MAC_RESHADE_SHADERS_URL:-$RESHADE_SHADERS_URL}" SWEETFX_URL="${GW2_ON_MAC_SWEETFX_URL:-$SWEETFX_URL}"
-  PACK_LIMIT="${GW2_ON_MAC_PACK_LIMIT:-$PACK_LIMIT}"
+  PACK_LIMIT="${GW2_ON_MAC_PACK_LIMIT:-$PACK_LIMIT}" PACK_MAX_FILES="${GW2_ON_MAC_PACK_MAX_FILES:-$PACK_MAX_FILES}"
 fi
 RS="$APPDIR/ReShade"                  # ReShade's folder (its BasePath)
 RS_CACHE="$CACHE/reshade"             # its compiled effects (IntermediateCachePath)
@@ -1553,64 +1571,82 @@ check_download() {
   fi
 }
 
-# unpack_pack <zip or folder> <pack> <into>: a pack of ReShade effects into <into>/Shaders/<pack>/
-# and <into>/Textures/<pack>/, which must not exist yet (a staging folder of the caller's, moved
-# into the ReShade folder afterwards): the contents of each folder named Shaders or Textures in it, at any depth, which is the
-# layout of every pack on ReShade's list. Only regular files, and of those only .fx and .fxh from
-# Shaders and images from Textures; at most PACK_LIMIT bytes. A path that climbs out (..), an
-# absolute path or a link in a zip refuses the whole pack (what was written by then stays in
-# <into>). Nothing is extracted by its own path: each file is read on its own (unzip -p) into a path
-# made here. PACK_FILES: the effect files unpacked.
+# unpack_pack <zip or folder> <pack> <into> [import]: a pack of ReShade effects into
+# <into>/Shaders/<pack>/ and <into>/Textures/<pack>/, which must not exist yet (a staging folder of
+# the caller's, moved into the ReShade folder afterwards): the contents of each folder named Shaders
+# or Textures in it, at any depth, which is the layout of every pack on ReShade's list. Only regular
+# files, and of those only .fx and .fxh from Shaders and images from Textures; at most PACK_LIMIT
+# bytes, from a pack of at most PACK_MAX_FILES files. A path that climbs out (..), an absolute path
+# or a link in a zip refuses the whole pack (what was written by then stays in <into>). Nothing is
+# extracted by its own path: each file is read on its own (unzip -p) into a path made here.
+# With import (reshade import), also the files outside those folders: .fx and .fxh into
+# Shaders/<pack>/ and images into Textures/<pack>/ by their names, every .ini into <into>/Presets/
+# by its name (for the caller to check), and no refusal of a pack without effects.
+# PACK_FILES, PACK_IMAGES, PACK_PRESETS: the effect files, images and .ini files unpacked.
 unpack_pack() {
-  local src=$1 pack=$2 into=$3 list plan line kind rel name dest n rc left tab
-  tab=$(printf '\t')
+  local src=$1 pack=$2 into=$3 mode=${4:-} list plan line kind rel name dest n rc left tab nl
+  tab=$(printf '\t') nl='
+'
   case "$pack" in ""|.*|*[!A-Za-z0-9._\ -]*) die "\"$pack\" can't be the name of a pack of effects: use letters, digits, spaces, dots, dashes and underscores." ;; esac
   # (made here, so no link in them leads elsewhere)
   for n in Shaders Textures; do
     [ ! -e "$into/$n/$pack" ] && [ ! -L "$into/$n/$pack" ] || die "GW2 on Mac unpacks $pack only into a new folder, and $into/$n/$pack is there already."
   done
-  # "<kind> <bytes> <path>" lines (kind f: a file, d: a folder, l: a link)
+  # "<kind> <bytes> <path>" lines (kind f: a file, d: a folder, l: a link; "+" alone: more than
+  # PACK_MAX_FILES files)
   if [ -d "$src" ] && [ ! -L "$src" ]; then
-    # (find doesn't follow links, so a linked folder's files aren't in it)
-    list=$(cd "$src" && find . -type f | sed 's|^\./|f 0 |')
+    # (find doesn't follow links, so a linked folder's files aren't in it; a name with a line break
+    # would break the lines. Unreadable folders are left out.)
+    list=$(cd "$src" && find . -type f ! -path "*$nl*" 2>>"$LOGFILE" |
+      LC_ALL=C awk -v max="$PACK_MAX_FILES" 'NR > max { print "+"; exit } { sub(/^\.\//, ""); print "f 0 " $0 }') || true
   else
-    list=$(unzip -Z "$src" 2>>"$LOGFILE" | LC_ALL=C awk '$2 ~ /^[0-9]+\.[0-9]+$/ && NF >= 9 {
-        name = $0; sub(/^[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ /, "", name)
-        k = substr($1, 1, 1)
-        print (k == "l" ? "l" : (k == "d" || name ~ /\/$/) ? "d" : "f"), $4, name }') ||
-      die "$pack is not a zip archive GW2 on Mac can read. Try again."
+    n=$(unzip -Zt "$src" 2>>"$LOGFILE" | sed -n 's/^\([0-9][0-9]*\) files*,.*/\1/p') || true
+    [ -n "$n" ] || die "$pack is not a zip archive GW2 on Mac can read. Try again."
+    if [ "$n" -gt "$PACK_MAX_FILES" ]; then list="+"
+    else
+      list=$(unzip -Z "$src" 2>>"$LOGFILE" | LC_ALL=C awk '$2 ~ /^[0-9]+\.[0-9]+$/ && NF >= 9 {
+          name = $0; sub(/^[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ /, "", name)
+          k = substr($1, 1, 1)
+          print (k == "l" ? "l" : (k == "d" || name ~ /\/$/) ? "d" : "f"), $4, name }') ||
+        die "$pack is not a zip archive GW2 on Mac can read. Try again."
+    fi
   fi
-  # what goes where: "<S|T> <bytes> <path in the pack's folder><tab><path>", after a "= <bytes>"
-  # line; "x"/"l" and the path alone for a refusal
-  plan=$(printf '%s\n' "$list" | LC_ALL=C awk '
+  # what goes where: "<S|T|P> <bytes> <path in the pack's folder><tab><path>", after a "= <bytes>"
+  # line; "x"/"l" and the path alone, or "+", for a refusal
+  plan=$(printf '%s\n' "$list" | LC_ALL=C awk -v imp="$mode" '
     { k = $1; name = $0; sub(/^[^ ]+ [^ ]+ /, "", name)
       if (k == "") next
+      if (k == "+") { refused = "+"; exit }
       if (substr(name, 1, 1) == "/" || index("/" name "/", "/../")) { refused = "x " name; exit }
       if (k == "l") { refused = "l " name; exit }
       if (k != "f") next
-      # (unzip takes these for patterns; control characters would break the lines)
-      if (index(name, "\\") || index(name, "*") || index(name, "?") || index(name, "[") || name ~ /[[:cntrl:]]/) next
+      # (unzip may take a backslash for an escape; control characters would break the lines)
+      if (index(name, "\\") || name ~ /[[:cntrl:]]/) next
       n = split(name, p, "/"); d = ""
       for (i = 1; i <= n; i++) if (p[i] == "" || p[i] == ".") next
-      for (i = 1; i < n; i++) { q = tolower(p[i]); if (q == "shaders" || q == "textures") { d = q; break } }
-      if (d == "" || index(p[n], ".") == 0) next
+      if (index(p[n], ".") == 0) next
       e = tolower(p[n]); sub(/^.*\./, "", e)
+      if (imp != "" && e == "ini") { total += $2; out = out "P " $2 " " p[n] "\t" name "\n"; next }
+      for (i = 1; i < n; i++) { q = tolower(p[i]); if (q == "shaders" || q == "textures") { d = q; break } }
+      if (d != "") { rel = p[i + 1]; for (j = i + 2; j <= n; j++) rel = rel "/" p[j] }
+      else if (imp != "") { rel = p[n]; d = (e == "fx" || e == "fxh") ? "shaders" : "textures" }
+      else next
       if (d == "shaders" && e != "fx" && e != "fxh") next
       if (d == "textures" && e !~ /^(png|jpg|jpeg|bmp|tga|dds|hdr)$/) next
-      rel = p[i + 1]; for (j = i + 2; j <= n; j++) rel = rel "/" p[j]
       total += $2; out = out (d == "shaders" ? "S" : "T") " " $2 " " rel "\t" name "\n" }
     END { if (refused != "") print refused; else printf "= %.0f\n%s", total, out }')
   case "$plan" in
+    +) die "$pack has more than $PACK_MAX_FILES files in it, so GW2 on Mac doesn't unpack it." ;;
     x\ *) die "$pack has a file whose path leaves its folder (${plan#x }), so GW2 on Mac doesn't unpack it." ;;
     l\ *) die "$pack has a link in it (${plan#l }), so GW2 on Mac doesn't unpack it." ;;
   esac
   left=$PACK_LIMIT
   n=$(printf '%s\n' "$plan" | sed -n '1s/^= //p')
   [ "${n:-0}" -le "$left" ] || die "$pack unpacks to more than $(mb "$PACK_LIMIT") MB, so GW2 on Mac doesn't unpack it."
-  PACK_FILES=0
+  PACK_FILES=0 PACK_IMAGES=0 PACK_PRESETS=0
   while IFS= read -r line; do
     kind=${line%% *}
-    case "$kind" in S) dest="$into/Shaders/$pack" ;; T) dest="$into/Textures/$pack" ;; *) continue ;; esac
+    case "$kind" in S) dest="$into/Shaders/$pack" ;; T) dest="$into/Textures/$pack" ;; P) dest="$into/Presets" ;; *) continue ;; esac
     line=${line#* }; line=${line#* }
     rel=${line%%"$tab"*} name=${line#*"$tab"}
     dest="$dest/$rel"
@@ -1619,18 +1655,20 @@ unpack_pack() {
     if [ -d "$src" ]; then
       head -c $((left + 1)) <"$src/$name" >"$dest" 2>>"$LOGFILE" || rc=$?
     else
-      unzip -p "$src" "$name" 2>>"$LOGFILE" | head -c $((left + 1)) >"$dest" || rc=$?
+      # (unzip takes the name for a pattern, and a leading dash for an option: each of those
+      # characters in brackets matches only itself)
+      unzip -p "$src" "$(printf '%s' "$name" | sed 's/[[*?]/[&]/g; s/^-/[-]/')" 2>>"$LOGFILE" | head -c $((left + 1)) >"$dest" || rc=$?
     fi
     n=$(stat -f %z "$dest")
     [ "$n" -le "$left" ] || die "$pack unpacks to more than $(mb "$PACK_LIMIT") MB, so GW2 on Mac doesn't unpack it."
     [ "$rc" = 0 ] || die "$pack is damaged: $name could not be read. Try again."
     left=$((left - n))
-    [ "$kind" != S ] || PACK_FILES=$((PACK_FILES + 1))
+    case "$kind" in S) PACK_FILES=$((PACK_FILES + 1)) ;; T) PACK_IMAGES=$((PACK_IMAGES + 1)) ;; P) PACK_PRESETS=$((PACK_PRESETS + 1)) ;; esac
   done <<EOF
 $plan
 EOF
-  [ "$PACK_FILES" -gt 0 ] || die "$pack has no ReShade effects in it (no .fx or .fxh files in a Shaders folder)."
-  log "unpacked $pack from $src: $PACK_FILES effect files, $((PACK_LIMIT - left)) bytes in all"
+  [ "$PACK_FILES" -gt 0 ] || [ -n "$mode" ] || die "$pack has no ReShade effects in it (no .fx or .fxh files in a Shaders folder)."
+  log "unpacked $pack from $src: $PACK_FILES effect files, $PACK_IMAGES images, $PACK_PRESETS .ini files, $((PACK_LIMIT - left)) bytes in all"
 }
 
 # reshade_fetch: the checked ReShade64.dll in the cache, downloaded (the installer, checked, then the
@@ -1843,6 +1881,294 @@ sync_reshade() {
   say "ReShade: its files back into the game folder"
   reshade_place
   registry_unlock
+}
+
+# --- ReShade's presets and shaders (reshade import; Settings › Interface: a drop on the Settings
+# window or Add preset or shaders…): presets, zips and folders into the ReShade folder, whether
+# ReShade is on, off or was never on, and while the game runs (it only adds files there, and never
+# touches the game folder). Each source is unpacked into a staging folder in the cache first
+# (unpack_pack and its rules: only effects, images and presets, no link, no path out, the size and
+# file limits), then moved in, through real folders only. Shaders and textures go into
+# Shaders/<name>/ and Textures/<name>/, named after the source; presets into Presets/, where a
+# preset of the same name is replaced only by one from a source of the same name (RS_IMPORTS
+# records where each came from), else kept. reshade use makes one ReShade's current preset.
+RS_IMPORTS="$RS/.imports"   # "<preset><tab><source's name>" lines; the last one for a preset counts
+RS_REPORT_NAMES=5           # the file names a sentence of the report lists before "and N more"
+
+# import_name <file name>: a source's name for its folders: without .zip or .ini; letters, digits,
+# spaces, dots, dashes and underscores (anything else becomes _); no dot or space at either end
+# (Windows drops a trailing one); at most 64 characters
+import_name() {
+  local n=$1
+  case "$n" in *.[Zz][Ii][Pp]|*.[Ii][Nn][Ii]) n=${n%.*} ;; esac
+  n=$(printf '%s' "$n" | LC_ALL=C tr -c 'A-Za-z0-9._ -' '_' | LC_ALL=C cut -c 1-64 | sed 's/^[. ]*//; s/[. ]*$//')
+  echo "${n:-Import}"
+}
+# preset_name <file name>: a preset's name in Presets: control characters and the characters
+# Windows doesn't allow in a file name (<>:"\|?*) become _
+preset_name() { printf '%s' "$1" | LC_ALL=C tr '\001-\037\177<>:"\\|?*' '_'; }
+
+# preset_effects <file>: the effect files (File.fx) its Techniques list names, once each; fails
+# when the file is no preset, as ReShade tells (a Techniques key before any section,
+# resolve_preset_path in source/runtime.cpp at v6.8.0; ini_file.cpp reads ",," as a comma)
+preset_effects() {
+  LC_ALL=C awk '
+    function strip(s, c) {
+      while (s != "" && index(c, substr(s, 1, 1))) s = substr(s, 2)
+      while (s != "" && index(c, substr(s, length(s), 1))) s = substr(s, 1, length(s) - 1)
+      return s }
+    { line = $0; if (NR == 1 && substr(line, 1, 3) == "\357\273\277") line = substr(line, 4)
+      line = strip(line, " \t\r"); c = substr(line, 1, 1)
+      if (line == "" || c == ";" || c == "/" || c == "#") next
+      if (c == "[") { i = index(line, "]"); sec = strip(i ? substr(line, 1, i - 1) : line, " \t[]"); next }
+      i = index(line, "=")
+      if (sec != "" || i == 0 || strip(substr(line, 1, i - 1), " \t") != "Techniques") next
+      found = 1; v = strip(substr(line, i + 1), " \t")
+      gsub(/,,/, "\001", v); n = split(v, t, ",")
+      for (j = 1; j <= n; j++) {
+        a = index(t[j], "@"); if (!a) continue
+        f = substr(t[j], a + 1); gsub(/\001/, ",", f)
+        if (f != "" && !(f in seen)) { seen[f] = 1; print f } } }
+    END { exit !found }' "$1"
+}
+
+# imported_from <preset>: the name of the source a preset in Presets came from, or nothing
+imported_from() {
+  [ -f "$RS_IMPORTS" ] && [ ! -L "$RS_IMPORTS" ] || return 0
+  N=$1 LC_ALL=C awk 'BEGIN { FS = "\t"; n = ENVIRON["N"] } $1 == n { s = $2 } END { print s }' "$RS_IMPORTS"
+}
+
+# rs_safe <path in the ReShade folder>: each folder on the way to it below the ReShade folder is a
+# real folder (no link, no file), and it isn't a folder itself; RS_BAD: the first that isn't
+rs_safe() {
+  local rest=${1#"$RS"/} at="$RS"
+  while :; do
+    case "$rest" in */*) at="$at/${rest%%/*}" rest=${rest#*/} ;; *) break ;; esac
+    if [ -L "$at" ] || { [ -e "$at" ] && [ ! -d "$at" ]; }; then RS_BAD=$at; return 1; fi
+  done
+  if [ -d "$1" ] && [ ! -L "$1" ]; then RS_BAD=$1; return 1; fi
+}
+
+# For the report: <lines> counted; listed ("a, b and c"; past <max> names, RS_REPORT_NAMES
+# without one, "a, b, c, d, e and 3 more"); <count> <word> with an s unless 1
+lines_count() { printf '%s' "$1" | LC_ALL=C awk '$0 != "" { n++ } END { print n + 0 }'; }
+names_list() {
+  printf '%s\n' "$1" | LC_ALL=C awk -v max="${2:-$RS_REPORT_NAMES}" '$0 != "" { a[++n] = $0 }
+    END { m = n > max ? max : n
+      for (i = 1; i <= m; i++) s = s (i == 1 ? "" : i == n ? " and " : ", ") a[i]
+      if (n > max) s = s " and " (n - max) " more"
+      print s }'
+}
+counted() { if [ "$1" = 1 ]; then echo "1 $2"; else echo "$1 $2s"; fi; }
+
+# reshade import <path>...: each a preset (.ini), a zip or a folder. Refused as a whole when one
+# can't be read or has nothing to add, or when a place in the ReShade folder is a link or a file.
+# Prints "@preset <name>" for each preset that came in, and the report as @done.
+reshade_import() {
+  local p i=0 n kind base name stage="$RS_DOWNLOADS/import" d f pn rel files line from dest tab nl
+  local parts="" moves="" presets="" kept="" records="" used have missing depth report s
+  local -a names
+  tab=$(printf '\t') nl='
+'
+  [ $# -gt 0 ] || die "Name the presets, zips or folders to add."
+  open_log
+  log "---- reshade import $*"
+  if [ -n "$DRY" ]; then
+    for p in "$@"; do echo "[dry-run] add $p to $RS"; done
+    echo "@done Nothing was added (a dry run)."
+    return 0
+  fi
+  lock
+  trap 'rm -rf "$RS_DOWNLOADS/import"; unlock' EXIT
+  rm -rf "$stage"
+  mkdir -p "$stage"
+  # Each source into its own staging folder, with only what it may bring
+  for p in "$@"; do
+    i=$((i + 1))
+    case "$p" in ?*/) p=${p%/} ;; esac
+    base=${p##*/}
+    [ ! -L "$p" ] || die "$base is a link. Add the file or folder it leads to instead."
+    [ -e "$p" ] || die "$base is not there any more."
+    name=$(import_name "$base")
+    names[i]=$name
+    mkdir "$stage/$i"
+    kind=other
+    if [ -d "$p" ]; then kind=folder
+    elif [ -f "$p" ]; then case "$base" in *.[Zz][Ii][Pp]) kind=zip ;; *.[Ii][Nn][Ii]) kind=preset ;; esac
+    fi
+    case "$kind" in
+      folder|zip) unpack_pack "$p" "$name" "$stage/$i" import ;;
+      preset)
+        mkdir "$stage/$i/Presets"
+        # (staged by its name in Presets: the moves are lines)
+        f="$stage/$i/Presets/$(preset_name "$base")"
+        head -c $((PACK_LIMIT + 1)) <"$p" >"$f" 2>>"$LOGFILE" || die "$base could not be read."
+        [ "$(stat -f %z "$f")" -le "$PACK_LIMIT" ] || die "$base is larger than $(mb "$PACK_LIMIT") MB, which no ReShade preset is."
+        preset_effects "$f" >/dev/null ||
+          die "$base is not a ReShade preset: it has no Techniques line, which every preset has. GW2 on Mac adds presets, and zips and folders of shaders."
+        PACK_FILES=0 PACK_IMAGES=0 ;;
+      *) die "$base is not a preset (.ini), a zip or a folder, so GW2 on Mac doesn't add it." ;;
+    esac
+    # (an .ini that isn't a preset stays out)
+    n=0
+    for f in "$stage/$i/Presets"/*; do
+      [ -f "$f" ] || continue
+      if preset_effects "$f" >/dev/null; then n=$((n + 1)); else rm -f "$f"; fi
+    done
+    [ $((PACK_FILES + PACK_IMAGES + n)) -gt 0 ] || die "$base has no ReShade presets, shaders or textures in it."
+  done
+  # Where each staged file goes ("<staged file><tab><place>" lines), and what the report says
+  n=$i i=0
+  while [ "$i" -lt "$n" ]; do
+    i=$((i + 1)) name=${names[i]}
+    for d in Shaders Textures; do
+      [ -d "$stage/$i/$d/$name" ] || continue
+      files=$(cd "$stage/$i/$d/$name" && find . -type f | sed 's|^\./||')
+      while IFS= read -r rel; do
+        [ -z "$rel" ] || moves="$moves$stage/$i/$d/$name/$rel$tab$RS/$d/$name/$rel$nl"
+      done <<EOF
+$files
+EOF
+      if [ "$d" = Shaders ]; then s="shader file"; else s=image; fi
+      parts="$parts$(counted "$(lines_count "$files")" "$s") to $d/$name$nl"
+    done
+    for f in "$stage/$i/Presets"/*; do
+      [ -f "$f" ] || continue
+      pn=$(preset_name "${f##*/}")
+      # (one of that name came in from an earlier source of this import)
+      case "$nl$presets$kept" in *"$nl$pn$nl"*) continue ;; esac
+      dest="$RS/Presets/$pn"
+      if { [ -e "$dest" ] || [ -L "$dest" ]; } && [ "$(imported_from "$pn")" != "$name" ]; then
+        kept="$kept$pn$nl"
+        continue
+      fi
+      moves="$moves$f$tab$dest$nl" presets="$presets$pn$nl" records="$records$pn$tab$name$nl"
+    done
+  done
+  # Nothing moves before every place is checked: no link and no file where a folder belongs
+  while IFS= read -r line; do
+    [ -z "$line" ] || rs_safe "${line#*"$tab"}" ||
+      die "${RS_BAD#"$RS"/} in the ReShade folder is a link or a file where GW2 on Mac puts a folder, so it adds nothing. Move it out of $RS, then try again."
+  done <<EOF
+$moves
+EOF
+  [ -z "$records" ] || rs_safe "$RS_IMPORTS" || die "${RS_BAD#"$RS"/} in the ReShade folder is a link or a folder. Move it out of $RS, then try again."
+  reshade_folder
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    from=${line%%"$tab"*} dest=${line#*"$tab"}
+    mkdir -p "$(dirname "$dest")"
+    # (a link there is replaced, never written through)
+    if [ -L "$dest" ]; then rm -f "$dest"; fi
+    mv -f "$from" "$dest"
+  done <<EOF
+$moves
+EOF
+  if [ -n "$records" ]; then
+    { if [ -f "$RS_IMPORTS" ] && [ ! -L "$RS_IMPORTS" ]; then cat "$RS_IMPORTS"; fi; printf '%s' "$records"; } | put "$RS_IMPORTS" 644
+  fi
+  # The report: what went where, what of Presets stayed, and what the presets need
+  [ -z "$presets" ] || parts="$(counted "$(lines_count "$presets")" preset) to Presets$nl$parts"
+  [ -z "$parts" ] || report="Added $(names_list "$parts" 100000)."
+  if [ -n "$kept" ]; then
+    if [ "$(lines_count "$kept")" = 1 ]; then s="kept it, not the new one"; else s="kept them, not the new ones"; fi
+    report="${report:+$report }Presets already had $(names_list "$kept") from elsewhere, so GW2 on Mac $s."
+  fi
+  if [ -n "$presets" ]; then
+    used=""
+    while IFS= read -r pn; do
+      [ -z "$pn" ] || used="$used$(preset_effects "$RS/Presets/$pn" || true)$nl"
+    done <<EOF
+$presets
+EOF
+    used=$(printf '%s' "$used" | LC_ALL=C awk '$0 != "" && !seen[$0]++')
+    have=$(cd "$RS/Shaders" && find . -type f 2>>"$LOGFILE" | sed 's|.*/||') || true
+    missing=$(HAVE="$have" USED="$used" LC_ALL=C awk 'BEGIN { n = split(ENVIRON["HAVE"], h, "\n"); for (i = 1; i <= n; i++) got[h[i]] = 1
+      n = split(ENVIRON["USED"], u, "\n"); for (i = 1; i <= n; i++) if (u[i] != "" && !(u[i] in got)) print u[i] }')
+    n=$(lines_count "$presets")
+    if [ "$n" = 1 ]; then s="This preset uses"; else s="These $n presets use"; fi
+    n=$(lines_count "$used")
+    if [ "$n" = 0 ]; then s="$s no effects."
+    elif [ -z "$missing" ]; then
+      if [ "$n" = 1 ]; then s="$s 1 effect, which is in Shaders."; else s="$s $n effects, all of them in Shaders."; fi
+    else
+      n=$(lines_count "$missing")
+      if [ "$n" = 1 ]; then s="$s $(counted "$(lines_count "$used")" effect). 1 is missing: $(names_list "$missing")."
+      else s="$s $(counted "$(lines_count "$used")" effect). $n are missing: $(names_list "$missing")."; fi
+      say "Effects missing from $RS/Shaders: $(names_list "$missing" 100000)"
+    fi
+    report="$report $s"
+    depth=$(printf '%s\n' "$used" | LC_ALL=C awk '{ l = tolower($0) } l ~ /mxao|dof|rtgi/ || l == "displaydepth.fx"')
+    if [ -n "$depth" ]; then
+      if [ "$(lines_count "$depth")" = 1 ]; then s="reads the depth buffer: it stays"; else s="read the depth buffer: they stay"; fi
+      report="$report $(names_list "$depth") $s off in online games with this build of ReShade."
+    fi
+    if session_running; then report="$report Guild Wars 2 is running: pick the preset in ReShade's menu (Home key)."; fi
+    while IFS= read -r pn; do [ -z "$pn" ] || echo "@preset $pn"; done <<EOF
+$presets
+EOF
+  fi
+  log "report: $report"
+  echo "@done $report"
+}
+
+# reshade use <preset>: PresetPath in the ReShade folder's ReShade.ini, the one key and nothing else
+# of the file (its other lines and line ends byte for byte); only while no session runs or starts,
+# since ReShade writes its ini while it runs (the session's lock, as set reshade)
+reshade_use() {
+  local name=${1:-} f ini="$RS/ReShade.ini" value nl=0
+  case "$name" in ""|*/*|.|..|*[[:cntrl:]]*) die "Name a preset in $RS/Presets." ;; esac
+  f="$RS/Presets/$name"
+  [ -f "$f" ] || die "$name is not in $RS/Presets."
+  preset_effects "$f" >/dev/null || die "$name is not a ReShade preset: it has no Techniques line."
+  # (relative to the ReShade folder, as ReShade writes it; a comma doubled)
+  value=$(printf '.\\Presets\\%s' "$name" | sed 's/,/,,/g')
+  open_log
+  log "---- reshade use $name"
+  if [ -n "$DRY" ]; then echo "[dry-run] PresetPath=$value in $ini"; echo "@done ReShade would start with $name."; return 0; fi
+  lock
+  trap 'unlock' EXIT
+  ! session_running || die "Guild Wars 2 is running, and ReShade rewrites its settings while it runs. Pick $name in ReShade's menu (Home key) instead."
+  registry_lock || die "A game session is starting. Pick $name in ReShade's menu (Home key) once the game runs."
+  rs_safe "$ini" || die "${RS_BAD#"$RS"/} in the ReShade folder is a folder, not ReShade's settings. Move it out of $RS, then try again."
+  reshade_folder
+  [ "$(tail -c 1 "$ini" | od -An -tx1 | tr -d ' \n')" != 0a ] || nl=1
+  # (keys and sections as ReShade's ini_file.cpp reads them: trimmed, ; / # start a comment; the
+  # key goes under [GENERAL]'s first header when that has none, and a section of its own without one)
+  V="PresetPath=$value" NL=$nl LC_ALL=C awk '
+    function strip(s, c) {
+      while (s != "" && index(c, substr(s, 1, 1))) s = substr(s, 2)
+      while (s != "" && index(c, substr(s, length(s), 1))) s = substr(s, 1, length(s) - 1)
+      return s }
+    BEGIN { v = ENVIRON["V"]; nl = ENVIRON["NL"] }
+    { line = $0; cr = ""; bom = ""; out[NR] = $0
+      if (substr(line, length(line), 1) == "\r") { cr = "\r"; line = substr(line, 1, length(line) - 1) }
+      if (NR == 1) { firstcr = cr; if (substr(line, 1, 3) == "\357\273\277") { bom = substr(line, 1, 3); line = substr(line, 4) } }
+      t = strip(line, " \t"); c = substr(t, 1, 1)
+      if (c == "[") {
+        i = index(t, "]"); sec = strip(i ? substr(t, 1, i - 1) : t, " \t[]")
+        if (sec == "GENERAL" && !g) { g = NR; gcr = cr }
+        next }
+      if (sec != "GENERAL" || c == ";" || c == "/" || c == "#") next
+      i = index(t, "=")
+      if (i && strip(substr(t, 1, i - 1), " \t") == "PresetPath") { out[NR] = bom v cr; set = 1 } }
+    END {
+      for (j = 1; j <= NR; j++) {
+        printf "%s", out[j]
+        if (j == g && !set) printf "\n%s%s", v, gcr
+        if (j < NR || nl) printf "\n" }
+      if (!g) { if (NR && !nl) printf "\n"; printf "[GENERAL]%s\n%s%s\n", firstcr, v, firstcr } }' "$ini" | put "$ini" 644
+  registry_unlock
+  log "ReShade.ini: PresetPath=$value"
+  echo "@done ReShade starts with $name the next time the game starts."
+}
+
+cmd_reshade() {
+  case "${1:-}" in
+    import) shift; reshade_import "$@" ;;
+    use) shift; reshade_use "$@" ;;
+    *) echo "@error Unknown command: reshade ${1:-}"; exit 2 ;;
+  esac
 }
 
 # --- Existing game files (install import): another Wine app's Guild Wars 2, cloned into the bottle
@@ -3405,5 +3731,6 @@ case "${1:-}" in
   end-leftovers) cmd_end_leftovers ;;
   fetch-engine) cmd_fetch_engine ;;
   env) cmd_env ;;
+  reshade) shift; cmd_reshade "$@" ;;
   *) sed -n '2,/^# Environment/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 2 ;;
 esac

@@ -410,9 +410,12 @@ func renderAll(_ dir: URL, exports: URL?) async {
     let reshadeSheet = AddonWarning.reshade(isPresented: .constant(true), version: "6.8.0") {}
     write(await render(reshadeSheet, size: CGSize(width: 460, height: 278), dark: dark, chrome: false),
           dir.appendingPathComponent("sheet-reshade-warning-\(dark ? "dark" : "light").png"))
+    let presetSheet = AddonWarning.preset(isPresented: .constant(true), name: "Golden Hour.ini") {}
+    write(await render(presetSheet, size: CGSize(width: 460, height: 196), dark: dark, chrome: false),
+          dir.appendingPathComponent("sheet-reshade-preset-\(dark ? "dark" : "light").png"))
   }
-  // A row's line of buttons with two of them, at the pane's width in the narrowest window (a layout
-  // check for a second button in the ReShade row; the row itself has one)
+  // A row's line of buttons with two of them, at the pane's width in the narrowest window (the
+  // ReShade row's, alone)
   let rowWidth = SettingsView.designSize.width - 214 - 48 + 24
   for dark in [false, true] {
     let row = SettingsGroup {
@@ -435,6 +438,12 @@ func renderAll(_ dir: URL, exports: URL?) async {
   // another program's file in the way (alone, and next to arcdps as dxgi.dll), the game running;
   // in the exclusive layout each addon waiting for the other. (The folder: any one that exists.)
   let folder = dir.path
+  // (an import's report as gw2om.sh gives it for a preset with many missing effects: five names,
+  // then the number of the others)
+  let report = "Added 1 preset to Presets, 148 shader files to Shaders/Golden Hour and 12 images to Textures/Golden Hour. "
+    + "This preset uses 14 effects. 9 are missing: qUINT_mxao.fx, qUINT_lightroom.fx, PD80_04_Contrast_Brightness_Saturation.fx, "
+    + "PD80_03_Filmic_Adaptation.fx, iMMERSE_Sharpen.fx and 4 more. qUINT_mxao.fx reads the depth buffer: it stays off in "
+    + "online games with this build of ReShade."
   let reshade: [(String, Bool, [String: String], (GameSettings) -> Void)] = [
     ("off", false, ["reshade_folder": folder], { _ in }),
     ("off", true, ["reshade_folder": folder], { _ in }),
@@ -470,6 +479,14 @@ func renderAll(_ dir: URL, exports: URL?) async {
                                    "arcdps": "on", "arcdps_state": "on"], { _ in }),
     ("exclusive-reshade-in", false, ["addons_layout": "exclusive", "reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll",
                                      "reshade_folder": folder, "arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"], { _ in }),
+    // after an import with ReShade off, and while the game runs (under the running note)
+    ("report", false, ["reshade_folder": folder], { s in s.reshadeReport = report }),
+    ("report", true, ["reshade_folder": folder], { s in s.reshadeReport = report }),
+    ("report-running", false, ["running": "yes", "reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll",
+                               "reshade_folder": folder], { s in
+      s.reshadeReport = report + " Guild Wars 2 is running: pick the preset in ReShade's menu (Home key)."
+    }),
+    ("importing", false, ["reshade_folder": folder], { s in s.reshadeImporting = true }),
   ]
   for (name, dark, values, adjust) in reshade {
     let s = settings(values)
