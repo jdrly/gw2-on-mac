@@ -289,7 +289,7 @@ check "set launchopts -maploadinfo" g set launchopts "-maploadinfo"
 check "launchopts with a ; refused" sh -c "! '$G' set launchopts '-x; rm -rf /' >/dev/null"
 check "unknown value refused (exit 2)" sh -c "'$G' set fpscap 45 >/dev/null; [ \$? = 2 ]"
 check "unknown key refused" sh -c "! '$G' set colour red >/dev/null"
-check "settings.conf has every key" [ "$(grep -c '=' "$AD/settings.conf")" = 20 ]
+check "settings.conf has every key" [ "$(grep -c '=' "$AD/settings.conf")" = 21 ]
 
 section "The larger interface (addon)"
 GD="$STEAM/steamapps/common/Guild Wars 2"
@@ -1038,6 +1038,164 @@ rmdir "$AD/.lock"
 GW2_ON_MAC_ENGINE_CHECKS=1 "$G" play >"$SANDBOX/realwine.txt" 2>&1 || true
 check "the real engine's Wine never runs in a sandbox" has "$SANDBOX/realwine.txt" "Refusing to run the real Wine"
 
+section "ReShade (Settings › Interface)"
+# Stand-ins from a local URL: reshade.me's installer (a PE's bytes with a zip appended, as the real
+# one is), Microsoft's compiler, and the two effect packs as GitHub zips them (a top folder with
+# Shaders, Textures and other files); a ReShade the app didn't place is the same PE with other bytes
+RSV="$SANDBOX/reshade.me" PK="$SANDBOX/packs" RSF="$AD/ReShade"
+mkdir -p "$RSV/in" "$PK"
+make_pe "$SANDBOX/pe/ReShade64.dll" ReShadeRegisterAddon ReShadeUnregisterAddon ReShadeRegisterEvent
+printf 'ReShade 6.8.0 (stand-in)\n' >>"$SANDBOX/pe/ReShade64.dll"
+cp "$SANDBOX/pe/ReShade64.dll" "$SANDBOX/pe/reshade-addon.dll" && printf 'the Addon build\n' >>"$SANDBOX/pe/reshade-addon.dll"
+make_pe "$RSV/d3dcompiler_47.dll" D3DCompile D3DReflect && printf 'fxc2 (stand-in)\n' >>"$RSV/d3dcompiler_47.dll"
+make_pe "$SANDBOX/pe/cef-compiler.dll" D3DCompile D3DCompile2 D3DReflect && printf 'bin64/cef (stand-in)\n' >>"$SANDBOX/pe/cef-compiler.dll"
+cp "$SANDBOX/pe/ReShade64.dll" "$RSV/in/" && echo "32-bit" >"$RSV/in/ReShade32.dll"
+( cd "$RSV/in" && zip -q ../setup.zip ReShade64.dll ReShade32.dll && zip -q ../no64.zip ReShade32.dll )
+{ printf 'MZ stand-in .NET installer\n'; cat "$RSV/setup.zip"; } >"$RSV/ReShade_Setup_6.8.0.exe"
+{ printf 'MZ stand-in .NET installer\n'; cat "$RSV/no64.zip"; } >"$RSV/no64.exe"
+echo '<html><body>Sign in to the Wi-Fi</body></html>' >"$RSV/portal.exe"
+S1="$PK/reshade-shaders-fd00" S2="$PK/SweetFX-93dd"
+mkdir -p "$S1/Shaders" "$S1/Textures" "$S2/Shaders/SweetFX" "$S2/Textures/SweetFX"
+echo '// ReShade.fxh' >"$S1/Shaders/ReShade.fxh"; echo '// Deband' >"$S1/Shaders/Deband.fx"; echo 'notes' >"$S1/Shaders/notes.txt"
+echo 'readme' >"$S1/README.md"; echo 'PNG' >"$S1/Textures/FontAtlas.png"
+echo '// CAS' >"$S2/Shaders/SweetFX/CAS.fx"; echo '// SMAA' >"$S2/Shaders/SweetFX/SMAA.fxh"; echo 'PNG' >"$S2/Textures/SweetFX/AreaTex.png"; echo 'MIT' >"$S2/LICENSE"
+( cd "$PK" && zip -qr "$RSV/standard.zip" reshade-shaders-fd00 && zip -qr "$RSV/sweetfx.zip" SweetFX-93dd )
+# a pack whose file climbs out of its folder (the name patched in place: the same length), and one
+# with a link in it
+mkdir -p "$PK/bad/Shaders/aa/aa" && echo '// evil' >"$PK/bad/Shaders/aa/aa/evil.fx" && echo '// ok' >"$PK/bad/Shaders/ok.fx"
+( cd "$PK" && zip -qr "$RSV/dotdot.zip" bad ) && perl -0777 -pi -e 's{Shaders/aa/aa/evil}{Shaders/../../evil}g' "$RSV/dotdot.zip"
+mkdir -p "$PK/linked/Shaders" && ln -s /etc/hosts "$PK/linked/Shaders/hosts.fx" && echo '// ok' >"$PK/linked/Shaders/ok.fx"
+( cd "$PK" && zip -qry "$RSV/link.zip" linked )
+sz() { stat -f %z "$1"; }
+sum() { shasum -a 256 "$1" | cut -d' ' -f1; }
+export GW2_ON_MAC_RESHADE_URL="file://$RSV/ReShade_Setup_6.8.0.exe"
+GW2_ON_MAC_RESHADE_SIZE=$(sz "$RSV/ReShade_Setup_6.8.0.exe") GW2_ON_MAC_RESHADE_SHA256=$(sum "$RSV/ReShade_Setup_6.8.0.exe")
+GW2_ON_MAC_RESHADE_DLL_SHA256=$(sum "$SANDBOX/pe/ReShade64.dll")
+export GW2_ON_MAC_RESHADE_SIZE GW2_ON_MAC_RESHADE_SHA256 GW2_ON_MAC_RESHADE_DLL_SHA256
+export GW2_ON_MAC_COMPILER_URL="file://$RSV/d3dcompiler_47.dll"
+GW2_ON_MAC_COMPILER_SIZE=$(sz "$RSV/d3dcompiler_47.dll") GW2_ON_MAC_COMPILER_SHA256=$(sum "$RSV/d3dcompiler_47.dll")
+export GW2_ON_MAC_COMPILER_SIZE GW2_ON_MAC_COMPILER_SHA256
+export GW2_ON_MAC_RESHADE_SHADERS_URL="file://$RSV/standard.zip" GW2_ON_MAC_SWEETFX_URL="file://$RSV/sweetfx.zip"
+GW2_DLLS='Software\\\\Wine\\\\AppDefaults\\\\Gw2-64.exe\\\\DllOverrides'
+WIN_RSF="Z:$(printf %s "$RSF" | tr / '\\')"
+RS_INI_WANT=$(printf '%s\n' '[GENERAL]' 'EffectSearchPaths=.\Shaders\**' 'TextureSearchPaths=.\Textures\**' \
+  'PresetPath=.\Presets\ReShadePreset.ini' "IntermediateCachePath=Z:$(printf %s "$CACHE/reshade" | tr / '\\')" '' \
+  '[INPUT]' 'KeyOverlay=36,0,0,0' '' '[SCREENSHOT]' 'SavePath=.\Screenshots')
+rsst() { g status | sed -n "s/^reshade_state=//p"; }
+gdsnap() { (cd "$GD" && find . -maxdepth 1 -type f -exec shasum {} + | sort); }
+our_ini() { [ "$(cat "$GD/ReShade.ini" 2>/dev/null)" = "$(printf '[INSTALL]\nBasePath=%s' "$WIN_RSF")" ]; }
+# refused <words> [<VAR=value>...]: set reshade on with those is refused, says so, and the game
+# folder is as it was, with no ReShade folder
+refused() {
+  local want=$1; shift
+  env "$@" "$G" set reshade on >"$SANDBOX/rs.txt" 2>&1 && return 1
+  grep -q "^@error .*$want" "$SANDBOX/rs.txt" && [ "$(gdsnap)" = "$before" ] && [ ! -e "$RSF" ]
+}
+rm -f "$GD/d3d11.dll" "$GD/dxgi.dll"; rm -rf "$GD/addons"
+check "ReShade off by default: reshade=off, reshade_state=off, version 6.8.0, the folder named" eval '[ "$(st reshade)/$(sett reshade)/$(rsst)/$(st reshade_version)" = off/off/off/6.8.0 ] && [ "$(sett reshade_folder)" = "$RSF" ]'
+# what's in the way
+cp "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll"
+check "arcdps as d3d11.dll: reshade_state=blocked, reshade_blocker=d3d11.dll" [ "$(rsst)/$(st reshade_blocker)" = blocked/d3d11.dll ]
+before=$(gdsnap)
+check "  set reshade on refused: turn arcdps off first; nothing placed" refused "arcdps is in the game folder as d3d11.dll. Turn arcdps off first"
+cp "$SANDBOX/pe/nexus.dll" "$GD/d3d11.dll"; before=$(gdsnap)
+check "another addon's d3d11.dll: blocked, refused, left alone" eval '[ "$(rsst)" = blocked ] && refused "another d3d11.dll (Nexus or another addon?)" && same "$SANDBOX/pe/nexus.dll" "$GD/d3d11.dll"'
+rm -f "$GD/d3d11.dll"
+# failed downloads and checks
+before=$(gdsnap)
+check "no server: refused (check the connection), nothing placed" refused "Check your internet connection" GW2_ON_MAC_RESHADE_URL="file://$SANDBOX/nowhere/ReShade_Setup_6.8.0.exe"
+check "a web page instead of the installer: refused, saying so, nothing kept" eval 'refused "brought a web page instead of the file" GW2_ON_MAC_RESHADE_URL="file://$RSV/portal.exe" && [ ! -e "$CACHE/downloads/reshade/portal.exe" ]'
+check "an installer that isn't the pinned one (its sha256): refused" refused "is not the file GW2 on Mac expects" GW2_ON_MAC_RESHADE_SHA256=0000000000000000000000000000000000000000000000000000000000000000
+check "an installer whose zip has no ReShade64.dll: refused" refused "has no ReShade64.dll in it" GW2_ON_MAC_RESHADE_URL="file://$RSV/no64.exe" GW2_ON_MAC_RESHADE_SIZE="$(sz "$RSV/no64.exe")" GW2_ON_MAC_RESHADE_SHA256="$(sum "$RSV/no64.exe")"
+check "a ReShade64.dll that isn't the pinned one: refused, not kept" eval 'refused "is not the ReShade 6.8.0 GW2 on Mac expects" GW2_ON_MAC_RESHADE_DLL_SHA256=0000000000000000000000000000000000000000000000000000000000000000 && [ ! -e "$CACHE/downloads/reshade/ReShade64.dll" ]'
+check "a compiler download that isn't the pinned file: refused" refused "The download of Microsoft.s shader compiler is not the file" GW2_ON_MAC_COMPILER_SIZE=1
+check "a pack with a file whose path climbs out (..): refused, nothing written outside" eval 'refused "SweetFX has a file whose path leaves its folder" GW2_ON_MAC_SWEETFX_URL="file://$RSV/dotdot.zip" && [ -z "$(find "$SANDBOX" -name evil.fx -not -path "$PK/*")" ]'
+check "a pack with a link in it: refused" refused "SweetFX has a link in it" GW2_ON_MAC_SWEETFX_URL="file://$RSV/link.zip"
+check "a pack over the unpacked size limit: refused" refused "Standard unpacks to more than" GW2_ON_MAC_PACK_LIMIT=10
+check "a pack download that is a web page: refused" refused "The download of SweetFX brought a web page" GW2_ON_MAC_SWEETFX_URL="file://$RSV/portal.exe"
+# on: everything downloaded (the game has no bin64/cef copy, so the compiler too)
+rm -rf "$CACHE/downloads/reshade" "$GD/bin64"
+out=$(g set reshade on 2>&1) && rc=0 || rc=$?
+check "set reshade on: exits 0 and says so" eval '[ "$rc" = 0 ] && echo "$out" | grep -q "^@done ReShade 6.8.0 is in the game folder as d3d11.dll"'
+check "  with progress for ReShade, the compiler (no bin64/cef copy) and both packs" eval 'for l in "ReShade" "Microsoft.s shader compiler" "ReShade.s standard effects" "SweetFX"; do echo "$out" | grep -q "^@progress $l [0-9]" || exit 1; done'
+check "  the game folder: ReShade64.dll as d3d11.dll, fxc2's compiler, ReShade.ini with BasePath" eval 'same "$SANDBOX/pe/ReShade64.dll" "$GD/d3d11.dll" && same "$RSV/d3dcompiler_47.dll" "$GD/d3dcompiler_47.dll" && our_ini'
+check "  the ReShade folder: Presets, Shaders, Textures, Screenshots and the starting ReShade.ini" eval '[ -d "$RSF/Presets" ] && [ -d "$RSF/Screenshots" ] && [ "$(cat "$RSF/ReShade.ini")" = "$RS_INI_WANT" ]'
+check "  both packs: each Shaders and Textures folder's contents under the pack's name" eval 'same "$S1/Shaders/ReShade.fxh" "$RSF/Shaders/Standard/ReShade.fxh" && [ -f "$RSF/Shaders/Standard/Deband.fx" ] && [ -f "$RSF/Textures/Standard/FontAtlas.png" ] && [ -f "$RSF/Shaders/SweetFX/SweetFX/CAS.fx" ] && [ -f "$RSF/Shaders/SweetFX/SweetFX/SMAA.fxh" ] && [ -f "$RSF/Textures/SweetFX/SweetFX/AreaTex.png" ]'
+check "  only effects and images: no README, LICENSE or notes.txt" eval '[ -z "$(find "$RSF" -name README.md -o -name LICENSE -o -name notes.txt)" ]'
+check "  reshade=on, reshade_state=on, reshade_dll=d3d11.dll, no blocker" eval '[ "$(sett reshade)/$(rsst)/$(st reshade_dll)/$(st reshade_blocker)" = on/on/d3d11.dll/ ] && grep -qx reshade=on "$AD/settings.conf"'
+check "  d3dcompiler_47=native,builtin for Gw2-64.exe" reg "$GW2_DLLS" d3dcompiler_47 native,builtin
+check "  the checked ReShade64.dll and the compiler stay in the cache; no installer, zip or temporary file" eval 'same "$SANDBOX/pe/ReShade64.dll" "$CACHE/downloads/reshade/ReShade64.dll" && [ "$(ls -A "$CACHE/downloads/reshade" | tr "\n" " ")" = "ReShade64.dll d3dcompiler_47.dll " ] && ! ls -a "$GD" | grep -q gw2om-new'
+check "  ReShade's effect cache folder is there" [ -d "$CACHE/reshade" ]
+check "set reshade on again: already there" sh -c "'$G' set reshade on | grep -q 'already in the game folder (d3d11.dll)'"
+echo "the player's preset" >"$RSF/Presets/Mine.ini"
+out=$(g set reshade off 2>&1) && rc=0 || rc=$?
+check "set reshade off: d3d11.dll, the compiler the app placed and ReShade.ini out of the game folder" eval '[ "$rc" = 0 ] && [ ! -e "$GD/d3d11.dll" ] && [ ! -e "$GD/d3dcompiler_47.dll" ] && [ ! -e "$GD/ReShade.ini" ]'
+check "  the ReShade folder stays, and the @done line says where" eval 'has "$RSF/Presets/Mine.ini" preset && [ -f "$RSF/Shaders/Standard/ReShade.fxh" ] && echo "$out" | grep -qxF "@done ReShade is off: its d3d11.dll is out of the game folder. Your presets and shaders stay in $RSF."'
+check "  reshade=off, reshade_state=off, the override deleted" eval '[ "$(sett reshade)/$(rsst)" = off/off ] && noreg "$GW2_DLLS" d3dcompiler_47'
+# the game's own compiler (bin64/cef); the packs aren't downloaded again while Shaders has files
+mkdir -p "$GD/bin64/cef" && cp "$SANDBOX/pe/cef-compiler.dll" "$GD/bin64/cef/d3dcompiler_47.dll"
+rm -f "$CACHE/downloads/reshade/d3dcompiler_47.dll"
+out=$(GW2_ON_MAC_COMPILER_URL="file://$SANDBOX/nowhere/c.dll" GW2_ON_MAC_RESHADE_SHADERS_URL="file://$SANDBOX/nowhere/s.zip" GW2_ON_MAC_SWEETFX_URL="file://$SANDBOX/nowhere/f.zip" "$G" set reshade on 2>&1) && rc=0 || rc=$?
+check "with the game's bin64/cef compiler: on, that copy next to Gw2-64.exe, nothing downloaded" eval '[ "$rc" = 0 ] && same "$GD/bin64/cef/d3dcompiler_47.dll" "$GD/d3dcompiler_47.dll" && ! echo "$out" | grep -q "^@progress"'
+g set reshade off >/dev/null 2>&1
+check "  off removes that copy; the game's own in bin64/cef stays" eval '[ ! -e "$GD/d3dcompiler_47.dll" ] && same "$SANDBOX/pe/cef-compiler.dll" "$GD/bin64/cef/d3dcompiler_47.dll"'
+# the player's own compiler
+echo "the player's compiler" >"$GD/d3dcompiler_47.dll"
+check "a compiler the player put there: on leaves it as it is" eval '"$G" set reshade on >/dev/null 2>&1 && has "$GD/d3dcompiler_47.dll" "the player" && [ "$(rsst)" = on ]'
+check "  off leaves it too" eval '"$G" set reshade off >/dev/null 2>&1 && has "$GD/d3dcompiler_47.dll" "the player" && [ ! -e "$GD/d3d11.dll" ]'
+rm -f "$GD/d3dcompiler_47.dll"
+# a ReShade the app didn't place
+cp "$SANDBOX/pe/reshade-addon.dll" "$GD/d3d11.dll"; before=$(gdsnap)
+check "a ReShade the app didn't place (another build): reshade_state=foreign, reshade_dll=d3d11.dll" [ "$(rsst)/$(st reshade_dll)/$(st reshade)" = foreign/d3d11.dll/off ]
+check "  set reshade on refused, the file left alone, nothing added" eval '! "$G" set reshade on >"$SANDBOX/rs.txt" 2>&1 && grep -q "^@error The game folder has a ReShade that GW2 on Mac didn.t put there (d3d11.dll)" "$SANDBOX/rs.txt" && [ "$(gdsnap)" = "$before" ]'
+check "  set reshade off: @done, the file left alone" eval '"$G" set reshade off | grep -q "^@done GW2 on Mac didn.t put the ReShade" && same "$SANDBOX/pe/reshade-addon.dll" "$GD/d3d11.dll"'
+g set rawmouse on >/dev/null
+check "  the override is written for it too" reg "$GW2_DLLS" d3dcompiler_47 native,builtin
+check "  set arcdps on refused, naming ReShade" eval '! "$G" set arcdps on >"$SANDBOX/arc.txt" 2>&1 && has "$SANDBOX/arc.txt" "has a ReShade that GW2 on Mac didn.t put there" && same "$SANDBOX/pe/reshade-addon.dll" "$GD/d3d11.dll"'
+mv "$GD/d3d11.dll" "$GD/dxgi.dll"
+check "  as dxgi.dll: foreign as well, reshade_dll=dxgi.dll" [ "$(rsst)/$(st reshade_dll)" = foreign/dxgi.dll ]
+rm -f "$GD/dxgi.dll"
+g set rawmouse on >/dev/null
+check "  gone: the override deleted" noreg "$GW2_DLLS" d3dcompiler_47
+g set reshade on >/dev/null 2>&1
+check "with the app's ReShade in, set arcdps on is refused: turn ReShade off first" eval '! "$G" set arcdps on >"$SANDBOX/arc.txt" 2>&1 && has "$SANDBOX/arc.txt" "ReShade is in the game folder as d3d11.dll. Turn ReShade off first" && same "$SANDBOX/pe/ReShade64.dll" "$GD/d3d11.dll"'
+# nothing changes while a session runs, or while a Play holds the session's lock
+mv "$ENG/bin/wineserver" "$ENG/bin/wineserver.heat" && cp "$SANDBOX/sleeper" "$ENG/bin/wineserver"
+"$ENG/bin/wineserver" 60 & sp=$!
+sleep 0.3
+before=$(gdsnap)
+check "while a session runs: set reshade off and on refused, nothing changes" eval '! "$G" set reshade off >"$SANDBOX/rs.txt" 2>&1 && has "$SANDBOX/rs.txt" "Quit Guild Wars 2 and Steam first" && ! "$G" set reshade on >/dev/null 2>&1 && [ "$(gdsnap)" = "$before" ] && [ "$(sett reshade)" = on ]'
+kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
+mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
+"$APP/Contents/Resources/helpers/sessionlock" hold "$AD/.session.lock" 30 & hp=$!
+i=0; until "$APP/Contents/Resources/helpers/sessionlock" held "$AD/.session.lock" || [ $i -ge 50 ]; do sleep 0.1; i=$((i + 1)); done
+check "while a Play holds the session's lock: set reshade off refused, nothing changes" eval '! "$G" set reshade off >"$SANDBOX/rs.txt" 2>&1 && has "$SANDBOX/rs.txt" "session is starting" && [ "$(gdsnap)" = "$before" ]'
+kill $hp 2>/dev/null; wait $hp 2>/dev/null
+check "dry run of on: places nothing" eval '"$G" set reshade off >/dev/null && GW2_ON_MAC_DRY_RUN=1 "$G" set reshade on | grep -q "would be in the game folder" && [ ! -e "$GD/d3d11.dll" ]'
+check "the URLs and sha256s can be changed only in a sandbox" eval '[ "$(grep -B1 "^  RESHADE_URL=\"\${GW2_ON_MAC_RESHADE_URL" "$G" | head -1)" = "if [ -n \"\$ROOT\" ]; then" ]'
+# (Play, Repair and the caches)
+g set reshade on >/dev/null 2>&1
+rm -f "$GD/d3d11.dll" "$GD/d3dcompiler_47.dll" "$GD/ReShade.ini"   # (Steam's file check, a new bottle)
+check "the files gone from the game folder: reshade=on, reshade_state=off" [ "$(st reshade)/$(rsst)" = on/off ]
+: >"$STANDIN_LOG"
+out=$(GW2_ON_MAC_RESHADE_URL="file://$SANDBOX/nowhere/r.exe" GW2_ON_MAC_COMPILER_URL="file://$SANDBOX/nowhere/c.dll" "$G" play 2>&1); started
+check "the next Play puts them back from the cache, without a download, and starts the game" eval 'same "$SANDBOX/pe/ReShade64.dll" "$GD/d3d11.dll" && same "$GD/bin64/cef/d3dcompiler_47.dll" "$GD/d3dcompiler_47.dll" && our_ini && ! echo "$out" | grep -q "^@progress" && has "$STANDIN_LOG" "^wine "'
+check "  with the override" reg "$GW2_DLLS" d3dcompiler_47 native,builtin
+watch_done
+rm -f "$GD/d3d11.dll" "$GD/d3dcompiler_47.dll" "$GD/ReShade.ini"; rm -rf "$CACHE/downloads/reshade" "$GD/bin64"
+: >"$STANDIN_LOG"
+out=$(g play 2>&1); started
+check "Play without the cache: the game starts without ReShade, and Play says why" eval 'echo "$out" | grep -q "^@warn ReShade.s files are not in the cache" && [ ! -e "$GD/d3d11.dll" ] && [ ! -e "$GD/d3dcompiler_47.dll" ] && ! echo "$out" | grep -q "^@progress" && has "$STANDIN_LOG" "^wine "'
+check "  and without the override" noreg "$GW2_DLLS" d3dcompiler_47
+watch_done
+out=$(g repair 2>&1) && rc=0 || rc=$?
+check "Repair downloads them again and puts them back" eval '[ "$rc" = 0 ] && echo "$out" | grep -q "^@progress ReShade " && same "$SANDBOX/pe/ReShade64.dll" "$GD/d3d11.dll" && same "$RSV/d3dcompiler_47.dll" "$GD/d3dcompiler_47.dll" && our_ini && same "$SANDBOX/pe/ReShade64.dll" "$CACHE/downloads/reshade/ReShade64.dll"'
+check "  with the override, and the player's preset still there" eval 'reg "$GW2_DLLS" d3dcompiler_47 native,builtin && has "$RSF/Presets/Mine.ini" preset'
+rm -f "$GD/d3d11.dll"
+check "Repair puts a missing file back from the cache" eval '"$G" repair >/dev/null 2>&1 && same "$SANDBOX/pe/ReShade64.dll" "$GD/d3d11.dll"'
+echo "compiled" >"$CACHE/reshade/reshade-1234.cso"
+check "reset-shaders empties ReShade's cache too, and keeps its folder" eval '"$G" reset-shaders | grep -q "DXMT.s and ReShade.s caches" && [ -d "$CACHE/reshade" ] && [ ! -e "$CACHE/reshade/reshade-1234.cso" ]'
+
 section "Uninstall"
 GW2_ON_MAC_WATCH_GRACE=60 "$G" play >/dev/null 2>&1; started; watcher_up
 wp=$(sess watcher_pid)
@@ -1046,13 +1204,15 @@ mkdir -p "$CACHE/downloads" && echo x >"$CACHE/downloads/x"
 out=$(g uninstall 2>&1) && rc=0 || rc=$?
 check "uninstall exits 0" [ "$rc" = 0 ]
 check "the phases 1-3" [ "$(echo "$out" | grep '^@phase' | tr '\n' ' ')" = "@phase 1 @phase 2 @phase 3 " ]
-check "the app's folder is gone (engine, bottle with the game, Game Mode, settings, the session)" [ ! -e "$AD" ]
+check "the app's folder holds only the ReShade folder (engine, bottle with the game, Game Mode, settings, the session gone)" [ "$(ls -A "$AD")" = ReShade ]
+check "  the ReShade folder stays with the player's preset, and uninstall names it" eval 'has "$RSF/Presets/Mine.ini" preset && echo "$out" | grep -qF "your ReShade presets and shaders in $RSF."'
 check "  the session's watcher stopped" sh -c "! kill -0 $wp 2>/dev/null"
 check "its caches are gone" eval '[ ! -e "$CACHE" ] && [ ! -e "$DXMT_CACHE" ]'
 check "the per-user cache folder's dxmt/ stays (another setup's)" other_dxmt_kept
 check "the Game Mode link is gone" sh -c "! ls '$SANDBOX/usertmp/'winetemp-*/Gw2-64.exe >/dev/null 2>&1"
 check "the logs stay" [ -f "$LOGS/install.log" ]
 check "status: not installed" [ "$(st installed)/$(st engine_installed)" = no/no ]
+rm -rf "$AD"
 
 section "ArenaNet route"
 if [ -f "$SIGNED_PE" ]; then
