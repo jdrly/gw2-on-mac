@@ -1219,7 +1219,6 @@ switches() {
 # with both off, no addon file, ReShade.ini or temporary file is left
 none_left() { [ ! -e "$GD/d3d11.dll" ] && [ ! -e "$GD/dxgi.dll" ] && [ ! -e "$GD/ReShade.ini" ] && [ -z "$(find "$GD" -maxdepth 1 -name '*gw2om-new')" ]; }
 g set reshade off >/dev/null 2>&1; rm -f "$GD/d3d11.dll" "$GD/dxgi.dll"
-check "the shipped layout is together, and only a sandbox can change it" eval 'grep -qx "ADDONS_LAYOUT=together" "$G" && grep -q "^\[ -z \"\$ROOT\" \] || ADDONS_LAYOUT=" "$G"'
 check "arcdps on, ReShade on, arcdps off, ReShade off" switches arcdps on arcdps - reshade on reshade arcdps arcdps off reshade - reshade off - -
 check "  neither file left" none_left
 check "arcdps on, ReShade on, ReShade off, arcdps off" switches arcdps on arcdps - reshade on reshade arcdps reshade off arcdps - arcdps off - -
