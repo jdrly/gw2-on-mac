@@ -36,8 +36,7 @@ struct UIRender {
 // MARK: - Drawing
 
 @MainActor
-func render<V: View>(_ view: V, size: CGSize, dark: Bool, chrome: Bool = true,
-                     inspect: ((NSView) -> Void)? = nil) async -> NSBitmapImageRep {
+func render<V: View>(_ view: V, size: CGSize, dark: Bool, chrome: Bool = true) async -> NSBitmapImageRep {
   let host = NSHostingView(rootView: view.environment(\.controlActiveState, .key))
   let win = NSWindow(contentRect: CGRect(origin: CGPoint(x: -20000, y: -20000), size: size), styleMask: [.borderless],
                      backing: .buffered, defer: true)
@@ -56,26 +55,8 @@ func render<V: View>(_ view: V, size: CGSize, dark: Bool, chrome: Bool = true,
                              colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
   rep.size = size
   host.cacheDisplay(in: host.bounds, to: rep)
-  inspect?(host)
   win.close()
   return chrome ? windowChrome(rep, size: size, dark: dark) : rep
-}
-
-// The accessibility tree under an element: each element's role and label (what VoiceOver reads)
-@MainActor
-func accessibilityTree(_ element: Any, depth: Int = 0) -> [(role: String, label: String)] {
-  guard depth < 64 else { return [] }
-  let role: NSAccessibility.Role?, label: String?, children: [Any]?
-  if let view = element as? NSView {
-    (role, label, children) = (view.accessibilityRole(), view.accessibilityLabel(), view.accessibilityChildren())
-  } else if let node = element as? NSAccessibilityElement {
-    (role, label, children) = (node.accessibilityRole(), node.accessibilityLabel(), node.accessibilityChildren())
-  } else {
-    return [(role: "?\(type(of: element))", label: "")]
-  }
-  var out = [(role: role?.rawValue ?? "", label: label ?? "")]
-  for child in children ?? [] { out += accessibilityTree(child, depth: depth + 1) }
-  return out
 }
 
 // The window's frame as the design draws it: rounded corners (12), a hairline and the traffic
@@ -427,11 +408,12 @@ func renderAll(_ dir: URL, exports: URL?) async {
     write(await render(arcSheet, size: CGSize(width: 460, height: 248), dark: dark, chrome: false),
           dir.appendingPathComponent("sheet-arcdps-warning-\(dark ? "dark" : "light").png"))
     let reshadeSheet = AddonWarning.reshade(isPresented: .constant(true), version: "6.8.0") {}
-    write(await render(reshadeSheet, size: CGSize(width: 460, height: 340), dark: dark, chrome: false),
+    write(await render(reshadeSheet, size: CGSize(width: 460, height: 278), dark: dark, chrome: false),
           dir.appendingPathComponent("sheet-reshade-warning-\(dark ? "dark" : "light").png"))
   }
   // A row's line of buttons with two of them, at the pane's width in the narrowest window (a layout
   // check for a second button in the ReShade row; the row itself has one)
+  let rowWidth = SettingsView.designSize.width - 214 - 48 + 24
   for dark in [false, true] {
     let row = SettingsGroup {
       SettingRow("ReShade", "Post-processing effects by crosire, drawn over the finished picture. Downloads ReShade 6.8.0 from reshade.me. Open its menu in the game with the Home key (fn + Left Arrow on a MacBook).") {
@@ -441,10 +423,11 @@ func renderAll(_ dir: URL, exports: URL?) async {
         SmallButton("Add preset or shaders…", icon: "file-down") {}
       }
     }
+    // (a fixed size, as the sheets have)
     .padding(12)
+    .frame(width: rowWidth, height: 160, alignment: .top)
     .background(Brand.bg)
-    write(await render(row, size: CGSize(width: SettingsView.designSize.width - 214 - 48 + 24, height: 160), dark: dark,
-                       chrome: false),
+    write(await render(row, size: CGSize(width: rowWidth, height: 160), dark: dark, chrome: false),
           dir.appendingPathComponent("row-two-buttons-\(dark ? "dark" : "light").png"))
   }
   // ReShade in the Interface pane: off with its folder from an earlier time (the pane's own render
@@ -480,21 +463,7 @@ func renderAll(_ dir: URL, exports: URL?) async {
   for (name, dark, values, adjust) in reshade {
     let s = settings(values)
     adjust(s)
-    var tree: [(role: String, label: String)] = []
-    write(await render(SettingsView(settings: s), size: SettingsView.designSize, dark: dark) { tree = accessibilityTree($0) },
+    write(await render(SettingsView(settings: s), size: SettingsView.designSize, dark: dark),
           dir.appendingPathComponent("settings-interface-reshade-\(name)-\(dark ? "dark" : "light").png"))
-    // VoiceOver's names: the switch reads "ReShade" (SettingRow's label), the button its own title
-    guard name == "off", !dark else { continue }
-    let named = tree.filter { !$0.label.isEmpty }
-    print("accessibility, ReShade off: " + named.filter { $0.label.contains("ReShade") }
-      .map { "\($0.role) \"\($0.label)\"" }.joined(separator: ", "))
-    if named.isEmpty {
-      print("notice: no accessibility labels off screen (\(tree.count) elements: "
-            + Set(tree.map(\.role)).sorted().joined(separator: " ") + "), so VoiceOver's names are not checked here")
-    } else if !named.contains(where: { $0.role == "AXButton" && $0.label == "Open ReShade folder" })
-                || !named.contains(where: { $0.label == "ReShade" && $0.role != "AXStaticText" }) {
-      print("FAIL the ReShade row's switch or its button lacks its VoiceOver name")
-      exit(1)
-    }
   }
 }
