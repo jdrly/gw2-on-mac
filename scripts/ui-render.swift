@@ -411,7 +411,7 @@ func renderAll(_ dir: URL, exports: URL?) async {
     write(await render(reshadeSheet, size: CGSize(width: 460, height: 278), dark: dark, chrome: false),
           dir.appendingPathComponent("sheet-reshade-warning-\(dark ? "dark" : "light").png"))
     let presetSheet = AddonWarning.preset(isPresented: .constant(true), name: "Golden Hour.ini") {}
-    write(await render(presetSheet, size: CGSize(width: 460, height: 196), dark: dark, chrome: false),
+    write(await render(presetSheet, size: CGSize(width: 460, height: 172), dark: dark, chrome: false),
           dir.appendingPathComponent("sheet-reshade-preset-\(dark ? "dark" : "light").png"))
   }
   // A row's line of buttons with two of them, at the pane's width in the narrowest window (the
