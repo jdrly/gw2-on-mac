@@ -46,7 +46,8 @@
 #   gw2om.sh set arcdps on|off arcdps into the game folder (downloaded from deltaconnected.com,
 #                              checked against its published md5) or out of it (only arcdps; its
 #                              addons/arcdps settings stay), while no session runs; status and
-#                              settings print arcdps, arcdps_state (on|off|foreign|nogame)
+#                              settings print arcdps, arcdps_state (on|off|foreign|nogame).
+#                              With ReShade in, arcdps is dxgi.dll (ADDONS_LAYOUT)
 #   gw2om.sh set reshade on|off
 #                              ReShade 6.8.0 into the game folder as d3d11.dll (from reshade.me's
 #                              installer, pinned by sha256), with Microsoft's d3dcompiler_47.dll
@@ -90,11 +91,12 @@
 #                              d3dcompiler_47.dll to download
 #   GW2_ON_MAC_RESHADE_SHADERS_URL, GW2_ON_MAC_SWEETFX_URL   other effect pack zips
 #   GW2_ON_MAC_PACK_LIMIT      the most bytes one effect pack may unpack to
+#   GW2_ON_MAC_ADDONS_LAYOUT   exclusive: arcdps and ReShade refuse each other (ADDONS_LAYOUT)
 #   GW2_ON_MAC_OLD_COMPONENTS  a file of "<path in the engine> <sha256>" lines: stand-ins for an
 #                              earlier version's engine pieces (graphics_state update)
 #   GW2_ON_MAC_TEST_PAUSE, GW2_ON_MAC_TEST_PAUSE_AT   wait at a point while that file is there
 #                              (test_pause: play-classified, update-<n>, locked, lock-owner-read,
-#                              lock-stale-checked)
+#                              lock-stale-checked, arcdps-moved)
 #   GW2_ON_MAC_UPDATE_FAIL_AFTER, GW2_ON_MAC_UPDATE_KILL_AFTER   an update fails (or is killed)
 #                              after <n> of its files
 #   GW2_ON_MAC_UPDATE_KILL_IN_BACKUP   an update is killed halfway through backing up its <n>th file
@@ -1228,10 +1230,20 @@ sync_uiscale() {
 # Direct3D 11 on to DXMT. It updates itself, so it is recognised by what it is, not by a hash: a PE
 # whose export table has arcdps's extension API (addextension2) and that names arcdps. As dxgi.dll
 # it counts too. Its settings (addons/arcdps/) stay when it goes. Another d3d11.dll or dxgi.dll
-# (Nexus, ReShade...) is never touched: state foreign.
+# (Nexus, a ReShade the app didn't place...) is never touched: state foreign.
 ARCDPS_URL=https://www.deltaconnected.com/arcdps/x64
 [ -z "$ROOT" ] || ARCDPS_URL="${GW2_ON_MAC_ARCDPS_URL:-$ARCDPS_URL}"
 ARCDPS_DLLS="d3d11.dll dxgi.dll"
+# arcdps and the app's ReShade in one game folder: ADDONS_LAYOUT=together gives each a file name
+# (addon_dll): alone, each is d3d11.dll; with both in, ReShade is d3d11.dll and arcdps dxgi.dll
+# (arcdps's page allows that name). ADDONS_LAYOUT=exclusive: each counts the other as a file in its
+# way, and its switch refuses until the other is off.
+ADDONS_LAYOUT=together
+[ -z "$ROOT" ] || ADDONS_LAYOUT="${GW2_ON_MAC_ADDONS_LAYOUT:-$ADDONS_LAYOUT}"
+# addon_dll <arcdps|reshade> <the other one in: on|off>: the addon's file name in the game folder
+addon_dll() { case "$1 $2 $ADDONS_LAYOUT" in "arcdps on together") echo dxgi.dll ;; *) echo d3d11.dll ;; esac; }
+# our_reshade <file>: the app's ReShade (the pinned file)
+our_reshade() { [ -f "$1" ] && [ "$(sha256 "$1")" = "$RESHADE_DLL_SHA256" ]; }
 
 pe32() { od -An -tu4 -j "$2" -N4 "$1" 2>/dev/null | tr -d ' ' || true; }   # <file> <offset>
 pe16() { od -An -tu2 -j "$2" -N2 "$1" 2>/dev/null | tr -d ' ' || true; }
@@ -1271,7 +1283,8 @@ is_arcdps() {
   LC_ALL=C grep -aq arcdps "$1"
 }
 # arcdps_state: ARC (on: arcdps is in the game folder, as d3d11.dll or dxgi.dll; off; foreign:
-# another program's d3d11.dll or dxgi.dll, ARC_FOREIGN its names; nogame), ARC_DLL (arcdps's file)
+# another program's d3d11.dll or dxgi.dll, ARC_FOREIGN its names, the app's ReShade too in the
+# exclusive layout; nogame), ARC_DLL (arcdps's files)
 arcdps_state() {
   local n
   ARC=off ARC_FOREIGN="" ARC_DLL=""
@@ -1279,10 +1292,65 @@ arcdps_state() {
   [ -n "$GAME_DIR" ] || { ARC=nogame; return 0; }
   for n in $ARCDPS_DLLS; do
     [ -f "$GAME_DIR/$n" ] || continue
-    if is_arcdps "$GAME_DIR/$n"; then ARC=on ARC_DLL=${ARC_DLL:+$ARC_DLL }$n; else ARC_FOREIGN=${ARC_FOREIGN:+$ARC_FOREIGN }$n; fi
+    if is_arcdps "$GAME_DIR/$n"; then ARC=on ARC_DLL=${ARC_DLL:+$ARC_DLL }$n
+    elif [ "$ADDONS_LAYOUT" = together ] && our_reshade "$GAME_DIR/$n"; then :
+    else ARC_FOREIGN=${ARC_FOREIGN:+$ARC_FOREIGN }$n
+    fi
   done
   [ "$ARC" = on ] || [ -z "$ARC_FOREIGN" ] || ARC=foreign
   return 0
+}
+
+# arcdps_move <from> <to>: arcdps renamed in the game folder, checked first (the file is arcdps,
+# <to> is free; else nothing changes, status 1). One rename, so arcdps is under one name or the
+# other whenever the script stops. ARC_MOVED: the new name.
+arcdps_move() {
+  local from="$GAME_DIR/$1" to="$GAME_DIR/$2"
+  if ! is_arcdps "$from" || [ -e "$to" ] || [ -L "$to" ]; then
+    log "arcdps: not renamed from $1 to $2 (not arcdps, or $2 is taken)"
+    return 1
+  fi
+  run mv -n "$from" "$to" || return 1
+  if [ -z "$DRY" ] && { [ -e "$from" ] || ! is_arcdps "$to"; }; then
+    log "arcdps: the rename from $1 to $2 didn't happen"
+    return 1
+  fi
+  ARC_MOVED=$2
+  log "arcdps: $1 renamed to $2"
+}
+
+# arcdps_tidy <ReShade in: on|off>: arcdps under the name addon_dll gives (the caller holds the
+# session's lock, and no session runs). arcdps updates itself and may write a new d3d11.dll while
+# it runs as dxgi.dll: under both names, the newer file stays and the older goes (both are arcdps).
+# A name that is taken leaves arcdps where it is. ARC_MOVED: the name arcdps was renamed to, if any.
+arcdps_tidy() {
+  local want newer older
+  ARC_MOVED=""
+  arcdps_state
+  [ "$ARC" = on ] || return 0
+  want=$(addon_dll arcdps "$1")
+  if [ "$ARC_DLL" = "d3d11.dll dxgi.dll" ]; then
+    if [ "$GAME_DIR/d3d11.dll" -nt "$GAME_DIR/dxgi.dll" ]; then newer=d3d11.dll
+    elif [ "$GAME_DIR/dxgi.dll" -nt "$GAME_DIR/d3d11.dll" ]; then newer=dxgi.dll
+    else newer=$want
+    fi
+    if [ "$newer" = d3d11.dll ]; then older=dxgi.dll; else older=d3d11.dll; fi
+    log "arcdps: in the game folder as d3d11.dll and dxgi.dll (it updated itself); keeping the newer $newer (sha256 $(sha256 "$GAME_DIR/$newer")), removing $older (sha256 $(sha256 "$GAME_DIR/$older"))"
+    run rm -f "$GAME_DIR/$older"
+    ARC_DLL=$newer
+  fi
+  [ "$ARC_DLL" = "$want" ] || arcdps_move "$ARC_DLL" "$want" || true
+}
+
+# sync_arcdps: arcdps under the name addon_dll gives, before Play, at Install and at Repair; never
+# while a session runs or starts
+sync_arcdps() {
+  [ -n "$DRY" ] || [ -x "$LOCKER" ] || return 0
+  registry_lock || return 0
+  if session_running; then registry_unlock; return 0; fi
+  reshade_state
+  arcdps_tidy "$([ "$RSH" = on ] && echo on || echo off)"
+  registry_unlock
 }
 
 # set arcdps on|off (cmd_set): only while no session runs or starts (the session's lock, as the
@@ -1313,13 +1381,16 @@ set_arcdps() {
     foreign)
       reshade_state
       case "$RSH" in
-        on) die "ReShade is in the game folder as $RSH_DLL. Turn ReShade off first, then turn arcdps on." ;;
+        on) [ "$ADDONS_LAYOUT" != exclusive ] || die "ReShade is in the game folder as $RSH_DLL. Turn ReShade off first, then turn arcdps on." ;;
         foreign) die "The game folder has a ReShade that GW2 on Mac didn't put there ($RSH_DLL). GW2 on Mac leaves it alone, so it can't add arcdps: remove that file first." ;;
       esac
       die "The game folder has another $ARC_FOREIGN (Nexus or another addon?). GW2 on Mac leaves it alone, so it can't add arcdps: remove that file, or add arcdps through that addon." ;;
   esac
+  # (its name: dxgi.dll next to the app's ReShade in the together layout)
+  reshade_state
+  n=$(addon_dll arcdps "$([ "$RSH" = on ] && echo on || echo off)")
   if [ -n "$DRY" ]; then
-    echo "[dry-run] download $ARCDPS_URL/d3d11.dll, check it against $ARCDPS_URL/d3d11.dll.md5sum, put it into $GAME_DIR/d3d11.dll"
+    echo "[dry-run] download $ARCDPS_URL/d3d11.dll, check it against $ARCDPS_URL/d3d11.dll.md5sum, put it into $GAME_DIR/$n"
     echo "@done arcdps would be in the game folder."
     return 0
   fi
@@ -1340,12 +1411,12 @@ set_arcdps() {
   is_arcdps "$dir/d3d11.dll" || die "The file from $ARCDPS_URL/d3d11.dll is not arcdps. Try again later."
   # (no session can start meanwhile: this holds its lock)
   arcdps_state
-  [ "$ARC" = off ] || die "The game folder changed during the download ($ARC). Try again."
-  run install -m 644 "$dir/d3d11.dll" "$GAME_DIR/.d3d11.dll.gw2om-new"
-  run mv -f "$GAME_DIR/.d3d11.dll.gw2om-new" "$GAME_DIR/d3d11.dll"
+  [ "$ARC" = off ] && [ ! -e "$GAME_DIR/$n" ] && [ ! -L "$GAME_DIR/$n" ] || die "The game folder changed during the download ($ARC). Try again."
+  run install -m 644 "$dir/d3d11.dll" "$GAME_DIR/.$n.gw2om-new"
+  run mv -f "$GAME_DIR/.$n.gw2om-new" "$GAME_DIR/$n"
   registry_unlock
-  log "arcdps: $ARCDPS_URL/d3d11.dll into $GAME_DIR/d3d11.dll (md5 $got, sha256 $(sha256 "$GAME_DIR/d3d11.dll"))"
-  echo "@done arcdps is in the game folder (d3d11.dll from deltaconnected.com). It loads the next time the game starts, and from then on it updates itself."
+  log "arcdps: $ARCDPS_URL/d3d11.dll into $GAME_DIR/$n (md5 $got, sha256 $(sha256 "$GAME_DIR/$n"))"
+  echo "@done arcdps is in the game folder ($n from deltaconnected.com$([ "$n" = d3d11.dll ] || echo ", next to ReShade's d3d11.dll")). It loads the next time the game starts, and from then on it updates itself."
 }
 
 # --- ReShade (crosire's post-processing; Settings › Interface): downloaded on request, never hosted
@@ -1413,7 +1484,8 @@ our_game_ini() {
 
 # reshade_state: RSH (on: the app's ReShade is in the game folder, as d3d11.dll or dxgi.dll;
 # foreign: another ReShade is; blocked: another program's d3d11.dll or dxgi.dll is in the way, arcdps
-# too; off; nogame), RSH_DLL (the ReShade's file), RSH_BLOCKER (the other files' names)
+# too in the exclusive layout; off; nogame), RSH_DLL (the ReShade's file), RSH_BLOCKER (the other
+# files' names)
 reshade_state() {
   local n foreign=""
   RSH=off RSH_DLL="" RSH_BLOCKER=""
@@ -1421,8 +1493,9 @@ reshade_state() {
   [ -n "$GAME_DIR" ] || { RSH=nogame; return 0; }
   for n in $ARCDPS_DLLS; do
     [ -f "$GAME_DIR/$n" ] || continue
-    if [ "$(sha256 "$GAME_DIR/$n")" = "$RESHADE_DLL_SHA256" ]; then RSH_DLL=${RSH_DLL:+$RSH_DLL }$n
+    if our_reshade "$GAME_DIR/$n"; then RSH_DLL=${RSH_DLL:+$RSH_DLL }$n
     elif is_reshade "$GAME_DIR/$n"; then foreign=${foreign:+$foreign }$n
+    elif [ "$ADDONS_LAYOUT" = together ] && is_arcdps "$GAME_DIR/$n"; then :
     else RSH_BLOCKER=${RSH_BLOCKER:+$RSH_BLOCKER }$n
     fi
   done
@@ -1438,7 +1511,7 @@ reshade_refusal() {
     foreign) echo "The game folder has a ReShade that GW2 on Mac didn't put there ($RSH_DLL). GW2 on Mac leaves it alone: remove that file to turn ReShade on here." ;;
     blocked)
       arcdps_state
-      if [ "$ARC" = on ]; then
+      if [ "$ADDONS_LAYOUT" = exclusive ] && [ "$ARC" = on ]; then
         echo "arcdps is in the game folder as $ARC_DLL. Turn arcdps off first, then turn ReShade on."
       else
         echo "The game folder has another ${RSH_BLOCKER// / and } (Nexus or another addon?). GW2 on Mac leaves it alone, so it can't add ReShade: remove that file first."
@@ -1617,8 +1690,11 @@ reshade_folder() {
 }
 
 # reshade_place: what is missing of the three into the game folder, the DLL last (RSH, COMPILER_SRC
-# set). A d3dcompiler_47.dll there stays as it is, the player's or the app's.
+# set). A d3dcompiler_47.dll there stays as it is, the player's or the app's. The last step moves
+# arcdps to the name it has next to ReShade, then puts ReShade's DLL in; if that fails, arcdps
+# goes back to its name.
 reshade_place() {
+  local n tmp
   if [ ! -e "$GAME_DIR/d3dcompiler_47.dll" ] && [ -n "$COMPILER_SRC" ]; then
     run install -m 644 "$COMPILER_SRC" "$GAME_DIR/.d3dcompiler_47.dll.gw2om-new"
     run mv -f "$GAME_DIR/.d3dcompiler_47.dll.gw2om-new" "$GAME_DIR/d3dcompiler_47.dll"
@@ -1626,11 +1702,19 @@ reshade_place() {
     log "ReShade: $COMPILER_SRC into $GAME_DIR/d3dcompiler_47.dll"
   fi
   [ -e "$GAME_DIR/ReShade.ini" ] || reshade_game_ini | put "$GAME_DIR/ReShade.ini" 644
-  if [ "$RSH" = off ]; then
-    run install -m 644 "$RS_DOWNLOADS/ReShade64.dll" "$GAME_DIR/.d3d11.dll.gw2om-new"
-    run mv -f "$GAME_DIR/.d3d11.dll.gw2om-new" "$GAME_DIR/d3d11.dll"
-    log "ReShade: ReShade64.dll $RESHADE_VERSION into $GAME_DIR/d3d11.dll"
+  [ "$RSH" = off ] || return 0
+  n=$(addon_dll reshade on)
+  tmp="$GAME_DIR/.$n.gw2om-new"
+  arcdps_tidy on
+  test_pause arcdps-moved
+  # (checked one by one: errexit doesn't stop a failing step inside a condition)
+  if { [ -z "$DRY" ] && { [ -e "$GAME_DIR/$n" ] || [ -L "$GAME_DIR/$n" ]; }; } ||
+    ! run install -m 644 "$RS_DOWNLOADS/ReShade64.dll" "$tmp" || ! run mv -f "$tmp" "$GAME_DIR/$n"; then
+    rm -f "$tmp"
+    [ -z "$ARC_MOVED" ] || arcdps_move "$ARC_MOVED" "$(addon_dll arcdps off)" || true
+    die "GW2 on Mac couldn't put ReShade into the game folder as $n. Try again (details in $LOGS/install.log)."
   fi
+  log "ReShade: ReShade64.dll $RESHADE_VERSION into $GAME_DIR/$n"
 }
 
 # set reshade on|off (cmd_set): only while no session runs or starts (the session's lock, as set
@@ -1654,11 +1738,14 @@ set_reshade() {
       run rm -f "$RS_COMPILER_RECORD"
     fi
     write_settings reshade off
+    # (last: arcdps back to the name it has alone)
+    ARC_MOVED=""
+    [ -z "$gone" ] || arcdps_tidy off
     registry_unlock
     apply_registry
     if [ -n "$gone" ]; then
       say "ReShade removed from the game folder ($gone); its folder stays: $RS"
-      echo "@done ReShade is off: its $gone is out of the game folder. Your presets and shaders stay in $RS."
+      echo "@done ReShade is off: its $gone is out of the game folder.$([ -z "$ARC_MOVED" ] || echo " arcdps is $ARC_MOVED again.") Your presets and shaders stay in $RS."
     elif [ "$RSH" = foreign ]; then
       echo "@done GW2 on Mac didn't put the ReShade in the game folder ($RSH_DLL), so it stays as it is."
     elif [ "$RSH" = blocked ]; then
@@ -1711,11 +1798,12 @@ set_reshade() {
   done
   reshade_state
   case "$RSH" in on|off) ;; *) die "The game folder changed during the download ($RSH). Try again." ;; esac
+  ARC_MOVED=""
   reshade_place
   write_settings reshade on
   registry_unlock
   apply_registry
-  echo "@done ReShade $RESHADE_VERSION is in the game folder as d3d11.dll. It loads the next time the game starts."
+  echo "@done ReShade $RESHADE_VERSION is in the game folder as d3d11.dll. It loads the next time the game starts.$([ -z "$ARC_MOVED" ] || echo " arcdps is $ARC_MOVED now, so both load.")"
 }
 
 # sync_reshade [download]: with the setting on, puts ReShade's missing files back into the game
@@ -1879,9 +1967,12 @@ game_runs_anywhere() {
 
 # import_game <source dir> <bottle's game dir>: the folder cloned (same disk) or copied (with a
 # free-space check and progress); my own addon's files (version.dll with its mark,
-# gw2-ui-scale.*) are left out; any other addon comes along as it is (ADDONS names them)
+# gw2-ui-scale.*) are left out, and so is a ReShade (its d3d11.dll or dxgi.dll, and the ReShade.ini
+# next to Gw2-64.exe, which points into the other install: RESHADE_LEFT names them); any other addon
+# comes along as it is (ADDONS names them)
 import_game() {
-  local src=$1 dst=$2 total pid
+  local src=$1 dst=$2 total pid n
+  RESHADE_LEFT=""
   total=$(folder_bytes "$src")
   if [ -e "$dst" ]; then
     [ -z "$(ls -A "$dst" 2>/dev/null)" ] ||
@@ -1925,6 +2016,13 @@ import_game() {
   echo "@progress Guild Wars 2 $total $total"
   if [ -f "$dst/version.dll" ] && grep -aq "$UI_MARK" "$dst/version.dll"; then run rm -f "$dst/version.dll"; fi
   run rm -f "$dst/gw2-ui-scale.ini" "$dst/gw2-ui-scale.log"
+  for n in d3d11.dll dxgi.dll ReShade.ini; do
+    if { [ "$n" = ReShade.ini ] && [ -f "$dst/$n" ]; } || is_reshade "$dst/$n"; then
+      run rm -f "$dst/$n"
+      RESHADE_LEFT=${RESHADE_LEFT:+$RESHADE_LEFT, }$n
+    fi
+  done
+  [ -z "$RESHADE_LEFT" ] || say "ReShade stayed behind in $src ($RESHADE_LEFT): GW2 on Mac puts in its own when you turn ReShade on in Settings › Interface"
   chmod -R u+w "$dst"
   ADDONS=$( (cd "$dst" && ls -d ./*.dll addons bin64/d3d9.dll 2>/dev/null || true) | sed 's|^\./||' | tr '\n' ',' | sed 's/,$//; s/,/, /g')
   [ -z "$ADDONS" ] || say "Addons that came along with the game's files: $ADDONS (GW2 on Mac leaves them as they are)"
@@ -2003,7 +2101,7 @@ install_imported() {
     finish_touches
     IMPORT_DST="" IMPORT_ACF=""
     log "install import complete"
-    echo "@done Guild Wars 2 is ready: its files were $how$([ "$SETTINGS_IMPORTED" = yes ] && echo ", with your game settings").$([ -z "$ADDONS" ] || echo " Addons that came along: $ADDONS; GW2 on Mac leaves them as they are.")$([ "$route" = steam ] && echo " Steam may check the files at the first Play.") Press Play."
+    echo "@done Guild Wars 2 is ready: its files were $how$([ "$SETTINGS_IMPORTED" = yes ] && echo ", with your game settings").$([ -z "$ADDONS" ] || echo " Addons that came along: $ADDONS; GW2 on Mac leaves them as they are.")$([ -z "$RESHADE_LEFT" ] || echo " ReShade stayed behind: turn it on in Settings › Interface.")$([ "$route" = steam ] && echo " Steam may check the files at the first Play.") Press Play."
   else
     step "Steam opens: sign in, and it brings Guild Wars 2 up to date"
     launch "$STEAM_EXE" "steam://install/$GW2_APPID"
@@ -2758,6 +2856,7 @@ finish_touches() {
   run mkdir -p "$DXMT_CACHE"
   sync_uiscale
   sync_reshade
+  sync_arcdps
   apply_registry
   gamemode_current || [ "$(setting gamemode)" != on ] || install_gamemode
   [ -n "$DRY" ] || { set_state stage finished; set_state game_dir "$GAME_DIR"; }
@@ -2820,6 +2919,7 @@ cmd_repair() {
   write_manifest
   # (last: what it can't download fails the repair after the rest is done)
   sync_reshade download
+  sync_arcdps
   apply_registry
   log "repair complete"
   echo "@done Repaired: the engine, the graphics, the bottle's settings and Game Mode are set up again."
@@ -2917,6 +3017,7 @@ cmd_play() {
       yes) [ "$(json_get "$MANIFEST" version)" = "$VERSION" ] || [ -n "$DRY" ] || write_manifest ;;
     esac
     sync_reshade
+    sync_arcdps
     apply_registry
     write_dxmt_conf
   fi
