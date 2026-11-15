@@ -21,7 +21,7 @@
 #                  threads and modules, which may hold account or character names. Never Local.dat (the game's saved login), Steam's config or its
 #                  login, connection or account logs, nor anything else of the bottle.
 #   reshade/       from the ReShade folder (gw2om.sh's reshade_folder): ReShade.log (its end),
-#                  ReShade.ini, the current preset in preset/ (the file PresetPath names, only one
+#                  ReShade.ini, the current preset as preset.ini (the file PresetPath names, only one
 #                  inside the folder) and shaders.txt, the names of the files under Shaders
 #   system-info.txt  macOS, chip, memory, displays, versions, the state of the install and its
 #                  engine pieces, ReShade and arcdps (gw2om.sh's status), which crash reports are in
@@ -375,12 +375,15 @@ done
 # No links: only the folder's own files.
 # reshade_preset: PRESET, the file ReShade.ini's [GENERAL] PresetPath names, if it is one inside the
 # folder (relative paths start at the folder, Z: is /); PRESET_NOTE says what was found
-lc() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 reshade_preset() {
   local v p dir root
   PRESET="" PRESET_NOTE="none set"
-  v=$(LC_ALL=C awk '{ sub(/\r$/, "") } /^[ \t]*\[/ { g = $0 ~ /^[ \t]*\[GENERAL\][ \t]*$/; next }
-    g && /^[ \t]*PresetPath[ \t]*=/ { sub(/^[^=]*=[ \t]*/, ""); sub(/[ \t]+$/, ""); print; exit }' "$RSF/ReShade.ini" 2>/dev/null)
+  [ -f "$RSF/ReShade.ini" ] && [ ! -L "$RSF/ReShade.ini" ] || return 0
+  # (as ReShade reads its ini: a UTF-8 BOM skipped, a comma doubled in a value)
+  v=$(head -c 1000000 "$RSF/ReShade.ini" | BOM="$(printf '\357\273\277')" LC_ALL=C awk '
+    NR == 1 && index($0, ENVIRON["BOM"]) == 1 { $0 = substr($0, 4) }
+    { sub(/\r$/, "") } /^[ \t]*\[/ { g = $0 ~ /^[ \t]*\[GENERAL\][ \t]*$/; next }
+    g && /^[ \t]*PresetPath[ \t]*=/ { sub(/^[^=]*=[ \t]*/, ""); sub(/[ \t]+$/, ""); gsub(/,,/, ","); print; exit }' 2>/dev/null)
   [ -n "$v" ] || return 0
   PRESET_NOTE="outside the ReShade folder, not collected"
   case "$v" in
@@ -391,9 +394,9 @@ reshade_preset() {
   p=$(printf '%s' "$p" | tr '\\' /)
   case "/$p/" in */../*) return 0 ;; esac
   dir=$(cd "$(dirname "$p")" 2>/dev/null && pwd -P) && root=$(cd "$RSF" && pwd -P) || { PRESET_NOTE="not there"; return 0; }
-  case "$(lc "$dir")/" in "$(lc "$root")"/*) ;; *) return 0 ;; esac
+  case "$dir/" in "$root"/*) ;; *) return 0 ;; esac
   [ -f "$p" ] && [ ! -L "$p" ] || { PRESET_NOTE="not there"; return 0; }
-  PRESET="$dir/${p##*/}" PRESET_NOTE="${p##*/}, in reshade/preset/"
+  PRESET="$dir/${p##*/}" PRESET_NOTE="${p##*/}, in reshade/preset.ini"
 }
 PRESET="" PRESET_NOTE=""
 if [ -n "$RSF" ] && [ -d "$RSF" ] && [ ! -L "$RSF" ]; then
@@ -401,7 +404,11 @@ if [ -n "$RSF" ] && [ -d "$RSF" ] && [ ! -L "$RSF" ]; then
   [ -L "$RSF/ReShade.log" ] || add_log "$RSF/ReShade.log" 5000000 reshade
   [ -L "$RSF/ReShade.ini" ] || add_log "$RSF/ReShade.ini" 1000000 reshade
   reshade_preset
-  [ -z "$PRESET" ] || add_log "$PRESET" 1000000 reshade/preset
+  # (under a name of its own: the player's file name may hold a name, and only contents are redacted)
+  if [ -n "$PRESET" ]; then
+    add_log "$PRESET" 1000000 .preset && mv "$out/.preset/${PRESET##*/}" "$out/reshade/preset.ini"
+    rm -rf "$out/.preset"
+  fi
   # (the first SHADER_NAMES names; find doesn't follow links)
   SHADER_NAMES=2000 SHADERS_NOTE="no Shaders folder"
   if [ -d "$RSF/Shaders" ] && [ ! -L "$RSF/Shaders" ]; then

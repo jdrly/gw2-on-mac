@@ -1207,30 +1207,37 @@ watch_done
   printf '%s\n' "INFO | Initializing crosire's ReShade version '6.8.0.2091' (64-bit) loaded from 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Guild Wars 2\\d3d11.dll'" \
     "INFO | Loading effects from 'Z:$(winf "$RSF")\\Shaders\\Standard\\Deband.fx' and 'Z:\\Users\\$(id -un)\\Documents\\Mine.fx'"
   printf 'binary \001\002\377\376\0 end\n'; echo "LAST LINE"; } >"$RSF/ReShade.log"
-printf '[Deband.fx]\nIterations=4\n; from Z:%s\\Downloads\n\nTechniques=Deband@Deband.fx\n' "$(winf "$H")" >"$RSF/Presets/ReShadePreset.ini"
+# (the preset under a file name with the user's name, chosen in a ReShade.ini that starts with a
+# UTF-8 BOM, as an editor may save it)
+PRESET_FILE="$RSF/Presets/$(id -un) look.ini"
+printf '[Deband.fx]\nIterations=4\n; from Z:%s\\Downloads\n\nTechniques=Deband@Deband.fx\n' "$(winf "$H")" >"$PRESET_FILE"
+cp "$RSF/ReShade.ini" "$SANDBOX/ReShade.ini.keep"
+# setpreset <PresetPath>: ReShade.ini with that PresetPath, after a BOM
+setpreset() { { printf '\357\273\277'; P=$1 awk '/^PresetPath=/ { $0 = "PresetPath=" ENVIRON["P"] } { print }' "$SANDBOX/ReShade.ini.keep"; } >"$RSF/ReShade.ini"; }
+setpreset ".\\Presets\\$(id -un) look.ini"
 head -c 20000000 /dev/urandom >"$RSF/Shaders/big.bin"
 printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60\ninfo:  STATS fps=60.0 ms=16.7/24.8 cb=1.1 rp=31.7(+0.0 merged) encode=0.23+1.03/10.3\n' >"$LOGS/Gw2-64_d3d11.log"
 collect
 check "Collect Logs with ReShade on: ReShade.log, ReShade.ini, the current preset and the names under Shaders" \
-  eval 'for f in ReShade.log ReShade.ini preset/ReShadePreset.ini shaders.txt; do [ -f "$Z/reshade/$f" ] || exit 1; done'
-check "  none of them, nor the reports, holds the home folder or the user name" no_home "$Z/reshade" "$Z/system-info.txt" "$Z/session-report.txt"
-check "  the Z:\\ paths kept, from ~ on" eval 'grep -qxF "IntermediateCachePath=Z:~\\Library\\Caches\\GW2 on Mac\\reshade" "$Z/reshade/ReShade.ini" && has "$Z/reshade/preset/ReShadePreset.ini" "Techniques=Deband@Deband.fx"'
+  eval 'for f in ReShade.log ReShade.ini preset.ini shaders.txt; do [ -f "$Z/reshade/$f" ] || exit 1; done'
+check "  none of them, nor the reports, holds the home folder or the user name; nor does a name in the zip" \
+  eval 'no_home "$Z/reshade" "$Z/system-info.txt" "$Z/session-report.txt" && ! unzip -Z1 "$zip" | grep -qiw "$(id -un)"'
+check "  the Z:\\ paths kept, from ~ on; the preset's techniques kept" eval 'grep -qxF "IntermediateCachePath=Z:~\\Library\\Caches\\GW2 on Mac\\reshade" "$Z/reshade/ReShade.ini" && has "$Z/reshade/preset.ini" "^Techniques=Deband@Deband.fx$"'
 check "  ReShade.log: its last 5 MB, the binary line and the last line in, the first out" \
   eval 'head -1 "$Z/reshade/ReShade.log" | grep -qxF "[GW2 on Mac: only the last 5 MB of ReShade.log]" && has "$Z/reshade/ReShade.log" "^LAST LINE" && has "$Z/reshade/ReShade.log" "^binary " && ! has "$Z/reshade/ReShade.log" "FIRST LINE" && [ "$(stat -f %z "$Z/reshade/ReShade.log")" -lt 5100000 ]'
 check "  shaders.txt names the files, the 20 MB one too; no file of Shaders in the zip" \
   eval 'grep -qxF "Standard/Deband.fx" "$Z/reshade/shaders.txt" && grep -qxF "big.bin" "$Z/reshade/shaders.txt" && [ "$(find "$Z/reshade" -type f | wc -l | tr -d " ")" = 4 ] && [ "$(stat -f %z "$zip")" -lt 3000000 ]'
 check "  system-info: ReShade on, 6.8.0 as d3d11.dll, the compiler's sha256, the folder" \
-  eval 'grep -qxF "ReShade: on, 6.8.0 as d3d11.dll; arcdps off" "$Z/system-info.txt" && grep -qxF "  d3dcompiler_47.dll next to Gw2-64.exe: sha256 $(sum "$GD/d3dcompiler_47.dll")" "$Z/system-info.txt" && grep -qF "preset ReShadePreset.ini, in reshade/preset/" "$Z/system-info.txt" && has "$Z/system-info.txt" "d3d11.dll addon: ReShade"'
+  eval 'grep -qxF "ReShade: on, 6.8.0 as d3d11.dll; arcdps off" "$Z/system-info.txt" && grep -qxF "  d3dcompiler_47.dll next to Gw2-64.exe: sha256 $(sum "$GD/d3dcompiler_47.dll")" "$Z/system-info.txt" && grep -qF "look.ini, in reshade/preset.ini" "$Z/system-info.txt" && has "$Z/system-info.txt" "d3d11.dll addon: ReShade"'
 check "  the session report's ReShade line matches reshade_state and the compiler's sha256" \
   eval 'grep -qxF "ReShade at the start: $(rsst), $(st reshade_version) as $(st reshade_dll); arcdps $(st arcdps)" "$Z/session-report.txt" && grep -qxF "  d3dcompiler_47.dll next to Gw2-64.exe: sha256 $(sum "$GD/d3dcompiler_47.dll")" "$Z/session-report.txt" && [ "$(rsst)" = on ]'
 # a preset outside the ReShade folder (an absolute Z:\ path) stays out
 echo "zz secret preset" >"$SANDBOX/secret-preset.ini"
-cp "$RSF/ReShade.ini" "$SANDBOX/ReShade.ini.keep"
-P="Z:$(winf "$SANDBOX")\\secret-preset.ini" awk '/^PresetPath=/ { $0 = "PresetPath=" ENVIRON["P"] } { print }' "$SANDBOX/ReShade.ini.keep" >"$RSF/ReShade.ini"
+setpreset "Z:$(winf "$SANDBOX")\\secret-preset.ini"
 collect
 check "a PresetPath outside the ReShade folder: that file is not collected, system-info says so" \
-  eval 'grep -q "^PresetPath=Z:.*secret-preset.ini" "$RSF/ReShade.ini" && [ ! -e "$Z/reshade/preset" ] && ! grep -rq "zz secret preset" "$Z" && grep -qF "preset outside the ReShade folder, not collected" "$Z/system-info.txt"'
-mv -f "$SANDBOX/ReShade.ini.keep" "$RSF/ReShade.ini"; rm -f "$RSF/Shaders/big.bin" "$RSF/ReShade.log" "$SANDBOX/secret-preset.ini"
+  eval 'grep -q "^PresetPath=Z:.*secret-preset.ini" "$RSF/ReShade.ini" && [ ! -e "$Z/reshade/preset.ini" ] && ! grep -rq "zz secret preset" "$Z" && grep -qF "preset outside the ReShade folder, not collected" "$Z/system-info.txt"'
+mv -f "$SANDBOX/ReShade.ini.keep" "$RSF/ReShade.ini"; rm -f "$RSF/Shaders/big.bin" "$RSF/ReShade.log" "$PRESET_FILE" "$SANDBOX/secret-preset.ini"
 rm -f "$GD/d3d11.dll" "$GD/d3dcompiler_47.dll" "$GD/ReShade.ini"; rm -rf "$CACHE/downloads/reshade" "$GD/bin64"
 : >"$STANDIN_LOG"
 out=$(g play 2>&1); started
