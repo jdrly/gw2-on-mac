@@ -59,7 +59,8 @@
 #                              remembered as reshade= in the settings, so Play, Install and Repair
 #                              put missing files back; status and settings print reshade,
 #                              reshade_state (on|off|foreign|blocked|nogame), reshade_version,
-#                              reshade_dll, reshade_blocker, reshade_folder. ReShade's menu opens
+#                              reshade_dll, reshade_blocker, reshade_folder, addons_layout
+#                              (together|exclusive, ADDONS_LAYOUT). ReShade's menu opens
 #                              in the game with Home (fn + Left Arrow on a MacBook).
 #   gw2om.sh check-setup FILE  is FILE ArenaNet's Gw2Setup-64.exe: a PE x86_64 executable with a
 #                              valid Authenticode signature by ArenaNet ("@done <what>")
@@ -1525,6 +1526,7 @@ reshade_lines() {   # (status, settings)
   echo "reshade_dll=$RSH_DLL"
   echo "reshade_blocker=$RSH_BLOCKER"
   echo "reshade_folder=$RS"
+  echo "addons_layout=$ADDONS_LAYOUT"
 }
 
 # check_download <file> <label> <magic, hex> [<size> <sha256>]: a download is the file: not a web

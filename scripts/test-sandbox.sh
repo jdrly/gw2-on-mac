@@ -1232,6 +1232,7 @@ out=$(g set arcdps on 2>&1); out2=$(g set reshade on 2>&1)
 check "both on: ReShade d3d11.dll, arcdps dxgi.dll, and @done says arcdps moved" eval '[ "$(lay)" = "reshade arcdps" ] && echo "$out2" | grep -qx "@done ReShade 6.8.0 is in the game folder as d3d11.dll. It loads the next time the game starts. arcdps is dxgi.dll now, so both load."'
 check "  status: arcdps=on, arcdps_state=on with no foreign file, reshade_state=on with no blocker" eval '[ "$(st arcdps)/$(arcst)/$(st arcdps_foreign)/$(rsst)/$(st reshade_blocker)/$(st reshade_dll)" = on/on//on//d3d11.dll ]'
 check "  settings say the same" eval '[ "$(sett arcdps_state)/$(sett reshade_state)/$(sett reshade)" = on/on/on ]'
+check "  status and settings name the layout: addons_layout=together (exclusive in the sandbox's other value)" eval '[ "$(st addons_layout)/$(sett addons_layout)/$(GW2_ON_MAC_ADDONS_LAYOUT=exclusive g settings | sed -n "s/^addons_layout=//p")" = together/together/exclusive ]'
 check "  set arcdps on and set reshade on again: already there, nothing moves" eval '"$G" set arcdps on | grep -q "already in the game folder (dxgi.dll)" && "$G" set reshade on | grep -q "already in the game folder (d3d11.dll)" && [ "$(lay)" = "reshade arcdps" ]'
 out=$(g set reshade off 2>&1)
 check "ReShade off: @done says arcdps is d3d11.dll again" eval 'echo "$out" | grep -q "^@done ReShade is off: its d3d11.dll is out of the game folder. arcdps is d3d11.dll again." && [ "$(lay)" = "arcdps -" ]'
