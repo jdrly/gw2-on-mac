@@ -279,13 +279,13 @@ game closed, `KeyOverlay` under `[INPUT]` in the ReShade folder's `ReShade.ini`.
 are the key's Windows key code and then Ctrl, Shift and Alt, each 0 or 1. `KeyOverlay=36,0,0,0` is
 Home, and `KeyOverlay=50,0,1,0` is Shift + 2.
 
-**What doesn't work.** reshade.me has two builds of ReShade, and the app uses the signed one. That
-build turns its add-ons off while the game talks to a server, which in Guild Wars 2 is all the
-time. The depth buffer comes from one of those add-ons, so effects that read it, such as ambient
-occlusion (MXAO) and depth of field, get no depth buffer. ReShade's menu then says "High
-network activity discovered. All add-ons are disabled to prevent exploitation." The app doesn't
-offer the other build. Its installer opens with "This build of ReShade is intended for
-singleplayer games only and may cause bans in multiplayer games."
+**What doesn't work.** reshade.me has two builds of ReShade, and the app uses the signed one. When
+that build sees high network activity, it turns its add-ons off, and the depth buffer comes from
+one of them. Effects that read depth, such as ambient occlusion (MXAO) and depth of field, then get
+no depth buffer, and ReShade's menu says "High network activity discovered. All add-ons are
+disabled to prevent exploitation." Guild Wars 2 is an online game, and I haven't checked yet how
+often that happens in it. The app doesn't offer the other build. Its installer opens with "This
+build of ReShade is intended for singleplayer games only and may cause bans in multiplayer games."
 
 **Presets and shaders.** Drop a preset (`.ini`), a zip or a folder on the Settings window, or pick
 them with *Add preset or shaders…* in the ReShade row. That works with ReShade on or off, and while
@@ -305,7 +305,7 @@ the game runs. The files go into the ReShade folder, never into the game folder:
 
 Afterwards the row says what went where, which effects the new presets use that aren't in
 `Shaders`, and which of them look like effects that read the depth buffer (MXAO, depth of field,
-RTGI, DisplayDepth), which stay off in online games with this build of ReShade. When one preset
+RTGI, DisplayDepth), which get none while ReShade sees high network activity. When one preset
 came in and the game is closed, the app asks whether ReShade should start with it. While the game
 runs, pick it in ReShade's menu.
 
@@ -647,7 +647,7 @@ registry turns it on, and this app never does.
 
 ```mermaid
 flowchart LR
-    game["Gw2-64.exe"] -->|"native first"| addon["d3d11.dll in the game folder<br/>arcdps, ReShade or another addon"]
+    game["Gw2-64.exe"] -->|"native first"| addon["d3d11.dll in the game folder<br/>arcdps or another addon"]
     addon -->|"loads"| sys["system32\d3d11.dll<br/>Wine's built-in"]
     sys -->|"compatdb rule"| dxmt["DXMT d3d11.dll"]
     dxmt --> wm["winemetal"] --> metal["Metal"]
