@@ -1439,7 +1439,7 @@ check "a zip with an absolute path: refused" eval '! imp "$IM/abs.zip" && err_ha
 check "a zip with a link in it: refused" eval '! imp "$RSV/link.zip" && err_has "link has a link in it"'
 check "a zip over the size limit: refused" eval '! GW2_ON_MAC_PACK_LIMIT=10 imp "$IM/Golden Hour.zip" && err_has "Golden Hour unpacks to more than"'
 check "a zip and a folder with more files than the limit: refused" eval '! GW2_ON_MAC_PACK_MAX_FILES=3 imp "$IM/Golden Hour.zip" && err_has "Golden Hour has more than 3 files in it" && ! GW2_ON_MAC_PACK_MAX_FILES=3 imp "$LF" && err_has "loose fx has more than 3 files in it"'
-check "a dropped folder that is a link: refused, with or without a slash" eval '! imp "$IM/linked" && err_has "linked is a link" && ! imp "$IM/linked/" && err_has "linked is a link"'
+check "a dropped folder that is a link: refused, with or without a slash or /." eval 'for l in linked linked/ linked// linked/. linked/./; do ! imp "$IM/$l" && err_has "linked is a link" || exit 1; done'
 ln -s "$OUT" "$RSF/Shaders/Evil"
 check "a link in the ReShade folder where the source's folder goes: refused, nothing through it" eval '! imp "$IM/Evil" && err_has "Shaders/Evil in the ReShade folder is a link or a file" && [ -z "$(ls -A "$OUT")" ]'
 rm -f "$RSF/Shaders/Evil"; mv "$RSF/Textures" "$SANDBOX/textures.keep"; ln -s "$OUT" "$RSF/Textures"
@@ -1448,6 +1448,12 @@ rm -f "$RSF/Textures"; mv "$SANDBOX/textures.keep" "$RSF/Textures"
 rmdir "$RSF/Screenshots" && ln -s "$SANDBOX/nowhere/shots" "$RSF/Screenshots"
 check "  a dangling link for Screenshots: refused, saying so" eval '! imp "$IM/Fresh.ini" && err_has "Screenshots in the ReShade folder is a link or a file"'
 rm -f "$RSF/Screenshots"; mkdir "$RSF/Screenshots"
+mv "$RSF/.imports" "$SANDBOX/imports.keep" && ln -s "$OUT" "$RSF/.imports"
+check "  a link to a folder in place of the record of imports: refused, nothing moved into it" eval '! imp "$IM/Fresh.ini" && err_has ".imports in the ReShade folder is a folder or a link to one" && [ -z "$(ls -A "$OUT")" ]'
+rm -f "$RSF/.imports"; mv "$SANDBOX/imports.keep" "$RSF/.imports"
+mv "$RSF" "$SANDBOX/rsf.real" && ln -s "$SANDBOX/rsf.real" "$RSF"
+check "  the ReShade folder itself a link: refused, nothing added where it leads" eval '! imp "$IM/Fresh.ini" && err_has "The ReShade folder is a link or a file" && [ ! -e "$SANDBOX/rsf.real/Presets/Fresh.ini" ]'
+rm -f "$RSF"; mv "$SANDBOX/rsf.real" "$RSF"
 check "  the refusals wrote nothing outside the ReShade folder, and changed nothing in it" eval '[ -z "$(outside_changed)" ] && [ "$(rssnap)" = "$before" ] || { outside_changed; false; }'
 # names that break careless scripts
 printf 'Techniques=Vibrance@Vibrance.fx\n' >"$IM/-n \"it's\" 4K.ini"
@@ -1459,6 +1465,10 @@ line.ini" "$RSF/Presets/new_line.ini" && done_is "Added 2 presets to Presets. Th
 mkdir -p "$IM/dash/Shaders" && echo '// d' >"$IM/dash/-d.fx" && echo '// q' >"$IM/dash/Shaders/q[1].fx" && echo '// star' >"$IM/dash/Shaders/a*b.fx"
 ( cd "$IM/dash" && zip -q "../-x [v2].zip" -- -d.fx Shaders/q\[1\].fx 'Shaders/a*b.fx' )
 check "a zip with a leading dash and brackets in its name and its files' names, named from its folder: each file on its own" eval '(cd "$IM" && imp "-x [v2].zip") && same "$IM/dash/-d.fx" "$RSF/Shaders/-x _v2_/-d.fx" && same "$IM/dash/Shaders/q[1].fx" "$RSF/Shaders/-x _v2_/q[1].fx" && same "$IM/dash/Shaders/a*b.fx" "$RSF/Shaders/-x _v2_/a*b.fx"'
+mkdir -p "$IM/n/Shaders" && echo '// n' >"$IM/n/Shaders/n.fx" && ( cd "$IM/n" && zip -q ../-n.zip Shaders/n.fx )
+printf 'Techniques=Vibrance@Vibrance.fx\n' >"$IM/Look.INI"
+check "a zip named like an option of echo (-n.zip): its folder is -n" eval 'imp "$IM/-n.zip" && same "$IM/n/Shaders/n.fx" "$RSF/Shaders/-n/n.fx"'
+check "a preset ending in .INI: in Presets as .ini, the name ReShade takes" eval 'imp "$IM/Look.INI" && presets_are Look.ini && same "$IM/Look.INI" "$RSF/Presets/Look.ini"'
 # a name that is there already: replaced only from a source of the same name
 echo "the player's own" >"$RSF/Presets/ReShadePreset.ini"
 mkdir -p "$IM/pack" && printf 'Techniques=Vibrance@Vibrance.fx\n' >"$IM/pack/ReShadePreset.ini" && printf 'Techniques=CAS@CAS.fx\n' >"$IM/pack/Lumen.ini"
@@ -1490,6 +1500,9 @@ printf '[INPUT]\nKeyOverlay=36,0,0,0\n[GENERAL]\nPresetPath=.\\Presets\\Night.in
 check "  without [GENERAL]: a section of its own at the end" eval 'use Night.ini && same "$SANDBOX/ini.want" "$RSF/ReShade.ini"'
 printf '[GENERAL]\nKey=1\n' >"$RSF/Presets/NotOne.ini"; cp "$RSF/ReShade.ini" "$SANDBOX/ini.before"
 check "  refused for a preset that isn't in Presets, an .ini there that isn't one, a path" eval '! use Nope.ini && err_has "Nope.ini is not in" && ! use NotOne.ini && err_has "NotOne.ini is not a ReShade preset" && ! use ../ReShade.ini && err_has "Name a preset in" && same "$SANDBOX/ini.before" "$RSF/ReShade.ini"'
+mkdir "$SANDBOX/outside2" && mv "$RSF/ReShade.ini" "$SANDBOX/ini.keep" && ln -s "$SANDBOX/outside2" "$RSF/ReShade.ini"
+check "  ReShade.ini a link to a folder: refused, nothing moved into it" eval '! use Night.ini && err_has "ReShade.ini in the ReShade folder is a folder or a link to one" && [ -z "$(ls -A "$SANDBOX/outside2")" ]'
+rm -f "$RSF/ReShade.ini"; mv "$SANDBOX/ini.keep" "$RSF/ReShade.ini"
 # while a session runs: the import adds, reshade use is refused
 mv "$ENG/bin/wineserver" "$ENG/bin/wineserver.heat" && cp "$SANDBOX/sleeper" "$ENG/bin/wineserver"
 "$ENG/bin/wineserver" 60 & sp=$!

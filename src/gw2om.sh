@@ -1902,11 +1902,17 @@ import_name() {
   local n=$1
   case "$n" in *.[Zz][Ii][Pp]|*.[Ii][Nn][Ii]) n=${n%.*} ;; esac
   n=$(printf '%s' "$n" | LC_ALL=C tr -c 'A-Za-z0-9._ -' '_' | LC_ALL=C cut -c 1-64 | sed 's/^[. ]*//; s/[. ]*$//')
-  echo "${n:-Import}"
+  printf '%s\n' "${n:-Import}"
 }
 # preset_name <file name>: a preset's name in Presets: control characters and the characters
-# Windows doesn't allow in a file name (<>:"\|?*) become _
-preset_name() { printf '%s' "$1" | LC_ALL=C tr '\001-\037\177<>:"\\|?*' '_'; }
+# Windows doesn't allow in a file name (<>:"\|?*) become _, and .INI .ini (ReShade takes a
+# preset's extension only in lower case, resolve_preset_path)
+preset_name() {
+  local n
+  n=$(printf '%s' "$1" | LC_ALL=C tr '\001-\037\177<>:"\\|?*' '_')
+  case "$n" in *.[Ii][Nn][Ii]) n="${n%.*}.ini" ;; esac
+  printf '%s\n' "$n"
+}
 
 # preset_effects <file>: the effect files (File.fx) its Techniques list names, once each; fails
 # when the file is no preset, as ReShade tells (a Techniques key before any section,
@@ -1938,15 +1944,23 @@ imported_from() {
   N=$1 LC_ALL=C awk 'BEGIN { FS = "\t"; n = ENVIRON["N"] } $1 == n { s = $2 } END { print s }' "$RS_IMPORTS"
 }
 
-# rs_safe <path in the ReShade folder>: each folder on the way to it below the ReShade folder is a
-# real folder (no link, no file), and it isn't a folder itself; RS_BAD: the first that isn't
+# rs_safe <path in the ReShade folder>: the ReShade folder and each folder on the way to it is a
+# real folder (no link, no file), and it isn't a folder itself, nor a link to one (mv would move
+# into it); RS_BAD: the first that isn't. rs_refuse: the sentence for it.
 rs_safe() {
   local rest=${1#"$RS"/} at="$RS"
+  RS_BAD_FILE=""
+  if [ -L "$RS" ] || { [ -e "$RS" ] && [ ! -d "$RS" ]; }; then RS_BAD=$RS; return 1; fi
   while :; do
     case "$rest" in */*) at="$at/${rest%%/*}" rest=${rest#*/} ;; *) break ;; esac
     if [ -L "$at" ] || { [ -e "$at" ] && [ ! -d "$at" ]; }; then RS_BAD=$at; return 1; fi
   done
-  if [ -d "$1" ] && [ ! -L "$1" ]; then RS_BAD=$1; return 1; fi
+  if [ -d "$1" ]; then RS_BAD=$1 RS_BAD_FILE=1; return 1; fi
+}
+rs_refuse() {
+  [ "$RS_BAD" != "$RS" ] || die "The ReShade folder is a link or a file ($RS), so GW2 on Mac adds nothing to it. Put a folder in its place, then try again."
+  [ -z "$RS_BAD_FILE" ] || die "${RS_BAD#"$RS"/} in the ReShade folder is a folder or a link to one, where GW2 on Mac puts a file. Move it out of $RS, then try again."
+  die "${RS_BAD#"$RS"/} in the ReShade folder is a link or a file where GW2 on Mac puts a folder, so it adds nothing. Move it out of $RS, then try again."
 }
 
 # For the report: <lines> counted; listed ("a, b and c"; past <max> names, RS_REPORT_NAMES
@@ -1987,7 +2001,7 @@ reshade_import() {
     i=$((i + 1))
     # (a relative path with a leading dash isn't an option to unzip; the name in sentences without
     # control characters)
-    case "$p" in ?*/) p=${p%/} ;; esac
+    while :; do case "$p" in ?*/) p=${p%/} ;; ?*/.) p=${p%/.} ;; *) break ;; esac; done
     case "$p" in -*) p="./$p" ;; esac
     base=$(printf '%s' "${p##*/}" | LC_ALL=C tr '\001-\037\177' '_')
     [ ! -L "$p" ] || die "$base is a link. Add the file or folder it leads to instead."
@@ -2050,14 +2064,13 @@ EOF
   done
   # Nothing moves before every place is checked: no link and no file where a folder belongs
   while IFS= read -r line; do
-    [ -z "$line" ] || rs_safe "${line#*"$tab"}" ||
-      die "${RS_BAD#"$RS"/} in the ReShade folder is a link or a file where GW2 on Mac puts a folder, so it adds nothing. Move it out of $RS, then try again."
+    [ -z "$line" ] || rs_safe "${line#*"$tab"}" || rs_refuse
   done <<EOF
 $moves
 EOF
-  [ -z "$records" ] || rs_safe "$RS_IMPORTS" || die "${RS_BAD#"$RS"/} in the ReShade folder is a link or a folder. Move it out of $RS, then try again."
+  [ -z "$records" ] || rs_safe "$RS_IMPORTS" || rs_refuse
   for d in Presets Shaders Textures Screenshots; do
-    rs_safe "$RS/$d/-" || die "${RS_BAD#"$RS"/} in the ReShade folder is a link or a file where GW2 on Mac puts a folder, so it adds nothing. Move it out of $RS, then try again."
+    rs_safe "$RS/$d/-" || rs_refuse
   done
   reshade_folder
   while IFS= read -r line; do
@@ -2136,7 +2149,7 @@ reshade_use() {
   trap 'unlock' EXIT
   ! session_running || die "Guild Wars 2 is running, and ReShade rewrites its settings while it runs. Pick $name in ReShade's menu (Home key) instead."
   registry_lock || die "A game session is starting. Pick $name in ReShade's menu (Home key) once the game runs."
-  rs_safe "$ini" || die "${RS_BAD#"$RS"/} in the ReShade folder is a folder, not ReShade's settings. Move it out of $RS, then try again."
+  rs_safe "$ini" || rs_refuse
   reshade_folder
   [ "$(tail -c 1 "$ini" | od -An -tx1 | tr -d ' \n')" != 0a ] || nl=1
   # (keys and sections as ReShade's ini_file.cpp reads them: trimmed, ; / # start a comment; the
