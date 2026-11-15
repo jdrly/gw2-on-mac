@@ -2918,8 +2918,57 @@ if fexb; then
   # (the stand-ins its install started, as end_sandbox_processes ends them)
   pkill -f "^$(cd "$PROOT" && pwd -P)/" 2>/dev/null || true
   rm -rf "$PROOT"
+  # Version 6's FEX lines (#164, #165, #118): out while my FEX's record doesn't name them, in once
+  # it does (FEX_HOSTFEATURES with its value, as jdrly/FEX#12's VERSION writes it), out with the
+  # engine's own FEX. FEX_HOSTFEATURES: the file's lines as one entry, the later of enableavx and
+  # disableavx kept, and out while a compatdb.local rule for the game sets it, but not for another
+  # program's. (Status and the rules to files, read with awk: no grep -q on a pipe under pipefail)
+  V6FEX="FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1 FEX_ENTRYCOMPILELOCK=1 FEX_HOSTFEATURES=disableavx"
+  v6_fex() { # in|<why>: each of them in the rule and status, or out of both, status saying <why>
+    local e
+    for e in $V6FEX; do
+      if [ "$1" = in ]; then rule_has "$e" && in_word "$e" || return 1
+      else ! rule_has "$e" && ! in_status "$e" && out_status "$e ($1)" || return 1; fi
+    done
+  }
+  # in_word <NAME=value>: one of status's dev_switches= words is exactly it; hf_count: the
+  # FEX_HOSTFEATURES entries of the game's rule
+  in_word() { awk -v w="$1" 'index($0, "dev_switches=") == 1 { n = split(substr($0, 14), a, " "); for (i = 1; i <= n; i++) if (a[i] == w) f = 1 } END { exit !f }' "$SANDBOX/dev-status.txt"; }
+  hf_count() { awk -F';' 'NR == 1 { for (i = 1; i <= NF; i++) if (index($i, "env=FEX_HOSTFEATURES=") == 1) n++ } END { print n + 0 }' "$SANDBOX/dev-rules.txt"; }
+  dev_files
+  check "my FEX's record without version 6's FEX lines: each out, saying so" v6_fex "my FEX doesn't have it"
+  dev_switches_line fex FEX_INITIALCODEBUFFERMB FEX_ENTRYCOMPILELOCK FEX_LEA32BITADDS FEX_SIGNEXTENDINGLOADS FEX_HOSTFEATURES=disableavx
+  dev_files
+  check "  one that names them, FEX_HOSTFEATURES as FEX_HOSTFEATURES=disableavx: each in the rule and status, FEX_HOSTFEATURES once" \
+    eval 'v6_fex in && [ "$(hf_count)" = 1 ]'
+  echo FEX_HOSTFEATURES=enableafp >>"$DEVF"
+  dev_files
+  check "  with a FEX_HOSTFEATURES=enableafp line of mine after it: one entry, disableavx,enableafp, in the rule and status" \
+    eval '[ "$(hf_count)" = 1 ] && rule_has FEX_HOSTFEATURES=disableavx,enableafp && in_word FEX_HOSTFEATURES=disableavx,enableafp'
+  sed -i '' 's/^FEX_HOSTFEATURES=enableafp$/FEX_HOSTFEATURES=enableavx,enableafp/' "$DEVF"
+  dev_files
+  check "  with FEX_HOSTFEATURES=enableavx,enableafp instead: enableavx,enableafp, no disableavx (FEX refuses a value with both)" \
+    eval '[ "$(hf_count)" = 1 ] && rule_has FEX_HOSTFEATURES=enableavx,enableafp && in_word FEX_HOSTFEATURES=enableavx,enableafp'
+  sed -i '' '/^FEX_HOSTFEATURES=enableavx,enableafp$/d' "$DEVF"
+  HFWHY="compatdb.local's rule for Gw2-64.exe sets FEX_HOSTFEATURES=enableafp, which comes later and replaces it. For both, write FEX_HOSTFEATURES=disableavx,enableafp there"
+  printf 'exe=Gw2-64.exe;env=FEX_HOSTFEATURES=enableafp\n' >"$DAD/compatdb.local"
+  dev_files
+  GW2_ON_MAC_DRY_RUN=1 dg play >"$SANDBOX/hfplay.txt" 2>&1
+  check "  with exe=Gw2-64.exe;env=FEX_HOSTFEATURES=enableafp in compatdb.local: the line out of the game's rule, status and a dry run of Play saying why and what to write there; the other three in" \
+    eval '[ "$(hf_count)" = 0 ] && ! in_status FEX_HOSTFEATURES && out_status "FEX_HOSTFEATURES=disableavx ($HFWHY)" && grep -qxF "[dry-run] dev-switches.conf leaves out FEX_HOSTFEATURES=disableavx ($HFWHY)" "$SANDBOX/hfplay.txt" && rule_has FEX_LEA32BITADDS=1 && rule_has FEX_SIGNEXTENDINGLOADS=1 && rule_has FEX_ENTRYCOMPILELOCK=1'
+  printf 'exe=CefHost.exe;env=FEX_HOSTFEATURES=enableafp\n' >"$DAD/compatdb.local"
+  dev_files
+  check "  with a compatdb.local rule for CefHost.exe instead: the line in" \
+    eval '[ "$(hf_count)" = 1 ] && rule_has FEX_HOSTFEATURES=disableavx && in_word FEX_HOSTFEATURES=disableavx'
+  rm -f "$DAD/compatdb.local"
+  dg set fex engine >/dev/null 2>&1
+  dev_files
+  check "  the engine's own FEX: each out, saying so" v6_fex "my FEX isn't in the engine"
+  dg set fex mine >/dev/null 2>&1
+  dev_switches_line fex FEX_INITIALCODEBUFFERMB
 else
   skipfex "FEX_DISPATCHERL1LOOKUP and FEX_ENTRYHEADERLOOKUP in and out of the rule, and the sampler's line"
+  skipfex "version 6's FEX lines in and out of the rule, and FEX_HOSTFEATURES with my own lines and compatdb.local"
 fi
 # My win32u.so in the engine with my winemac.so, from a build whose record names its two switches:
 # the rule takes the WINE_WIN32U_* lines; with the engine's own pair, they stay out. The app's
@@ -2960,9 +3009,16 @@ rm -rf "$SANDBOX/dtree.keep" && cp -Rp "$DTREE" "$SANDBOX/dtree.keep"
 for f in "$DTREE"/*.dll; do echo "an earlier build" >"$f"; done
 check "an earlier build of my DXMT fork in the engine: its DXMT_* lines out, saying so" \
   eval '! dg status | grep "^dev_switches=" | grep -q DXMT_ && dg status | sed -n "s/^dev_switches_out=//p" | grep -q "DXMT_PRESENT_QUEUE=pace (my DXMT fork doesn'"'"'t have it)"'
+dev_files
+check "  DXMT_RENAME_TRIM=600 (jdrly/dxmt#265) among them" \
+  eval '! rule_has DXMT_RENAME_TRIM=600 && ! in_status DXMT_RENAME_TRIM && out_status "DXMT_RENAME_TRIM=600 (my DXMT fork doesn'"'"'t have it)"'
 printf 'x\0DXMT_PRESENT_QUEUE\0' >"$DTREE/d3d11.dll"
 check "  one that has DXMT_PRESENT_QUEUE: that line in, the others out" \
   eval 'dg status | grep "^dev_switches=" | grep -q DXMT_PRESENT_QUEUE=pace && dg status | sed -n "s/^dev_switches_out=//p" | grep -q "DXMT_PRESENTER_FREE=1 (my DXMT fork doesn'"'"'t have it)"'
+printf 'x\0DXMT_RENAME_TRIM\0' >"$DTREE/d3d11.dll"
+dev_files
+check "  one that has DXMT_RENAME_TRIM: DXMT_RENAME_TRIM=600 in the rule and status" \
+  eval 'rule_has DXMT_RENAME_TRIM=600 && in_status DXMT_RENAME_TRIM=600 && ! out_status DXMT_RENAME_TRIM'
 dg status >"$SANDBOX/dev-status.txt" 2>&1
 check "  DXMT_MTL4_ALLOCATOR_POOL=1 among those out, and the rule's own DXMT_MTL4_PRESENT=mtl3 out at Metal 4, the default, each saying so" \
   eval 'sed -n "s/^dev_switches_out=//p" "$SANDBOX/dev-status.txt" | grep -qF "DXMT_MTL4_ALLOCATOR_POOL=1 (my DXMT fork doesn'"'"'t have it)" && grep -qx metal=4 "$SANDBOX/dev-status.txt" && grep -qxF "metal_present_out=DXMT_MTL4_PRESENT=mtl3 (my DXMT fork doesn'"'"'t have it)" "$SANDBOX/dev-status.txt"'
@@ -3042,6 +3098,47 @@ sed 1d "$SANDBOX/devf.v4old" >"$SANDBOX/devf.v4rest"
 tail -6 "$DEVF" >"$SANDBOX/devf.added"
 check "  updated: the table's version, the two lines at the end, each under a comment naming my FEX, its issue and unplayed, the rest as it was" \
   eval '[ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && same "$SANDBOX/devf.v4rest" "$SANDBOX/devf.v5" && [ -z "$(sed -n 1p "$SANDBOX/devf.added")" ] && sed -n 2p "$SANDBOX/devf.added" | grep "^# my FEX (#161), unplayed: " >/dev/null && [ "$(sed -n 3p "$SANDBOX/devf.added")" = FEX_DISPATCHERL1LOOKUP=1 ] && [ -z "$(sed -n 4p "$SANDBOX/devf.added")" ] && sed -n 5p "$SANDBOX/devf.added" | grep "^# my FEX (#162), unplayed: " >/dev/null && [ "$(sed -n 6p "$SANDBOX/devf.added")" = FEX_ENTRYHEADERLOOKUP=1 ]'
+# A file at version 5, before version 6's rows (#164, #165, #118, jdrly/dxmt#265): the five added at
+# the end, on, each under its comment, and nothing else changes. Then FEX_HOSTFEATURES: a line of
+# mine about something else (enableafp) still gets disableavx added; one that already says enableavx,
+# or a disableavx line commented out, doesn't.
+added_ok() { # <file> <label|ref|entry>...: per row, an empty line, "# <label> (<ref>), unplayed: …" and <entry>, nothing more
+  local f=$1 i=0 r label ref entry
+  shift
+  [ "$(wc -l <"$f" | tr -d ' ')" = $(($# * 3)) ] || return 1
+  for r in "$@"; do
+    label=${r%%|*} r=${r#*|}
+    ref=${r%%|*} entry=${r#*|}
+    [ -z "$(sed -n "$((i + 1))p" "$f")" ] || return 1
+    case "$(sed -n "$((i + 2))p" "$f")" in "# $label ($ref), unplayed: "*) ;; *) return 1 ;; esac
+    [ "$(sed -n "$((i + 3))p" "$f")" = "$entry" ] || return 1
+    i=$((i + 3))
+  done
+}
+V6ON="FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1 FEX_ENTRYCOMPILELOCK=1 FEX_HOSTFEATURES=disableavx DXMT_RENAME_TRIM=600"
+cp "$DEVF" "$SANDBOX/devf.v6full"
+drop_rows "$DEVF" FEX_LEA32BITADDS FEX_SIGNEXTENDINGLOADS FEX_ENTRYCOMPILELOCK FEX_HOSTFEATURES DXMT_RENAME_TRIM | sed 's/^version=.*/version=5/' >"$SANDBOX/devf.v5old"
+cp "$SANDBOX/devf.v5old" "$DEVF"
+GW2_ON_MAC_DRY_RUN=1 dg play >"$SANDBOX/v5play.txt" 2>&1
+check "a file at version 5: Play would add version 6's five lines (dry run)" \
+  eval '[ "$DEVVER" = 6 ] && [ "$(grep -c -e "^FEX_LEA32BITADDS=" -e "^FEX_HOSTFEATURES=" -e "^DXMT_RENAME_TRIM=" "$DEVF")" = 0 ] && grep -qxF "dev-switches.conf: version $DEVVER, switched on: $V6ON" "$SANDBOX/v5play.txt"'
+dg repair >/dev/null 2>&1
+n=$(wc -l <"$DEVF" | tr -d ' ')
+awk -v n="$n" 'NR > 1 && NR <= n - 15' "$DEVF" >"$SANDBOX/devf.v6"
+sed 1d "$SANDBOX/devf.v5old" >"$SANDBOX/devf.v5rest"
+tail -15 "$DEVF" >"$SANDBOX/devf.added"
+check "  updated: the table's version, the five lines at the end, each under a comment naming its piece, its issue and unplayed, the rest as it was" \
+  eval '[ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && same "$SANDBOX/devf.v5rest" "$SANDBOX/devf.v6" && added_ok "$SANDBOX/devf.added" "my FEX|#164|FEX_LEA32BITADDS=1" "my FEX|#164|FEX_SIGNEXTENDINGLOADS=1" "my FEX|#165|FEX_ENTRYCOMPILELOCK=1" "my FEX|#118|FEX_HOSTFEATURES=disableavx" "my DXMT fork|jdrly/dxmt#265|DXMT_RENAME_TRIM=600"'
+v5_with() { { cat "$SANDBOX/devf.v5old"; echo "$1"; } >"$DEVF"; GW2_ON_MAC_DRY_RUN=1 dg play >"$SANDBOX/v5play.txt" 2>&1; dg repair >/dev/null 2>&1; }
+v5_with FEX_HOSTFEATURES=enableafp
+check "  a version-5 file with a FEX_HOSTFEATURES=enableafp line of mine: disableavx added at the end all the same, mine kept" \
+  eval 'grep -qxF "dev-switches.conf: version $DEVVER, switched on: $V6ON" "$SANDBOX/v5play.txt" && grep -qx FEX_HOSTFEATURES=enableafp "$DEVF" && [ "$(sed -n "/^FEX_HOSTFEATURES=disableavx\$/=" "$DEVF")" -gt "$(sed -n "/^FEX_HOSTFEATURES=enableafp\$/=" "$DEVF")" ]'
+for hand in FEX_HOSTFEATURES=enableavx,enableafp '#FEX_HOSTFEATURES=disableavx'; do
+  v5_with "$hand"
+  check "  a version-5 file with $hand: the other four added, no FEX_HOSTFEATURES line" \
+    eval 'grep -qxF "dev-switches.conf: version $DEVVER, switched on: FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1 FEX_ENTRYCOMPILELOCK=1 DXMT_RENAME_TRIM=600" "$SANDBOX/v5play.txt" && [ "$(grep -c "FEX_HOSTFEATURES=" "$DEVF")" = 1 ] && grep -qxF "$hand" "$DEVF"'
+done
+cp "$SANDBOX/devf.v6full" "$DEVF"
 # A file at version 2: DXMT_MTL4_ALLOCATOR_POOL (version 3) added at the end, on, under its comment,
 # and nothing else changes. (A version-2 build's file had DXMT_MTL4_PRESENT=mtl3 too: the version-4
 # checks below have it.)
@@ -3049,7 +3146,7 @@ sed -i '' -e 's/^version=.*/version=2/' -e '/DXMT_MTL4_ALLOCATOR_POOL/d' -e '/jd
 sed 1d "$DEVF" >"$SANDBOX/devf.v2"
 out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
 check "a file at version 2: Play would add DXMT_MTL4_ALLOCATOR_POOL=1 alone, and say DXMT_MTL4_PRESENT=mtl3 left the list (dry run)" \
-  eval '[ "$DEVVER" = 5 ] && echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: DXMT_MTL4_ALLOCATOR_POOL=1; out of the list: DXMT_MTL4_PRESENT=mtl3"'
+  eval '[ "$DEVVER" = 6 ] && echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: DXMT_MTL4_ALLOCATOR_POOL=1; out of the list: DXMT_MTL4_PRESENT=mtl3"'
 dg repair >/dev/null 2>&1
 n=$(wc -l <"$DEVF" | tr -d ' ')
 awk -v n="$n" 'NR > 1 && NR <= n - 3' "$DEVF" >"$SANDBOX/devf.v4"

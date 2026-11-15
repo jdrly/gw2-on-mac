@@ -725,7 +725,18 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   (#162, version 5 with `FEX_DISPATCHERL1LOOKUP=1`, #161) also stays out while the rule can start
   my `ntdll.so`'s sampler: `WINE_HEAT_PROF=on` or `=1`, or `WINE_HEAT_CONTROL`, whose file can say
   `prof=on` in a session, in a line of the file or of `compatdb.local`. With that switch FEX no
-  longer stores the block a thread entered last, which the sampler reads. The log says at each
+  longer stores the block a thread entered last, which the sampler reads. Version 6 adds
+  `FEX_LEA32BITADDS=1`, `FEX_SIGNEXTENDINGLOADS=1` (#164), `FEX_ENTRYCOMPILELOCK=1` (#165),
+  `FEX_HOSTFEATURES=disableavx` (#118) and `DXMT_RENAME_TRIM=600` (jdrly/dxmt#265). My FEX's
+  `VERSION` names the last FEX one as `FEX_HOSTFEATURES=disableavx`, and the name is what counts.
+  FEX reads `FEX_HOSTFEATURES` as a comma list, but in the rules a later entry for a variable
+  replaces the earlier one. So the file's `FEX_HOSTFEATURES` lines go in as one entry, their items
+  joined in order (`disableavx,enableafp`); of `enableavx` and `disableavx` the later one stays,
+  since FEX refuses a value with both. A rule of `compatdb.local` for `Gw2-64.exe` that sets it
+  comes after the app's and replaces that entry, and the app doesn't write that file. The file's
+  `FEX_HOSTFEATURES` lines then stay out, and the reason names the value to write in
+  `compatdb.local` for both. An update adds `disableavx` to a file whose own `FEX_HOSTFEATURES`
+  lines say nothing about AVX. The log says at each
   start what stays out and why, and `status` prints `dev_switches=` and `dev_switches_out=`.
 - A `compatdb.local` that I put in the app's folder is appended as it is, for trying FEX switches
   such as `exe=Gw2-64.exe;env=FEX_HOSTFEATURES=disableavx`. Nothing in the app writes it, and
@@ -1229,7 +1240,10 @@ Without one, those checks are skipped. It covers:
   each line whose file has the switch and none whose file hasn't, status, `session.env`, the log
   and the session report, my FEX's two lookup lines in and out (`FEX_ENTRYHEADERLOOKUP` out with
   each of the sampler's lines, in `dev-switches.conf` or `compatdb.local`, also through a third
-  root's install to the session report), a line commented out or added, the engine's own DXMT, a second start
+  root's install to the session report), version 6's four FEX lines and `DXMT_RENAME_TRIM` in and
+  out, `FEX_HOSTFEATURES` joined with a line of mine, `enableavx` after `disableavx`, and out under
+  a `compatdb.local` rule for the game but not one for another program, a file at version 5
+  updated (with a `FEX_HOSTFEATURES` line of mine, and with AVX already decided there), a line commented out or added, the engine's own DXMT, a second start
   that changes nothing, an update that adds a newer switch and keeps the rest, a row turned off
   that stays off, a release that writes no file and reads none, and a release's install updated
   by a development build
