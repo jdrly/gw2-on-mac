@@ -243,9 +243,9 @@ What the switch does:
   next to `Gw2-64.exe`. Otherwise it downloads Microsoft's copy from
   [mozilla/fxc2](https://github.com/mozilla/fxc2), pinned by sha256 as well. A `d3dcompiler_47.dll`
   that is already next to `Gw2-64.exe` stays as it is.
-- While the `Shaders` folder below is empty, On also downloads the two effect packs ReShade's own
-  installer picks by default: crosire's standard effects and CeeJayDK's SweetFX, from GitHub at
-  fixed commits.
+- The first time you turn ReShade on, it also downloads two effect packs from GitHub at fixed
+  commits, the ones ReShade's own installer picks by default: crosire's standard effects and
+  CeeJayDK's SweetFX.
 - The third file in the game folder is a two-line `ReShade.ini` that points ReShade at its own
   folder.
 - Off removes ReShade's `d3d11.dll`, that `ReShade.ini`, and the compiler if the app put it there.
@@ -864,7 +864,7 @@ which has Sparkle's key and my Developer ID), building the components themselves
 route's and the real arcdps's checks, and playing.
 
 `scripts/test-sandbox.sh` tests the backend of a built app end to end in `work/app-sandbox/test`,
-with 413 checks. It uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and
+with 558 checks on GitHub's runner, which skips the few that need my workspace or more CPUs. It uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and
 ArenaNet's downloads itself, and uses a clone of the game's own ArenaNet-signed `Gw2-64.exe` as the
 installer to check. That's `SIGNED_PE`, by default the copy in my development workspace's bottle.
 Without one, those checks are skipped. It covers:
@@ -884,6 +884,12 @@ Without one, those checks are skipped. It covers:
   folder, and refusals while a session runs. With arcdps it tests every order of turning
   both on and off, arcdps under both names after an update, a failure and a kill halfway through
   the rename, and the exclusive layout (`GW2_ON_MAC_ADDONS_LAYOUT`).
+- ReShade's import and `reshade use`: a preset, a zip with its `reshade-shaders` folder and a folder
+  of loose effects, the report and its missing and depth effects, refusals of anything executable,
+  of a bad source, of zips that climb out, hold links or pass the size and file limits
+  (`GW2_ON_MAC_PACK_LIMIT`, `GW2_ON_MAC_PACK_MAX_FILES`), of links in the ReShade folder, presets of
+  the same name, odd file names, and `PresetPath` written while the rest of `ReShade.ini` stays
+  byte for byte.
 - an update from 0.1.0 with stand-in 0.1.0 files from `GW2_ON_MAC_OLD_COMPONENTS`. Play puts the
   new pieces in without Repair. Damaged or foreign DXMT, sibling and Wine files stay for Repair. Two
   Plays race, with the first paused after classifying and halfway through the replacement
