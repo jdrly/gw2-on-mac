@@ -47,7 +47,7 @@
 #                              checked against its published md5) or out of it (only arcdps; its
 #                              addons/arcdps settings stay), while no session runs; status and
 #                              settings print arcdps, arcdps_state (on|off|foreign|nogame).
-#                              With ReShade in, arcdps is dxgi.dll (ADDONS_LAYOUT)
+#                              With ReShade in, it is refused (ADDONS_LAYOUT)
 #   gw2om.sh set reshade on|off
 #                              ReShade 6.8.0 into the game folder as d3d11.dll (from reshade.me's
 #                              installer, pinned by sha256), with Microsoft's d3dcompiler_47.dll
@@ -109,7 +109,7 @@
 #   GW2_ON_MAC_PACK_LIMIT, GW2_ON_MAC_PACK_MAX_FILES   the most bytes one effect pack (or one
 #                              zip, folder or preset of reshade import) may unpack to, and the
 #                              most files it may have
-#   GW2_ON_MAC_ADDONS_LAYOUT   exclusive: arcdps and ReShade refuse each other (ADDONS_LAYOUT)
+#   GW2_ON_MAC_ADDONS_LAYOUT   together: arcdps as dxgi.dll next to ReShade (ADDONS_LAYOUT)
 #   GW2_ON_MAC_OLD_COMPONENTS  a file of "<path in the engine> <sha256>" lines: stand-ins for an
 #                              earlier version's engine pieces (graphics_state update)
 #   GW2_ON_MAC_TEST_PAUSE, GW2_ON_MAC_TEST_PAUSE_AT   wait at a point while that file is there
@@ -1253,11 +1253,12 @@ sync_uiscale() {
 ARCDPS_URL=https://www.deltaconnected.com/arcdps/x64
 [ -z "$ROOT" ] || ARCDPS_URL="${GW2_ON_MAC_ARCDPS_URL:-$ARCDPS_URL}"
 ARCDPS_DLLS="d3d11.dll dxgi.dll"
-# arcdps and the app's ReShade in one game folder: ADDONS_LAYOUT=together gives each a file name
-# (addon_dll): alone, each is d3d11.dll; with both in, ReShade is d3d11.dll and arcdps dxgi.dll
-# (arcdps's page allows that name). ADDONS_LAYOUT=exclusive: each counts the other as a file in its
-# way, and its switch refuses until the other is off.
-ADDONS_LAYOUT=together
+# arcdps and the app's ReShade in one game folder. ADDONS_LAYOUT=exclusive: each counts the other as
+# a file in its way, and its switch refuses until the other is off. ADDONS_LAYOUT=together gives
+# each a file name (addon_dll): alone, each is d3d11.dll; with both in, ReShade is d3d11.dll and
+# arcdps dxgi.dll (arcdps's page allows that name). In my session in the game (#205) arcdps as
+# dxgi.dll didn't load next to ReShade, so 0.1.4 ships exclusive.
+ADDONS_LAYOUT=exclusive
 [ -z "$ROOT" ] || ADDONS_LAYOUT="${GW2_ON_MAC_ADDONS_LAYOUT:-$ADDONS_LAYOUT}"
 # addon_dll <arcdps|reshade> <the other one in: on|off>: the addon's file name in the game folder
 addon_dll() { case "$1 $2 $ADDONS_LAYOUT" in "arcdps on together") echo dxgi.dll ;; *) echo d3d11.dll ;; esac; }
@@ -1362,13 +1363,26 @@ arcdps_tidy() {
 }
 
 # sync_arcdps: arcdps under the name addon_dll gives, before Play, at Install and at Repair; never
-# while a session runs or starts
+# while a session runs or starts. In the exclusive layout, an arcdps next to the app's ReShade (a
+# 0.1.4 development build put it there as dxgi.dll) goes out of the game folder, its settings stay,
+# and ReShade stays. ARC_OUT: what the player is told then (Play shows it as a notice).
 sync_arcdps() {
+  local n
+  ARC_OUT=""
   [ -n "$DRY" ] || [ -x "$LOCKER" ] || return 0
   registry_lock || return 0
   if session_running; then registry_unlock; return 0; fi
   reshade_state
-  arcdps_tidy "$([ "$RSH" = on ] && echo on || echo off)"
+  if [ "$RSH" = on ] && [ "$ADDONS_LAYOUT" = exclusive ]; then
+    arcdps_state
+    if [ "$ARC" = on ]; then
+      for n in $ARC_DLL; do run rm -f "$GAME_DIR/$n"; done
+      ARC_OUT="arcdps doesn't load next to ReShade, so GW2 on Mac took its $ARC_DLL out of the game folder. Its settings stay in addons/arcdps. To use arcdps, turn ReShade off in Settings › Interface, then turn arcdps on."
+      warn "$ARC_OUT"
+    fi
+  else
+    arcdps_tidy "$([ "$RSH" = on ] && echo on || echo off)"
+  fi
   registry_unlock
 }
 
@@ -3389,6 +3403,7 @@ cmd_play() {
     esac
     sync_reshade
     sync_arcdps
+    [ -z "$ARC_OUT" ] || echo "@notice $ARC_OUT"
     apply_registry
     write_dxmt_conf
   fi

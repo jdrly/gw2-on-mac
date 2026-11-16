@@ -252,7 +252,7 @@ func settings(_ extra: [String: String] = [:]) -> GameSettings {
              "route": "steam", "updates": "off", "debug": "off", "steambg": "on", "quitsteam": "on", "cpus": "12",
              "steam_login": "no", "rawmouse": "on", "mousespeed": "1", "arcdps": "off", "arcdps_state": "off",
              "arcdps_foreign": "", "reshade": "off", "reshade_state": "off", "reshade_version": "6.8.0",
-             "reshade_dll": "", "reshade_blocker": "", "reshade_folder": "", "addons_layout": "together"].merging(extra) { $1 })
+             "reshade_dll": "", "reshade_blocker": "", "reshade_folder": "", "addons_layout": "exclusive"].merging(extra) { $1 })
   return s
 }
 
@@ -434,10 +434,13 @@ func renderAll(_ dir: URL, exports: URL?) async {
           dir.appendingPathComponent("row-two-buttons-\(dark ? "dark" : "light").png"))
   }
   // ReShade in the Interface pane: off with its folder from an earlier time (the pane's own render
-  // has no folder yet), downloading, just placed, both on (arcdps as dxgi.dll), another ReShade,
-  // another program's file in the way (alone, and next to arcdps as dxgi.dll), the game running;
-  // in the exclusive layout each addon waiting for the other. (The folder: any one that exists.)
+  // has no folder yet), downloading, just placed, another ReShade, another program's file in the
+  // way, the game running; each addon waiting for the other (the exclusive layout, gw2om.sh's
+  // default, where the app's ReShade is a file in arcdps's way). In the together layout: both on
+  // (arcdps as dxgi.dll), and another program's file next to arcdps as dxgi.dll. (The folder: any
+  // one that exists.)
   let folder = dir.path
+  let arcdpsOut = ["arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"]
   // (an import's report as gw2om.sh gives it for a preset with many missing effects: five names,
   // then the number of the others)
   let report = "Added 1 preset to Presets, 148 shader files to Shaders/Golden Hour and 12 images to Textures/Golden Hour. "
@@ -455,24 +458,26 @@ func renderAll(_ dir: URL, exports: URL?) async {
       s.reshade.working = true
       s.reshade.progress = .init(label: "ReShade's standard effects", done: 2_300_000, total: 0)
     }),
-    ("on", false, ["reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll", "reshade_folder": folder], { s in
+    ("on", false, ["reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll", "reshade_folder": folder]
+      .merging(arcdpsOut) { $1 }, { s in
       s.reshade.result = "ReShade 6.8.0 is in the game folder as d3d11.dll. It loads the next time the game starts."
     }),
-    ("on", true, ["reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll", "reshade_folder": folder], { _ in }),
-    ("both-on", false, ["reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll", "reshade_folder": folder,
-                        "arcdps": "on", "arcdps_state": "on"], { s in
+    ("on", true, ["reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll", "reshade_folder": folder]
+      .merging(arcdpsOut) { $1 }, { _ in }),
+    ("together-both-on", false, ["addons_layout": "together", "reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll",
+                                 "reshade_folder": folder, "arcdps": "on", "arcdps_state": "on"], { s in
       s.reshade.result = "ReShade 6.8.0 is in the game folder as d3d11.dll. It loads the next time the game starts. arcdps is dxgi.dll now, so both load."
     }),
-    ("both-on", true, ["reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll", "reshade_folder": folder,
-                       "arcdps": "on", "arcdps_state": "on"], { _ in }),
+    ("together-both-on", true, ["addons_layout": "together", "reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll",
+                                "reshade_folder": folder, "arcdps": "on", "arcdps_state": "on"], { _ in }),
     ("foreign", false, ["reshade_state": "foreign", "reshade_dll": "d3d11.dll",
                         "arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"], { _ in }),
     ("blocked-other", false, ["reshade_state": "blocked", "reshade_blocker": "d3d11.dll",
                               "arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"], { _ in }),
-    ("blocked-nexus", false, ["reshade_state": "blocked", "reshade_blocker": "d3d11.dll", "arcdps": "on", "arcdps_state": "on",
-                              "arcdps_foreign": "d3d11.dll"], { _ in }),
-    ("running", false, ["running": "yes", "reshade": "on", "reshade_state": "on", "reshade_folder": folder,
-                        "arcdps": "on", "arcdps_state": "on"], { _ in }),
+    ("together-blocked-nexus", false, ["addons_layout": "together", "reshade_state": "blocked", "reshade_blocker": "d3d11.dll",
+                                       "arcdps": "on", "arcdps_state": "on", "arcdps_foreign": "d3d11.dll"], { _ in }),
+    ("running", false, ["running": "yes", "reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll",
+                        "reshade_folder": folder].merging(arcdpsOut) { $1 }, { _ in }),
     ("exclusive-arcdps-in", false, ["addons_layout": "exclusive", "reshade_state": "blocked", "reshade_blocker": "d3d11.dll",
                                     "arcdps": "on", "arcdps_state": "on"], { _ in }),
     ("exclusive-arcdps-in", true, ["addons_layout": "exclusive", "reshade_state": "blocked", "reshade_blocker": "d3d11.dll",
@@ -483,7 +488,7 @@ func renderAll(_ dir: URL, exports: URL?) async {
     ("report", false, ["reshade_folder": folder], { s in s.reshadeReport = report }),
     ("report", true, ["reshade_folder": folder], { s in s.reshadeReport = report }),
     ("report-running", false, ["running": "yes", "reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll",
-                               "reshade_folder": folder], { s in
+                               "reshade_folder": folder].merging(arcdpsOut) { $1 }, { s in
       s.reshadeReport = report + " Guild Wars 2 is running: pick the preset in ReShade's menu (Home key)."
     }),
     ("importing", false, ["reshade_folder": folder], { s in s.reshadeImporting = true }),

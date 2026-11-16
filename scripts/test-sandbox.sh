@@ -1128,12 +1128,13 @@ refused() {
 }
 rm -f "$GD/d3d11.dll" "$GD/dxgi.dll"; rm -rf "$GD/addons"
 check "ReShade off by default: reshade=off, reshade_state=off, version 6.8.0, the folder named" eval '[ "$(st reshade)/$(sett reshade)/$(rsst)/$(st reshade_version)" = off/off/off/6.8.0 ] && [ "$(sett reshade_folder)" = "$RSF" ]'
-# what's in the way (arcdps only in the exclusive layout: "arcdps and ReShade together" below)
+# what's in the way (arcdps too, in the default exclusive layout; the together layout: "arcdps and
+# ReShade together" below)
 cp "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll"
-check "arcdps as d3d11.dll, the exclusive layout: reshade_state=blocked, reshade_blocker=d3d11.dll" eval '[ "$(GW2_ON_MAC_ADDONS_LAYOUT=exclusive g status | sed -n "s/^reshade_state=//p; s/^reshade_blocker=//p" | tr "\n" /)" = blocked/d3d11.dll/ ]'
+check "arcdps as d3d11.dll: reshade_state=blocked, reshade_blocker=d3d11.dll, addons_layout=exclusive" eval '[ "$(g status | sed -n "s/^reshade_state=//p; s/^reshade_blocker=//p; s/^addons_layout=//p" | tr "\n" /)" = blocked/d3d11.dll/exclusive/ ]'
 before=$(gdsnap)
-check "  set reshade on refused: turn arcdps off first; nothing placed" refused "arcdps is in the game folder as d3d11.dll. Turn arcdps off first" GW2_ON_MAC_ADDONS_LAYOUT=exclusive
-check "  the together layout: reshade_state=off, no blocker" [ "$(rsst)/$(st reshade_blocker)" = off/ ]
+check "  set reshade on refused: turn arcdps off first; nothing placed" refused "arcdps is in the game folder as d3d11.dll. Turn arcdps off first, then turn ReShade on."
+check "  the together layout: reshade_state=off, no blocker" eval '[ "$(GW2_ON_MAC_ADDONS_LAYOUT=together g status | sed -n "s/^reshade_state=//p; s/^reshade_blocker=//p" | tr "\n" /)" = off// ]'
 cp "$SANDBOX/pe/nexus.dll" "$GD/d3d11.dll"; before=$(gdsnap)
 check "another addon's d3d11.dll: blocked, refused, left alone" eval '[ "$(rsst)" = blocked ] && refused "another d3d11.dll (Nexus or another addon?)" && same "$SANDBOX/pe/nexus.dll" "$GD/d3d11.dll"'
 rm -f "$GD/d3d11.dll"
@@ -1196,7 +1197,7 @@ rm -f "$GD/dxgi.dll"
 g set rawmouse on >/dev/null
 check "  gone: the override deleted" noreg "$GW2_DLLS" d3dcompiler_47
 g set reshade on >/dev/null 2>&1
-check "with the app's ReShade in, the exclusive layout: arcdps_state=foreign, set arcdps on refused: turn ReShade off first" eval '[ "$(GW2_ON_MAC_ADDONS_LAYOUT=exclusive g status | sed -n "s/^arcdps_state=//p")" = foreign ] && ! GW2_ON_MAC_ADDONS_LAYOUT=exclusive "$G" set arcdps on >"$SANDBOX/arc.txt" 2>&1 && has "$SANDBOX/arc.txt" "ReShade is in the game folder as d3d11.dll. Turn ReShade off first" && same "$SANDBOX/pe/ReShade64.dll" "$GD/d3d11.dll" && [ ! -e "$GD/dxgi.dll" ]'
+check "with the app's ReShade in: arcdps_state=foreign, set arcdps on refused: turn ReShade off first" eval '[ "$(g status | sed -n "s/^arcdps_state=//p")" = foreign ] && ! "$G" set arcdps on >"$SANDBOX/arc.txt" 2>&1 && has "$SANDBOX/arc.txt" "^@error ReShade is in the game folder as d3d11.dll. Turn ReShade off first, then turn arcdps on." && same "$SANDBOX/pe/ReShade64.dll" "$GD/d3d11.dll" && [ ! -e "$GD/dxgi.dll" ]'
 # nothing changes while a session runs, or while a Play holds the session's lock
 mv "$ENG/bin/wineserver" "$ENG/bin/wineserver.heat" && cp "$SANDBOX/sleeper" "$ENG/bin/wineserver"
 "$ENG/bin/wineserver" 60 & sp=$!
@@ -1271,9 +1272,11 @@ check "Repair puts a missing file back from the cache" eval '"$G" repair >/dev/n
 echo "compiled" >"$CACHE/reshade/reshade-1234.cso"
 check "reset-shaders empties ReShade's cache too, and keeps its folder" eval '"$G" reset-shaders | grep -q "DXMT.s and ReShade.s caches" && [ -d "$CACHE/reshade" ] && [ ! -e "$CACHE/reshade/reshade-1234.cso" ]'
 
-section "arcdps and ReShade together"
+section "arcdps and ReShade together (the together layout, not the default)"
 # The layout (addon_dll): alone, each is d3d11.dll; with both in, ReShade is d3d11.dll and arcdps
-# dxgi.dll. who <file>: whose it is; lay: d3d11.dll's and dxgi.dll's
+# dxgi.dll. 0.1.4 ships exclusive (#205); this section sets together itself.
+# who <file>: whose it is; lay: d3d11.dll's and dxgi.dll's
+export GW2_ON_MAC_ADDONS_LAYOUT=together
 who() {
   if [ ! -e "$GD/$1" ]; then echo -
   elif same "$SANDBOX/pe/ReShade64.dll" "$GD/$1"; then echo reshade
@@ -1305,7 +1308,7 @@ out=$(g set arcdps on 2>&1); out2=$(g set reshade on 2>&1)
 check "both on: ReShade d3d11.dll, arcdps dxgi.dll, and @done says arcdps moved" eval '[ "$(lay)" = "reshade arcdps" ] && echo "$out2" | grep -qx "@done ReShade 6.8.0 is in the game folder as d3d11.dll. It loads the next time the game starts. arcdps is dxgi.dll now, so both load."'
 check "  status: arcdps=on, arcdps_state=on with no foreign file, reshade_state=on with no blocker" eval '[ "$(st arcdps)/$(arcst)/$(st arcdps_foreign)/$(rsst)/$(st reshade_blocker)/$(st reshade_dll)" = on/on//on//d3d11.dll ]'
 check "  settings say the same" eval '[ "$(sett arcdps_state)/$(sett reshade_state)/$(sett reshade)" = on/on/on ]'
-check "  status and settings name the layout: addons_layout=together (exclusive in the sandbox's other value)" eval '[ "$(st addons_layout)/$(sett addons_layout)/$(GW2_ON_MAC_ADDONS_LAYOUT=exclusive g settings | sed -n "s/^addons_layout=//p")" = together/together/exclusive ]'
+check "  status and settings name the layout: addons_layout=together (exclusive without the sandbox's value)" eval '[ "$(st addons_layout)/$(sett addons_layout)/$(GW2_ON_MAC_ADDONS_LAYOUT= g settings | sed -n "s/^addons_layout=//p")" = together/together/exclusive ]'
 check "  set arcdps on and set reshade on again: already there, nothing moves" eval '"$G" set arcdps on | grep -q "already in the game folder (dxgi.dll)" && "$G" set reshade on | grep -q "already in the game folder (d3d11.dll)" && [ "$(lay)" = "reshade arcdps" ]'
 out=$(g set reshade off 2>&1)
 check "ReShade off: @done says arcdps is d3d11.dll again" eval 'echo "$out" | grep -q "^@done ReShade is off: its d3d11.dll is out of the game folder. arcdps is d3d11.dll again." && [ "$(lay)" = "arcdps -" ]'
@@ -1391,6 +1394,29 @@ check "while a session runs: set reshade on refused, arcdps not moved" eval '! "
 kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
 mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
 g set arcdps off >/dev/null 2>&1
+
+# Both in from a 0.1.4 development build (ReShade d3d11.dll, arcdps dxgi.dll), in the default
+# exclusive layout: the next Play keeps ReShade and takes arcdps out, its settings stay, and Play
+# says so; Repair does the same
+g set reshade on >/dev/null 2>&1
+mkdir -p "$GD/addons/arcdps" && echo "the player's arcdps settings" >"$GD/addons/arcdps/arcdps.ini"
+cp "$SANDBOX/pe/arcdps.dll" "$GD/dxgi.dll"
+unset GW2_ON_MAC_ADDONS_LAYOUT
+ARC_NOTE="arcdps doesn't load next to ReShade, so GW2 on Mac took its dxgi.dll out of the game folder. Its settings stay in addons/arcdps. To use arcdps, turn ReShade off in Settings › Interface, then turn arcdps on."
+check "left in the together layout: arcdps_state=on as dxgi.dll, reshade_state=on" eval '[ "$(lay)" = "reshade arcdps" ] && [ "$(arcst)/$(st reshade_dll)/$(rsst)" = on/d3d11.dll/on ]'
+: >"$STANDIN_LOG"
+out=$(g play 2>&1); started
+check "  the next Play: ReShade stays as d3d11.dll, arcdps out, the game starts" eval '[ "$(lay)" = "reshade -" ] && has "$STANDIN_LOG" "^wine "'
+check "  Play tells the player (@notice) and the log says so" eval 'echo "$out" | grep -qxF "@notice $ARC_NOTE" && grep -qF "WARNING: $ARC_NOTE" "$LOGS/install.log"'
+check "  arcdps's settings stay; arcdps=off, arcdps_state=foreign, ReShade on" eval 'has "$GD/addons/arcdps/arcdps.ini" "the player" && [ "$(st arcdps)/$(arcst)/$(sett reshade)/$(rsst)" = off/foreign/on/on ]'
+watch_done
+cp "$SANDBOX/pe/arcdps.dll" "$GD/dxgi.dll"
+out=$(g repair 2>&1) && rc=0 || rc=$?
+check "  Repair does the same, and says so (@warn)" eval '[ "$rc" = 0 ] && [ "$(lay)" = "reshade -" ] && echo "$out" | grep -qxF "@warn $ARC_NOTE"'
+cp "$SANDBOX/pe/nexus.dll" "$GD/dxgi.dll"; before=$(gdsnap)
+check "  another program's dxgi.dll next to ReShade: Play leaves it, says nothing about arcdps" eval 'out=$(g play 2>&1); started; [ "$(gdsnap)" = "$before" ] && ! echo "$out" | grep -q "arcdps doesn.t load"'
+watch_done
+rm -f "$GD/dxgi.dll"; rm -rf "$GD/addons"; g set reshade off >/dev/null 2>&1
 
 section "ReShade presets and shaders (reshade import, reshade use)"
 # The section above's ReShade folder is put aside: the import works with ReShade off, before it was
