@@ -12,6 +12,7 @@
 
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor @Observable
 final class GameSettings {
@@ -39,6 +40,12 @@ final class GameSettings {
   var reshade = AddonJob()
   // (both take the session's lock: while one works, the other would be refused)
   var addonWorking: Bool { arcdps.working || reshade.working }
+  // ReShade's presets and shaders (gw2om.sh reshade import): running; the report, which takes the
+  // place of ReShade's last @done under the group; the one preset that came in, for "Use this
+  // preset now?"
+  var reshadeImporting = false
+  var reshadeReport: String?
+  var importedPreset: String?
 
   private let script = Brand.resources.appendingPathComponent("gw2om.sh")
 
@@ -90,7 +97,49 @@ final class GameSettings {
   }
 
   func setArcdps(_ on: Bool) { setAddon(\.arcdps, key: "arcdps", name: "arcdps", on) }
-  func setReshade(_ on: Bool) { setAddon(\.reshade, key: "reshade", name: "ReShade", on) }
+  func setReshade(_ on: Bool) {
+    reshadeReport = nil
+    setAddon(\.reshade, key: "reshade", name: "ReShade", on)
+  }
+
+  // Files and folders into the ReShade folder: the report as gw2om.sh gives it (it lists a few
+  // missing effects, the output and the log all of them), and the question for a single preset
+  // while the game is closed (reshade use refuses while it runs)
+  func importReshade(_ urls: [URL]) {
+    let paths = urls.filter(\.isFileURL).map(\.path)
+    guard !reshadeImporting, !reshade.working, !paths.isEmpty else { return }
+    reshadeImporting = true
+    error = nil
+    let script = script
+    Task {
+      let lines = await Installer.capture(script: script, arguments: ["reshade", "import"] + paths)
+        .split(separator: "\n").map(String.init)
+      reshadeImporting = false
+      if let done = lines.last(where: { $0.hasPrefix("@done ") }) {
+        reshade.result = nil
+        reshadeReport = String(done.dropFirst(6))
+        let presets = lines.filter { $0.hasPrefix("@preset ") }.map { String($0.dropFirst(8)) }
+        if presets.count == 1, !running { importedPreset = presets[0] }
+      } else {
+        error = lines.first { $0.hasPrefix("@error ") }.map { String($0.dropFirst(7)) } ?? "The presets and shaders could not be added."
+      }
+      reload()
+    }
+  }
+
+  // A preset that came in as ReShade's current one (gw2om.sh reshade use): its answer goes after
+  // the import's report
+  func usePreset(_ name: String) {
+    let script = script
+    Task {
+      let lines = await Installer.capture(script: script, arguments: ["reshade", "use", name]).split(separator: "\n")
+      if let done = lines.last(where: { $0.hasPrefix("@done ") }) {
+        reshadeReport = [reshadeReport, String(done.dropFirst(6))].compactMap { $0 }.joined(separator: " ")
+      } else {
+        error = lines.first { $0.hasPrefix("@error ") }.map { String($0.dropFirst(7)) } ?? "\(name) could not be made ReShade's preset."
+      }
+    }
+  }
 
   // An addon on or off, with gw2om.sh's lines as they come (its @progress while it downloads).
   // Without its @done the switch goes back.
@@ -263,6 +312,14 @@ struct SettingsView: View {
     .background { SettingsBackground() }
     .ignoresSafeArea()
     .frame(minWidth: SettingsView.designSize.width, minHeight: SettingsView.designSize.height)
+    // (presets, zips and folders dropped anywhere on the window: into the ReShade folder, and the
+    // pane whose row shows the report)
+    .dropDestination(for: URL.self) { urls, _ in
+      guard settings.installed, !settings.reshadeImporting, !settings.reshade.working, urls.contains(where: \.isFileURL) else { return false }
+      selectedPane = .interface
+      settings.importReshade(urls)
+      return true
+    }
     .onAppear { settings.reload() }
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
       settings.reload()
@@ -277,6 +334,11 @@ struct SettingsView: View {
       AddonWarning.reshade(isPresented: $confirmReshade, version: settings.values["reshade_version"]) {
         settings.setReshade(true)
       }
+    }
+    .sheet(isPresented: Binding(get: { settings.importedPreset != nil }, set: { if !$0 { settings.importedPreset = nil } })) {
+      let name = settings.importedPreset ?? ""
+      AddonWarning.preset(isPresented: Binding(get: { settings.importedPreset != nil }, set: { if !$0 { settings.importedPreset = nil } }),
+                          name: name) { settings.usePreset(name) }
     }
     .alert(confirmAction == "reset-shaders" ? "Reset the shader cache?" : "Reinstall the engine?",
            isPresented: Binding(get: { confirmAction != nil }, set: { if !$0 { confirmAction = nil } })) {
@@ -418,6 +480,8 @@ struct SettingsView: View {
           if let folder = reshadeFolder {
             SmallButton("Open ReShade folder", icon: "folder-open") { NSWorkspace.shared.open(folder) }
           }
+          SmallButton(settings.reshadeImporting ? "Adding…" : "Add preset or shaders…", icon: "file-down") { chooseReshadeFiles() }
+            .disabled(settings.reshadeImporting || settings.reshade.working)
         }
       }
       if let state = settings.values["uiscale_state"], state != "off", state != "on" {
@@ -436,6 +500,9 @@ struct SettingsView: View {
         note("triangle-alert", text, Brand.accent)
       } else if let result = settings.reshade.result, !settings.reshade.working {
         note("info", result, Brand.fg3)
+      }
+      if let report = settings.reshadeReport, !settings.reshade.working {
+        note("info", report, Brand.fg3)
       }
       SettingsGroup {
         SettingRow("Interface Size \"Larger\"", "How large the game's Larger size draws, from the game's own pre-rendered fonts.") {
@@ -648,6 +715,19 @@ struct SettingsView: View {
     }
   }
 
+  // Add preset or shaders…: what a drop on the window takes (gw2om.sh refuses anything else, and
+  // says why)
+  private func chooseReshadeFiles() {
+    let panel = NSOpenPanel()
+    panel.canChooseDirectories = true
+    panel.canChooseFiles = true
+    panel.allowsMultipleSelection = true
+    panel.allowedContentTypes = [.folder, .zip] + [UTType(filenameExtension: "ini")].compactMap { $0 }
+    panel.message = "Choose ReShade presets (.ini), or zips or folders of presets and shaders"
+    panel.prompt = "Add"
+    if panel.runModal() == .OK { settings.importReshade(panel.urls) }
+  }
+
   // The ReShade folder, once it exists (gw2om.sh prints it always): it stays when ReShade is off
   private var reshadeFolder: URL? {
     guard let path = settings.values["reshade_folder"], !path.isEmpty else { return nil }
@@ -730,10 +810,13 @@ struct InterfaceWarning: View {
 }
 
 // The warning before an addon is downloaded and goes in (as the larger interface's: off by
-// default, a clear warning, installed only after the user confirms)
+// default, a clear warning, installed only after the user confirms); its parts also ask whether
+// a preset that came in should be ReShade's
 struct AddonWarning: View {
   let title: String
   let bullets: [String]
+  var icon = "triangle-alert"
+  var confirmTitle = "Download and Turn On"
   @Binding var isPresented: Bool
   let confirm: () -> Void
 
@@ -757,10 +840,18 @@ struct AddonWarning: View {
     ], isPresented: isPresented, confirm: confirm)
   }
 
+  // (name: as gw2om.sh's @preset line gives it)
+  static func preset(isPresented: Binding<Bool>, name: String, confirm: @escaping () -> Void) -> AddonWarning {
+    AddonWarning(title: "Use this preset now?", bullets: [
+      "ReShade starts with \(name) the next time the game starts.",
+      "Your other presets stay in the Presets folder. ReShade's menu (Home key) switches between them in the game.",
+    ], icon: "sliders-horizontal", confirmTitle: "Use This Preset", isPresented: isPresented, confirm: confirm)
+  }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack(spacing: 10) {
-        LucideIcon(name: "triangle-alert", size: 22).foregroundStyle(Brand.accent)
+        LucideIcon(name: icon, size: 22).foregroundStyle(Brand.accent)
         Text(title).font(.head(19)).foregroundStyle(Brand.fg)
       }
       VStack(alignment: .leading, spacing: 8) {
@@ -769,7 +860,7 @@ struct AddonWarning: View {
       HStack {
         Spacer()
         Button("Cancel") { isPresented = false }.keyboardShortcut(.cancelAction)
-        Button("Download and Turn On") { isPresented = false; confirm() }.keyboardShortcut(.defaultAction).tint(Brand.accent)
+        Button(confirmTitle) { isPresented = false; confirm() }.keyboardShortcut(.defaultAction).tint(Brand.accent)
       }
     }
     .padding(22)

@@ -1373,6 +1373,152 @@ kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
 mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
 g set arcdps off >/dev/null 2>&1
 
+section "ReShade presets and shaders (reshade import, reshade use)"
+# The section above's ReShade folder is put aside: the import works with ReShade off, before it was
+# ever on. Stand-ins of what players bring from preset pages: a preset, a zip of a preset with its
+# reshade-shaders folder (and files that must stay out), a folder of loose effects; hostile zips made
+# here or patched in place, and links in the ReShade folder that lead out of it.
+g set reshade off >/dev/null 2>&1
+mv "$RSF" "$SANDBOX/rsf.keep"
+IM="$SANDBOX/import" OUT="$SANDBOX/outside"
+mkdir -p "$IM/zip" "$OUT"
+imp() { "$G" reshade import "$@" >"$SANDBOX/imp.txt" 2>&1; }
+use() { "$G" reshade use "$@" >"$SANDBOX/imp.txt" 2>&1; }
+done_is() { [ "$(sed -n 's/^@done //p' "$SANDBOX/imp.txt")" = "$1" ] || { cat "$SANDBOX/imp.txt"; false; }; }
+err_has() { grep -q "^@error .*$1" "$SANDBOX/imp.txt" || { cat "$SANDBOX/imp.txt"; false; }; }
+presets_are() { [ "$(sed -n 's/^@preset //p' "$SANDBOX/imp.txt")" = "$1" ]; }
+rssnap() { (cd "$RSF" 2>/dev/null && find . \( -type f -o -type l \) -exec shasum {} + | LC_ALL=C sort); }
+# files and links outside the ReShade folder and the logs that changed after the marker
+outside_changed() { find "$SANDBOX" -newer "$SANDBOX/marker" \( -type f -o -type l \) ! -path "$RSF/*" ! -path "$LOGS/*" ! -path "$SANDBOX/imp.txt"; }
+DEPTH="off in online games with this build of ReShade."
+printf '%s\n' 'PreprocessorDefinitions=' 'Techniques=MXAO@qUINT_mxao.fx,Vibrance@Vibrance.fx,Clarity@Clarity.fx' \
+  'TechniqueSorting=MXAO@qUINT_mxao.fx,Vibrance@Vibrance.fx,Clarity@Clarity.fx' '' '[Vibrance.fx]' 'Vibrance=0.150000' >"$IM/Lumen.ini"
+GH="$IM/zip/Golden Hour"
+mkdir -p "$GH/reshade-shaders/Shaders/sub" "$GH/reshade-shaders/Textures" "$GH/Shaders"
+printf '%s\r\n' 'Techniques=Vibrance@Vibrance.fx,CAS@CAS.fx,PD80@PD80_04_Contrast_Brightness_Saturation.fx,DisplayDepth@DisplayDepth.fx' >"$GH/Golden Hour.ini"
+printf '[GENERAL]\nEffectSearchPaths=.\\Shaders\n' >"$GH/ReShade.ini"
+echo '// Vibrance' >"$GH/reshade-shaders/Shaders/Vibrance.fx"; echo '// Clarity' >"$GH/reshade-shaders/Shaders/sub/Clarity.fxh"
+echo 'PNG' >"$GH/reshade-shaders/Textures/Lut.png"; echo '// DisplayDepth' >"$GH/Shaders/DisplayDepth.fx"
+for f in ReShade64.DLL README.txt; do echo x >"$GH/$f"; done
+for f in evil.Addon64 run.sh tool.EXE Setup.Dll; do echo x >"$GH/reshade-shaders/Shaders/$f"; done
+echo x >"$GH/Shaders/start.command"; chmod 755 "$GH/Shaders/start.command" "$GH/reshade-shaders/Shaders/run.sh" "$GH/Shaders/DisplayDepth.fx"
+( cd "$IM/zip" && zip -qr "../Golden Hour.zip" "Golden Hour" )
+LF="$IM/loose fx"
+mkdir -p "$LF/sub/Shaders"
+echo '// CAS' >"$LF/CAS.fx"; echo '// common' >"$LF/Common.fxh"; echo PNG >"$LF/noise.PNG"; echo x >"$LF/tool.dll"
+printf '[GENERAL]\nKey=1\n' >"$LF/notes.ini"; echo '// deep' >"$LF/sub/Shaders/Deep.fx"; ln -s /etc/hosts "$LF/hosts.fx"
+printf 'Techniques=CAS@CAS.fx,Deep@Deep.fx\n' >"$IM/Night.ini"
+before=$(gdsnap)
+check "a preset while ReShade is off and its folder isn't there yet: exits 0" imp "$IM/Lumen.ini"
+check "  the ReShade folder as On makes it, with the preset in Presets" eval '[ -d "$RSF/Shaders" ] && [ -d "$RSF/Textures" ] && [ -d "$RSF/Screenshots" ] && [ "$(cat "$RSF/ReShade.ini")" = "$RS_INI_WANT" ] && same "$IM/Lumen.ini" "$RSF/Presets/Lumen.ini"'
+check "  the game folder as it was, ReShade still off" eval '[ "$(gdsnap)" = "$before" ] && [ ! -e "$GD/ReShade.ini" ] && [ "$(sett reshade)/$(rsst)" = off/off ]'
+check "  the report: its effects, the missing ones, the depth effect; @preset names it" eval 'done_is "Added 1 preset to Presets. This preset uses 3 effects. 3 are missing: qUINT_mxao.fx, Vibrance.fx and Clarity.fx. qUINT_mxao.fx reads the depth buffer: it stays $DEPTH" && presets_are Lumen.ini'
+check "a zip of a preset with its reshade-shaders folder: the report" eval 'imp "$IM/Golden Hour.zip" && done_is "Added 1 preset to Presets, 3 shader files to Shaders/Golden Hour and 1 image to Textures/Golden Hour. This preset uses 4 effects. 2 are missing: CAS.fx and PD80_04_Contrast_Brightness_Saturation.fx. DisplayDepth.fx reads the depth buffer: it stays $DEPTH"'
+check "  Shaders and Textures at any depth under the zip's name, the preset (CRLF) in Presets" eval 'same "$GH/reshade-shaders/Shaders/Vibrance.fx" "$RSF/Shaders/Golden Hour/Vibrance.fx" && [ -f "$RSF/Shaders/Golden Hour/sub/Clarity.fxh" ] && [ -f "$RSF/Shaders/Golden Hour/DisplayDepth.fx" ] && [ -f "$RSF/Textures/Golden Hour/Lut.png" ] && same "$GH/Golden Hour.ini" "$RSF/Presets/Golden Hour.ini"'
+check "  its ReShade.ini (no preset) stays out: the folder's own is as it was" eval '[ ! -e "$RSF/Presets/ReShade.ini" ] && [ "$(cat "$RSF/ReShade.ini")" = "$RS_INI_WANT" ]'
+check "a folder of loose effects with a preset beside it, in one import" eval 'imp "$LF" "$IM/Night.ini" && done_is "Added 1 preset to Presets, 3 shader files to Shaders/loose fx and 1 image to Textures/loose fx. This preset uses 2 effects, all of them in Shaders." && presets_are Night.ini'
+check "  loose .fx and .fxh into Shaders/<folder>, images into Textures/<folder>, a Shaders folder's too" eval 'same "$LF/CAS.fx" "$RSF/Shaders/loose fx/CAS.fx" && [ -f "$RSF/Shaders/loose fx/Common.fxh" ] && [ -f "$RSF/Shaders/loose fx/Deep.fx" ] && [ -f "$RSF/Textures/loose fx/noise.PNG" ]'
+check "nothing executable or scriptable came in, whatever its case, no README, no link, no other .ini" eval '[ -z "$(find "$RSF" -iname "*.dll" -o -iname "*.exe" -o -iname "*.addon*" -o -iname "*.sh" -o -iname "*.command" -o -name README.txt -o -name hosts.fx -o -name notes.ini -o -type l)" ] && [ -z "$(find "$RSF" -type f -perm -100)" ]'
+# refused, with nothing added
+printf '[GENERAL]\nTechniques=Vibrance@Vibrance.fx\n' >"$IM/Settings.ini"
+echo x >"$IM/ReShade64.dll"
+printf 'Techniques=Vibrance@Vibrance.fx\n' >"$IM/Fresh.ini"
+before=$(rssnap)
+check "an .ini whose Techniques key is in a section (no preset): refused, saying why" eval '! imp "$IM/Settings.ini" && err_has "Settings.ini is not a ReShade preset: it has no Techniques line" && [ "$(rssnap)" = "$before" ]'
+check "a .dll: refused" eval '! imp "$IM/ReShade64.dll" && err_has "ReShade64.dll is not a preset (.ini), a zip or a folder" && [ "$(rssnap)" = "$before" ]'
+check "one bad source refuses the whole import: the good one isn't added either" eval '! imp "$IM/Fresh.ini" "$IM/ReShade64.dll" && [ "$(rssnap)" = "$before" ] && [ ! -e "$CACHE/downloads/reshade/import" ]'
+check "a dry run adds nothing" eval 'GW2_ON_MAC_DRY_RUN=1 "$G" reshade import "$IM/Fresh.ini" | grep -q "^@done Nothing was added" && [ "$(rssnap)" = "$before" ]'
+# hostile zips and folders, links in the ReShade folder: nothing written outside it
+mkdir -p "$PK/abs/Shaders" && echo '// abs' >"$PK/abs/Shaders/x.fx"
+( cd "$PK" && zip -qr "$IM/abs.zip" abs ) && perl -0777 -pi -e 's{abs/Shaders/x\.fx}{/bs/Shaders/x.fx}g' "$IM/abs.zip"
+mkdir -p "$IM/Evil/Shaders" && echo '// evil' >"$IM/Evil/Shaders/a.fx"
+ln -s "$LF" "$IM/linked"
+touch "$SANDBOX/marker"
+check "a zip with a path that climbs out (..): refused, nothing written outside" eval '! imp "$RSV/dotdot.zip" && err_has "has a file whose path leaves its folder" && [ -z "$(find "$SANDBOX" -name evil.fx -not -path "$PK/*")" ]'
+check "a zip with an absolute path: refused" eval '! imp "$IM/abs.zip" && err_has "abs has a file whose path leaves its folder (/bs/Shaders/x.fx)"'
+check "a zip with a link in it: refused" eval '! imp "$RSV/link.zip" && err_has "link has a link in it"'
+check "a zip over the size limit: refused" eval '! GW2_ON_MAC_PACK_LIMIT=10 imp "$IM/Golden Hour.zip" && err_has "Golden Hour unpacks to more than"'
+check "a zip and a folder with more files than the limit: refused" eval '! GW2_ON_MAC_PACK_MAX_FILES=3 imp "$IM/Golden Hour.zip" && err_has "Golden Hour has more than 3 files in it" && ! GW2_ON_MAC_PACK_MAX_FILES=3 imp "$LF" && err_has "loose fx has more than 3 files in it"'
+check "a dropped folder that is a link: refused, with or without a slash or /." eval 'for l in linked linked/ linked// linked/. linked/./; do ! imp "$IM/$l" && err_has "linked is a link" || exit 1; done'
+ln -s "$OUT" "$RSF/Shaders/Evil"
+check "a link in the ReShade folder where the source's folder goes: refused, nothing through it" eval '! imp "$IM/Evil" && err_has "Shaders/Evil in the ReShade folder is a link or a file" && [ -z "$(ls -A "$OUT")" ]'
+rm -f "$RSF/Shaders/Evil"; mv "$RSF/Textures" "$SANDBOX/textures.keep"; ln -s "$OUT" "$RSF/Textures"
+check "  Textures itself a link: refused, nothing through it" eval '! imp "$IM/Golden Hour.zip" && err_has "Textures in the ReShade folder is a link or a file" && [ -z "$(ls -A "$OUT")" ]'
+rm -f "$RSF/Textures"; mv "$SANDBOX/textures.keep" "$RSF/Textures"
+rmdir "$RSF/Screenshots" && ln -s "$SANDBOX/nowhere/shots" "$RSF/Screenshots"
+check "  a dangling link for Screenshots: refused, saying so" eval '! imp "$IM/Fresh.ini" && err_has "Screenshots in the ReShade folder is a link or a file"'
+rm -f "$RSF/Screenshots"; mkdir "$RSF/Screenshots"
+mv "$RSF/.imports" "$SANDBOX/imports.keep" && ln -s "$OUT" "$RSF/.imports"
+check "  a link to a folder in place of the record of imports: refused, nothing moved into it" eval '! imp "$IM/Fresh.ini" && err_has ".imports in the ReShade folder is a folder or a link to one" && [ -z "$(ls -A "$OUT")" ]'
+rm -f "$RSF/.imports"; mv "$SANDBOX/imports.keep" "$RSF/.imports"
+mv "$RSF" "$SANDBOX/rsf.real" && ln -s "$SANDBOX/rsf.real" "$RSF"
+check "  the ReShade folder itself a link: refused, nothing added where it leads" eval '! imp "$IM/Fresh.ini" && err_has "The ReShade folder is a link or a file" && [ ! -e "$SANDBOX/rsf.real/Presets/Fresh.ini" ]'
+rm -f "$RSF"; mv "$SANDBOX/rsf.real" "$RSF"
+check "  the refusals wrote nothing outside the ReShade folder, and changed nothing in it" eval '[ -z "$(outside_changed)" ] && [ "$(rssnap)" = "$before" ] || { outside_changed; false; }'
+# names that break careless scripts
+printf 'Techniques=Vibrance@Vibrance.fx\n' >"$IM/-n \"it's\" 4K.ini"
+printf 'Techniques=Vibrance@Vibrance.fx\n' >"$IM/new
+line.ini"
+check "presets named with a leading dash, quotes and a line break: in, as names Windows takes" eval 'imp "$IM/-n \"it'\''s\" 4K.ini" "$IM/new
+line.ini" && presets_are "$(printf "%s\n" "-n _it'\''s_ 4K.ini" new_line.ini)" && same "$IM/new
+line.ini" "$RSF/Presets/new_line.ini" && done_is "Added 2 presets to Presets. These 2 presets use 1 effect, which is in Shaders."'
+mkdir -p "$IM/dash/Shaders" && echo '// d' >"$IM/dash/-d.fx" && echo '// q' >"$IM/dash/Shaders/q[1].fx" && echo '// star' >"$IM/dash/Shaders/a*b.fx"
+( cd "$IM/dash" && zip -q "../-x [v2].zip" -- -d.fx Shaders/q\[1\].fx 'Shaders/a*b.fx' )
+check "a zip with a leading dash and brackets in its name and its files' names, named from its folder: each file on its own" eval '(cd "$IM" && imp "-x [v2].zip") && same "$IM/dash/-d.fx" "$RSF/Shaders/-x _v2_/-d.fx" && same "$IM/dash/Shaders/q[1].fx" "$RSF/Shaders/-x _v2_/q[1].fx" && same "$IM/dash/Shaders/a*b.fx" "$RSF/Shaders/-x _v2_/a*b.fx"'
+mkdir -p "$IM/n/Shaders" && echo '// n' >"$IM/n/Shaders/n.fx" && ( cd "$IM/n" && zip -q ../-n.zip Shaders/n.fx )
+printf 'Techniques=Vibrance@Vibrance.fx\n' >"$IM/Look.INI"
+check "a zip named like an option of echo (-n.zip): its folder is -n" eval 'imp "$IM/-n.zip" && same "$IM/n/Shaders/n.fx" "$RSF/Shaders/-n/n.fx"'
+check "a preset ending in .INI: in Presets as .ini, the name ReShade takes" eval 'imp "$IM/Look.INI" && presets_are Look.ini && same "$IM/Look.INI" "$RSF/Presets/Look.ini"'
+# a name that is there already: replaced only from a source of the same name
+echo "the player's own" >"$RSF/Presets/ReShadePreset.ini"
+mkdir -p "$IM/pack" && printf 'Techniques=Vibrance@Vibrance.fx\n' >"$IM/pack/ReShadePreset.ini" && printf 'Techniques=CAS@CAS.fx\n' >"$IM/pack/Lumen.ini"
+( cd "$IM/pack" && zip -q ../Pack.zip ReShadePreset.ini Lumen.ini )
+check "a zip whose presets clash with the player's own and another source's: both kept, and it says so" eval 'imp "$IM/Pack.zip" && done_is "Presets already had Lumen.ini and ReShadePreset.ini from elsewhere, so GW2 on Mac kept them, not the new ones." && presets_are "" && has "$RSF/Presets/ReShadePreset.ini" "the player" && same "$IM/Lumen.ini" "$RSF/Presets/Lumen.ini"'
+printf 'Techniques=CAS@CAS.fx\n' >"$IM/Lumen.ini"
+check "the same preset again from a source of the same name: replaced" eval 'imp "$IM/Lumen.ini" && same "$IM/Lumen.ini" "$RSF/Presets/Lumen.ini" && done_is "Added 1 preset to Presets. This preset uses 1 effect, which is in Shaders."'
+echo "outside" >"$OUT/target.txt"
+ln -f "$OUT/target.txt" "$RSF/Presets/Lumen.ini"
+check "  a hard link in its place: replaced, the file it shares stays as it was" eval 'imp "$IM/Lumen.ini" && same "$IM/Lumen.ini" "$RSF/Presets/Lumen.ini" && has "$OUT/target.txt" "^outside$"'
+ln -sf "$OUT/target.txt" "$RSF/Presets/Lumen.ini"
+check "  a link in its place: replaced by the file, not written through" eval 'imp "$IM/Lumen.ini" && [ ! -L "$RSF/Presets/Lumen.ini" ] && same "$IM/Lumen.ini" "$RSF/Presets/Lumen.ini" && has "$OUT/target.txt" "^outside$"'
+ln -s "$OUT/target.txt" "$RSF/Presets/Sym.ini" && printf 'Techniques=CAS@CAS.fx\n' >"$IM/Sym.ini"
+check "  a link of the player's of that name: kept as it is" eval 'imp "$IM/Sym.ini" && grep -q "^@done Presets already had Sym.ini from elsewhere" "$SANDBOX/imp.txt" && [ -L "$RSF/Presets/Sym.ini" ] && has "$OUT/target.txt" "^outside$"'
+# a long report
+printf 'Techniques=%s\n' 'A@m1.fx,B@m2.fx,C@m3.fx,D@m4.fx,E@m5.fx,F@m6.fx,G@m7.fx,H@m8.fx' >"$IM/Many.ini"
+check "many missing effects: the report names five and the number of the others" eval 'imp "$IM/Many.ini" && done_is "Added 1 preset to Presets. This preset uses 8 effects. 8 are missing: m1.fx, m2.fx, m3.fx, m4.fx, m5.fx and 3 more."'
+check "  the output and the log have them all" eval 'grep -qxF "Effects missing from $RSF/Shaders: m1.fx, m2.fx, m3.fx, m4.fx, m5.fx, m6.fx, m7.fx and m8.fx" "$SANDBOX/imp.txt" && has "$LOGS/install.log" "Effects missing from .*m7.fx and m8.fx"'
+# reshade use: the one key, byte for byte
+printf '[ADDON]\r\nPresetPath=.\\other\r\n\r\n[GENERAL]\r\n;PresetPath=commented\r\nEffectSearchPaths=.\\Shaders\\**\r\n  PresetPath = .\\Presets\\Old.ini  \r\nTextureSearchPaths=.\\Textures\\**\r\n\r\n[SCREENSHOT]\r\nSavePath=.\\Screenshots\\Caf\303\251' >"$RSF/ReShade.ini"
+printf '[ADDON]\r\nPresetPath=.\\other\r\n\r\n[GENERAL]\r\n;PresetPath=commented\r\nEffectSearchPaths=.\\Shaders\\**\r\nPresetPath=.\\Presets\\Golden Hour.ini\r\nTextureSearchPaths=.\\Textures\\**\r\n\r\n[SCREENSHOT]\r\nSavePath=.\\Screenshots\\Caf\303\251' >"$SANDBOX/ini.want"
+check "reshade use: PresetPath and nothing else, byte for byte (CRLF, comments, another section's key, no last line break)" eval 'use "Golden Hour.ini" && done_is "ReShade starts with Golden Hour.ini the next time the game starts." && same "$SANDBOX/ini.want" "$RSF/ReShade.ini"'
+printf 'Techniques=Vibrance@Vibrance.fx\n' >"$IM/Day, Night.ini" && imp "$IM/Day, Night.ini"
+printf '[GENERAL]\nEffectSearchPaths=.\\Shaders\\**\n\n[INPUT]\nKeyOverlay=36,0,0,0\n' >"$RSF/ReShade.ini"
+printf '[GENERAL]\nPresetPath=.\\Presets\\Day,, Night.ini\nEffectSearchPaths=.\\Shaders\\**\n\n[INPUT]\nKeyOverlay=36,0,0,0\n' >"$SANDBOX/ini.want"
+check "  without the key: under [GENERAL]'s header, a comma doubled as ReShade reads it" eval 'use "Day, Night.ini" && same "$SANDBOX/ini.want" "$RSF/ReShade.ini"'
+printf '[INPUT]\nKeyOverlay=36,0,0,0\n' >"$RSF/ReShade.ini"
+printf '[INPUT]\nKeyOverlay=36,0,0,0\n[GENERAL]\nPresetPath=.\\Presets\\Night.ini\n' >"$SANDBOX/ini.want"
+check "  without [GENERAL]: a section of its own at the end" eval 'use Night.ini && same "$SANDBOX/ini.want" "$RSF/ReShade.ini"'
+printf '[GENERAL]\nKey=1\n' >"$RSF/Presets/NotOne.ini"; cp "$RSF/ReShade.ini" "$SANDBOX/ini.before"
+check "  refused for a preset that isn't in Presets, an .ini there that isn't one, a path" eval '! use Nope.ini && err_has "Nope.ini is not in" && ! use NotOne.ini && err_has "NotOne.ini is not a ReShade preset" && ! use ../ReShade.ini && err_has "Name a preset in" && same "$SANDBOX/ini.before" "$RSF/ReShade.ini"'
+mkdir "$SANDBOX/outside2" && mv "$RSF/ReShade.ini" "$SANDBOX/ini.keep" && ln -s "$SANDBOX/outside2" "$RSF/ReShade.ini"
+check "  ReShade.ini a link to a folder: refused, nothing moved into it" eval '! use Night.ini && err_has "ReShade.ini in the ReShade folder is a folder or a link to one" && [ -z "$(ls -A "$SANDBOX/outside2")" ]'
+rm -f "$RSF/ReShade.ini"; mv "$SANDBOX/ini.keep" "$RSF/ReShade.ini"
+# while a session runs: the import adds, reshade use is refused
+mv "$ENG/bin/wineserver" "$ENG/bin/wineserver.heat" && cp "$SANDBOX/sleeper" "$ENG/bin/wineserver"
+"$ENG/bin/wineserver" 60 & sp=$!
+sleep 0.3
+printf 'Techniques=Vibrance@Vibrance.fx\n' >"$IM/Running.ini"
+check "while a session runs: the import adds, and says to pick the preset in ReShade's menu" eval 'imp "$IM/Running.ini" && [ -f "$RSF/Presets/Running.ini" ] && grep -q "^@done .* Guild Wars 2 is running: pick the preset in ReShade.s menu (Home key).$" "$SANDBOX/imp.txt"'
+check "  reshade use refused, saying to pick it in ReShade's menu; ReShade.ini as it was" eval '! use Running.ini && err_has "Guild Wars 2 is running, and ReShade rewrites its settings while it runs. Pick Running.ini in ReShade.s menu (Home key) instead." && same "$SANDBOX/ini.before" "$RSF/ReShade.ini"'
+kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
+mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
+"$APP/Contents/Resources/helpers/sessionlock" hold "$AD/.session.lock" 30 & hp=$!
+i=0; until "$APP/Contents/Resources/helpers/sessionlock" held "$AD/.session.lock" || [ $i -ge 50 ]; do sleep 0.1; i=$((i + 1)); done
+check "  while a Play holds the session's lock: reshade use refused" eval '! use Running.ini && err_has "A game session is starting" && same "$SANDBOX/ini.before" "$RSF/ReShade.ini"'
+kill $hp 2>/dev/null; wait $hp 2>/dev/null
+check "no staging folder is left in the cache" [ ! -e "$CACHE/downloads/reshade/import" ]
+rm -rf "$RSF"; mv "$SANDBOX/rsf.keep" "$RSF"
+
 section "Uninstall"
 GW2_ON_MAC_WATCH_GRACE=60 "$G" play >/dev/null 2>&1; started; watcher_up
 wp=$(sess watcher_pid)
