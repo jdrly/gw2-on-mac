@@ -53,9 +53,10 @@
 #                              installer, pinned by sha256), with Microsoft's d3dcompiler_47.dll
 #                              (the game's bin64/cef copy, else mozilla/fxc2's) and a ReShade.ini
 #                              that points ReShade at the ReShade folder in the app's folder
-#                              (its ini, presets, shaders, textures, screenshots; the standard and
-#                              SweetFX effects while Shaders is empty), or out of it (only what
-#                              the app placed; the ReShade folder stays), while no session runs;
+#                              (its ini, presets, shaders, textures, screenshots; the standard
+#                              effects while Shaders has no ReShade.fxh, SweetFX at the first On),
+#                              or out of it (only what the app placed; the ReShade folder
+#                              stays), while no session runs;
 #                              remembered as reshade= in the settings, so Play, Install and Repair
 #                              put missing files back; status and settings print reshade,
 #                              reshade_state (on|off|foreign|blocked|nogame), reshade_version,
@@ -1476,6 +1477,7 @@ fi
 RS="$APPDIR/ReShade"                  # ReShade's folder (its BasePath)
 RS_CACHE="$CACHE/reshade"             # its compiled effects (IntermediateCachePath)
 RS_DOWNLOADS="$CACHE/downloads/reshade"   # the checked ReShade64.dll (and fxc2's compiler) for Play and Repair
+RS_PACKS="$RS/.packs"                 # "SweetFX" once an On has brought it: not again after a player deleted it
 # the sha256 of the d3dcompiler_47.dll the app put next to Gw2-64.exe (Off removes only that one)
 RS_COMPILER_RECORD="$APPDIR/reshade-compiler"
 
@@ -1761,7 +1763,7 @@ reshade_place() {
 # arcdps). On downloads and checks everything first, then makes the ReShade folder, and touches the
 # game folder last.
 set_reshade() {
-  local stage="$RS_DOWNLOADS/packs" d p gone=""
+  local stage="$RS_DOWNLOADS/packs" d p gone="" std sfx
   reshade_state
   [ "$RSH" != nogame ] || die "Guild Wars 2 is not installed yet: ReShade goes into its folder once it is."
   ! session_running || die "Quit Guild Wars 2 and Steam first: ReShade goes into or out of the game folder only while they are closed."
@@ -1817,12 +1819,27 @@ set_reshade() {
   [ "$RSH" = on ] || reshade_fetch
   COMPILER_SRC=""
   [ -e "$GAME_DIR/d3dcompiler_47.dll" ] || reshade_compiler download
-  if [ -z "$(ls -A "$RS/Shaders" 2>/dev/null)" ]; then
+  # The standard effects whenever Shaders has no ReShade.fxh, which almost every effect includes
+  # (an import may have filled Shaders before the first On); SweetFX only until an On has brought
+  # it (RS_PACKS), so one a player deleted stays deleted. A pack's folder that is there stays as it is.
+  std="" sfx=""
+  [ -n "$(find "$RS/Shaders" -type f -iname ReShade.fxh 2>/dev/null | head -1)" ] || [ -e "$RS/Shaders/Standard" ] || std=1
+  grep -qx SweetFX "$RS_PACKS" 2>/dev/null || [ -e "$RS/Shaders/SweetFX" ] || sfx=1
+  case "$std$sfx" in
+    11) p="ReShade's standard effects and SweetFX" ;;
+    1) if [ -n "$std" ]; then p="ReShade's standard effects"; else p=SweetFX; fi ;;
+    *) p="" ;;
+  esac
+  if [ -n "$p" ]; then
     mkdir -p "$stage"
-    step "Downloading ReShade's standard effects and SweetFX from github.com"
+    step "Downloading $p from github.com"
+  fi
+  if [ -n "$std" ]; then
     download "$RESHADE_SHADERS_URL" "$RS_DOWNLOADS/Standard.zip" "ReShade's standard effects" "$PACK_DOWNLOAD_MAX"
     check_download "$RS_DOWNLOADS/Standard.zip" "ReShade's standard effects" 504b0304
     unpack_pack "$RS_DOWNLOADS/Standard.zip" Standard "$stage"
+  fi
+  if [ -n "$sfx" ]; then
     download "$SWEETFX_URL" "$RS_DOWNLOADS/SweetFX.zip" SweetFX "$PACK_DOWNLOAD_MAX"
     check_download "$RS_DOWNLOADS/SweetFX.zip" SweetFX 504b0304
     unpack_pack "$RS_DOWNLOADS/SweetFX.zip" SweetFX "$stage"
@@ -1833,13 +1850,16 @@ set_reshade() {
   for d in Shaders Textures; do
     for p in "$stage/$d"/*; do
       [ -d "$p" ] || continue
-      if [ -e "$RS/$d/$(basename "$p")" ]; then cp -R "$p/." "$RS/$d/$(basename "$p")/"; else mv "$p" "$RS/$d/"; fi
+      [ -e "$RS/$d/$(basename "$p")" ] || [ -L "$RS/$d/$(basename "$p")" ] || mv "$p" "$RS/$d/"
     done
   done
   reshade_state
   case "$RSH" in on|off) ;; *) die "The game folder changed during the download ($RSH). Try again." ;; esac
   ARC_MOVED=""
   reshade_place
+  if ! grep -qx SweetFX "$RS_PACKS" 2>/dev/null && rs_safe "$RS_PACKS"; then
+    { if [ -f "$RS_PACKS" ]; then cat "$RS_PACKS"; fi; echo SweetFX; } | put "$RS_PACKS" 644
+  fi
   write_settings reshade on
   registry_unlock
   apply_registry
