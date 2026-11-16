@@ -20,6 +20,7 @@ Website: [gw2onmac.com](https://gw2onmac.com). Download: the
 > *Larger interface* changes the game's memory for a sharper interface at 4K. It is off by default
 > and asks before it goes in. The *arcdps* switch downloads deltaconnected's arcdps from
 > deltaconnected.com. It is also off by default and asks first, and I don't host or change arcdps.
+> The *ReShade* switch works the same way with crosire's ReShade from reshade.me.
 >
 > **I do all the support for GW2 on Mac.** I'm Pharaphobia on
 > [Discord](https://discord.gg/AnV3fZWz2b), or you can open a
@@ -84,8 +85,9 @@ game folder works, and so does a bottle or wrapper app with the game in it.
 
 On the same disk the app clones the files with APFS. That takes a moment and no extra space until
 one of the copies changes. From another disk it copies them, after checking there's room for their
-size plus 1 GB. Either way it only reads your original. My own addon files are left behind. Any
-other addon, such as an arcdps `d3d11.dll` or an `addons` folder, comes along as it is, and the
+size plus 1 GB. Either way it only reads your original. My own addon files are left behind, and
+so are a ReShade and the `ReShade.ini` next to `Gw2-64.exe`: turn ReShade on in Settings instead.
+Any other addon, such as an arcdps `d3d11.dll` or an `addons` folder, comes along as it is, and the
 summary names it. *Also bring my game settings* is on by default and brings `GFXSettings.Gw2-64.exe.xml`
 and `Local.dat`, which holds your options and remembered login. If the new bottle already had
 those files, the old ones move to a `GW2 on Mac backup <date>` folder next to them. The import
@@ -160,6 +162,7 @@ scripting.
 | | Small text in Cronos | `uiscale_sans` | on | chat, the tracker and labels have no larger font, so the addon draws them in Cronos at the larger size |
 | | Cinematic dialogue | `uiscale_cinema` | on | story cinematics size their dialogue apart from the interface. This draws it at the same size, with a small code patch |
 | | arcdps | `arcdps` | off | downloads or removes arcdps, see below |
+| | ReShade | `reshade` | off | downloads or removes ReShade, see below |
 | Game | Game Mode | `gamemode` | on | in full screen, macOS gives the game priority on the CPU and GPU and lowers Bluetooth latency |
 | | Start Steam in the background | `steambg` | on | Steam starts without a window once it remembers your login |
 | | Quit Steam when the game quits | `quitsteam` | on | shown while the previous setting is on |
@@ -189,6 +192,12 @@ in [`addon/ui-scale`](addon/ui-scale), and goes into the game folder as `version
 and patches one piece of its code for the cinematic dialogue. ArenaNet doesn't support that, and a
 game update may break it.
 
+The addon has one more setting with no switch in Settings. Wine gives the game's critical sections,
+its usual lock, no spin, so a thread that finds one taken goes to sleep at once. `csspin=5` in the
+game folder's `gw2-ui-scale.ini` makes them spin for 5 microseconds first. It's off (`csspin=0`) by
+default and works only while *Larger interface* is on. Change it with the game closed. Repair, or a
+change to the interface settings, writes the file again with `csspin=0`.
+
 ### arcdps
 
 Settings › Interface has an *arcdps* switch, off by default. arcdps is deltaconnected's
@@ -196,8 +205,8 @@ third-party addon, and it reads the game's memory. ArenaNet, NCSOFT and I don't 
 switch asks first, and you use it at your own risk.
 
 - On downloads `d3d11.dll` and its `.md5sum` from deltaconnected.com, checks the file against that
-  checksum and checks that it is arcdps. Then it goes next to `Gw2-64.exe` as `d3d11.dll`.
-  From then on arcdps updates itself.
+  checksum and checks that it is arcdps. Then it goes next to `Gw2-64.exe` as `d3d11.dll`, or as
+  `dxgi.dll` while ReShade is on. From then on arcdps updates itself.
 - Off removes arcdps from `d3d11.dll` or `dxgi.dll` and keeps its settings in `addons/arcdps` for
   next time.
 - An arcdps you put there yourself, or that came with your game files, shows as on.
@@ -208,6 +217,102 @@ switch asks first, and you use it at your own risk.
 Other addons that load as `d3d11.dll` or `dxgi.dll` next to `Gw2-64.exe` work too. The game loads
 them first, and they pass its drawing on to DXMT. [How addons load](#how-addons-load) has the
 details.
+
+### ReShade
+
+Settings › Interface has a *ReShade* switch under arcdps, off by default. ReShade is crosire's
+post-processing program. It draws effects such as sharpening, colour correction or anti-aliasing
+over the finished picture, and it has its own menu in the game. It isn't made or supported by
+ArenaNet, NCSOFT or me, so the switch asks first, and you use it at your own risk.
+
+ArenaNet's [third-party programs policy](https://help.guildwars2.com/hc/en-us/articles/360013625034-Policy-Third-Party-Programs)
+says: "We do not permit the use of any program that gives one player an unintended, unnatural, or
+unfair advantage over another player." It also says that "some utilities help players without
+affecting others", that "in general, we will not take action on an account for the use of such a
+utility program or modification", that this "is subject to ArenaNet's discretion", and "You use any
+third-party program at your own risk." It ends with "ArenaNet does not review, approve, or endorse
+any third-party program." The policy doesn't name ReShade.
+
+What the switch does:
+
+- On downloads ReShade 6.8.0's installer from reshade.me and checks it against the size and
+  sha256 I pinned. The installer never runs. The app takes `ReShade64.dll` out of it, checks that
+  file's sha256 too, and puts it next to `Gw2-64.exe` as `d3d11.dll`.
+- ReShade needs Microsoft's shader compiler, `d3dcompiler_47.dll`, because Wine's own can't
+  compile its effects. If the game has one with its Chromium in `bin64/cef`, the app copies that one
+  next to `Gw2-64.exe`. Otherwise it downloads Microsoft's copy from
+  [mozilla/fxc2](https://github.com/mozilla/fxc2), pinned by sha256 as well. A `d3dcompiler_47.dll`
+  that is already next to `Gw2-64.exe` stays as it is.
+- If you haven't added shaders of your own yet, turning ReShade on for the first time also
+  downloads two effect packs from GitHub at fixed commits, the ones ReShade's own installer picks by
+  default: crosire's standard effects and CeeJayDK's SweetFX.
+- The third file in the game folder is a two-line `ReShade.ini` that points ReShade at its own
+  folder.
+- Off removes ReShade's `d3d11.dll`, that `ReShade.ini`, and the compiler if the app put it there.
+  ReShade's folder stays.
+- Play and Install put a missing file back from the app's cache. Repair also downloads what the
+  cache lacks.
+- A ReShade that GW2 on Mac didn't put there is left alone, and so are another program's
+  `d3d11.dll` or `dxgi.dll`, such as the Nexus loader, and a `ReShade.ini` of its own. The switch
+  says which file it found.
+- The switch only works while the game and Steam are closed.
+
+**Your files.** ReShade's settings, log, presets, shaders and screenshots are in one folder outside
+the bottle, `~/Library/Application Support/GW2 on Mac/ReShade`. *Open ReShade folder* in the row shows it in
+Finder.
+
+| In the ReShade folder | What |
+|---|---|
+| `ReShade.ini` | ReShade's settings. The app writes it once, and from then on it is ReShade's and yours |
+| `ReShade.log` | ReShade's log |
+| `Presets/` | your presets. `ReShadePreset.ini` is the one ReShade starts with |
+| `Shaders/`, `Textures/` | the effects and the images they read, a folder for each pack |
+| `Screenshots/` | ReShade's screenshots |
+
+ReShade's compiled effects go to `~/Library/Caches/GW2 on Mac/reshade`, and *Reset the shader
+cache* empties that folder too. Turning ReShade off, Repair and Uninstall all leave the ReShade
+folder where it is.
+
+**The menu.** ReShade's menu key is Home. A MacBook has no Home key, and fn + Left Arrow sends it.
+To use another key, change *Overlay key* in the menu's Settings tab, or, with the
+game closed, `KeyOverlay` under `[INPUT]` in the ReShade folder's `ReShade.ini`. Its four numbers
+are the key's Windows key code and then Ctrl, Shift and Alt, each 0 or 1. `KeyOverlay=36,0,0,0` is
+Home, and `KeyOverlay=50,0,1,0` is Shift + 2.
+
+**What doesn't work.** reshade.me has two builds of ReShade, and the app uses the signed one. When
+that build sees high network activity, it turns its add-ons off, and the depth buffer comes from
+one of them. Effects that read depth, such as ambient occlusion (MXAO) and depth of field, then get
+no depth buffer, and ReShade's menu says "High network activity discovered. All add-ons are
+disabled to prevent exploitation." Guild Wars 2 is an online game, and I haven't checked yet how
+often that happens in it. The app doesn't offer the other build. Its installer opens with "This
+build of ReShade is intended for singleplayer games only and may cause bans in multiplayer games."
+
+**Presets and shaders.** Drop a preset (`.ini`), a zip or a folder on the Settings window, or pick
+them with *Add preset or shaders…* in the ReShade row. That works with ReShade on or off, and while
+the game runs. The files go into the ReShade folder, never into the game folder:
+
+- A preset is an `.ini` with a `Techniques` line, which every ReShade preset has. It goes to
+  `Presets`. A dropped `.ini` without one is refused, and one inside a zip or folder stays out.
+- From a zip or a folder, the contents of every `Shaders` and `Textures` folder in it, at any
+  depth, go to `Shaders/<name>` and `Textures/<name>`, named after the zip or folder. Loose `.fx`
+  and `.fxh` files go to `Shaders/<name>`, loose images to `Textures/<name>`, presets to `Presets`.
+- Nothing else comes in, so no `.dll`, `.addon64` or `.exe`. A link inside a dropped folder is left
+  out. A zip with a link in it, or with a path that leads out of its folder, is refused, and so is a
+  zip or folder that unpacks to more than 256 MB or has more than 10,000 files. A refusal adds
+  nothing of that drop.
+- A preset of the same name that is already in `Presets` stays, unless it came from a zip, folder or
+  file of the same name before. The report says which ones stayed.
+
+Afterwards the row says what went where, which effects the new presets use that aren't in
+`Shaders`, and which of them look like effects that read the depth buffer (MXAO, depth of field,
+RTGI, DisplayDepth), which get none while ReShade sees high network activity. When one preset
+came in and the game is closed, the app asks whether ReShade should start with it. While the game
+runs, pick it in ReShade's menu.
+
+**arcdps and ReShade together.** Both switches can be on at once. Then ReShade is `d3d11.dll` and
+arcdps is `dxgi.dll`, a name arcdps's own page allows. Turning ReShade on renames arcdps to
+`dxgi.dll`, and turning it off renames arcdps back to `d3d11.dll`. If arcdps updates itself into a
+second file, the next Play keeps the newer one under the right name.
 
 ## Updates
 
@@ -228,10 +333,17 @@ with what I need for a bug report:
 - a session report
 - the game's `ArenaNet.log` and `GFXSettings.Gw2-64.exe.xml`
 - Steam's bootstrap, content, gameprocess and shader logs
+- from the ReShade folder, if there is one: `ReShade.log` (its last 5 MB), `ReShade.ini`, the
+  current preset as `preset.ini` (only one inside the folder) and the names of the files under
+  `Shaders`
 - crash reports from the last 7 days, GPU errors from the last 2 hours, and `system-info.txt`
 
+`system-info.txt` and the session report also say whether ReShade and arcdps were in, ReShade's
+version and file name, and the sha256 of the `d3dcompiler_47.dll` next to `Gw2-64.exe`.
+
 On the way into the zip it removes account, persona and Mac names, Steam IDs, e-mail addresses,
-home folders, tokens and the crash logs' machine, account and address fields. `Local.dat`, Steam's
+home folders (also as Wine writes them, `Z:\Users\…`), tokens and the crash logs' machine, account
+and address fields. `Local.dat`, Steam's
 config and Steam's login and connection logs never go in. If a file still holds one of those after
 redaction, the zip leaves it out and lists it in `left-out.txt`. arcdps's logs stay out too. Its
 crash log dumps the game's threads and modules, and I can't be sure it holds no account or character
@@ -253,26 +365,30 @@ nothing in `/Applications` besides itself.
 | `~/Library/Application Support/GW2 on Mac/engine/` | the Wine engine with my pieces, about 1 GB | removed |
 | `…/GW2 on Mac/bottle/` | the game's Wine prefix with Steam, the game's files and the game's settings. About 75 GB, or no extra space for a clone of files on the same disk | removed, with the game |
 | `…/GW2 on Mac/gamemode/GW2.app` | the Game Mode bundle | removed |
-| `…/GW2 on Mac/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `session`, `session.req`, `.session.lock` | settings, install state, what was installed, DXMT's options, the current game session and its lock | removed |
-| `~/Library/Caches/GW2 on Mac/downloads/` | the engine archive, `SteamSetup.exe`, a copy of `Gw2Setup-64.exe` | removed |
+| `…/GW2 on Mac/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `session`, `session.req`, `.session.lock`, `reshade-compiler` | settings, install state, what was installed, DXMT's options, the current game session and its lock, the sha256 of the compiler the app put next to `Gw2-64.exe` | removed |
+| `…/GW2 on Mac/ReShade/` | ReShade's settings, log, presets, shaders, textures and screenshots | kept |
+| `~/Library/Caches/GW2 on Mac/downloads/` | the engine archive, `SteamSetup.exe`, a copy of `Gw2Setup-64.exe`, and in `reshade/` the checked `ReShade64.dll` and fxc2's compiler | removed |
 | `~/Library/Caches/GW2 on Mac/dxmt/Gw2-64.exe/` | DXMT's shader cache and pipeline archives. Another process, such as the launcher's `CefHost.exe`, gets its own folder next to it | removed. *Reset the shader cache* in Settings empties it too |
+| `~/Library/Caches/GW2 on Mac/reshade/` | ReShade's compiled effects | removed. *Reset the shader cache* empties it too |
 | `$(getconf DARWIN_USER_TEMP_DIR)winetemp-…/Gw2-64.exe` | the Game Mode link | removed |
 | `~/Library/Logs/GW2 on Mac/` | `install.log`, `wine.log`, DXMT's `Gw2-64_d3d11.log`, `session.env`, `gamemode.log`, the heat logs, and `.lock-claim` for the install lock | kept |
 
 In the game folder, `version.dll` and `gw2-ui-scale.ini` exist only while *Larger interface* is on,
-and arcdps's `d3d11.dll` only while *arcdps* is on. The app never touches another program's
-`version.dll`, `d3d11.dll` or `dxgi.dll` there. The app's own preferences, such as the chosen
+arcdps's `d3d11.dll`, or `dxgi.dll` next to ReShade, only while *arcdps* is on, and ReShade's
+`d3d11.dll`, `ReShade.ini` and the `d3dcompiler_47.dll` the app put there only while *ReShade* is
+on. The app never touches another program's `version.dll`, `d3d11.dll`, `dxgi.dll`,
+`d3dcompiler_47.dll` or `ReShade.ini` there. The app's own preferences, such as the chosen
 route and the last Settings pane, live in the defaults domain `cz.jandrly.gw2onmac`. Other Wine
 apps' bottles are only ever read.
 
 ## Uninstall
 
 *Uninstall…* in the window asks first and tells you the game's files go with the bottle. Close the
-game and Steam before you run it. It removes everything in the table above except the logs. To do
-it by hand:
+game and Steam before you run it. It removes everything in the table above except the logs and
+the ReShade folder. To do it by hand:
 
 ```sh
-rm -rf ~/Library/"Application Support/GW2 on Mac" ~/Library/Caches/"GW2 on Mac"
+rm -rf ~/Library/"Application Support/GW2 on Mac" ~/Library/Caches/"GW2 on Mac"   # the ReShade folder too
 rm -rf ~/Library/Logs/"GW2 on Mac"      # the logs, if you want them gone too
 ```
 
@@ -289,6 +405,11 @@ Storage, stays where it is.
   Wars 2 this Mac driver build has had one in-game test so far, on 2026-11-08.
 - arcdps on DXMT has had one check, on 2026-11-08 with arcdps 1.2026.1023.2303. It loads and
   creates its device through DXMT. I haven't tested its overlay in play, or the Nexus loader.
+- ReShade is new in 0.1.4, and I haven't run it in the game through the app yet. What I've tested
+  is the app's side: the switch, the ReShade folder, the import, arcdps's renaming and Collect Logs,
+  in a sandbox with stand-in files. The pins are the sha256 of the files reshade.me and mozilla/fxc2
+  served when I checked them. Whether ReShade loads and draws on DXMT, and whether arcdps as
+  `dxgi.dll` loads next to it, is still open.
 - While Steam verifies the game's files, *Checking game files* shows no percentage, because Steam's
   logs don't give one. A game update shows its progress.
 - There's no Keyboard pane. SWTOR on Mac's game keys by keyboard position are in the Mac driver,
@@ -394,6 +515,7 @@ The settings map to these:
 | `ncpu` | `WINENCPU`, bounded by `sysctl hw.logicalcpu` |
 | `uiscale` | the addon files, and `version=native,builtin` for `Gw2-64.exe` |
 | `uiscale_size`, `uiscale_sans`, `uiscale_cinema` | the addon's ini: `scale`, `sans=cronos` or `keep`, `cinema=1` |
+| `reshade` | ReShade's files in the game folder, and `d3dcompiler_47=native,builtin` for `Gw2-64.exe` while a ReShade is there |
 | `rawmouse`, `mousespeed` | `RawMouseWhenCursorHidden` and `RawMouseGameControllerScale` for `Gw2-64.exe` in `user.reg` |
 | `debug` | `DXMT_LOG_LEVEL=debug`, `WINE_HEAT_COUNT` and `WINEDEBUG=err+all,fixme-all` |
 
@@ -548,6 +670,19 @@ writes, so it refuses while a session runs. `status` and `settings` print `arcdp
 `on`, `off`, `foreign` with the file in `arcdps_foreign`, or `nogame`. `GW2_ON_MAC_ARCDPS_URL`
 points the download elsewhere for tests.
 
+ReShade is the app's when the file is the pinned `ReShade64.dll`, by sha256. Any other DLL that
+exports `ReShadeRegisterAddon` is a ReShade the app didn't place, and it stays as it is.
+`gw2om.sh set reshade on|off` takes the same lock. `status` and `settings` print `reshade_state`
+(`on`, `off`, `foreign`, `blocked` or `nogame`), `reshade_version`, `reshade_dll`,
+`reshade_blocker`, `reshade_folder` and `addons_layout`. ReShade finds its folder through the
+`ReShade.ini` next to `Gw2-64.exe`, whose `[INSTALL] BasePath` ReShade reads before anything else,
+and loads `d3dcompiler_47.dll` by name, so the `native,builtin` override makes it take the
+compiler next to the game. With both addons in, `addon_dll` gives ReShade `d3d11.dll` and arcdps
+`dxgi.dll`. `gw2om.sh reshade import <path>...` does the import, and `gw2om.sh reshade use
+<preset>` makes a preset the one ReShade starts with. The `GW2_ON_MAC_RESHADE_*`,
+`GW2_ON_MAC_COMPILER_*` and `GW2_ON_MAC_SWEETFX_URL` variables point the downloads elsewhere for
+tests.
+
 ## Engine updates
 
 When an app update has new engine pieces, `status` says `graphics=update` and *This Mac* shows
@@ -612,6 +747,7 @@ last session from DXMT's own log lines:
 - shader compiles and DXMT's encode thread's waits for them: how many, their total and the
   longest
 - shader warming, presentation and Metal 4 errors
+- ReShade and arcdps as the session started, from `session.env`
 
 # Development
 
@@ -695,7 +831,7 @@ string in the bundled `version.dll`.
 downloads Sparkle at a pinned version and sha256, and compiles the Icon Composer icon
 `src/AppIcon.icon` with actool into `Assets.car` and a fallback `AppIcon.icns`.
 
-- `GW2_ON_MAC_VERSION` sets the version, 0.1.2 by default. `X.Y.Z-dev.N` makes a development build,
+- `GW2_ON_MAC_VERSION` sets the version, 0.1.4 by default. `X.Y.Z-dev.N` makes a development build,
   as in SWTOR on Mac.
 - `GW2_ON_MAC_FEED_URL` and `GW2_ON_MAC_ED_PUBLIC_KEY` turn updates on. Without them Sparkle stays
   off, which is normal for local builds.
@@ -732,7 +868,8 @@ which has Sparkle's key and my Developer ID), building the components themselves
 route's and the real arcdps's checks, and playing.
 
 `scripts/test-sandbox.sh` tests the backend of a built app end to end in `work/app-sandbox/test`,
-with 413 checks. It uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and
+with 558 checks on GitHub's runner, which skips the few that need my workspace or more CPUs. It
+uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and
 ArenaNet's downloads itself, and uses a clone of the game's own ArenaNet-signed `Gw2-64.exe` as the
 installer to check. That's `SIGNED_PE`, by default the copy in my development workspace's bottle.
 Without one, those checks are skipped. It covers:
@@ -745,6 +882,19 @@ Without one, those checks are skipped. It covers:
   `ARCDPS_REAL`, read only. It tests the md5 check, a web page instead of the checksum, no server, a
   self-updated arcdps, `dxgi.dll`, another addon left alone, and refusals while a session runs or a
   Play holds its lock.
+- ReShade on and off from stand-in downloads: an installer with a zip appended, a compiler and two
+  effect packs, from `file://` folders. It tests the pinned hashes, an installer without
+  `ReShade64.dll`, the game's own compiler, fxc2's and one you put there, a ReShade the app didn't
+  place, another addon in the way, files put back at Play and Repair, Uninstall keeping the ReShade
+  folder, and refusals while a session runs. With arcdps it tests every order of turning
+  both on and off, arcdps under both names after an update, a failure and a kill halfway through
+  the rename, and the exclusive layout (`GW2_ON_MAC_ADDONS_LAYOUT`).
+- ReShade's import and `reshade use`: a preset, a zip with its `reshade-shaders` folder and a folder
+  of loose effects, the report and its missing and depth effects, refusals of anything executable,
+  of a bad source, of zips that climb out, hold links or pass the size and file limits
+  (`GW2_ON_MAC_PACK_LIMIT`, `GW2_ON_MAC_PACK_MAX_FILES`), of links in the ReShade folder, presets of
+  the same name, odd file names, and `PresetPath` written while the rest of `ReShade.ini` stays
+  byte for byte.
 - an update from 0.1.0 with stand-in 0.1.0 files from `GW2_ON_MAC_OLD_COMPONENTS`. Play puts the
   new pieces in without Repair. Damaged or foreign DXMT, sibling and Wine files stay for Repair. Two
   Plays race, with the first paused after classifying and halfway through the replacement
@@ -756,7 +906,8 @@ Without one, those checks are skipped. It covers:
   after reading a live owner, and gets refused. A missing piece refuses Play, and this version's
   pieces under 0.1.0's manifest count as set up.
 - play, the busy checks, repair, reset-shaders, reinstall-engine and the lock
-- Collect Logs' redaction, with no arcdps log, uninstall, and a failed install's rollback
+- Collect Logs' redaction, with no arcdps log, ReShade's files with their `Z:\` paths, uninstall,
+  and a failed install's rollback
 - Steam's `-silent` with and without a remembered login, and the CPU counts
 - the session's watcher, with stand-in Steam and game processes and shorter times
   (`GW2_ON_MAC_WATCH_TIMEOUT`, `GW2_ON_MAC_WATCH_GRACE`, `GW2_ON_MAC_WATCH_QUITWAIT`,

@@ -619,7 +619,7 @@ struct SettingsView: View {
       guard let p = settings.arcdps.progress, p.total > 0 else { return "Downloading arcdps from deltaconnected.com…" }
       return "Downloading arcdps from deltaconnected.com… \(Installer.megabytes(p.done)) of \(Installer.megabytes(p.total)) MB"
     }
-    return "deltaconnected's addon (d3d11.dll), downloaded from deltaconnected.com; it updates itself. "
+    return "deltaconnected's addon, downloaded from deltaconnected.com; it updates itself. "
       + "It reads the game's memory, which ArenaNet doesn't support."
   }
 
@@ -824,8 +824,8 @@ struct AddonWarning: View {
     AddonWarning(title: "Turn on arcdps?", bullets: [
       "arcdps is a third-party addon by deltaconnected. It is not made or supported by ArenaNet, NCSOFT or GW2 on Mac.",
       "It reads the game's memory while it runs. Use it at your own risk: there is no help or warranty for it from GW2 on Mac.",
-      "GW2 on Mac downloads it from deltaconnected.com and puts it into the game folder as d3d11.dll. From then on arcdps updates itself.",
-      "Turning it off removes d3d11.dll and keeps arcdps's settings (addons/arcdps).",
+      "GW2 on Mac downloads it from deltaconnected.com and puts it into the game folder, next to Gw2-64.exe. From then on arcdps updates itself.",
+      "Turning it off removes arcdps from the game folder and keeps its settings (addons/arcdps).",
     ], isPresented: isPresented, confirm: confirm)
   }
 
