@@ -1464,14 +1464,24 @@ chmod 755 "$RSF"; g set arcdps on >/dev/null 2>&1; chmod 555 "$RSF"; before=$(pl
 check "  with both in, set arcdps off and set reshade off: refused, saying so; nothing changes, keys still on" eval '! "$G" set arcdps off >"$SANDBOX/arc.txt" 2>&1 && has "$SANDBOX/arc.txt" "so arcdps stays in" && ! "$G" set reshade off >"$SANDBOX/rs.txt" 2>&1 && has "$SANDBOX/rs.txt" "so ReShade stays in" && [ "$(places)" = "$before" ] && [ "$(keys)" = 1 ]'
 rm -f "$GD/$CH"
 : >"$STANDIN_LOG"
-check "  keys on, arcdps gone, the ini unwritable: Play refuses to start, saying why" eval 'out=$(nodl play 2>&1); ! echo "$out" | grep -q "^@done" && echo "$out" | grep -q "^@error GW2 on Mac couldn.t change ReShade.s settings .*the game would have no Direct3D 11" && ! has "$STANDIN_LOG" "^wine "'
+out=""; out=$(nodl play 2>&1) || true
+check "  keys on, arcdps gone, the ini unwritable: Play refuses to start, saying why" eval '! echo "$out" | grep -q "^@done" && echo "$out" | grep -q "^@error GW2 on Mac couldn.t change ReShade.s settings .*the game would have no Direct3D 11" && ! has "$STANDIN_LOG" "^wine "'
 chmod 755 "$RSF"; g repair >/dev/null 2>&1
 check "  Repair, with the ini writable again: keys off, ReShade alone" eval '[ "$(lay)" = "reshade -" ] && [ "$(keys)" = 0 ]'
+# both in, the keys on at an old path (ReShade reads 2 as on, and the first of a repeated key), the
+# ini unwritable: Play refuses; Repair with the ini writable puts the keys right
 g set arcdps on >/dev/null 2>&1
-sed "s|^ProxyLibrary=.*|ProxyLibrary=C:\\\\old bottle\\\\addons\\\\arcdps\\\\chain\\\\d3d11.dll|" "$RSF/ReShade.ini" >"$SANDBOX/ini.old" && cat "$SANDBOX/ini.old" >"$RSF/ReShade.ini"; chmod 555 "$RSF"
-: >"$STANDIN_LOG"
-check "  both in, keys on at an old path, the ini unwritable: Play refuses to start, saying why" eval '[ "$(keys)" = "1 at C:\\old bottle\\addons\\arcdps\\chain\\d3d11.dll" ] && out=$(nodl play 2>&1); ! echo "$out" | grep -q "^@done" && echo "$out" | grep -q "the game would have no Direct3D 11" && ! has "$STANDIN_LOG" "^wine "'
-chmod 755 "$RSF"; g repair >/dev/null 2>&1
+cp "$RSF/ReShade.ini" "$SANDBOX/ini.good"
+OLDPX='C:\old bottle\addons\arcdps\chain\d3d11.dll'
+for how in 1 2 "1 then 0"; do
+  OLDPX=$OLDPX HOW=$how awk '/^EnableProxyLibrary=/ { print "EnableProxyLibrary=" substr(ENVIRON["HOW"], 1, 1); if (ENVIRON["HOW"] == "1 then 0") print "EnableProxyLibrary=0"; next }
+    /^ProxyLibrary=/ { print "ProxyLibrary=" ENVIRON["OLDPX"]; next } { print }' "$SANDBOX/ini.good" >"$RSF/ReShade.ini"
+  chmod 555 "$RSF"; : >"$STANDIN_LOG"
+  out=""; out=$(nodl play 2>&1) || true
+  check "  both in, EnableProxyLibrary=$how at an old path, the ini unwritable: Play refuses to start" eval 'grep -qxF "ProxyLibrary=$OLDPX" "$RSF/ReShade.ini" && ! echo "$out" | grep -q "^@done" && echo "$out" | grep -q "the game would have no Direct3D 11" && ! has "$STANDIN_LOG" "^wine "'
+  chmod 755 "$RSF"
+done
+g repair >/dev/null 2>&1
 check "  Repair, with the ini writable again: keys on at the chain file" eval '[ "$(lay)" = "reshade arcdps" ] && keys_ok && [ "$(keys)" = 1 ]'
 g set arcdps off >/dev/null 2>&1; g set reshade off >/dev/null 2>&1
 

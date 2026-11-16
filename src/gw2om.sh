@@ -1409,7 +1409,10 @@ proxy_path() {
     *) winpath "$GAME_DIR/$ARC_CHAIN" ;;
   esac
 }
-# proxy_enabled <ini>: [PROXY] EnableProxyLibrary is on in it (1 or true, as ReShade reads a bool)
+# proxy_enabled <ini>: [PROXY] EnableProxyLibrary is on in it, as ReShade 6.8.0 reads it
+# (source/ini_file.cpp, ini_file.hpp): a repeated key appends its values and ReShade takes the
+# first, a value splits at a single comma, an empty value adds nothing, and a bool is on when
+# strtol gives a number other than 0 or the value is true, True or TRUE
 proxy_enabled() {
   LC_ALL=C awk '
     function strip(s, c) {
@@ -1419,8 +1422,15 @@ proxy_enabled() {
     { t = strip($0, " \t\r"); if (NR == 1 && substr(t, 1, 3) == "\357\273\277") t = substr(t, 4)
       if (substr(t, 1, 1) == "[") { i = index(t, "]"); sec = strip(i ? substr(t, 1, i - 1) : t, " \t[]"); next }
       i = index(t, "=")
-      if (sec == "PROXY" && i && strip(substr(t, 1, i - 1), " \t") == "EnableProxyLibrary") v = tolower(strip(substr(t, i + 1), " \t")) }
-    END { exit !(v == "1" || v == "true") }' "$1"
+      if (found || sec != "PROXY" || !i || strip(substr(t, 1, i - 1), " \t") != "EnableProxyLibrary") next
+      v = strip(substr(t, i + 1), " \t")
+      if (v == "") next
+      j = index(v, ","); if (j) v = substr(v, 1, j - 1)
+      found = 1 }
+    END {
+      on = v == "true" || v == "True" || v == "TRUE"
+      if (!on && match(v, /^[+-]?[0-9]+/)) { d = substr(v, 1, RLENGTH); gsub(/[^0-9]/, "", d); on = d ~ /[1-9]/ }
+      exit !on }' "$1"
 }
 # proxy_safe: ReShade won't look for arcdps where it isn't: the app's ReShade isn't d3d11.dll, or its
 # keys are off, or they are on with arcdps at their path. Only reads; Play checks it before the
