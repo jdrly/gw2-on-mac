@@ -88,6 +88,13 @@ reg() {
 }
 GW2_MAC='Software\\\\Wine\\\\AppDefaults\\\\Gw2-64.exe\\\\Mac Driver'
 ALL_MAC='Software\\\\Wine\\\\Mac Driver'
+RUNDLL_DLLS='Software\\\\Wine\\\\AppDefaults\\\\rundll32.exe\\\\DllOverrides'
+# rundll <on|off>: rundll32.exe's d3d11 and dxgi are native,builtin, or neither is set
+rundll() {
+  if [ "$1" = on ]; then reg "$RUNDLL_DLLS" d3d11 native,builtin && reg "$RUNDLL_DLLS" dxgi native,builtin
+  else noreg "$RUNDLL_DLLS" d3d11 && noreg "$RUNDLL_DLLS" dxgi
+  fi
+}
 same() { cmp -s "$1" "$2"; }
 # the session's file, and waits (up to 10 s) for its watcher to reach a stage or end
 sess() { sed -n "s/^$1=//p" "$AD/session" 2>/dev/null; }
@@ -366,6 +373,7 @@ check "  d3d11.dll next to Gw2-64.exe is the published file" same "$ARCSRV/d3d11
 check "  arcdps=on, arcdps_state=on" [ "$(st arcdps)/$(arcst)" = on/on ]
 check "  nothing left in the downloads, no temporary file in the game folder" eval '[ ! -e "$CACHE/downloads/arcdps" ] && ! ls -a "$GD" | grep -q gw2om-new'
 check "  the d3d11 addon order is set for Gw2-64.exe" reg 'Software\\\\Wine\\\\AppDefaults\\\\Gw2-64.exe\\\\DllOverrides' d3d11 native,builtin
+check "  and for rundll32.exe: d3d11 and dxgi native,builtin (arcdps's crash window and update)" rundll on
 check "set arcdps on again: already there" sh -c "'$G' set arcdps on | grep -q 'already in the game folder'"
 # arcdps updates itself: a newer arcdps (another hash) still counts as arcdps
 printf 'self-updated\n' >>"$GD/d3d11.dll"
@@ -374,6 +382,7 @@ check "an arcdps that updated itself (another hash) is still on" [ "$(arcst)" = 
 check "set arcdps off: d3d11.dll removed" sh -c "'$G' set arcdps off | grep -q '^@done arcdps is off' && [ ! -e '$GD/d3d11.dll' ]"
 check "  its settings (addons/arcdps) stay" has "$GD/addons/arcdps/arcdps.ini" session
 check "  arcdps_state=off" [ "$(arcst)" = off ]
+check "  rundll32.exe's d3d11 and dxgi deleted" rundll off
 check "arcdps x maybe refused (exit 2)" sh -c "'$G' set arcdps maybe >/dev/null; [ \$? = 2 ]"
 # as dxgi.dll it counts too, and off removes it there
 cp "$SANDBOX/pe/arcdps.dll" "$GD/dxgi.dll"
@@ -384,12 +393,16 @@ check "  off removes that dxgi.dll" [ ! -e "$GD/dxgi.dll" ]
 cp "$SANDBOX/pe/nexus.dll" "$GD/d3d11.dll"
 check "another addon's d3d11.dll (with arcdps's words outside its exports): arcdps_state=foreign, arcdps=off" [ "$(arcst)/$(st arcdps)" = foreign/off ]
 check "  arcdps_foreign names it" [ "$(st arcdps_foreign)" = d3d11.dll ]
+g set rawmouse on >/dev/null
+check "  rundll32.exe gets d3d11 and dxgi native,builtin for it too" rundll on
 out=$(g set arcdps on 2>&1) && rc=0 || rc=$?
 check "  set arcdps on refused, saying why, the file left alone" eval '[ "$rc" != 0 ] && echo "$out" | grep -q "^@error The game folder has another d3d11.dll" && same "$SANDBOX/pe/nexus.dll" "$GD/d3d11.dll"'
 check "  set arcdps off leaves it alone too" sh -c "'$G' set arcdps off | grep -q 'stays as it is' && cmp -s '$SANDBOX/pe/nexus.dll' '$GD/d3d11.dll'"
 mv "$GD/d3d11.dll" "$GD/dxgi.dll"
 check "  another addon's dxgi.dll: foreign as well" eval '[ "$(arcst)" = foreign ] && ! "$G" set arcdps on >/dev/null 2>&1 && same "$SANDBOX/pe/nexus.dll" "$GD/dxgi.dll"'
 rm -f "$GD/dxgi.dll"
+g set rawmouse on >/dev/null
+check "  gone: rundll32.exe's d3d11 and dxgi deleted" rundll off
 # DXMT's own d3d11.dll (a real PE, other exports) is not arcdps either
 cp "$COMP/dxmt/x86_64-windows/d3d11.dll" "$GD/d3d11.dll"
 check "a real d3d11.dll that isn't arcdps (DXMT's): foreign" [ "$(arcst)" = foreign ]
@@ -440,7 +453,8 @@ printf 'Crash\nName: ZZ-MACHINE\nIpAddr: 192.168.77.5\nLogin: zz.person@example.
 printf 'started by %s from %s/Library, mail zz.person@example.com, token=abcDEF123secret\n' "$(id -un)" "$HOME" >>"$LOGS/wine.log"
 printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60\ninfo:  STATS fps=60.0 ms=16.7/24.8 cb=1.1 rp=31.7(+0.0 merged) encode=0.23+1.03/10.3\ninfo:  HITCH frame=52 ms=120.0 dxmt(ms/calls): create=4.0/37 flush=3.5/1\n' >"$LOGS/Gw2-64_d3d11.log"
 mkdir -p "$GD/addons/arcdps" && printf 'crash\nself: Zz Charname Q, zz_arc_acct.1234\n' >"$GD/addons/arcdps/arcdps_lastcrash.log"
-echo "info: build" >"$GD/addons/arcdps/arcdps.log"; cp "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll"
+cp "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll"; mkdir -p "$GD/addons/arcdps/logs" && : >"$GD/addons/arcdps/logs/$(id -un)-boss.zevtc"
+: >"$GD/addons/arcdps/logs/$(id -un)_boss.zevtc"
 # collect: Collect Logs into $SANDBOX/zip, unzipped into $SANDBOX/unzipped (Z: its folder)
 collect() {
   rm -rf "$SANDBOX/zip" "$SANDBOX/unzipped" && mkdir -p "$SANDBOX/zip" "$SANDBOX/unzipped"
@@ -455,6 +469,8 @@ no_home() {
   ! grep -rqiF -e "$HOME/" -e "$H/" -e "$(winf "$HOME")\\" -e "$(winf "$H")\\" -e "\\Users\\$(id -un)\\" "$@" &&
     ! grep -rqiw -e "$(id -un)" "$@"
 }
+# (arcdps.log with the game folder as Wine writes it, and the user name)
+printf 'info: build\ninfo: loaded Z:%s\\d3d11.dll for %s\n' "$(winf "$GD")" "$(id -un)" >"$GD/addons/arcdps/arcdps.log"
 collect
 check "collect-logs makes a zip" [ -f "$zip" ]
 for f in logs/install.log logs/wine.log logs/Gw2-64_d3d11.log settings.conf install-manifest.json session-report.txt system-info.txt gpu-errors.txt game-logs/ArenaNet.log game-logs/steam/content_log.txt; do
@@ -470,7 +486,11 @@ check "  the token value is gone" sh -c "! grep -rq abcDEF123secret '$Z'"
 check "  the home folder is gone" sh -c "! grep -rqF '$HOME/' '$Z'"
 check "  never Local.dat or Steam's config" sh -c "! find '$Z' -name Local.dat -o -name loginusers.vdf | grep -q ."
 check "  the crash log kept its exception" has "$Z/game-logs/ArenaNet.log" "Exception: c0000005"
-check "  no arcdps log (its crash log may hold character names)" sh -c "! find '$Z' -iname 'arcdps*' | grep -q . && ! grep -rq 'Zz Charname Q' '$Z'"
+check "  arcdps.log in game-logs, redacted: Z:~\\, no home folder or user name" \
+  eval 'has "$Z/game-logs/arcdps.log" "^info: build" && grep -qF "Z:~\\Library\\" "$Z/game-logs/arcdps.log" && no_home "$Z/game-logs/arcdps.log"'
+check "  not arcdps's crash log (it may hold character names)" eval '[ "$(cd "$Z" && find . -iname "arcdps*")" = ./game-logs/arcdps.log ] && ! grep -rq "Zz Charname Q" "$Z"'
+check "  addon-files.txt lists d3d11.dll and the files under addons/arcdps with sizes, redacted" \
+  eval 'f="$Z/game-logs/addon-files.txt"; grep -qE "^[0-9-]+ [0-9:]+ $(wc -c <"$GD/d3d11.dll" | tr -d " ") d3d11.dll\$" "$f" && grep -qE " addons/arcdps/arcdps_lastcrash.log\$" "$f" && grep -qE " 0 addons/arcdps/logs/USER-boss.zevtc\$" "$f" && grep -qE " 0 addons/arcdps/logs/USER_boss.zevtc\$" "$f" && ! grep -qi "$(id -un)_boss" "$f" && ! grep -q " dxgi.dll\$" "$f" && no_home "$f"'
 check "  system-info names the d3d11.dll addon: arcdps" has "$Z/system-info.txt" "d3d11.dll addon: arcdps"
 check "  system-info: ReShade off, arcdps in as d3d11.dll" grep -qxF "ReShade: off; arcdps on as d3d11.dll" "$Z/system-info.txt"
 check "  the session report: ReShade and arcdps off as the session started, no compiler" \
@@ -478,7 +498,7 @@ check "  the session report: ReShade and arcdps off as the session started, no c
 rm -rf "$GD/addons" "$GD/d3d11.dll"
 collect
 check "no ReShade folder and nothing in the game folder: Collect Logs works and says ReShade is off" \
-  eval '[ ! -e "$AD/ReShade" ] && [ -f "$Z/system-info.txt" ] && grep -qxF "ReShade: off; arcdps off" "$Z/system-info.txt" && grep -qxF "  ReShade folder: none" "$Z/system-info.txt" && [ ! -e "$Z/reshade" ]'
+  eval '[ ! -e "$AD/ReShade" ] && [ -f "$Z/system-info.txt" ] && grep -qxF "ReShade: off; arcdps off" "$Z/system-info.txt" && grep -qxF "  ReShade folder: none" "$Z/system-info.txt" && [ ! -e "$Z/reshade" ] && [ ! -e "$Z/game-logs/addon-files.txt" ]'
 # (DXMT's wait field is count, the window's total and its longest: two windows with waits and one
 # without, which adds nothing)
 printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60
@@ -1160,6 +1180,7 @@ check "  both packs: each Shaders and Textures folder's contents under the pack'
 check "  only effects and images: no README, LICENSE or notes.txt" eval '[ -z "$(find "$RSF" -name README.md -o -name LICENSE -o -name notes.txt)" ]'
 check "  reshade=on, reshade_state=on, reshade_dll=d3d11.dll, no blocker" eval '[ "$(sett reshade)/$(rsst)/$(st reshade_dll)/$(st reshade_blocker)" = on/on/d3d11.dll/ ] && grep -qx reshade=on "$AD/settings.conf"'
 check "  d3dcompiler_47=native,builtin for Gw2-64.exe" reg "$GW2_DLLS" d3dcompiler_47 native,builtin
+check "  ReShade alone: rundll32.exe gets d3d11 and dxgi native,builtin" rundll on
 check "  the checked ReShade64.dll and the compiler stay in the cache; no installer, zip or temporary file" eval 'same "$SANDBOX/pe/ReShade64.dll" "$CACHE/downloads/reshade/ReShade64.dll" && [ "$(ls -A "$CACHE/downloads/reshade" | LC_ALL=C sort | tr "\n" " ")" = "ReShade64.dll d3dcompiler_47.dll " ] && ! ls -a "$GD" | grep -q gw2om-new || { ls -lA "$CACHE/downloads/reshade" "$GD"; false; }'
 check "  ReShade's effect cache folder is there" [ -d "$CACHE/reshade" ]
 check "set reshade on again: already there" sh -c "'$G' set reshade on | grep -q 'already in the game folder (d3d11.dll)'"
@@ -1168,6 +1189,7 @@ out=$(g set reshade off 2>&1) && rc=0 || rc=$?
 check "set reshade off: d3d11.dll, the compiler the app placed and ReShade.ini out of the game folder" eval '[ "$rc" = 0 ] && [ ! -e "$GD/d3d11.dll" ] && [ ! -e "$GD/d3dcompiler_47.dll" ] && [ ! -e "$GD/ReShade.ini" ]'
 check "  the ReShade folder stays, and the @done line says where" eval 'has "$RSF/Presets/Mine.ini" preset && [ -f "$RSF/Shaders/Standard/ReShade.fxh" ] && echo "$out" | grep -qxF "@done ReShade is off: its d3d11.dll is out of the game folder. Your presets and shaders stay in $RSF."'
 check "  reshade=off, reshade_state=off, the override deleted" eval '[ "$(sett reshade)/$(rsst)" = off/off ] && noreg "$GW2_DLLS" d3dcompiler_47'
+check "  rundll32.exe's d3d11 and dxgi deleted" rundll off
 # the game's own compiler (bin64/cef); the packs aren't downloaded again (Shaders has ReShade.fxh,
 # and On brought SweetFX once)
 mkdir -p "$GD/bin64/cef" && cp "$SANDBOX/pe/cef-compiler.dll" "$GD/bin64/cef/d3dcompiler_47.dll"
@@ -1325,6 +1347,7 @@ out=$(g set arcdps on 2>&1); out2=$(g set reshade on 2>&1)
 check "both on: ReShade d3d11.dll, arcdps at the chain path, and @done says ReShade loads arcdps" eval '[ "$(lay)" = "reshade arcdps" ] && echo "$out2" | grep -qx "@done ReShade 6.8.0 is in the game folder as d3d11.dll. It loads the next time the game starts. ReShade loads arcdps itself now, so both load."'
 check "  the ReShade folder's ReShade.ini: EnableProxyLibrary=1, ProxyLibrary=the chain file as C:\\" eval 'grep -qxF "EnableProxyLibrary=1" "$RSF/ReShade.ini" && grep -qxF "ProxyLibrary=$PX" "$RSF/ReShade.ini" && [ "$(keys)" = 1 ] && has "$LOGS/install.log" "ReShade.ini: \[PROXY\] EnableProxyLibrary=1"'
 check "  status: arcdps on at the chain path with no foreign file, reshade_state=on with no blocker" eval '[ "$(st arcdps)/$(arcst)/$(st arcdps_dll)/$(st arcdps_foreign)/$(rsst)/$(st reshade_blocker)/$(st reshade_dll)" = "on/on/$CH//on//d3d11.dll" ]'
+check "  rundll32.exe gets d3d11 and dxgi native,builtin" rundll on
 check "  settings say the same, and addons_layout=together" eval '[ "$(sett arcdps_state)/$(sett arcdps_dll)/$(sett reshade_state)/$(sett reshade)/$(sett addons_layout)" = "on/$CH/on/on/together" ]'
 check "  set arcdps on and set reshade on again: already there, nothing moves" eval '"$G" set arcdps on | grep -qF "already in the game folder ($CH)" && "$G" set reshade on | grep -q "already in the game folder (d3d11.dll)" && [ "$(lay)" = "reshade arcdps" ] && keys_ok'
 out=$(g set reshade off 2>&1)
@@ -1414,6 +1437,7 @@ collect
 check "  Collect Logs: system-info names ReShade as d3d11.dll and arcdps at the chain path" \
   eval 'has "$Z/system-info.txt" "^  d3d11.dll addon: ReShade, " && has "$Z/system-info.txt" "^  $CH addon: arcdps, " && grep -qxF "ReShade: on, 6.8.0 as d3d11.dll; arcdps on as $CH" "$Z/system-info.txt"'
 check "  the session report: ReShade and arcdps on as that session started, arcdps at the chain path" grep -qxF "ReShade at the start: on, 6.8.0 as d3d11.dll; arcdps on as $CH" "$Z/session-report.txt"
+check "  addon-files.txt names ReShade's d3d11.dll and arcdps at the chain path" eval 'grep -qE " d3d11.dll\$" "$Z/game-logs/addon-files.txt" && grep -qE " $CH\$" "$Z/game-logs/addon-files.txt"'
 
 # another program's file at any of the three places blocks both switches, named, and is never
 # touched (nor is arcdps renamed next to it)
@@ -1490,10 +1514,12 @@ touch "$PAUSE"; rm -f "$PAUSE.at"
 GW2_ON_MAC_TEST_PAUSE="$PAUSE" GW2_ON_MAC_TEST_PAUSE_AT=arcdps-moved "$G" set reshade on >"$SANDBOX/rs.txt" 2>&1 & ra=$!
 wait_at; kill -9 $ra 2>/dev/null; wait $ra 2>/dev/null; rm -f "$PAUSE" "$PAUSE.at"
 check "killed after the rename: arcdps at the chain path, ReShade off, keys off" eval '[ "$(lay)" = "- arcdps" ] && [ "$(arcst)/$(rsst)/$(sett reshade)" = on/off/off ] && keys_ok'
+g set rawmouse on >/dev/null
+check "  arcdps only at the chain path: rundll32.exe gets d3d11 and dxgi native,builtin" rundll on
 check "  Repair moves arcdps back to d3d11.dll" eval '"$G" repair >/dev/null 2>&1 && [ "$(lay)" = "arcdps -" ] && keys_ok'
 check "  then ReShade on and off work as usual" switches reshade on reshade arcdps reshade off arcdps - arcdps off - -
 g set reshade off >/dev/null 2>&1
-check "  and neither file is left" none_left
+check "  and neither file is left, nor rundll32.exe's overrides" eval 'none_left && rundll off'
 # nothing changes while a session runs
 g set arcdps on >/dev/null 2>&1
 mv "$ENG/bin/wineserver" "$ENG/bin/wineserver.heat" && cp "$SANDBOX/sleeper" "$ENG/bin/wineserver"

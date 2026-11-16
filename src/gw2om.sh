@@ -593,6 +593,7 @@ get_reg() {
 }
 REG_MAC='Software\\Wine\\Mac Driver'
 REG_GW2_DLLS='Software\\Wine\\AppDefaults\\Gw2-64.exe\\DllOverrides'
+REG_RUNDLL_DLLS='Software\\Wine\\AppDefaults\\rundll32.exe\\DllOverrides'
 # the Mac driver's options for Gw2-64.exe only (the game and its launcher; Steam's processes keep
 # Wine's behaviour)
 REG_GW2_MAC='Software\\Wine\\AppDefaults\\Gw2-64.exe\\Mac Driver'
@@ -617,7 +618,8 @@ registry_lock() {
 registry_unlock() { [ -z "$DRY" ] && [ -z "${SESSION_LOCKED:-}" ] || return 0; exec 8>&-; }
 
 # The bottle's registry settings from settings.conf (Retina mode; for Gw2-64.exe only, the
-# d3d11/dxgi addon order, the addon's version.dll override, raw mouse-look and its speed): only
+# d3d11/dxgi addon order, the addon's version.dll override, raw mouse-look and its speed; the
+# d3d11/dxgi order for rundll32.exe while an addon is in the game folder): only
 # while no session runs or starts (Wine reads user.reg when its wineserver starts and writes it
 # back), else at the next game start that finds none (play)
 apply_registry() {
@@ -651,6 +653,21 @@ apply_registry() {
   case "$RSH" in
     on|foreign) set_reg "$REG_GW2_DLLS" d3dcompiler_47 native,builtin ;;
     *) del_reg "$REG_GW2_DLLS" d3dcompiler_47 ;;
+  esac
+  # arcdps does part of its work in rundll32 with its own DLL: its crash window
+  # (c_exceptionerrormsg, #155) and very likely its update (c_closeandupdate). For a DLL at an
+  # explicit path Wine's default order asks the file's version block, arcdps's names no company,
+  # and rundll32 loads Wine's own d3d11 in place of the file, without that entry point. So while
+  # an addon's d3d11.dll or dxgi.dll is in (arcdps, also as ARC_CHAIN, a ReShade, Nexus...),
+  # rundll32 gets the game's native-first order too (#209)
+  arcdps_state
+  case "$ARC $RSH" in
+    on\ *|foreign\ *|*\ on|*\ foreign)
+      set_reg "$REG_RUNDLL_DLLS" d3d11 native,builtin
+      set_reg "$REG_RUNDLL_DLLS" dxgi native,builtin ;;
+    *)
+      del_reg "$REG_RUNDLL_DLLS" d3d11
+      del_reg "$REG_RUNDLL_DLLS" dxgi ;;
   esac
   registry_unlock
 }
@@ -1475,6 +1492,7 @@ set_arcdps() {
       if is_arcdps "$GAME_DIR/$n"; then run rm -f "$GAME_DIR/$n"; gone=${gone:+$gone and }$n; fi
     done
     registry_unlock
+    apply_registry
     if [ -n "$gone" ]; then
       say "arcdps removed from the game folder ($gone); its settings stay in addons/arcdps"
       echo "@done arcdps is off: its $gone is out of the game folder. Its settings stay in addons/arcdps for next time."
@@ -1534,6 +1552,7 @@ set_arcdps() {
     die "$(proxy_refusal "arcdps stays out")"
   fi
   registry_unlock
+  apply_registry
   echo "@done arcdps is in the game folder ($n from deltaconnected.com). It loads the next time the game starts, and from then on it updates itself.$([ "$PROXY_ON" = 0 ] || echo " ReShade loads arcdps itself now, so both load.")"
 }
 

@@ -341,6 +341,8 @@ with what I need for a bug report:
 - a session report
 - the game's `ArenaNet.log` and `GFXSettings.Gw2-64.exe.xml`
 - Steam's bootstrap, content, gameprocess and shader logs
+- arcdps's `arcdps.log` (its last 5 MB), and the names, sizes and times of `d3d11.dll`, `dxgi.dll`
+  and the files under `addons/arcdps` in the game folder
 - from the ReShade folder, if there is one: `ReShade.log` (its last 5 MB), `ReShade.ini`, the
   current preset as `preset.ini` (only one inside the folder) and the names of the files under
   `Shaders`
@@ -353,7 +355,7 @@ On the way into the zip it removes account, persona and Mac names, Steam IDs, e-
 home folders (also as Wine writes them, `Z:\Users\…`), tokens and the crash logs' machine, account
 and address fields. `Local.dat`, Steam's
 config and Steam's login and connection logs never go in. If a file still holds one of those after
-redaction, the zip leaves it out and lists it in `left-out.txt`. arcdps's logs stay out too. Its
+redaction, the zip leaves it out and lists it in `left-out.txt`. arcdps's other logs stay out. Its
 crash log dumps the game's threads and modules, and I can't be sure it holds no account or character
 names. If I ask for it, look through it before you attach it.
 
@@ -671,6 +673,14 @@ came up.
 Without an addon the game gets the built-in directly. Steam and the launcher keep Wine's default
 order.
 
+`rundll32.exe` gets the same `d3d11` and `dxgi` as `native,builtin` while an addon's `d3d11.dll` or
+`dxgi.dll` is in the game folder (arcdps, also at `addons/arcdps/chain/d3d11.dll`, a ReShade,
+Nexus), and loses them when the last one goes. arcdps does part of its work in `rundll32` with its
+own DLL: its crash window (`c_exceptionerrormsg`) and very likely its update (`c_closeandupdate`).
+In Wine's default order `rundll32` would load Wine's own `d3d11` in place of that file, because
+arcdps's version information names no company (Wine's `version_heuristics`). The entry point would
+then be missing (#155, #209).
+
 arcdps updates itself, so the app can't recognise it by hash. A `d3d11.dll` or `dxgi.dll` next to
 `Gw2-64.exe`, or `addons/arcdps/chain/d3d11.dll`, counts as
 arcdps when it's a PE whose export directory lists `addextension2`, arcdps's extension API, and the
@@ -924,8 +934,8 @@ Without one, those checks are skipped. It covers:
   after reading a live owner, and gets refused. A missing piece refuses Play, and this version's
   pieces under 0.1.0's manifest count as set up.
 - play, the busy checks, repair, reset-shaders, reinstall-engine and the lock
-- Collect Logs' redaction, with no arcdps log, ReShade's files with their `Z:\` paths, uninstall,
-  and a failed install's rollback
+- Collect Logs' redaction, with `arcdps.log` but not arcdps's crash log, ReShade's files with
+  their `Z:\` paths, uninstall, and a failed install's rollback
 - Steam's `-silent` with and without a remembered login, and the CPU counts
 - the session's watcher, with stand-in Steam and game processes and shorter times
   (`GW2_ON_MAC_WATCH_TIMEOUT`, `GW2_ON_MAC_WATCH_GRACE`, `GW2_ON_MAC_WATCH_QUITWAIT`,

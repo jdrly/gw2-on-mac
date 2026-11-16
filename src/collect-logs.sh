@@ -15,11 +15,13 @@
 #   session-report.txt  the last game session in short (session-report.sh)
 #   game-logs/     the game's and Steam's own logs, with game_rules: ArenaNet.log (crash entries;
 #                  their computer, account and address fields taken out), the game's graphics
-#                  settings (GFXSettings.Gw2-64.exe.xml), the addon's log in the game folder, and
-#                  Steam's bootstrap_log, content_log, gameprocess_log and shader_log (Steam IDs
-#                  taken out). Not arcdps's logs (addons/arcdps): its crash log dumps the game's
-#                  threads and modules, which may hold account or character names. Never Local.dat (the game's saved login), Steam's config or its
-#                  login, connection or account logs, nor anything else of the bottle.
+#                  settings (GFXSettings.Gw2-64.exe.xml), the addon's log in the game folder,
+#                  arcdps's arcdps.log, addon-files.txt (the names, sizes and times of d3d11.dll,
+#                  dxgi.dll and the files under addons/arcdps), and Steam's bootstrap_log,
+#                  content_log, gameprocess_log and shader_log (Steam IDs taken out). Not arcdps's
+#                  other logs: its crash log dumps the game's threads and modules, which may hold
+#                  account or character names. Never Local.dat (the game's saved login), Steam's
+#                  config or its login, connection or account logs, nor anything else of the bottle.
 #   reshade/       from the ReShade folder (gw2om.sh's reshade_folder): ReShade.log (its end),
 #                  ReShade.ini, the current preset as preset.ini (the file PresetPath names, only one
 #                  inside the folder) and shaders.txt, the names of the files under Shaders
@@ -85,6 +87,8 @@ literals="$work/literals" literals_short="$work/literals-short"
 awk 'length($0) >= 4' "$work/names" >"$literals"
 awk 'length($0) < 4' "$work/names" >"$literals_short"
 
+# (SOM_ANYWHERE=1: the user, full and account names also inside words, as file names hold them:
+# jd_boss.zevtc)
 redact() {  # [game] stdin → stdout (game: also game_rules)
   SOM_HOME_PATH="$HOME" SOM_ROOT_HOME="$H" SOM_WHOME="$(winform "$HOME")" SOM_WROOT_HOME="$(winform "$H")" \
   SOM_USER="$(id -un)" SOM_NAME="$(id -F 2>/dev/null)" SOM_ACCOUNTS="$accounts" \
@@ -185,7 +189,7 @@ redact() {  # [game] stdin → stdout (game: also game_rules)
       secret_value = "^[^\"\047&,; \t}]+"
       home = ENVIRON["SOM_HOME_PATH"]; rhome = ENVIRON["SOM_ROOT_HOME"]
       whome = ENVIRON["SOM_WHOME"]; wrhome = ENVIRON["SOM_WROOT_HOME"]
-      user = ENVIRON["SOM_USER"]; fullname = ENVIRON["SOM_NAME"]
+      user = ENVIRON["SOM_USER"]; fullname = ENVIRON["SOM_NAME"]; wordonly = ENVIRON["SOM_ANYWHERE"] == ""
       # A user name that is a common word is only replaced in paths, not everywhere.
       split("admin user users mac test game wine guest root home apple steam shared crossover", w, " ")
       for (i in w) common[w[i]] = 1
@@ -201,9 +205,9 @@ redact() {  # [game] stdin → stdout (game: also game_rules)
       s = rep(s, home, "~", 0); s = rep(s, whome, "~", 0)
       s = rep(s, "/Users/" user, "/Users/USER", 1)
       s = rep(s, "\\users\\" user, "\\users\\USER", 1)
-      if (length(user) >= 2 && !(tolower(user) in common)) s = rep(s, user, "USER", 1)
-      if (length(fullname) >= 3) s = rep(s, fullname, "NAME", 1)
-      for (i = 1; i <= n; i++) if (length(accounts[i]) >= 2) s = rep(s, accounts[i], "ACCOUNT", 1)
+      if (length(user) >= 2 && !(tolower(user) in common)) s = rep(s, user, "USER", wordonly)
+      if (length(fullname) >= 3) s = rep(s, fullname, "NAME", wordonly)
+      for (i = 1; i <= n; i++) if (length(accounts[i]) >= 2) s = rep(s, accounts[i], "ACCOUNT", wordonly)
       if (gamelog) s = game_rules(s)
       for (i = 1; i <= nl; i++) s = rep(s, lit[i], "NAME", 0)
       for (i = 1; i <= ns; i++) s = rep(s, short[i], "NAME", 1)
@@ -371,6 +375,26 @@ add_log "$GW2_APPDATA/GFXSettings.Gw2-64.exe.xml" 1000000 game-logs game
 for f in bootstrap_log.txt content_log.txt gameprocess_log.txt shader_log.txt; do
   add_log "$STEAM/logs/$f" 2000000 game-logs/steam game
 done
+# arcdps's arcdps.log (a regular file, not a link), and the names, sizes and times of the game
+# folder's d3d11.dll and dxgi.dll and of the files under addons/arcdps (the first ADDON_FILES; no
+# contents, and find doesn't follow links)
+ADDON_FILES=2000
+if [ -n "$GAME_DIR" ] && [ -d "$GAME_DIR" ]; then
+  arc="$GAME_DIR/addons/arcdps"
+  [ -L "$GAME_DIR/addons" ] || [ -L "$arc" ] || [ -L "$arc/arcdps.log" ] || add_log "$arc/arcdps.log" 5000000 game-logs game
+  ( cd "$GAME_DIR" || exit 0
+    set -- d3d11.dll dxgi.dll
+    [ -L addons ] || set -- "$@" addons/arcdps
+    find "$@" -type f -exec stat -f '%Sm %z %N' -t '%F %T' {} + ) 2>/dev/null | LC_ALL=C sort -k4 >"$work/addon-files"
+  if [ -s "$work/addon-files" ]; then
+    nfiles=$(wc -l <"$work/addon-files" | tr -d ' ')
+    mkdir -p "$out/game-logs"
+    { echo "d3d11.dll, dxgi.dll and the files under addons/arcdps in the game folder: $nfiles (modified, bytes, name)"
+      head -n "$ADDON_FILES" "$work/addon-files"
+      [ "$nfiles" -le "$ADDON_FILES" ] || echo "[GW2 on Mac: only the first $ADDON_FILES]"
+    } | SOM_ANYWHERE=1 redact game >"$out/game-logs/addon-files.txt"
+  fi
+fi
 # ReShade's folder: its log and ini, the current preset and the names of the files under Shaders.
 # No links: only the folder's own files.
 # reshade_preset: PRESET, the file ReShade.ini's [GENERAL] PresetPath names, if it is one inside the
@@ -454,7 +478,7 @@ sha12() { shasum -a 256 "$1" 2>/dev/null | cut -c1-12; }
   echo "Game: $([ -n "$GAME_DIR" ] && [ -f "$GAME_DIR/Gw2-64.exe" ] && echo "installed, Gw2-64.exe $(stat -f '%z bytes, %Sm' "$GAME_DIR/Gw2-64.exe")" || echo "not found")"
   [ -z "$GAME_DIR" ] || echo "  interface addon (version.dll): $([ -f "$GAME_DIR/version.dll" ] && { grep -aq 'gw2-on-mac ui-scale' "$GAME_DIR/version.dll" && echo "GW2 on Mac's" || echo "another program's"; } || echo none)"
   # d3d11.dll and dxgi.dll addons (ReShade, arcdps, Nexus), and the file ReShade loads arcdps from:
-  # which, by gw2om.sh's status keys; arcdps's own logs stay out (its crash log dumps the game's memory)
+  # which, by gw2om.sh's status keys
   for f in d3d11.dll dxgi.dll addons/arcdps/chain/d3d11.dll; do
     [ -n "$GAME_DIR" ] && [ -f "$GAME_DIR/$f" ] || continue
     case " $(key reshade_dll) | $(key arcdps_foreign) " in
