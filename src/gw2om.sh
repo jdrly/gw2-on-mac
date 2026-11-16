@@ -1382,7 +1382,7 @@ proxy_sync() {
   local want=0 ini="$RS/ReShade.ini"
   if [ "${1:-}" != off ] && [ "$ADDONS_LAYOUT" = together ] && our_reshade "$GAME_DIR/d3d11.dll" &&
     is_arcdps "$GAME_DIR/$ARC_CHAIN"; then want=1; fi
-  PROXY_ON=0 PROXY_WANT=$want
+  PROXY_ON=0
   if [ "$want" = 1 ]; then
     rs_safe "$ini" || return 1
     reshade_folder
@@ -1409,6 +1409,27 @@ proxy_path() {
     *) winpath "$GAME_DIR/$ARC_CHAIN" ;;
   esac
 }
+# proxy_enabled <ini>: [PROXY] EnableProxyLibrary is on in it (1 or true, as ReShade reads a bool)
+proxy_enabled() {
+  LC_ALL=C awk '
+    function strip(s, c) {
+      while (s != "" && index(c, substr(s, 1, 1))) s = substr(s, 2)
+      while (s != "" && index(c, substr(s, length(s), 1))) s = substr(s, 1, length(s) - 1)
+      return s }
+    { t = strip($0, " \t\r"); if (NR == 1 && substr(t, 1, 3) == "\357\273\277") t = substr(t, 4)
+      if (substr(t, 1, 1) == "[") { i = index(t, "]"); sec = strip(i ? substr(t, 1, i - 1) : t, " \t[]"); next }
+      i = index(t, "=")
+      if (sec == "PROXY" && i && strip(substr(t, 1, i - 1), " \t") == "EnableProxyLibrary") v = tolower(strip(substr(t, i + 1), " \t")) }
+    END { exit !(v == "1" || v == "true") }' "$1"
+}
+# proxy_safe: ReShade won't look for arcdps where it isn't: the app's ReShade isn't d3d11.dll, or its
+# keys are off, or they are on with arcdps at their path. Only reads; Play checks it before the
+# start, since a game whose ReShade loads a missing file has no Direct3D 11.
+proxy_safe() {
+  local ini="$RS/ReShade.ini"
+  our_reshade "$GAME_DIR/d3d11.dll" && [ -f "$ini" ] && proxy_enabled "$ini" || return 0
+  is_arcdps "$GAME_DIR/$ARC_CHAIN" && ini_set "$ini" PROXY EnableProxyLibrary=1 "ProxyLibrary=$(proxy_path)" | cmp -s - "$ini"
+}
 # proxy_refusal <what stays>: the sentence for an ini that can't be written
 proxy_refusal() { echo "GW2 on Mac couldn't change ReShade's settings ($RS/ReShade.ini), so $1. Try again (details in $LOGS/install.log)."; }
 
@@ -1422,7 +1443,7 @@ sync_arcdps() {
   reshade_state
   arcdps_tidy "$([ "$RSH" = on ] && echo on || echo off)"
   if ! proxy_sync; then
-    [ "$PROXY_WANT" = 1 ] || die "$(proxy_refusal "ReShade would look for arcdps where it isn't, and the game would have no Direct3D 11")"
+    proxy_safe || die "$(proxy_refusal "ReShade would look for arcdps where it isn't, and the game would have no Direct3D 11")"
     warn "$(proxy_refusal "ReShade doesn't load arcdps this time")"
   fi
   registry_unlock
@@ -1455,7 +1476,9 @@ set_arcdps() {
     return 0
   fi
   case "$ARC" in
-    on) registry_unlock; echo "@done arcdps is already in the game folder ($ARC_DLL)."; return 0 ;;
+    on)
+      proxy_sync || die "$(proxy_refusal "ReShade doesn't load arcdps")"
+      registry_unlock; echo "@done arcdps is already in the game folder ($ARC_DLL)."; return 0 ;;
     foreign)
       reshade_state
       case "$RSH" in
@@ -1875,6 +1898,7 @@ set_reshade() {
     die "The game folder has a ReShade.ini of its own. GW2 on Mac leaves it alone, so it can't add ReShade: move that file away first (ReShade's settings go into $RS)."
   if [ "$RSH" = on ] && [ -e "$GAME_DIR/d3dcompiler_47.dll" ] && [ -e "$GAME_DIR/ReShade.ini" ]; then
     reshade_folder
+    proxy_sync || die "$(proxy_refusal "ReShade doesn't load arcdps")"
     write_settings reshade on
     registry_unlock
     apply_registry
@@ -3486,6 +3510,9 @@ cmd_play() {
   if [ -z "$DRY" ]; then
     MISSING=$(components_missing | head -1)
     [ -z "$MISSING" ] || die "The engine is missing GW2 on Mac's $MISSING. Click Repair (with the game and Steam closed)."
+    # (whatever the syncs above did or skipped: ReShade never starts looking for a missing arcdps)
+    proxy_safe || die "ReShade's settings ($RS/ReShade.ini) point it at arcdps where arcdps isn't, and the game would have no Direct3D 11. Click Repair (with the game and Steam closed)."
+
     case "$(graphics_state)" in
       yes) ;;
       update)

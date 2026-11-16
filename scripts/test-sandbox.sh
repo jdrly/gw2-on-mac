@@ -1332,6 +1332,12 @@ check "ReShade off: @done says arcdps is d3d11.dll again; keys off" eval 'echo "
 g set reshade on >/dev/null 2>&1; g set arcdps off >/dev/null 2>&1
 out=$(g set arcdps on 2>&1)
 check "arcdps on next to ReShade: downloaded straight to the chain path, keys on, and @done says so" eval 'echo "$out" | grep -qxF "@done arcdps is in the game folder ($CH from deltaconnected.com). It loads the next time the game starts, and from then on it updates itself. ReShade loads arcdps itself now, so both load." && [ "$(lay)" = "reshade arcdps" ] && keys_ok'
+# the already-there answers put the keys right too
+cp "$RSF/ReShade.ini" "$SANDBOX/rs.ini.keep"
+grep -v -e '^EnableProxyLibrary=' "$SANDBOX/rs.ini.keep" >"$RSF/ReShade.ini"
+check "  keys gone, both in: set arcdps on (already there) turns them on" eval '"$G" set arcdps on | grep -q "already in the game folder" && [ "$(keys)" = 1 ] && keys_ok'
+sed 's/^EnableProxyLibrary=1/EnableProxyLibrary=0/' "$SANDBOX/rs.ini.keep" >"$RSF/ReShade.ini"
+check "  keys off, both in: set reshade on (already there) turns them on" eval '"$G" set reshade on | grep -q "already in the game folder" && [ "$(keys)" = 1 ] && keys_ok'
 
 # Play puts the keys right before the start, without a download: keys off with both files in (the
 # ini rewritten without them), keys on with no arcdps at their path
@@ -1416,7 +1422,7 @@ for at in dxgi.dll "$CH"; do
   mkdir -p "$GD/addons/arcdps/chain"; cp "$SANDBOX/pe/nexus.dll" "$GD/$at"; cp "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll"; before=$(places)
   check "Nexus as $at, arcdps as d3d11.dll: set reshade on refused, naming $at, nothing changes" eval '! "$G" set reshade on >"$SANDBOX/rs.txt" 2>&1 && has "$SANDBOX/rs.txt" "^@error The game folder has another $at (Nexus" && [ "$(places)" = "$before" ] && keys_ok'
   echo "reshade=on" >>"$AD/settings.conf"
-  check "  Repair and Play with reshade=on: ReShade stays out, saying so; nothing renamed or removed" eval 'out=$("$G" repair 2>&1); echo "$out" | grep -q "^@warn ReShade stays out of the game folder. The game folder has another $at" && [ "$(places)" = "$before" ] && keys_ok'
+  check "  Repair with reshade=on: ReShade stays out, saying so; nothing renamed or removed" eval 'out=$("$G" repair 2>&1); echo "$out" | grep -q "^@warn ReShade stays out of the game folder. The game folder has another $at" && [ "$(places)" = "$before" ] && keys_ok'
   g set reshade off >/dev/null 2>&1; rm -f "$GD/d3d11.dll"; before=$(places)
   check "  arcdps out: set arcdps on refused, naming $at, nothing changes" eval '! "$G" set arcdps on >"$SANDBOX/arc.txt" 2>&1 && has "$SANDBOX/arc.txt" "^@error The game folder has another $at (Nexus" && [ "$(places)" = "$before" ]'
   rm -f "$GD/$at"
@@ -1457,8 +1463,18 @@ check "  set arcdps on next to ReShade: refused, saying so; arcdps out again" ev
 chmod 755 "$RSF"; g set arcdps on >/dev/null 2>&1; chmod 555 "$RSF"; before=$(places)
 check "  with both in, set arcdps off and set reshade off: refused, saying so; nothing changes, keys still on" eval '! "$G" set arcdps off >"$SANDBOX/arc.txt" 2>&1 && has "$SANDBOX/arc.txt" "so arcdps stays in" && ! "$G" set reshade off >"$SANDBOX/rs.txt" 2>&1 && has "$SANDBOX/rs.txt" "so ReShade stays in" && [ "$(places)" = "$before" ] && [ "$(keys)" = 1 ]'
 rm -f "$GD/$CH"
-check "  keys on, arcdps gone, the ini unwritable: Play refuses to start, saying why" eval 'out=$(nodl play 2>&1); ! echo "$out" | grep -q "^@done" && echo "$out" | grep -q "^@error GW2 on Mac couldn.t change ReShade.s settings .*the game would have no Direct3D 11"'
-chmod 755 "$RSF"; g repair >/dev/null 2>&1; g set reshade off >/dev/null 2>&1
+: >"$STANDIN_LOG"
+check "  keys on, arcdps gone, the ini unwritable: Play refuses to start, saying why" eval 'out=$(nodl play 2>&1); ! echo "$out" | grep -q "^@done" && echo "$out" | grep -q "^@error GW2 on Mac couldn.t change ReShade.s settings .*the game would have no Direct3D 11" && ! has "$STANDIN_LOG" "^wine "'
+chmod 755 "$RSF"; g repair >/dev/null 2>&1
+check "  Repair, with the ini writable again: keys off, ReShade alone" eval '[ "$(lay)" = "reshade -" ] && [ "$(keys)" = 0 ]'
+g set arcdps on >/dev/null 2>&1
+sed "s|^ProxyLibrary=.*|ProxyLibrary=C:\\\\old bottle\\\\addons\\\\arcdps\\\\chain\\\\d3d11.dll|" "$RSF/ReShade.ini" >"$SANDBOX/ini.old" && cat "$SANDBOX/ini.old" >"$RSF/ReShade.ini"; chmod 555 "$RSF"
+: >"$STANDIN_LOG"
+check "  both in, keys on at an old path, the ini unwritable: Play refuses to start, saying why" eval '[ "$(keys)" = "1 at C:\\old bottle\\addons\\arcdps\\chain\\d3d11.dll" ] && out=$(nodl play 2>&1); ! echo "$out" | grep -q "^@done" && echo "$out" | grep -q "the game would have no Direct3D 11" && ! has "$STANDIN_LOG" "^wine "'
+chmod 755 "$RSF"; g repair >/dev/null 2>&1
+check "  Repair, with the ini writable again: keys on at the chain file" eval '[ "$(lay)" = "reshade arcdps" ] && keys_ok && [ "$(keys)" = 1 ]'
+g set arcdps off >/dev/null 2>&1; g set reshade off >/dev/null 2>&1
+
 check "  then the switches work as usual" switches arcdps on arcdps - reshade on reshade arcdps reshade off arcdps -
 touch "$PAUSE"; rm -f "$PAUSE.at"
 GW2_ON_MAC_TEST_PAUSE="$PAUSE" GW2_ON_MAC_TEST_PAUSE_AT=arcdps-moved "$G" set reshade on >"$SANDBOX/rs.txt" 2>&1 & ra=$!
