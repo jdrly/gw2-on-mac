@@ -87,9 +87,16 @@ jobs:
           path: ${{ runner.temp }}/app.tar
           retention-days: 7
 
-      # Both refusals change the files this job has finished with.
-      - name: build.sh refuses a changed component, stage-components.sh a changed archive
+      # The refusals change the files this job has finished with.
+      - name: build.sh refuses a changed component or an addon older than its source, stage-components.sh a changed archive
         run: |
+          printf 'zz_new_setting=1\n' >>addon/ui-scale/gw2-ui-scale.ini
+          if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took a version.dll without a new setting"; exit 1; fi
+          grep 'version.dll has no zz_new_setting setting' "$RUNNER_TEMP/build.txt"
+          git checkout -- addon/ui-scale/gw2-ui-scale.ini
+          sed -i '' 's/^csspin=/; csspin=/' prebuilt/ui-scale/gw2-ui-scale.ini
+          if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took an ini with csspin only in a comment"; exit 1; fi
+          grep 'gw2-ui-scale.ini has no csspin=' "$RUNNER_TEMP/build.txt"
           printf x >>prebuilt/heat/ntdll.so
           if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took a changed ntdll.so"; exit 1; fi
           grep 'ntdll.so does not match its VERSION' "$RUNNER_TEMP/build.txt"

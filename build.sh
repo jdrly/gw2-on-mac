@@ -123,6 +123,20 @@ for p in $WINEMAC_PATCHES; do
     { echo "$P/winemac was not built from patches/$p as it is now; rebuild and restage" >&2; exit 1; }
 done
 grep -aq 'gw2-on-mac ui-scale' "$P/ui-scale/version.dll" || { echo "$P/ui-scale/version.dll is not the addon" >&2; exit 1; }
+# The addon isn't older than addon/ui-scale: each setting in its ini is a string in version.dll (the
+# key the DLL reads, between NULs) and a key=value line in the bundled ini
+src_ini=addon/ui-scale/gw2-ui-scale.ini
+[ -f "$src_ini" ] || { echo "Missing $src_ini" >&2; exit 1; }
+keys="$(sed -n 's/^\([A-Za-z][A-Za-z0-9_-]*\)=.*/\1/p' "$src_ini")"
+[ -n "$keys" ] || { echo "$src_ini has no settings" >&2; exit 1; }
+mkdir -p "$CACHE"
+LC_ALL=C tr '\0' '\n' <"$P/ui-scale/version.dll" >"$CACHE/ui-scale-strings.txt"
+for k in $keys; do
+  LC_ALL=C grep -aqxF -- "$k" "$CACHE/ui-scale-strings.txt" ||
+    { echo "$P/ui-scale/version.dll has no $k setting: it is older than addon/ui-scale; rebuild it and restage" >&2; exit 1; }
+  grep -q "^$k=" "$P/ui-scale/gw2-ui-scale.ini" ||
+    { echo "$P/ui-scale/gw2-ui-scale.ini has no $k=: it is older than addon/ui-scale; restage it" >&2; exit 1; }
+done
 DXMT_VERSION="$(cat "$P/dxmt/VERSION")"
 DXMT_COMMIT="${DXMT_VERSION##*-g}"
 # the athei/wine commit the Wine pieces were built from, as their record names it
