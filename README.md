@@ -243,9 +243,9 @@ What the switch does:
   next to `Gw2-64.exe`. Otherwise it downloads Microsoft's copy from
   [mozilla/fxc2](https://github.com/mozilla/fxc2), pinned by sha256 as well. A `d3dcompiler_47.dll`
   that is already next to `Gw2-64.exe` stays as it is.
-- The first time you turn ReShade on, it also downloads two effect packs from GitHub at fixed
-  commits, the ones ReShade's own installer picks by default: crosire's standard effects and
-  CeeJayDK's SweetFX.
+- If you haven't added shaders of your own yet, turning ReShade on for the first time also
+  downloads two effect packs from GitHub at fixed commits, the ones ReShade's own installer picks by
+  default: crosire's standard effects and CeeJayDK's SweetFX.
 - The third file in the game folder is a two-line `ReShade.ini` that points ReShade at its own
   folder.
 - Off removes ReShade's `d3d11.dll`, that `ReShade.ini`, and the compiler if the app put it there.
@@ -864,7 +864,8 @@ which has Sparkle's key and my Developer ID), building the components themselves
 route's and the real arcdps's checks, and playing.
 
 `scripts/test-sandbox.sh` tests the backend of a built app end to end in `work/app-sandbox/test`,
-with 558 checks on GitHub's runner, which skips the few that need my workspace or more CPUs. It uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and
+with 558 checks on GitHub's runner, which skips the few that need my workspace or more CPUs. It
+uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and
 ArenaNet's downloads itself, and uses a clone of the game's own ArenaNet-signed `Gw2-64.exe` as the
 installer to check. That's `SIGNED_PE`, by default the copy in my development workspace's bottle.
 Without one, those checks are skipped. It covers:
