@@ -1347,6 +1347,7 @@ out=$(g set arcdps on 2>&1); out2=$(g set reshade on 2>&1)
 check "both on: ReShade d3d11.dll, arcdps at the chain path, and @done says ReShade loads arcdps" eval '[ "$(lay)" = "reshade arcdps" ] && echo "$out2" | grep -qx "@done ReShade 6.8.0 is in the game folder as d3d11.dll. It loads the next time the game starts. ReShade loads arcdps itself now, so both load."'
 check "  the ReShade folder's ReShade.ini: EnableProxyLibrary=1, ProxyLibrary=the chain file as C:\\" eval 'grep -qxF "EnableProxyLibrary=1" "$RSF/ReShade.ini" && grep -qxF "ProxyLibrary=$PX" "$RSF/ReShade.ini" && [ "$(keys)" = 1 ] && has "$LOGS/install.log" "ReShade.ini: \[PROXY\] EnableProxyLibrary=1"'
 check "  status: arcdps on at the chain path with no foreign file, reshade_state=on with no blocker" eval '[ "$(st arcdps)/$(arcst)/$(st arcdps_dll)/$(st arcdps_foreign)/$(rsst)/$(st reshade_blocker)/$(st reshade_dll)" = "on/on/$CH//on//d3d11.dll" ]'
+check "  rundll32.exe gets d3d11 and dxgi native,builtin" rundll on
 check "  settings say the same, and addons_layout=together" eval '[ "$(sett arcdps_state)/$(sett arcdps_dll)/$(sett reshade_state)/$(sett reshade)/$(sett addons_layout)" = "on/$CH/on/on/together" ]'
 check "  set arcdps on and set reshade on again: already there, nothing moves" eval '"$G" set arcdps on | grep -qF "already in the game folder ($CH)" && "$G" set reshade on | grep -q "already in the game folder (d3d11.dll)" && [ "$(lay)" = "reshade arcdps" ] && keys_ok'
 out=$(g set reshade off 2>&1)
@@ -1436,6 +1437,7 @@ collect
 check "  Collect Logs: system-info names ReShade as d3d11.dll and arcdps at the chain path" \
   eval 'has "$Z/system-info.txt" "^  d3d11.dll addon: ReShade, " && has "$Z/system-info.txt" "^  $CH addon: arcdps, " && grep -qxF "ReShade: on, 6.8.0 as d3d11.dll; arcdps on as $CH" "$Z/system-info.txt"'
 check "  the session report: ReShade and arcdps on as that session started, arcdps at the chain path" grep -qxF "ReShade at the start: on, 6.8.0 as d3d11.dll; arcdps on as $CH" "$Z/session-report.txt"
+check "  addon-files.txt names ReShade's d3d11.dll and arcdps at the chain path" eval 'grep -qE " d3d11.dll\$" "$Z/game-logs/addon-files.txt" && grep -qE " $CH\$" "$Z/game-logs/addon-files.txt"'
 
 # another program's file at any of the three places blocks both switches, named, and is never
 # touched (nor is arcdps renamed next to it)
@@ -1512,10 +1514,12 @@ touch "$PAUSE"; rm -f "$PAUSE.at"
 GW2_ON_MAC_TEST_PAUSE="$PAUSE" GW2_ON_MAC_TEST_PAUSE_AT=arcdps-moved "$G" set reshade on >"$SANDBOX/rs.txt" 2>&1 & ra=$!
 wait_at; kill -9 $ra 2>/dev/null; wait $ra 2>/dev/null; rm -f "$PAUSE" "$PAUSE.at"
 check "killed after the rename: arcdps at the chain path, ReShade off, keys off" eval '[ "$(lay)" = "- arcdps" ] && [ "$(arcst)/$(rsst)/$(sett reshade)" = on/off/off ] && keys_ok'
+g set rawmouse on >/dev/null
+check "  arcdps only at the chain path: rundll32.exe gets d3d11 and dxgi native,builtin" rundll on
 check "  Repair moves arcdps back to d3d11.dll" eval '"$G" repair >/dev/null 2>&1 && [ "$(lay)" = "arcdps -" ] && keys_ok'
 check "  then ReShade on and off work as usual" switches reshade on reshade arcdps reshade off arcdps - arcdps off - -
 g set reshade off >/dev/null 2>&1
-check "  and neither file is left" none_left
+check "  and neither file is left, nor rundll32.exe's overrides" eval 'none_left && rundll off'
 # nothing changes while a session runs
 g set arcdps on >/dev/null 2>&1
 mv "$ENG/bin/wineserver" "$ENG/bin/wineserver.heat" && cp "$SANDBOX/sleeper" "$ENG/bin/wineserver"
