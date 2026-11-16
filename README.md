@@ -714,7 +714,13 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   version in one place: its `DXMT_MTL4_PRESENT=mtl3` line as the table wrote it goes, with its
   comment. A `DXMT_MTL4_PRESENT` line I changed, such as `=done`, stays and still wins: the file's
   lines come after the rule's entries. One I commented out to play Metal 4's own present becomes
-  `DXMT_MTL4_PRESENT=mtl4` under a comment, so it stays off. A row whose variable a line of the file sets, *Faster locks* with the file's
+  `DXMT_MTL4_PRESENT=mtl4` under a comment, so it stays off.
+  Version 8 takes three lines out because my DXMT fork deletes their switches: `DXMT_PSO_ARCHIVE=1`
+  and `DXMT_PSO_GENERATIONS=1` (with the archive on the game crashed at exit, and Metal's own
+  shader cache already keeps what it saved) and `DXMT_PRESENT_QUEUE=pace` (it gave up at frame 181
+  in every session). A line as the table wrote it goes with its comment. One I changed or commented
+  out stays as it is, and does nothing once my DXMT fork's build no longer has the switch.
+  A row whose variable a line of the file sets, *Faster locks* with the file's
   `WINE_HEAT_SPIN`, is greyed while that line is there, since the file's entry wins. A line of the table goes in only while the file of mine that
   reads it is in place and has the switch: the `switches:` line of my `ntdll.so`'s,
   `winemac.so`'s or FEX's `VERSION` (a `VERSION` without that line names none). My `win32u.so`'s
@@ -1249,7 +1255,8 @@ Without one, those checks are skipped. It covers:
   a `compatdb.local` rule for the game but not one for another program, a file at version 5
   updated (with a `FEX_HOSTFEATURES` line of mine, and with AVX already decided there), version
   7's `DXMT_MTL4_SHOWN_WAIT` in and out, a file at version 6 updated (and with that line
-  commented out, which stays so), a line commented out or added, the engine's own DXMT, a second start
+  commented out, which stays so), a file at version 7 updated (version 8's three lines gone, a
+  changed or commented-out one kept), a line commented out or added, the engine's own DXMT, a second start
   that changes nothing, an update that adds a newer switch and keeps the rest, a row turned off
   that stays off, a release that writes no file and reads none, and a release's install updated
   by a development build
