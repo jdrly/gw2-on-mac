@@ -472,7 +472,7 @@ check "  never Local.dat or Steam's config" sh -c "! find '$Z' -name Local.dat -
 check "  the crash log kept its exception" has "$Z/game-logs/ArenaNet.log" "Exception: c0000005"
 check "  no arcdps log (its crash log may hold character names)" sh -c "! find '$Z' -iname 'arcdps*' | grep -q . && ! grep -rq 'Zz Charname Q' '$Z'"
 check "  system-info names the d3d11.dll addon: arcdps" has "$Z/system-info.txt" "d3d11.dll addon: arcdps"
-check "  system-info: ReShade off, arcdps in" grep -qxF "ReShade: off; arcdps on" "$Z/system-info.txt"
+check "  system-info: ReShade blocked by arcdps's d3d11.dll (the exclusive layout), arcdps in" grep -qxF "ReShade: blocked (another d3d11.dll in the game folder); arcdps on" "$Z/system-info.txt"
 check "  the session report: ReShade and arcdps off as the session started, no compiler" \
   eval 'grep -qxF "ReShade at the start: off; arcdps off" "$Z/session-report.txt" && grep -qxF "  d3dcompiler_47.dll next to Gw2-64.exe: none" "$Z/session-report.txt"'
 rm -rf "$GD/addons" "$GD/d3d11.dll"
