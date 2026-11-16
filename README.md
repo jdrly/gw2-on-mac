@@ -684,8 +684,11 @@ and the commit above is its source. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_N
 
 **The interface addon** is this repository's own code in [`addon/ui-scale`](addon/ui-scale).
 `scripts/build-addon.sh` builds `version.dll` with Homebrew's mingw-w64 (`brew install mingw-w64`)
-into `work/ui-scale/build` and runs its native test. Staging still takes the workspace's build of
-the same source, which differs only in link timestamps.
+into `work/ui-scale/build` and runs its native test. Staging takes the workspace's build of the
+same source, which differs only in link timestamps, or this repository's with
+`UISCALE_BUILD="$PWD/work/ui-scale/build"`. `build.sh` refuses an addon older than its source:
+each setting in `addon/ui-scale/gw2-ui-scale.ini` has to be a `key=` line in the bundled ini and a
+string in the bundled `version.dll`.
 
 **What build.sh does.** It checks `prebuilt/` again, compiles `src/native/*.swift` for arm64 and the
 `procpaths` and `sessionlock` helpers, and bundles the components, fonts, art and licences. It
@@ -715,7 +718,8 @@ Mac. It has read-only access and no secrets, and its actions are pinned by commi
 - `lint`: `shellcheck -S warning` on the bash scripts and `actionlint` on the workflows
 - `build`: `bash -n` (macOS's 3.2) on the scripts, `stage-components.sh --fetch`, `./build.sh`,
   then the build's `VERSIONS` and component hashes in the run's summary. It also checks that
-  `build.sh` refuses a changed `ntdll.so` and `stage-components.sh` a changed archive.
+  `build.sh` refuses a changed `ntdll.so` and an addon older than its source, and
+  `stage-components.sh` a changed archive.
 - `sandbox`: `test-sandbox.sh` on that build. Without my workspace, the ArenaNet route and the real
   arcdps are skipped, and each skip shows as a notice on the run.
 - `renders`: `ui-render.sh`, with the PNGs as the run's `renders` artifact. A runner has no design
