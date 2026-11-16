@@ -1150,7 +1150,8 @@ out=$(g set reshade off 2>&1) && rc=0 || rc=$?
 check "set reshade off: d3d11.dll, the compiler the app placed and ReShade.ini out of the game folder" eval '[ "$rc" = 0 ] && [ ! -e "$GD/d3d11.dll" ] && [ ! -e "$GD/d3dcompiler_47.dll" ] && [ ! -e "$GD/ReShade.ini" ]'
 check "  the ReShade folder stays, and the @done line says where" eval 'has "$RSF/Presets/Mine.ini" preset && [ -f "$RSF/Shaders/Standard/ReShade.fxh" ] && echo "$out" | grep -qxF "@done ReShade is off: its d3d11.dll is out of the game folder. Your presets and shaders stay in $RSF."'
 check "  reshade=off, reshade_state=off, the override deleted" eval '[ "$(sett reshade)/$(rsst)" = off/off ] && noreg "$GW2_DLLS" d3dcompiler_47'
-# the game's own compiler (bin64/cef); the packs aren't downloaded again while Shaders has files
+# the game's own compiler (bin64/cef); the packs aren't downloaded again (Shaders has ReShade.fxh,
+# and On brought SweetFX once)
 mkdir -p "$GD/bin64/cef" && cp "$SANDBOX/pe/cef-compiler.dll" "$GD/bin64/cef/d3dcompiler_47.dll"
 rm -f "$CACHE/downloads/reshade/d3dcompiler_47.dll"
 out=$(GW2_ON_MAC_COMPILER_URL="file://$SANDBOX/nowhere/c.dll" GW2_ON_MAC_RESHADE_SHADERS_URL="file://$SANDBOX/nowhere/s.zip" GW2_ON_MAC_SWEETFX_URL="file://$SANDBOX/nowhere/f.zip" "$G" set reshade on 2>&1) && rc=0 || rc=$?
@@ -1517,6 +1518,29 @@ i=0; until "$APP/Contents/Resources/helpers/sessionlock" held "$AD/.session.lock
 check "  while a Play holds the session's lock: reshade use refused" eval '! use Running.ini && err_has "A game session is starting" && same "$SANDBOX/ini.before" "$RSF/ReShade.ini"'
 kill $hp 2>/dev/null; wait $hp 2>/dev/null
 check "no staging folder is left in the cache" [ ! -e "$CACHE/downloads/reshade/import" ]
+rm -rf "$RSF"; mv "$SANDBOX/rsf.keep" "$RSF"
+
+section "ReShade's packs at On (after an import, deleted by hand)"
+# On brings the standard effects whenever Shaders has no ReShade.fxh, and SweetFX only once. The
+# folder from the sections above is put aside: each case starts before the first On.
+mv "$RSF" "$SANDBOX/rsf.keep"
+imp "$LF"
+out=$(g set reshade on 2>&1) && rc=0 || rc=$?
+check "a pack imported before the first On: On adds the standard effects and SweetFX next to it" eval '[ "$rc" = 0 ] && same "$S1/Shaders/ReShade.fxh" "$RSF/Shaders/Standard/ReShade.fxh" && [ -f "$RSF/Shaders/SweetFX/SweetFX/CAS.fx" ] && same "$LF/CAS.fx" "$RSF/Shaders/loose fx/CAS.fx" || { echo "$out"; false; }'
+rm -rf "$RSF/Shaders/SweetFX" "$RSF/Textures/SweetFX"
+g set reshade off >/dev/null 2>&1
+out=$(GW2_ON_MAC_SWEETFX_URL="file://$SANDBOX/nowhere/f.zip" "$G" set reshade on 2>&1) && rc=0 || rc=$?
+check "SweetFX deleted by hand: the next On leaves it out, without a download" eval '[ "$rc" = 0 ] && [ ! -e "$RSF/Shaders/SweetFX" ] && ! echo "$out" | grep -q "^@progress"'
+rm -rf "$RSF/Shaders/Standard" "$RSF/Textures/Standard"
+g set reshade off >/dev/null 2>&1
+out=$(GW2_ON_MAC_SWEETFX_URL="file://$SANDBOX/nowhere/f.zip" "$G" set reshade on 2>&1) && rc=0 || rc=$?
+check "the standard effects deleted by hand: the next On brings them back, and not SweetFX" eval '[ "$rc" = 0 ] && [ -f "$RSF/Shaders/Standard/ReShade.fxh" ] && [ -f "$RSF/Textures/Standard/FontAtlas.png" ] && [ ! -e "$RSF/Shaders/SweetFX" ]'
+g set reshade off >/dev/null 2>&1
+rm -rf "$RSF"
+imp "$IM/Night.ini"
+out=$(g set reshade on 2>&1) && rc=0 || rc=$?
+check "a preset imported before the first On: On adds both packs" eval '[ "$rc" = 0 ] && [ -f "$RSF/Shaders/Standard/ReShade.fxh" ] && [ -f "$RSF/Shaders/SweetFX/SweetFX/CAS.fx" ] && [ -f "$RSF/Presets/Night.ini" ]'
+g set reshade off >/dev/null 2>&1
 rm -rf "$RSF"; mv "$SANDBOX/rsf.keep" "$RSF"
 
 section "Uninstall"
