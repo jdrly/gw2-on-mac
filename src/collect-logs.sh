@@ -87,6 +87,8 @@ literals="$work/literals" literals_short="$work/literals-short"
 awk 'length($0) >= 4' "$work/names" >"$literals"
 awk 'length($0) < 4' "$work/names" >"$literals_short"
 
+# (SOM_ANYWHERE=1: the user, full and account names also inside words, as file names hold them:
+# jd_boss.zevtc)
 redact() {  # [game] stdin → stdout (game: also game_rules)
   SOM_HOME_PATH="$HOME" SOM_ROOT_HOME="$H" SOM_WHOME="$(winform "$HOME")" SOM_WROOT_HOME="$(winform "$H")" \
   SOM_USER="$(id -un)" SOM_NAME="$(id -F 2>/dev/null)" SOM_ACCOUNTS="$accounts" \
@@ -187,7 +189,7 @@ redact() {  # [game] stdin → stdout (game: also game_rules)
       secret_value = "^[^\"\047&,; \t}]+"
       home = ENVIRON["SOM_HOME_PATH"]; rhome = ENVIRON["SOM_ROOT_HOME"]
       whome = ENVIRON["SOM_WHOME"]; wrhome = ENVIRON["SOM_WROOT_HOME"]
-      user = ENVIRON["SOM_USER"]; fullname = ENVIRON["SOM_NAME"]
+      user = ENVIRON["SOM_USER"]; fullname = ENVIRON["SOM_NAME"]; wordonly = ENVIRON["SOM_ANYWHERE"] == ""
       # A user name that is a common word is only replaced in paths, not everywhere.
       split("admin user users mac test game wine guest root home apple steam shared crossover", w, " ")
       for (i in w) common[w[i]] = 1
@@ -203,9 +205,9 @@ redact() {  # [game] stdin → stdout (game: also game_rules)
       s = rep(s, home, "~", 0); s = rep(s, whome, "~", 0)
       s = rep(s, "/Users/" user, "/Users/USER", 1)
       s = rep(s, "\\users\\" user, "\\users\\USER", 1)
-      if (length(user) >= 2 && !(tolower(user) in common)) s = rep(s, user, "USER", 1)
-      if (length(fullname) >= 3) s = rep(s, fullname, "NAME", 1)
-      for (i = 1; i <= n; i++) if (length(accounts[i]) >= 2) s = rep(s, accounts[i], "ACCOUNT", 1)
+      if (length(user) >= 2 && !(tolower(user) in common)) s = rep(s, user, "USER", wordonly)
+      if (length(fullname) >= 3) s = rep(s, fullname, "NAME", wordonly)
+      for (i = 1; i <= n; i++) if (length(accounts[i]) >= 2) s = rep(s, accounts[i], "ACCOUNT", wordonly)
       if (gamelog) s = game_rules(s)
       for (i = 1; i <= nl; i++) s = rep(s, lit[i], "NAME", 0)
       for (i = 1; i <= ns; i++) s = rep(s, short[i], "NAME", 1)
@@ -390,7 +392,7 @@ if [ -n "$GAME_DIR" ] && [ -d "$GAME_DIR" ]; then
     { echo "d3d11.dll, dxgi.dll and the files under addons/arcdps in the game folder: $nfiles (modified, bytes, name)"
       head -n "$ADDON_FILES" "$work/addon-files"
       [ "$nfiles" -le "$ADDON_FILES" ] || echo "[GW2 on Mac: only the first $ADDON_FILES]"
-    } | redact game >"$out/game-logs/addon-files.txt"
+    } | SOM_ANYWHERE=1 redact game >"$out/game-logs/addon-files.txt"
   fi
 fi
 # ReShade's folder: its log and ini, the current preset and the names of the files under Shaders.

@@ -454,6 +454,7 @@ printf 'started by %s from %s/Library, mail zz.person@example.com, token=abcDEF1
 printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60\ninfo:  STATS fps=60.0 ms=16.7/24.8 cb=1.1 rp=31.7(+0.0 merged) encode=0.23+1.03/10.3\ninfo:  HITCH frame=52 ms=120.0 dxmt(ms/calls): create=4.0/37 flush=3.5/1\n' >"$LOGS/Gw2-64_d3d11.log"
 mkdir -p "$GD/addons/arcdps" && printf 'crash\nself: Zz Charname Q, zz_arc_acct.1234\n' >"$GD/addons/arcdps/arcdps_lastcrash.log"
 cp "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll"; mkdir -p "$GD/addons/arcdps/logs" && : >"$GD/addons/arcdps/logs/$(id -un)-boss.zevtc"
+: >"$GD/addons/arcdps/logs/$(id -un)_boss.zevtc"
 # collect: Collect Logs into $SANDBOX/zip, unzipped into $SANDBOX/unzipped (Z: its folder)
 collect() {
   rm -rf "$SANDBOX/zip" "$SANDBOX/unzipped" && mkdir -p "$SANDBOX/zip" "$SANDBOX/unzipped"
@@ -489,7 +490,7 @@ check "  arcdps.log in game-logs, redacted: Z:~\\, no home folder or user name" 
   eval 'has "$Z/game-logs/arcdps.log" "^info: build" && grep -qF "Z:~\\Library\\" "$Z/game-logs/arcdps.log" && no_home "$Z/game-logs/arcdps.log"'
 check "  not arcdps's crash log (it may hold character names)" eval '[ "$(cd "$Z" && find . -iname "arcdps*")" = ./game-logs/arcdps.log ] && ! grep -rq "Zz Charname Q" "$Z"'
 check "  addon-files.txt lists d3d11.dll and the files under addons/arcdps with sizes, redacted" \
-  eval 'f="$Z/game-logs/addon-files.txt"; grep -qE "^[0-9-]+ [0-9:]+ $(wc -c <"$GD/d3d11.dll" | tr -d " ") d3d11.dll\$" "$f" && grep -qE " addons/arcdps/arcdps_lastcrash.log\$" "$f" && grep -qE " 0 addons/arcdps/logs/USER-boss.zevtc\$" "$f" && ! grep -q " dxgi.dll\$" "$f" && no_home "$f"'
+  eval 'f="$Z/game-logs/addon-files.txt"; grep -qE "^[0-9-]+ [0-9:]+ $(wc -c <"$GD/d3d11.dll" | tr -d " ") d3d11.dll\$" "$f" && grep -qE " addons/arcdps/arcdps_lastcrash.log\$" "$f" && grep -qE " 0 addons/arcdps/logs/USER-boss.zevtc\$" "$f" && grep -qE " 0 addons/arcdps/logs/USER_boss.zevtc\$" "$f" && ! grep -qi "$(id -un)_boss" "$f" && ! grep -q " dxgi.dll\$" "$f" && no_home "$f"'
 check "  system-info names the d3d11.dll addon: arcdps" has "$Z/system-info.txt" "d3d11.dll addon: arcdps"
 check "  system-info: ReShade off, arcdps in as d3d11.dll" grep -qxF "ReShade: off; arcdps on as d3d11.dll" "$Z/system-info.txt"
 check "  the session report: ReShade and arcdps off as the session started, no compiler" \
