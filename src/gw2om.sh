@@ -46,8 +46,9 @@
 #   gw2om.sh set arcdps on|off arcdps into the game folder (downloaded from deltaconnected.com,
 #                              checked against its published md5) or out of it (only arcdps; its
 #                              addons/arcdps settings stay), while no session runs; status and
-#                              settings print arcdps, arcdps_state (on|off|foreign|nogame).
-#                              With ReShade in, arcdps is dxgi.dll (ADDONS_LAYOUT)
+#                              settings print arcdps, arcdps_state (on|off|foreign|nogame),
+#                              arcdps_dll. With ReShade in, ReShade loads arcdps from
+#                              addons/arcdps/chain/d3d11.dll (ADDONS_LAYOUT)
 #   gw2om.sh set reshade on|off
 #                              ReShade 6.8.0 into the game folder as d3d11.dll (from reshade.me's
 #                              installer, pinned by sha256), with Microsoft's d3dcompiler_47.dll
@@ -1248,19 +1249,24 @@ sync_uiscale() {
 # where it loads first (the d3d11/dxgi order for Gw2-64.exe, apply_registry) and passes the game's
 # Direct3D 11 on to DXMT. It updates itself, so it is recognised by what it is, not by a hash: a PE
 # whose export table has arcdps's extension API (addextension2) and that names arcdps. As dxgi.dll
-# it counts too. Its settings (addons/arcdps/) stay when it goes. Another d3d11.dll or dxgi.dll
-# (Nexus, a ReShade the app didn't place...) is never touched: state foreign.
+# it counts too, and at the chain path (below). Its settings (addons/arcdps/) stay when it goes.
+# Another file at those places (Nexus, a ReShade the app didn't place...) is never touched: state
+# foreign.
 ARCDPS_URL=https://www.deltaconnected.com/arcdps/x64
 [ -z "$ROOT" ] || ARCDPS_URL="${GW2_ON_MAC_ARCDPS_URL:-$ARCDPS_URL}"
-ARCDPS_DLLS="d3d11.dll dxgi.dll"
-# arcdps and the app's ReShade in one game folder: ADDONS_LAYOUT=together gives each a file name
-# (addon_dll): alone, each is d3d11.dll; with both in, ReShade is d3d11.dll and arcdps dxgi.dll
-# (arcdps's page allows that name). ADDONS_LAYOUT=exclusive: each counts the other as a file in its
+ARC_CHAIN=addons/arcdps/chain/d3d11.dll
+ARCDPS_DLLS="d3d11.dll dxgi.dll $ARC_CHAIN"
+# arcdps and the app's ReShade in one game folder. ADDONS_LAYOUT=together (addon_dll): alone, each
+# is d3d11.dll; with both in, ReShade is d3d11.dll and arcdps is ARC_CHAIN, which ReShade loads
+# itself through the [PROXY] keys of the ReShade folder's ReShade.ini (proxy_sync). Next to
+# ReShade, arcdps as dxgi.dll didn't load in my sessions (#205, #208), so an arcdps that 0.1.4's
+# development builds left as dxgi.dll moves to ARC_CHAIN too. ADDONS_LAYOUT=exclusive: each counts the other as a file in its
 # way, and its switch refuses until the other is off.
 ADDONS_LAYOUT=together
 [ -z "$ROOT" ] || ADDONS_LAYOUT="${GW2_ON_MAC_ADDONS_LAYOUT:-$ADDONS_LAYOUT}"
-# addon_dll <arcdps|reshade> <the other one in: on|off>: the addon's file name in the game folder
-addon_dll() { case "$1 $2 $ADDONS_LAYOUT" in "arcdps on together") echo dxgi.dll ;; *) echo d3d11.dll ;; esac; }
+PROXY_ON=0
+# addon_dll <arcdps|reshade> <the other one in: on|off>: the addon's path in the game folder
+addon_dll() { case "$1 $2 $ADDONS_LAYOUT" in "arcdps on together") echo "$ARC_CHAIN" ;; *) echo d3d11.dll ;; esac; }
 # our_reshade <file>: the app's ReShade (the pinned file)
 our_reshade() { [ -f "$1" ] && [ "$(sha256 "$1")" = "$RESHADE_DLL_SHA256" ]; }
 
@@ -1312,7 +1318,7 @@ arcdps_state() {
   for n in $ARCDPS_DLLS; do
     [ -f "$GAME_DIR/$n" ] || continue
     if is_arcdps "$GAME_DIR/$n"; then ARC=on ARC_DLL=${ARC_DLL:+$ARC_DLL }$n
-    elif [ "$ADDONS_LAYOUT" = together ] && our_reshade "$GAME_DIR/$n"; then :
+    elif [ "$ADDONS_LAYOUT" = together ] && [ "$n" != "$ARC_CHAIN" ] && our_reshade "$GAME_DIR/$n"; then :
     else ARC_FOREIGN=${ARC_FOREIGN:+$ARC_FOREIGN }$n
     fi
   done
@@ -1329,6 +1335,7 @@ arcdps_move() {
     log "arcdps: not renamed from $1 to $2 (not arcdps, or $2 is taken)"
     return 1
   fi
+  [ -d "$(dirname "$to")" ] || run mkdir -p "$(dirname "$to")" || return 1
   run mv -n "$from" "$to" || return 1
   if [ -z "$DRY" ] && { [ -e "$from" ] || ! is_arcdps "$to"; }; then
     log "arcdps: the rename from $1 to $2 didn't happen"
@@ -1340,47 +1347,99 @@ arcdps_move() {
 
 # arcdps_tidy <ReShade in: on|off>: arcdps under the name addon_dll gives (the caller holds the
 # session's lock, and no session runs). arcdps updates itself and may write a new d3d11.dll while
-# it runs as dxgi.dll: under both names, the newer file stays and the older goes (both are arcdps).
-# A name that is taken leaves arcdps where it is. ARC_MOVED: the name arcdps was renamed to, if any.
+# ReShade loads it from ARC_CHAIN: under two or three names, the newest file stays and the others
+# go (all are arcdps; the name addon_dll gives wins a tie). A name that is taken leaves arcdps where
+# it is. ARC_MOVED: the name arcdps was renamed to, if any.
 arcdps_tidy() {
-  local want newer older
+  local want newer n
   ARC_MOVED=""
   arcdps_state
   [ "$ARC" = on ] || return 0
   want=$(addon_dll arcdps "$1")
-  if [ "$ARC_DLL" = "d3d11.dll dxgi.dll" ]; then
-    if [ "$GAME_DIR/d3d11.dll" -nt "$GAME_DIR/dxgi.dll" ]; then newer=d3d11.dll
-    elif [ "$GAME_DIR/dxgi.dll" -nt "$GAME_DIR/d3d11.dll" ]; then newer=dxgi.dll
-    else newer=$want
-    fi
-    if [ "$newer" = d3d11.dll ]; then older=dxgi.dll; else older=d3d11.dll; fi
-    log "arcdps: in the game folder as d3d11.dll and dxgi.dll (it updated itself); keeping the newer $newer (sha256 $(sha256 "$GAME_DIR/$newer")), removing $older (sha256 $(sha256 "$GAME_DIR/$older"))"
-    run rm -f "$GAME_DIR/$older"
-    ARC_DLL=$newer
-  fi
+  case "$ARC_DLL" in
+    *" "*)
+      case " $ARC_DLL " in *" $want "*) newer=$want ;; *) newer=${ARC_DLL%% *} ;; esac
+      for n in $ARC_DLL; do [ ! "$GAME_DIR/$n" -nt "$GAME_DIR/$newer" ] || newer=$n; done
+      log "arcdps: in the game folder as ${ARC_DLL// / and } (it updated itself); keeping the newer $newer (sha256 $(sha256 "$GAME_DIR/$newer"))"
+      for n in $ARC_DLL; do
+        [ "$n" = "$newer" ] || { log "arcdps: removing $n (sha256 $(sha256 "$GAME_DIR/$n"))"; run rm -f "$GAME_DIR/$n"; }
+      done
+      ARC_DLL=$newer ;;
+  esac
   [ "$ARC_DLL" = "$want" ] || arcdps_move "$ARC_DLL" "$want" || true
 }
 
-# sync_arcdps: arcdps under the name addon_dll gives, before Play, at Install and at Repair; never
-# while a session runs or starts
+# proxy_sync [off]: ReShade's [PROXY] keys in the ReShade folder's ReShade.ini (ReShade reads them
+# from its own ini at its start, source/dll_main.cpp at v6.8.0), on exactly when the app's ReShade
+# is d3d11.dll and arcdps is ARC_CHAIN in the together layout: EnableProxyLibrary=1 and
+# ProxyLibrary=ARC_CHAIN's Windows path, so ReShade loads arcdps in place of system32's d3d11.dll.
+# Else EnableProxyLibrary=0 where the file has the key (with off: always, before a step takes
+# either file away). The keys on with no arcdps there would leave the game without Direct3D 11, so
+# the files go in before the keys go on, and the keys go off before a file goes. Only those keys
+# change (ini_set); the caller holds the session's lock. PROXY_ON: 1 when on. Status 1 when the
+# ini can't be written.
+proxy_sync() {
+  local want=0 ini="$RS/ReShade.ini"
+  if [ "${1:-}" != off ] && [ "$ADDONS_LAYOUT" = together ] && our_reshade "$GAME_DIR/d3d11.dll" &&
+    is_arcdps "$GAME_DIR/$ARC_CHAIN"; then want=1; fi
+  PROXY_ON=0 PROXY_WANT=$want
+  if [ "$want" = 1 ]; then
+    rs_safe "$ini" || return 1
+    reshade_folder
+    set -- EnableProxyLibrary=1 "ProxyLibrary=$(proxy_path)"
+  else
+    [ -f "$ini" ] && grep -q EnableProxyLibrary "$ini" || return 0
+    rs_safe "$ini" || return 1
+    set -- EnableProxyLibrary=0
+  fi
+  if [ ! -f "$ini" ]; then
+    [ -n "$DRY" ] || return 1
+    echo "[dry-run] $* in $ini"
+  elif ! ini_set "$ini" PROXY "$@" | cmp -s - "$ini"; then
+    ini_set "$ini" PROXY "$@" | put "$ini" 644 || return 1
+    log "ReShade.ini: [PROXY] $*"
+  fi
+  PROXY_ON=$want
+}
+# proxy_path: ARC_CHAIN as the game sees it (C:\ in the bottle, else Z:\; a comma doubled, as
+# ReShade's ini reads it)
+proxy_path() {
+  case "$GAME_DIR" in
+    "$BOTTLE/drive_c/"*) printf 'C:\\%s' "${GAME_DIR#"$BOTTLE/drive_c/"}/$ARC_CHAIN" | tr '/' '\\' | sed 's/,/,,/g' ;;
+    *) winpath "$GAME_DIR/$ARC_CHAIN" ;;
+  esac
+}
+# proxy_refusal <what stays>: the sentence for an ini that can't be written
+proxy_refusal() { echo "GW2 on Mac couldn't change ReShade's settings ($RS/ReShade.ini), so $1. Try again (details in $LOGS/install.log)."; }
+
+# sync_arcdps: arcdps under the name addon_dll gives, and ReShade's [PROXY] keys to match the files
+# (proxy_sync), before Play, at Install and at Repair; never while a session runs or starts. Keys
+# that stay on with no arcdps at their path stop the start.
 sync_arcdps() {
   [ -n "$DRY" ] || [ -x "$LOCKER" ] || return 0
   registry_lock || return 0
   if session_running; then registry_unlock; return 0; fi
   reshade_state
   arcdps_tidy "$([ "$RSH" = on ] && echo on || echo off)"
+  if ! proxy_sync; then
+    [ "$PROXY_WANT" = 1 ] || die "$(proxy_refusal "ReShade would look for arcdps where it isn't, and the game would have no Direct3D 11")"
+    warn "$(proxy_refusal "ReShade doesn't load arcdps this time")"
+  fi
   registry_unlock
 }
 
 # set arcdps on|off (cmd_set): only while no session runs or starts (the session's lock, as the
 # registry writes take it)
 set_arcdps() {
-  local dir="$CACHE/downloads/arcdps" sum want got n gone=""
+  local dir="$CACHE/downloads/arcdps" sum want got n tmp gone=""
+
   arcdps_state
   [ "$ARC" != nogame ] || die "Guild Wars 2 is not installed yet: arcdps goes into its folder once it is."
   ! session_running || die "Quit Guild Wars 2 and Steam first: arcdps goes into or out of the game folder only while they are closed."
   registry_lock || die "A game session is starting. Try again once Guild Wars 2 and Steam have quit."
   if [ "$1" = off ]; then
+    # (ReShade's keys off first: they never point at a file that is gone)
+    proxy_sync off || die "$(proxy_refusal "arcdps stays in")"
     for n in $ARCDPS_DLLS; do
       if is_arcdps "$GAME_DIR/$n"; then run rm -f "$GAME_DIR/$n"; gone=${gone:+$gone and }$n; fi
     done
@@ -1405,9 +1464,10 @@ set_arcdps() {
       esac
       die "The game folder has another $ARC_FOREIGN (Nexus or another addon?). GW2 on Mac leaves it alone, so it can't add arcdps: remove that file, or add arcdps through that addon." ;;
   esac
-  # (its name: dxgi.dll next to the app's ReShade in the together layout)
+  # (its place: ARC_CHAIN next to the app's ReShade in the together layout)
   reshade_state
   n=$(addon_dll arcdps "$([ "$RSH" = on ] && echo on || echo off)")
+  tmp="$GAME_DIR/$(dirname "$n")/.$(basename "$n").gw2om-new"
   if [ -n "$DRY" ]; then
     echo "[dry-run] download $ARCDPS_URL/d3d11.dll, check it against $ARCDPS_URL/d3d11.dll.md5sum, put it into $GAME_DIR/$n"
     echo "@done arcdps would be in the game folder."
@@ -1431,11 +1491,17 @@ set_arcdps() {
   # (no session can start meanwhile: this holds its lock)
   arcdps_state
   [ "$ARC" = off ] && [ ! -e "$GAME_DIR/$n" ] && [ ! -L "$GAME_DIR/$n" ] || die "The game folder changed during the download ($ARC). Try again."
-  run install -m 644 "$dir/d3d11.dll" "$GAME_DIR/.$n.gw2om-new"
-  run mv -f "$GAME_DIR/.$n.gw2om-new" "$GAME_DIR/$n"
-  registry_unlock
+  [ -d "$(dirname "$tmp")" ] || run mkdir -p "$(dirname "$tmp")"
+  run install -m 644 "$dir/d3d11.dll" "$tmp"
+  run mv -f "$tmp" "$GAME_DIR/$n"
   log "arcdps: $ARCDPS_URL/d3d11.dll into $GAME_DIR/$n (md5 $got, sha256 $(sha256 "$GAME_DIR/$n"))"
-  echo "@done arcdps is in the game folder ($n from deltaconnected.com$([ "$n" = d3d11.dll ] || echo ", next to ReShade's d3d11.dll")). It loads the next time the game starts, and from then on it updates itself."
+  # (the file is in: now ReShade's keys; if they can't go on, arcdps goes out again)
+  if ! proxy_sync; then
+    run rm -f "$GAME_DIR/$n"
+    die "$(proxy_refusal "arcdps stays out")"
+  fi
+  registry_unlock
+  echo "@done arcdps is in the game folder ($n from deltaconnected.com). It loads the next time the game starts, and from then on it updates itself.$([ "$PROXY_ON" = 0 ] || echo " ReShade loads arcdps itself now, so both load.")"
 }
 
 # --- ReShade (crosire's post-processing; Settings › Interface): downloaded on request, never hosted
@@ -1514,8 +1580,8 @@ reshade_state() {
   [ -n "$GAME_DIR" ] || { RSH=nogame; return 0; }
   for n in $ARCDPS_DLLS; do
     [ -f "$GAME_DIR/$n" ] || continue
-    if our_reshade "$GAME_DIR/$n"; then RSH_DLL=${RSH_DLL:+$RSH_DLL }$n
-    elif is_reshade "$GAME_DIR/$n"; then foreign=${foreign:+$foreign }$n
+    if [ "$n" != "$ARC_CHAIN" ] && our_reshade "$GAME_DIR/$n"; then RSH_DLL=${RSH_DLL:+$RSH_DLL }$n
+    elif [ "$n" != "$ARC_CHAIN" ] && is_reshade "$GAME_DIR/$n"; then foreign=${foreign:+$foreign }$n
     elif [ "$ADDONS_LAYOUT" = together ] && is_arcdps "$GAME_DIR/$n"; then :
     else RSH_BLOCKER=${RSH_BLOCKER:+$RSH_BLOCKER }$n
     fi
@@ -1732,9 +1798,9 @@ reshade_folder() {
 }
 
 # reshade_place: what is missing of the three into the game folder, the DLL last (RSH, COMPILER_SRC
-# set). A d3dcompiler_47.dll there stays as it is, the player's or the app's. The last step moves
-# arcdps to the name it has next to ReShade, then puts ReShade's DLL in; if that fails, arcdps
-# goes back to its name.
+# set). A d3dcompiler_47.dll there stays as it is, the player's or the app's. The last steps move
+# arcdps to its place next to ReShade (ARC_CHAIN), put ReShade's DLL in, and turn ReShade's
+# [PROXY] keys on (proxy_sync); if a step fails, the ones before are undone.
 reshade_place() {
   local n tmp
   if [ ! -e "$GAME_DIR/d3dcompiler_47.dll" ] && [ -n "$COMPILER_SRC" ]; then
@@ -1757,6 +1823,11 @@ reshade_place() {
     die "GW2 on Mac couldn't put ReShade into the game folder as $n. Try again (details in $LOGS/install.log)."
   fi
   log "ReShade: ReShade64.dll $RESHADE_VERSION into $GAME_DIR/$n"
+  if ! proxy_sync; then
+    run rm -f "$GAME_DIR/$n"
+    [ -z "$ARC_MOVED" ] || arcdps_move "$ARC_MOVED" "$(addon_dll arcdps off)" || true
+    die "$(proxy_refusal "ReShade stays out of the game folder")"
+  fi
 }
 
 # set reshade on|off (cmd_set): only while no session runs or starts (the session's lock, as set
@@ -1769,6 +1840,8 @@ set_reshade() {
   ! session_running || die "Quit Guild Wars 2 and Steam first: ReShade goes into or out of the game folder only while they are closed."
   registry_lock || die "A game session is starting. Try again once Guild Wars 2 and Steam have quit."
   if [ "$1" = off ]; then
+    # (ReShade's keys off first: they never point at a file that is gone)
+    proxy_sync off || die "$(proxy_refusal "ReShade stays in")"
     if [ "$RSH" = on ]; then
       for p in $RSH_DLL; do run rm -f "$GAME_DIR/$p"; gone=${gone:+$gone and }$p; done
     fi
@@ -1863,7 +1936,7 @@ set_reshade() {
   write_settings reshade on
   registry_unlock
   apply_registry
-  echo "@done ReShade $RESHADE_VERSION is in the game folder as d3d11.dll. It loads the next time the game starts.$([ -z "$ARC_MOVED" ] || echo " arcdps is $ARC_MOVED now, so both load.")"
+  echo "@done ReShade $RESHADE_VERSION is in the game folder as d3d11.dll. It loads the next time the game starts.$([ "$PROXY_ON" = 0 ] || echo " ReShade loads arcdps itself now, so both load.")"
 }
 
 # sync_reshade [download]: with the setting on, puts ReShade's missing files back into the game
@@ -2151,11 +2224,50 @@ EOF
   echo "@done $report"
 }
 
+# ini_set <ini> <section> <key=value>...: the ini on stdout with those keys set in that section and
+# nothing else changed (its other lines and line ends byte for byte). Keys and sections as
+# ReShade's ini_file.cpp reads them: trimmed, ; / # start a comment. A missing key goes under the
+# section's first header, and a missing section goes at the end, with the file's line ends.
+ini_set() {
+  local ini=$1 sec=$2 nl=0
+  shift 2
+  [ "$(tail -c 1 "$ini" | od -An -tx1 | tr -d ' \n')" != 0a ] || nl=1
+  S=$sec KV="$(printf '%s\n' "$@")" NL=$nl LC_ALL=C awk '
+    function strip(s, c) {
+      while (s != "" && index(c, substr(s, 1, 1))) s = substr(s, 2)
+      while (s != "" && index(c, substr(s, length(s), 1))) s = substr(s, 1, length(s) - 1)
+      return s }
+    BEGIN { s = ENVIRON["S"]; nl = ENVIRON["NL"]; n = split(ENVIRON["KV"], kv, "\n")
+      for (k = 1; k <= n; k++) key[k] = substr(kv[k], 1, index(kv[k], "=") - 1) }
+    { line = $0; cr = ""; out[NR] = $0
+      if (substr(line, length(line), 1) == "\r") { cr = "\r"; line = substr(line, 1, length(line) - 1) }
+      if (NR == 1) { firstcr = cr; if (substr(line, 1, 3) == "\357\273\277") line = substr(line, 4) }
+      t = strip(line, " \t"); c = substr(t, 1, 1)
+      if (c == "[") {
+        i = index(t, "]"); sec = strip(i ? substr(t, 1, i - 1) : t, " \t[]")
+        if (sec == s && !g) { g = NR; gcr = cr }
+        next }
+      if (sec != s || c == ";" || c == "/" || c == "#") next
+      i = index(t, "=")
+      if (!i) next
+      name = strip(substr(t, 1, i - 1), " \t")
+      for (k = 1; k <= n; k++) if (name == key[k]) { out[NR] = kv[k] cr; set[k] = 1 } }
+    END {
+      for (j = 1; j <= NR; j++) {
+        printf "%s", out[j]
+        if (j == g) for (k = 1; k <= n; k++) if (!set[k]) printf "\n%s%s", kv[k], gcr
+        if (j < NR || nl) printf "\n" }
+      if (!g) {
+        if (NR && !nl) printf "\n"
+        printf "[%s]%s\n", s, firstcr
+        for (k = 1; k <= n; k++) printf "%s%s\n", kv[k], firstcr } }' "$ini"
+}
+
 # reshade use <preset>: PresetPath in the ReShade folder's ReShade.ini, the one key and nothing else
-# of the file (its other lines and line ends byte for byte); only while no session runs or starts,
-# since ReShade writes its ini while it runs (the session's lock, as set reshade)
+# of the file (ini_set); only while no session runs or starts, since ReShade writes its ini while it
+# runs (the session's lock, as set reshade)
 reshade_use() {
-  local name=${1:-} f ini="$RS/ReShade.ini" value nl=0
+  local name=${1:-} f ini="$RS/ReShade.ini" value
   case "$name" in ""|*/*|.|..|*[[:cntrl:]]*) die "Name a preset in $RS/Presets." ;; esac
   f="$RS/Presets/$name"
   [ -f "$f" ] || die "$name is not in $RS/Presets."
@@ -2171,32 +2283,7 @@ reshade_use() {
   registry_lock || die "A game session is starting. Pick $name in ReShade's menu (Home key) once the game runs."
   rs_safe "$ini" || rs_refuse
   reshade_folder
-  [ "$(tail -c 1 "$ini" | od -An -tx1 | tr -d ' \n')" != 0a ] || nl=1
-  # (keys and sections as ReShade's ini_file.cpp reads them: trimmed, ; / # start a comment; the
-  # key goes under [GENERAL]'s first header when that has none, and a section of its own without one)
-  V="PresetPath=$value" NL=$nl LC_ALL=C awk '
-    function strip(s, c) {
-      while (s != "" && index(c, substr(s, 1, 1))) s = substr(s, 2)
-      while (s != "" && index(c, substr(s, length(s), 1))) s = substr(s, 1, length(s) - 1)
-      return s }
-    BEGIN { v = ENVIRON["V"]; nl = ENVIRON["NL"] }
-    { line = $0; cr = ""; bom = ""; out[NR] = $0
-      if (substr(line, length(line), 1) == "\r") { cr = "\r"; line = substr(line, 1, length(line) - 1) }
-      if (NR == 1) { firstcr = cr; if (substr(line, 1, 3) == "\357\273\277") { bom = substr(line, 1, 3); line = substr(line, 4) } }
-      t = strip(line, " \t"); c = substr(t, 1, 1)
-      if (c == "[") {
-        i = index(t, "]"); sec = strip(i ? substr(t, 1, i - 1) : t, " \t[]")
-        if (sec == "GENERAL" && !g) { g = NR; gcr = cr }
-        next }
-      if (sec != "GENERAL" || c == ";" || c == "/" || c == "#") next
-      i = index(t, "=")
-      if (i && strip(substr(t, 1, i - 1), " \t") == "PresetPath") { out[NR] = bom v cr; set = 1 } }
-    END {
-      for (j = 1; j <= NR; j++) {
-        printf "%s", out[j]
-        if (j == g && !set) printf "\n%s%s", v, gcr
-        if (j < NR || nl) printf "\n" }
-      if (!g) { if (NR && !nl) printf "\n"; printf "[GENERAL]%s\n%s%s\n", firstcr, v, firstcr } }' "$ini" | put "$ini" 644
+  ini_set "$ini" GENERAL "PresetPath=$value" | put "$ini" 644
   registry_unlock
   log "ReShade.ini: PresetPath=$value"
   echo "@done ReShade starts with $name the next time the game starts."
@@ -2603,6 +2690,7 @@ status() {
   echo "arcdps=$([ "$ARC" = on ] && echo on || echo off)"
   echo "arcdps_state=$ARC"
   echo "arcdps_foreign=$ARC_FOREIGN"
+  echo "arcdps_dll=$ARC_DLL"
   echo "reshade=$(setting reshade)"
   reshade_lines
   echo "session=$(session_live)"
@@ -2619,6 +2707,7 @@ settings() {
   echo "arcdps=$([ "$ARC" = on ] && echo on || echo off)"
   echo "arcdps_state=$ARC"
   echo "arcdps_foreign=$ARC_FOREIGN"
+  echo "arcdps_dll=$ARC_DLL"
   reshade_lines
   echo "cpus=$CPU_MAX"
   echo "steam_login=$(steam_remembers_login && echo yes || echo no)"
@@ -2836,7 +2925,8 @@ launch() {
     { echo "STARTED=$(date '+%F %T')"; echo "APP=$VERSION"; echo "ROUTE=$(state route)"; echo "DXMT=$DXMT_VERSION"
       for k in $SETTING_KEYS; do echo "SETTING_$k=$(setting "$k")"; done
       # (ReShade and arcdps as the session starts with them: the session report's ReShade line)
-      reshade_lines; arcdps_state; echo "arcdps=$([ "$ARC" = on ] && echo on || echo off)"
+      reshade_lines; arcdps_state; echo "arcdps=$([ "$ARC" = on ] && echo on || echo off)"; echo "arcdps_dll=$ARC_DLL"
+
       echo "d3dcompiler_47=$([ -z "$GAME_DIR" ] || [ ! -f "$GAME_DIR/d3dcompiler_47.dll" ] || sha256 "$GAME_DIR/d3dcompiler_47.dll")"
       printf '%s\n' "${E[@]}" | grep -v '^WINE_COMPATDB='; } >"$LOGS/session.env"
     printf '%s\n' "${E[@]}" | shasum | cut -c1-12 >"$LOGS/session.key"

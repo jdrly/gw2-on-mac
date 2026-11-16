@@ -32,6 +32,8 @@ final class GameSettings {
     var working = false
     var progress: Installer.Progress?
     var result: String?
+    // the game folder's addon state (addonState) the result was shown with
+    fileprivate var resultState: String?
     fileprivate var process: Process?
     fileprivate var done: String?
     fileprivate var failure: String?
@@ -59,8 +61,27 @@ final class GameSettings {
     Task {
       let parsed = Installer.parseStatus(await Installer.capture(script: script, arguments: ["settings"]))
       values = parsed
+      forgetStaleResults()
       if let updates, let value = parsed["updates"], parsed["installed"] == "yes" {
         updates.automaticChecks = value == "on"
+      }
+    }
+  }
+
+  // A row's result line (an addon's last @done) describes the game folder as it was right after
+  // that action: it goes once the addons' files have changed since (the other switch, a Play, the
+  // player's own hands)
+  private var addonState: String {
+    ["arcdps_state", "arcdps_dll", "arcdps_foreign", "reshade_state", "reshade_dll", "reshade_blocker"]
+      .map { values[$0] ?? "" }.joined(separator: "|")
+  }
+  private func forgetStaleResults() {
+    let state = addonState
+    for job in [\GameSettings.arcdps, \GameSettings.reshade] where self[keyPath: job].result != nil {
+      if let shown = self[keyPath: job].resultState {
+        if shown != state { self[keyPath: job].result = nil; self[keyPath: job].resultState = nil }
+      } else {
+        self[keyPath: job].resultState = state
       }
     }
   }

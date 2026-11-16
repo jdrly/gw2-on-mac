@@ -453,9 +453,9 @@ sha12() { shasum -a 256 "$1" 2>/dev/null | cut -c1-12; }
   echo "Game Mode bundle: $([ -x "$APPDIR/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe" ] && echo present || echo none)"
   echo "Game: $([ -n "$GAME_DIR" ] && [ -f "$GAME_DIR/Gw2-64.exe" ] && echo "installed, Gw2-64.exe $(stat -f '%z bytes, %Sm' "$GAME_DIR/Gw2-64.exe")" || echo "not found")"
   [ -z "$GAME_DIR" ] || echo "  interface addon (version.dll): $([ -f "$GAME_DIR/version.dll" ] && { grep -aq 'gw2-on-mac ui-scale' "$GAME_DIR/version.dll" && echo "GW2 on Mac's" || echo "another program's"; } || echo none)"
-  # d3d11.dll and dxgi.dll addons (ReShade, arcdps, Nexus): which, by gw2om.sh's status keys;
-  # arcdps's own logs stay out (its crash log dumps the game's memory)
-  for f in d3d11.dll dxgi.dll; do
+  # d3d11.dll and dxgi.dll addons (ReShade, arcdps, Nexus), and the file ReShade loads arcdps from:
+  # which, by gw2om.sh's status keys; arcdps's own logs stay out (its crash log dumps the game's memory)
+  for f in d3d11.dll dxgi.dll addons/arcdps/chain/d3d11.dll; do
     [ -n "$GAME_DIR" ] && [ -f "$GAME_DIR/$f" ] || continue
     case " $(key reshade_dll) | $(key arcdps_foreign) " in
       *" $f "*"|"*) what=ReShade ;;
@@ -472,7 +472,8 @@ sha12() { shasum -a 256 "$1" 2>/dev/null | cut -c1-12; }
     blocked) s="blocked (another $(key reshade_blocker) in the game folder)" ;;
     "") s="not known (gw2om.sh's status said nothing)" ;;
   esac
-  echo "ReShade: $s; arcdps $(key arcdps)"
+  echo "ReShade: $s; arcdps $(key arcdps)$([ -z "$(key arcdps_dll)" ] || echo " as $(key arcdps_dll)")"
+
   c=$([ -z "$GAME_DIR" ] || [ ! -f "$GAME_DIR/d3dcompiler_47.dll" ] || shasum -a 256 "$GAME_DIR/d3dcompiler_47.dll" | cut -d' ' -f1)
   echo "  d3dcompiler_47.dll next to Gw2-64.exe: ${c:+sha256 }${c:-none}"
   if [ -d "$out/reshade" ]; then

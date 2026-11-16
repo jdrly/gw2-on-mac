@@ -205,10 +205,9 @@ third-party addon, and it reads the game's memory. ArenaNet, NCSOFT and I don't 
 switch asks first, and you use it at your own risk.
 
 - On downloads `d3d11.dll` and its `.md5sum` from deltaconnected.com, checks the file against that
-  checksum and checks that it is arcdps. Then it goes next to `Gw2-64.exe` as `d3d11.dll`, or as
-  `dxgi.dll` while ReShade is on. From then on arcdps updates itself.
-- Off removes arcdps from `d3d11.dll` or `dxgi.dll` and keeps its settings in `addons/arcdps` for
-  next time.
+  checksum and checks that it is arcdps. Then it goes next to `Gw2-64.exe` as `d3d11.dll`, or to
+  `addons\arcdps\chain\d3d11.dll` while ReShade is on. From then on arcdps updates itself.
+- Off removes arcdps from the game folder and keeps its settings in `addons/arcdps` for next time.
 - An arcdps you put there yourself, or that came with your game files, shows as on.
 - Another addon in the same place, such as the Nexus loader, is left alone, and the switch says
   which file it found.
@@ -263,7 +262,7 @@ Finder.
 
 | In the ReShade folder | What |
 |---|---|
-| `ReShade.ini` | ReShade's settings. The app writes it once, and from then on it is ReShade's and yours |
+| `ReShade.ini` | ReShade's settings. The app writes it once, and from then on it is ReShade's and yours, except two keys under `[PROXY]` while arcdps is on too |
 | `ReShade.log` | ReShade's log |
 | `Presets/` | your presets. `ReShadePreset.ini` is the one ReShade starts with |
 | `Shaders/`, `Textures/` | the effects and the images they read, a folder for each pack |
@@ -309,10 +308,19 @@ RTGI, DisplayDepth), which get none while ReShade sees high network activity. Wh
 came in and the game is closed, the app asks whether ReShade should start with it. While the game
 runs, pick it in ReShade's menu.
 
-**arcdps and ReShade together.** Both switches can be on at once. Then ReShade is `d3d11.dll` and
-arcdps is `dxgi.dll`, a name arcdps's own page allows. Turning ReShade on renames arcdps to
-`dxgi.dll`, and turning it off renames arcdps back to `d3d11.dll`. If arcdps updates itself into a
-second file, the next Play keeps the newer one under the right name.
+**arcdps and ReShade together.** Both switches can be on at once. Then ReShade is `d3d11.dll`, and
+it loads arcdps itself from `addons\arcdps\chain\d3d11.dll` in the game folder. For that the app
+sets two keys under `[PROXY]` in the ReShade folder's `ReShade.ini`, `EnableProxyLibrary=1` and
+`ProxyLibrary` with that file's path, and changes nothing else in the file. Turning either addon
+off turns `EnableProxyLibrary` off first, and turning ReShade off moves arcdps back to `d3d11.dll`.
+Play checks before every start that the keys are on exactly while both files are there, and fixes
+them if not. In `ReShade.log` the layout shows as "Registering hooks for
+'C:\windows\system32\d3d11.dll' ... > Skipped." followed by "Installing export hooks for" arcdps's
+file.
+
+I haven't seen arcdps update itself in this layout yet. If its update replaces the game folder's
+`d3d11.dll`, which is ReShade's, the next Play keeps the newer arcdps at the chain path and puts
+ReShade back from the app's cache.
 
 ## Updates
 
@@ -374,7 +382,8 @@ nothing in `/Applications` besides itself.
 | `~/Library/Logs/GW2 on Mac/` | `install.log`, `wine.log`, DXMT's `Gw2-64_d3d11.log`, `session.env`, `gamemode.log`, the heat logs, and `.lock-claim` for the install lock | kept |
 
 In the game folder, `version.dll` and `gw2-ui-scale.ini` exist only while *Larger interface* is on,
-arcdps's `d3d11.dll`, or `dxgi.dll` next to ReShade, only while *arcdps* is on, and ReShade's
+arcdps's `d3d11.dll`, or `addons\arcdps\chain\d3d11.dll` next to ReShade, only while *arcdps* is
+on, and ReShade's
 `d3d11.dll`, `ReShade.ini` and the `d3dcompiler_47.dll` the app put there only while *ReShade* is
 on. The app never touches another program's `version.dll`, `d3d11.dll`, `dxgi.dll`,
 `d3dcompiler_47.dll` or `ReShade.ini` there. The app's own preferences, such as the chosen
@@ -662,13 +671,14 @@ came up.
 Without an addon the game gets the built-in directly. Steam and the launcher keep Wine's default
 order.
 
-arcdps updates itself, so the app can't recognise it by hash. A `d3d11.dll` or `dxgi.dll` counts as
+arcdps updates itself, so the app can't recognise it by hash. A `d3d11.dll` or `dxgi.dll` next to
+`Gw2-64.exe`, or `addons/arcdps/chain/d3d11.dll`, counts as
 arcdps when it's a PE whose export directory lists `addextension2`, arcdps's extension API, and the
 file names arcdps. Other addons may mention arcdps and look up its exports, but they don't export
 them. `gw2om.sh set arcdps on|off` does the switching. It takes the session's lock like the registry
 writes, so it refuses while a session runs. `status` and `settings` print `arcdps_state`, which is
-`on`, `off`, `foreign` with the file in `arcdps_foreign`, or `nogame`. `GW2_ON_MAC_ARCDPS_URL`
-points the download elsewhere for tests.
+`on`, `off`, `foreign` with the file in `arcdps_foreign`, or `nogame`, and `arcdps_dll`, where
+arcdps is. `GW2_ON_MAC_ARCDPS_URL` points the download elsewhere for tests.
 
 ReShade is the app's when the file is the pinned `ReShade64.dll`, by sha256. Any other DLL that
 exports `ReShadeRegisterAddon` is a ReShade the app didn't place, and it stays as it is.
@@ -678,7 +688,12 @@ exports `ReShadeRegisterAddon` is a ReShade the app didn't place, and it stays a
 `ReShade.ini` next to `Gw2-64.exe`, whose `[INSTALL] BasePath` ReShade reads before anything else,
 and loads `d3dcompiler_47.dll` by name, so the `native,builtin` override makes it take the
 compiler next to the game. With both addons in, `addon_dll` gives ReShade `d3d11.dll` and arcdps
-`dxgi.dll`. `gw2om.sh reshade import <path>...` does the import, and `gw2om.sh reshade use
+`addons/arcdps/chain/d3d11.dll`, and `proxy_sync` keeps ReShade's `[PROXY]` keys on exactly while
+both files are in place. Next to ReShade, arcdps as `dxgi.dll` in the game folder didn't load in
+my sessions, because `system32\dxgi.dll` was already loaded when ReShade started.
+
+`GW2_ON_MAC_ADDONS_LAYOUT=exclusive` makes each switch refuse while the other addon is in.
+`gw2om.sh reshade import <path>...` does the import, and `gw2om.sh reshade use
 <preset>` makes a preset the one ReShade starts with. The `GW2_ON_MAC_RESHADE_*`,
 `GW2_ON_MAC_COMPILER_*` and `GW2_ON_MAC_SWEETFX_URL` variables point the downloads elsewhere for
 tests.
@@ -886,9 +901,12 @@ Without one, those checks are skipped. It covers:
   effect packs, from `file://` folders. It tests the pinned hashes, an installer without
   `ReShade64.dll`, the game's own compiler, fxc2's and one you put there, a ReShade the app didn't
   place, another addon in the way, files put back at Play and Repair, Uninstall keeping the ReShade
-  folder, and refusals while a session runs. With arcdps it tests every order of turning
-  both on and off, arcdps under both names after an update, a failure and a kill halfway through
-  the rename, and the exclusive layout (`GW2_ON_MAC_ADDONS_LAYOUT`).
+  folder, and refusals while a session runs. With arcdps it tests every order of turning both on
+  and off with ReShade's `[PROXY]` keys after each step, the keys put right at Play, the two-key
+  edit byte for byte on a CRLF file, arcdps's update over ReShade's file, a development build's
+  arcdps as `dxgi.dll`, a Nexus stand-in at each place, failed steps undone, a kill halfway
+  through, and the exclusive layout (`GW2_ON_MAC_ADDONS_LAYOUT`).
+
 - ReShade's import and `reshade use`: a preset, a zip with its `reshade-shaders` folder and a folder
   of loose effects, the report and its missing and depth effects, refusals of anything executable,
   of a bad source, of zips that climb out, hold links or pass the size and file limits
