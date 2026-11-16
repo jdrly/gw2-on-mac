@@ -1139,6 +1139,7 @@ DEV_SWITCHES="
 6 fex #165 unplayed FEX_ENTRYCOMPILELOCK=1 threads that miss on the same entry at once compile it once, and FEX's pool allocators read the CPU's counter for their clock instead of QueryPerformanceCounter
 6 fex #118 unplayed FEX_HOSTFEATURES=disableavx the game sees no AVX, AVX2, BMI, FMA or F16C and takes its SSE paths. Another FEX_HOSTFEATURES line here joins this one. A compatdb.local rule for Gw2-64.exe that sets FEX_HOSTFEATURES replaces them, and status says what to write there instead. If the game crashes at start or in play, take this line out first.
 6 dxmt jdrly/dxmt#265 unplayed DXMT_RENAME_TRIM=600 every 2 s, the rename queues give back the allocations the GPU finished with more than 600 sequence ids (about 10 s) ago
+7 dxmt jdrly/dxmt#271 unplayed DXMT_MTL4_SHOWN_WAIT=write only with the Metal row at Metal 4, where the game's rule presents through a Metal 3 command buffer (DXMT_MTL4_PRESENT=mtl3), nothing on Metal 3: the Metal 4 queue waits for the last present's shown event only before the first encoder that writes the presented texture, not before the next frame's work, so that work runs while the present waits for its drawable
 "
 # Rows taken out of the table, "<version> <issue> <NAME=value> <off value>". dev_update brings a file
 # older than <version> up to it (dev_gone): the line as the table wrote it goes, with the comment and

@@ -736,7 +736,11 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   comes after the app's and replaces that entry, and the app doesn't write that file. The file's
   `FEX_HOSTFEATURES` lines then stay out, and the reason names the value to write in
   `compatdb.local` for both. An update adds `disableavx` to a file whose own `FEX_HOSTFEATURES`
-  lines say nothing about AVX. The log says at each
+  lines say nothing about AVX. Version 7 adds `DXMT_MTL4_SHOWN_WAIT=write` (jdrly/dxmt#271). It
+  acts only at Metal 4, where the rule has `DXMT_MTL4_PRESENT=mtl3`: the Metal 4 queue waits for
+  the last present's `shown` event only before the first encoder that writes the presented
+  texture, not before the next frame's work, so a GPU frame over 16.7 ms needn't skip a refresh.
+  The log says at each
   start what stays out and why, and `status` prints `dev_switches=` and `dev_switches_out=`.
 - A `compatdb.local` that I put in the app's folder is appended as it is, for trying FEX switches
   such as `exe=Gw2-64.exe;env=FEX_HOSTFEATURES=disableavx`. Nothing in the app writes it, and
@@ -1243,7 +1247,9 @@ Without one, those checks are skipped. It covers:
   root's install to the session report), version 6's four FEX lines and `DXMT_RENAME_TRIM` in and
   out, `FEX_HOSTFEATURES` joined with a line of mine, `enableavx` after `disableavx`, and out under
   a `compatdb.local` rule for the game but not one for another program, a file at version 5
-  updated (with a `FEX_HOSTFEATURES` line of mine, and with AVX already decided there), a line commented out or added, the engine's own DXMT, a second start
+  updated (with a `FEX_HOSTFEATURES` line of mine, and with AVX already decided there), version
+  7's `DXMT_MTL4_SHOWN_WAIT` in and out, a file at version 6 updated (and with that line
+  commented out, which stays so), a line commented out or added, the engine's own DXMT, a second start
   that changes nothing, an update that adds a newer switch and keeps the rest, a row turned off
   that stays off, a release that writes no file and reads none, and a release's install updated
   by a development build
