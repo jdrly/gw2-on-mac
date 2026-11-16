@@ -434,9 +434,9 @@ func renderAll(_ dir: URL, exports: URL?) async {
           dir.appendingPathComponent("row-two-buttons-\(dark ? "dark" : "light").png"))
   }
   // ReShade in the Interface pane: off with its folder from an earlier time (the pane's own render
-  // has no folder yet), downloading, just placed, both on (arcdps as dxgi.dll), another ReShade,
-  // another program's file in the way (alone, and next to arcdps as dxgi.dll), the game running;
-  // in the exclusive layout each addon waiting for the other. (The folder: any one that exists.)
+  // has no folder yet), downloading, just placed, both on (ReShade loads arcdps), another ReShade,
+  // another program's file in the way (alone, and next to arcdps), the game running; in the
+  // exclusive layout each addon waiting for the other. (The folder: any one that exists.)
   let folder = dir.path
   // (an import's report as gw2om.sh gives it for a preset with many missing effects: five names,
   // then the number of the others)
@@ -460,11 +460,12 @@ func renderAll(_ dir: URL, exports: URL?) async {
     }),
     ("on", true, ["reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll", "reshade_folder": folder], { _ in }),
     ("both-on", false, ["reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll", "reshade_folder": folder,
-                        "arcdps": "on", "arcdps_state": "on"], { s in
-      s.reshade.result = "ReShade 6.8.0 is in the game folder as d3d11.dll. It loads the next time the game starts. arcdps is dxgi.dll now, so both load."
+                        "arcdps": "on", "arcdps_state": "on", "arcdps_dll": "addons/arcdps/chain/d3d11.dll"], { s in
+      s.reshade.result = "ReShade 6.8.0 is in the game folder as d3d11.dll. It loads the next time the game starts. ReShade loads arcdps itself now, so both load."
     }),
     ("both-on", true, ["reshade": "on", "reshade_state": "on", "reshade_dll": "d3d11.dll", "reshade_folder": folder,
-                       "arcdps": "on", "arcdps_state": "on"], { _ in }),
+                       "arcdps": "on", "arcdps_state": "on", "arcdps_dll": "addons/arcdps/chain/d3d11.dll"], { _ in }),
+
     ("foreign", false, ["reshade_state": "foreign", "reshade_dll": "d3d11.dll",
                         "arcdps_state": "foreign", "arcdps_foreign": "d3d11.dll"], { _ in }),
     ("blocked-other", false, ["reshade_state": "blocked", "reshade_blocker": "d3d11.dll",

@@ -114,17 +114,18 @@ summary() {
 get() { printf '%s\n' "$1" | sed -n "s/^$2=//p"; }
 
 # reshade_line <keys> <label>: ReShade's state from gw2om.sh's keys (reshade_state, reshade_version,
-# reshade_dll, reshade_blocker, arcdps, d3dcompiler_47: its sha256), as gw2om.sh writes them
-# into session.env at the start of a session
+# reshade_dll, reshade_blocker, arcdps, arcdps_dll: where it is, d3dcompiler_47: its sha256), as
+# gw2om.sh writes them into session.env at the start of a session
 reshade_line() {
-  local k=$1 s c
-  s=$(get "$k" reshade_state) c=$(get "$k" d3dcompiler_47)
+  local k=$1 s c d
+  s=$(get "$k" reshade_state) c=$(get "$k" d3dcompiler_47) d=$(get "$k" arcdps_dll)
   case "$s" in
     on) s="on, $(get "$k" reshade_version) as $(get "$k" reshade_dll)" ;;
     foreign) s="foreign (a ReShade GW2 on Mac didn't place, version unknown) as $(get "$k" reshade_dll)" ;;
     blocked) s="blocked (another $(get "$k" reshade_blocker) in the game folder)" ;;
   esac
-  echo "$2: $s; arcdps $(get "$k" arcdps)"
+  echo "$2: $s; arcdps $(get "$k" arcdps)${d:+ as $d}"
+
   echo "  d3dcompiler_47.dll next to Gw2-64.exe: ${c:+sha256 }${c:-none}"
 }
 
