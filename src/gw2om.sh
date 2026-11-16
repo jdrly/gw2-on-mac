@@ -1090,7 +1090,7 @@ fex_entries() {
 # file's (its line version=): each row newer than the file whose variable the file doesn't name,
 # not even commented out, is added at the end, on. Nothing else in the file changes. A switch goes
 # in at the value that turns its new behaviour on. Not in it: diagnostics (Debug logging has
-# them), anything that can cap the frame rate below 60 (DXMT_PRESENT_QUEUE=two; the lower thread
+# them), anything that can cap the frame rate below 60 (the lower thread
 # priorities DXMT_THREAD_PRIORITY, DXMT_COMPILE_PRIORITY and DXMT_RENDER_THREAD_PRIORITY, which
 # are tuning values, and lower priorities cost frames in crowds on 0.1.x; DXMT_BG_POLICY=occlusion,
 # which throttles the game whenever another window covers it), a value only I can choose (the
@@ -1125,11 +1125,8 @@ DEV_SWITCHES="
 1 dxmt jdrly/dxmt#153 unplayed DXMT_MTL4_DEVICE_RESIDENCY=1 Metal 4 only, nothing on Metal 3: pipelines and argument buffers stay in the device's residency set, out of each chunk's
 1 dxmt jdrly/dxmt#154 unplayed DXMT_MTL4_TIMESTAMP_REUSE=1 Metal 4 only, nothing on Metal 3: timestamp queries read the chunk's last command buffer, with no empty one after it
 1 dxmt jdrly/dxmt#185 unplayed DXMT_PRESENTER_FREE=1 a swap chain's presenter is freed with its last reference
-1 dxmt jdrly/dxmt#157 unplayed DXMT_PRESENT_QUEUE=pace Present sleeps after a frame whose nextDrawable blocked (never two, which can latch 30 fps). Needs DXMT_STATS, on by default.
 1 dxmt jdrly/dxmt#159 unplayed DXMT_WARM_JOBS=2 with Shader warming, two speculative jobs at once while Metal's cache is cold
 1 dxmt jdrly/dxmt#147 unplayed DXMT_SKIP_SAME_SRV=1 SetShaderResources skips a slot that already holds the incoming view
-1 dxmt jdrly/dxmt#5 played DXMT_PSO_ARCHIVE=1 Metal binary archives of the pipelines, looked up in the last 4 sessions' archives
-1 dxmt jdrly/dxmt#75 unplayed DXMT_PSO_GENERATIONS=1 the archives published as generations instead of one file a session
 1 dxmt jdrly/dxmt#73 unplayed DXMT_COMPILE_DEMAND=1 the compile service's declared policy (Shader warming turns it on too)
 3 dxmt jdrly/dxmt#204 unplayed DXMT_MTL4_ALLOCATOR_POOL=1 only with the Metal row at Metal 4, nothing on Metal 3: a Metal 4 queue's chunks take their command allocator from a pool that keeps at most 8 idle, instead of one allocator per ring slot
 5 fex #161 unplayed FEX_DISPATCHERL1LOOKUP=1 the dispatcher looks in the thread's L1 before it leaves for the lookup in C++
@@ -1145,10 +1142,17 @@ DEV_SWITCHES="
 # older than <version> up to it (dev_gone): the line as the table wrote it goes, with the comment and
 # the empty line above it. A line with another value stays, and like every line of the file it comes
 # after the rule's entries and wins. A line I commented out becomes NAME=<off value> under a comment
-# saying why, so what I turned off stays off. Version 4: DXMT_MTL4_PRESENT=mtl3, which the game's
-# rule has at Metal 4 (metal_present); mtl4 is my fork's name for Metal 4's own present.
+# saying why, so what I turned off stays off. An off value of - is a switch that left my fork: there
+# is nothing to keep off, so a line I commented out stays as it is. Version 4: DXMT_MTL4_PRESENT=mtl3,
+# which the game's rule has at Metal 4 (metal_present); mtl4 is my fork's name for Metal 4's own
+# present. Version 8: my DXMT fork deletes the PSO archive (jdrly/dxmt#5, #75: with it on the game
+# crashed at exit, and Metal's own shader cache already keeps what it saved) and the present
+# queue's pace (jdrly/dxmt#157: it gave up at frame 181 in every session).
 DEV_GONE="
 4 jdrly/dxmt#227 DXMT_MTL4_PRESENT=mtl3 mtl4
+8 jdrly/dxmt#157 DXMT_PRESENT_QUEUE=pace -
+8 jdrly/dxmt#5 DXMT_PSO_ARCHIVE=1 -
+8 jdrly/dxmt#75 DXMT_PSO_GENERATIONS=1 -
 "
 DEV_SWITCHES_VERSION=$(printf '%s\n' "$DEV_SWITCHES" "$DEV_GONE" | awk 'NF && $1 > v { v = $1 } END { print v + 0 }')
 # dev_piece_label <piece>: what the file and the log call it
@@ -1257,8 +1261,8 @@ local_hostfeatures() {
 # dev_gone <the file's version>: dev-switches.conf from stdin to stdout, without the rows of DEV_GONE
 # newer than the file (the header above DEV_GONE). A line commented out with spaces or more than one
 # # counts too, as dev_update's search for a name does. With a line of the variable on, one
-# commented out stays as it is. (The rows go in through the environment: macOS's awk refuses a -v
-# value with a newline.)
+# commented out stays as it is. A row whose off value is - never changes a commented-out line. (The
+# rows go in through the environment: macOS's awk refuses a -v value with a newline.)
 dev_gone() {
   GONE_ROWS="$DEV_GONE" awk -v v="$1" '
     BEGIN {
@@ -1279,7 +1283,7 @@ dev_gone() {
               drop[i - 1] = 1
               if (i > 2 && l[i - 2] == "") drop[i - 2] = 1
             }
-          } else if (!(k in on) && l[i] ~ ("^[[:space:]]*#[#[:space:]]*" k "=")) {
+          } else if (off[k] != "-" && !(k in on) && l[i] ~("^[[:space:]]*#[#[:space:]]*" k "=")) {
             l[i] = "# Commented out before version " since[k] ". The game\047s rule has " line[k] " now, so this keeps it off. Take this line out to use the rule\047s.\n" k "=" off[k]
             on[k] = 1
           }
