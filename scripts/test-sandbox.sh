@@ -31,6 +31,16 @@ SIGNED_PE="${SIGNED_PE:-$WS/work/bottles/gw2/drive_c/Program Files (x86)/Steam/s
 # at its end
 end_sandbox_processes() { [ ! -d "$SANDBOX" ] || pkill -f "^$(cd "$SANDBOX" && pwd -P)/" 2>/dev/null || true; pkill -f "^/bin/bash $G watch-session" 2>/dev/null || true; }
 end_sandbox_processes
+# sessions_reset: a section that plays starts from no session: no stand-in game or Steam, no
+# watcher and no holder of the session's lock left by an earlier check (one that failed leaves
+# them running for minutes, and every check after it would fail on them)
+sessions_reset() {
+  local i=0
+  end_sandbox_processes
+  pkill -f "^$APP/Contents/Resources/helpers/sessionlock hold" 2>/dev/null || true
+  while pgrep -f "^/bin/bash $G watch-session" >/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+  rm -f "$AD/session" "$AD/session.req" "$SANDBOX/steam.pid" "$SANDBOX/game.pid"
+}
 rm -rf "$SANDBOX"
 mkdir -p "$SANDBOX"
 SANDBOX="$(cd "$SANDBOX" && pwd -P)"
@@ -116,9 +126,13 @@ case "${1:-}" in
     mkdir -p "$WINEPREFIX/drive_c/Program Files (x86)/Steam/steamapps"
     echo "stand-in steam" >"$WINEPREFIX/drive_c/Program Files (x86)/Steam/steam.exe" ;;
   *steam.exe)
-    # -shutdown ends the stand-in Steam (a sleeper whose pid is in steam.pid), unless steam.stubborn
+    # -shutdown ends the stand-in Steam (a sleeper whose pid is in steam.pid), unless steam.stubborn;
+    # with steam.autostart, a start of steam.exe starts that sleeper, as Wine starts Steam (once)
     d=$(dirname "$STANDIN_LOG")
-    if [ "${2:-}" = -shutdown ] && [ ! -e "$d/steam.stubborn" ] && [ -f "$d/steam.pid" ]; then kill "$(cat "$d/steam.pid")" 2>/dev/null || true; fi ;;
+    if [ "${2:-}" = -shutdown ] && [ ! -e "$d/steam.stubborn" ] && [ -f "$d/steam.pid" ]; then kill "$(cat "$d/steam.pid")" 2>/dev/null || true
+    elif [ "${2:-}" != -shutdown ] && [ -e "$d/steam.autostart" ] && ! kill -0 "$(cat "$d/steam.pid" 2>/dev/null)" 2>/dev/null; then
+      ( "$(dirname "$0")/steam.exe" 120 </dev/null >/dev/null 2>&1 & echo $! >"$d/steam.pid" )
+    fi ;;
 esac
 EOF
 chmod 755 "$S/bin/wine" "$S/bin/wineserver"
@@ -541,12 +555,12 @@ steam_runs() { kill -0 "$(cat "$SP")" 2>/dev/null; }
 steam_down() { kill "$(cat "$SP")" 2>/dev/null; rm -f "$SP"; sleep 0.2; }
 game_up() { ( "$ENG/bin/Gw2-64.exe" 120 & echo $! >"$SANDBOX/game.pid" ); }
 game_down() { kill "$(cat "$SANDBOX/game.pid")" 2>/dev/null; }
-# a session: the game starts, runs, quits
-game_session() { game_up; wait_stage playing && game_down && wait_stage grace; }
+# a session: the game starts, runs, quits (it is ended even when the watcher doesn't see it)
+game_session() { local r=0; game_up; wait_stage playing || r=1; game_down; [ $r = 0 ] && wait_stage grace; }
 # Play, then (up to 2 s) its watcher has written its pid
 watcher_up() { local i=0; until watcher_runs || [ $i -ge 20 ]; do sleep 0.1; i=$((i + 1)); done; }
 splay() { : >"$STANDIN_LOG"; g play >/dev/null 2>&1; started; watcher_up; }
-watch_done
+sessions_reset
 check "the Steam in the background is on, with a remembered login" [ "$(sett steambg)/$(sett steam_login)/$(sett quitsteam)" = on/yes/on ]
 
 splay; steam_up
@@ -653,11 +667,13 @@ game_session; splay
 game_session
 check "Play and its game within the grace: after that game, Steam quits" eval 'watch_done && [ "$(sess result)" = quit ] && [ "$(sess replay)" = 1 ] && ! steam_runs'
 
-# two Plays at once: one watcher, the other joins
-: >"$STANDIN_LOG"
+# two Plays at once: one watcher, the other joins. Steam starts with the first Play's launch, before
+# its watcher, as in the app: a stand-in Steam started only after both Plays have returned came
+# after the watcher's grace without Steam (2 s) when the joining Play took that long (#190)
+: >"$STANDIN_LOG"; touch "$SANDBOX/steam.autostart"
 "$G" play >/dev/null 2>&1 & p1=$!
 "$G" play >/dev/null 2>&1 & p2=$!
-wait $p1 $p2; started; watcher_up; steam_up
+wait $p1 $p2; rm -f "$SANDBOX/steam.autostart"; started; watcher_up
 check "two Plays at once: one watcher, the other joined" eval '[ "$(watchers)" = 1 ] && watcher_runs && [ "$(sess replay)" = 1 ]'
 game_session
 check "  Steam quits once" eval 'watch_done && [ "$(sess result)" = quit ] && [ "$(grep -c "steam.exe -shutdown" "$STANDIN_LOG")" = 1 ]'
@@ -705,6 +721,7 @@ rm -f "$SANDBOX/steam.stubborn" "$ENG/bin/steam.exe" "$ENG/bin/Gw2-64.exe"
 check "busy=none after the sessions" [ "$(st busy)" = none ]
 
 section "The session's stages (session-status: stand-in processes, fixture logs)"
+sessions_reset
 # Steam's and the game's processes are sleepers at the engine's paths; the watcher is a sleeper
 # named gw2om.sh holding the session's lock (as watch-session does), its session file written
 # here; Steam's logs carry a made-up account that must never show up in the output
@@ -885,6 +902,7 @@ rm -f "$GFX"
 check "  no settings file: no" [ "$(ss limiter_hint)" = no ]
 
 section "Repair and Troubleshooting"
+sessions_reset
 echo "something else" >"$ENG/lib/wine/dxgi/dxmt/x86_64-windows/d3d11.dll"
 check "graphics=other after a change in the engine" [ "$(st graphics)" = other ]
 out=$(g repair 2>&1) && rc=0 || rc=$?
