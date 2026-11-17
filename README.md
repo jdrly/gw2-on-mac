@@ -1168,7 +1168,8 @@ Mac. It has read-only access and no secrets, and its actions are pinned by commi
   `winemac.so` with a `win32u.so` from pinned downloads in their assets' layout (signed dylibs
   built on the runner, as `file://` URLs), refuses each under another sha256, and refuses a Mac
   driver archive whose `VERSION` names a `win32u.so` it lacks.
-- `sandbox`: `test-sandbox.sh` on that build. Without my workspace, the ArenaNet route and the real
+- `sandbox (steam)` and `sandbox (rest)`: `test-sandbox.sh` on that build, its two groups
+  (`GROUP`, below) as two jobs side by side. Without my workspace, the ArenaNet route and the real
   arcdps are skipped, and each skip shows as a notice on the run.
 - `renders`: `ui-render.sh`, with the PNGs as the run's `renders` artifact. A runner has no design
   exports, so there are no `compare-*.png`.
@@ -1260,6 +1261,13 @@ Without one, those checks are skipped. It covers:
   that changes nothing, an update that adds a newer switch and keeps the rest, a row turned off
   that stays off, a release that writes no file and reads none, and a release's install updated
   by a development build
+
+`GROUP=steam scripts/test-sandbox.sh` runs only the life of one Steam install, from the dry runs
+to Uninstall. `GROUP=rest` runs only what starts from nothing after it: the ArenaNet route, a
+failed install, existing game files and a development build's switches. Without `GROUP` the suite
+runs both, in that order. Checks runs the two groups as two jobs. On one Mac, run them one at a
+time: each ends every watch-session of this app. At its end the suite prints the seconds each
+section took, and on a runner it adds them to the job's summary.
 
 `scripts/ui-render.sh` renders every window state, light and dark, headlessly into
 `work/app-renders/`. Nothing shows on screen and the app never activates. With the exports of

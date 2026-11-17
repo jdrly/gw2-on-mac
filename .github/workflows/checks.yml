@@ -273,10 +273,18 @@ jobs:
           if scripts/stage-components.sh --fetch >"$RUNNER_TEMP/stage.txt" 2>&1; then echo "stage-components.sh took a changed archive"; exit 1; fi
           grep 'does not match the sha256 in prebuilt.lock' "$RUNNER_TEMP/stage.txt"
 
+  # The suite as two groups side by side (scripts/test-sandbox.sh, GROUP): steam is the life of
+  # one Steam install, from the dry runs to Uninstall, and rest is what starts from nothing after
+  # it. On a pull request steam takes about 11 minutes and rest about 5.
   sandbox:
     needs: build
     runs-on: xcode-27
-    timeout-minutes: 30
+    name: sandbox (${{ matrix.group }})
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [steam, rest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -294,6 +302,8 @@ jobs:
       # the real arcdps) or more CPUs than the runner's 3 (ncpu 6 and 8) say "skip" and pass;
       # each skip is a notice on the run.
       - name: test-sandbox.sh
+        env:
+          GROUP: ${{ matrix.group }}
         run: |
           rc=0
           scripts/test-sandbox.sh 2>&1 | tee "$RUNNER_TEMP/sandbox.txt" || rc=$?
@@ -310,7 +320,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
-          name: sandbox-checks
+          name: sandbox-checks-${{ matrix.group }}
           path: work/app-sandbox/test.failed
           if-no-files-found: ignore
           retention-days: 14
