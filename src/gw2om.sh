@@ -677,12 +677,14 @@ apply_registry() {
 # The defaults are the mix I play with in my development workspace. Some are newer than
 # the rest; Settings turns each off:
 #   warm=on          DXMT_WARM=all: pipelines built ahead by recent use (jdrly/dxmt #128)
-#   coolworkers=3    HEAT_QOS=1=utility:3: only the first 3 job workers on the cooler cores
 #   fastlocks=on     HEAT_SPIN=lock=20:game,event=30:game: short spins before sleeps (round 7)
 #   rawmouse=on      raw mouse-look, as SWTOR on Mac's default (mousespeed=1: as fast as the
 #                    macOS pointer). The bundled Mac driver also carries SWTOR on Mac's game keys
 #                    by keyboard position (PhysicalKeyboard), which stays inert: no setting
 #                    writes it
+# coolworkers=off: HEAT_QOS=1=utility:<n> puts the first n job workers on the cooler cores. It
+# saves power, and moving all of them costs frames in busy places, so it is off since 0.1.5
+# (docs/adr/0014)
 # (and, with no setting of their own, DXMT_DEPENDENCY_COMPRESSION=1, the checkpoint chain, #133,
 # and round 7's HEAT_LAZYCLOCK, HEAT_MSYNC_UNREG and HEAT_MSYNC_PORTFIX: see game_env)
 SETTING_KEYS="retina fpscap metalfx hud warm coolworkers fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam reshade"
@@ -696,11 +698,10 @@ UI_SCALES="1.5 1.75 1.8 2.0"
 setting_default() {
   case "$1" in
     retina|warm|fastlocks|uiscale_sans|uiscale_cinema|gamemode|rawmouse|updates|steambg|quitsteam) echo on ;;
-    metalfx|hud|uiscale|reshade) echo off ;;
+    metalfx|hud|uiscale|reshade|coolworkers) echo off ;;
     mousespeed) echo 1 ;;
     debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
     fpscap) echo off ;;
-    coolworkers) echo 3 ;;
     ncpu) echo 8 ;;
     uiscale_size) echo 1.75 ;;
     launchopts) echo "" ;;
@@ -725,9 +726,16 @@ setting() { # <key>: its value, or the default
   local v
   if [ -f "$SETTINGS" ] && grep -q "^$1=" "$SETTINGS"; then
     v=$(sed -n "s/^$1=//p" "$SETTINGS" | tail -1)
-    if setting_valid "$1" "$v"; then echo "$v"; return; fi
+    if setting_valid "$1" "$v" && ! old_default "$1" "$v"; then echo "$v"; return; fi
   fi
   setting_default "$1"
+}
+# old_default <key> <value>: the value is a default of 0.1.4 and earlier that install and repair
+# wrote into settings.conf, and the player never picked it. coolworkers was 3 until 0.1.5, and
+# Settings' changes are in install.log (cmd_set), so a 3 without its line there becomes off at the
+# next write (docs/adr/0014)
+old_default() {
+  [ "$1" = coolworkers ] && [ "$2" = 3 ] && ! grep -qs '^[0-9-]\{10\} [0-9:]\{8\} ---- set coolworkers=3$' "$LOGS/install.log"
 }
 write_settings() { # [<key> <value>]: settings.conf with every key, one of them changed
   local k v

@@ -154,7 +154,7 @@ scripting.
 | | MetalFX for Subsample | `metalfx` | off | with the game's Render Sampling at Subsample, MetalFX upscales the 3D scene and the interface stays sharp. Experimental |
 | | Metal HUD | `hud` | off | Apple's overlay with frame rate and frame times, over the game only and not over Steam's windows |
 | Performance | Shader warming | `warm` | on | builds the pipelines your recent sessions used before the game asks for them, up to 8,192 or about 300 MB |
-| | Cooler job workers | `coolworkers` | 3 | moves this many of the game's job workers to the efficiency cores, or none when off. Saves power, but moving all of them can cost frames in big crowds |
+| | Cooler job workers | `coolworkers` | off | moves this many of the game's job workers to the efficiency cores, or none when off. Saves power, but moving all of them can cost frames in big crowds. Off since 0.1.5 ([ADR 0014](docs/adr/0014-cooler-job-workers-are-off-by-default-on-0.1.x.md)): an install whose settings.conf still has the old default of 3 gets off, unless install.log shows you picked 3. If you picked 3 and deleted the logs since, pick it again |
 | | Faster locks | `fastlocks` | on | short waits before the game thread sleeps on a busy lock or job group |
 | | CPUs the game sees | `ncpu` | 8 | from 2 up to your Mac's logical CPUs, or all. The game starts one job worker per CPU, minus one |
 | Interface | Larger interface | `uiscale` | off | my interface addon, see below |

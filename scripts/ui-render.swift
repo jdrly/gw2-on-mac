@@ -247,7 +247,7 @@ func session(_ state: String) -> Installer.LaunchSession {
 func settings(_ extra: [String: String] = [:]) -> GameSettings {
   let s = GameSettings()
   s.preview(["installed": "yes", "running": "no", "retina": "on", "fpscap": "off", "metalfx": "off", "hud": "off",
-             "warm": "on", "coolworkers": "3", "fastlocks": "on", "ncpu": "8", "uiscale": "off", "uiscale_state": "off",
+             "warm": "on", "coolworkers": "off", "fastlocks": "on", "ncpu": "8", "uiscale": "off", "uiscale_state": "off",
              "uiscale_size": "1.75", "uiscale_sans": "on", "uiscale_cinema": "on", "gamemode": "on", "launchopts": "",
              "route": "steam", "updates": "off", "debug": "off", "steambg": "on", "quitsteam": "on", "cpus": "12",
              "steam_login": "no", "rawmouse": "on", "mousespeed": "1", "arcdps": "off", "arcdps_state": "off",
