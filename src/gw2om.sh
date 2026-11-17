@@ -1294,11 +1294,12 @@ dev_gone() {
 }
 # dxmt_names: the DXMT_* names in the DLLs the game loads (aarch64-windows) of my DXMT fork's tree
 # in the engine, or of this app's build without an engine, one a line (every byte that can't be in a
-# name splits them, so a name inside a longer one doesn't count)
+# name splits them, so a name inside a longer one doesn't count; -s makes each run of such bytes
+# one newline: the real DLLs are 15 MB, 13 million lines for grep without it and 1.3 million with)
 dxmt_names() {
   local d="$DXGI/dxmt/aarch64-windows"
   [ -d "$d" ] || d="$COMP/dxmt/aarch64-windows"
-  find "$d" -type f -name '*.dll' -exec cat {} + 2>/dev/null | LC_ALL=C tr -c 'A-Z0-9_' '\n' |
+  find "$d" -type f -name '*.dll' -exec cat {} + 2>/dev/null | LC_ALL=C tr -cs 'A-Z0-9_' '\n' |
     LC_ALL=C grep -x 'DXMT_[A-Z0-9_]*' | LC_ALL=C sort -u || true
 }
 # heat_prof_on: the game's rule can start my ntdll.so's sampler: WINE_HEAT_PROF=on or =1, or
