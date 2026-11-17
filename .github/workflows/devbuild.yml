@@ -2,7 +2,8 @@
 # pre-release v<version>, signed ad hoc and not notarized (no secret, no Developer ID). I download it
 # with `gh release download`, which sets no quarantine attribute.
 #
-#   plan        the DXMT commit (a full sha on jdrly/dxmt's gw2-on-mac, by default its head), the Wine
+#   plan        the DXMT commit (a full sha on jdrly/dxmt's gw2-on-mac, by default the newest whose
+#               GW2 run for its push ended success, printed with the branch head's state), the Wine
 #               and Mac driver commits (full shas on jdrly/wine's gw2-on-mac, by default none), the
 #               FEX commit (a full sha on jdrly/FEX's gw2-on-mac, by default none) and the version
 #               (by default build.sh's)
@@ -44,7 +45,7 @@ on:
   workflow_dispatch:
     inputs:
       dxmt_commit:
-        description: A full sha on jdrly/dxmt's gw2-on-mac; empty is the branch's head
+        description: A full sha on jdrly/dxmt's gw2-on-mac; empty is the newest whose GW2 run passed
         type: string
         default: ""
       wine_commit:
@@ -133,7 +134,27 @@ jobs:
             status="$(gh api "repos/$2/compare/$4...$3" --jq .status)" || fail "$2 has no commit $4"
             case "$status" in ahead|identical) ;; *) fail "$4 is not on $2's $3 ($status)" ;; esac
           }
-          [ -n "$DXMT_COMMIT" ] || DXMT_COMMIT="$(gh api "repos/$DXMT_REPO/branches/$DXMT_BRANCH" --jq .commit.sha)"
+          # Without dxmt_commit: the newest commit on the branch whose GW2 run for its push ended
+          # success (the runs come newest first, one per push), not a head whose run is still going
+          if [ -z "$DXMT_COMMIT" ]; then
+            runs="repos/$DXMT_REPO/actions/workflows/gw2.yml/runs"
+            out="$(gh api "$runs?branch=$DXMT_BRANCH&event=push&status=success&per_page=1" \
+              --jq '.workflow_runs[0] | [.head_sha, .html_url] | @tsv')" || fail "Could not read $DXMT_REPO's GW2 runs"
+            IFS=$'\t' read -r DXMT_COMMIT url <<<"$out"
+            [ -n "$DXMT_COMMIT" ] || fail "$DXMT_REPO's $DXMT_BRANCH has no GW2 run that ended success"
+            # (why, for the notice: the head and its run's state; a failed read only shortens it)
+            head="$(gh api "repos/$DXMT_REPO/branches/$DXMT_BRANCH" --jq .commit.sha)" || head=""
+            if [ "$head" = "$DXMT_COMMIT" ]; then
+              why="the branch's head"
+            elif [ -z "$head" ]; then
+              why="the branch's head couldn't be read"
+            else
+              state="$(gh api "$runs?head_sha=$head&event=push&per_page=1" --jq '.workflow_runs[0] // empty
+                | "is \(if .status == "completed" then .conclusion else .status end), \(.html_url)"')" || state=""
+              why="not the branch's head $head, whose GW2 run ${state:-is missing or unread}"
+            fi
+            echo "::notice title=DXMT::$DXMT_COMMIT, the newest commit on $DXMT_BRANCH whose GW2 run passed ($url); $why"
+          fi
           on_branch dxmt_commit "$DXMT_REPO" "$DXMT_BRANCH" "$DXMT_COMMIT"
           [ -z "$WINE_COMMIT" ] || on_branch wine_commit "$WINE_REPO" "$WINE_BRANCH" "$WINE_COMMIT"
           [ -z "$MACDRV_COMMIT" ] || on_branch macdrv_commit "$WINE_REPO" "$WINE_BRANCH" "$MACDRV_COMMIT"

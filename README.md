@@ -1322,7 +1322,7 @@ delta updates and checks it with `scripts/check-appcast.swift`.
 publishes it as the pre-release `v<version>`:
 
 ```sh
-gh workflow run devbuild.yml --ref arm64                    # DXMT at the fork's head, build.sh's version
+gh workflow run devbuild.yml --ref arm64                    # DXMT's newest green commit, build.sh's version
 gh workflow run devbuild.yml --ref arm64 -f dxmt_commit=<sha> -f wine_commit=<sha> -f macdrv_commit=<sha> -f fex_commit=<sha> -f version=0.2.0-dev.6
 gh workflow run devbuild.yml --ref arm64 -f publish=false   # a dry run: the DMG as an artifact, 7 days
 gh release download v0.2.0-dev.5 -R jdrly/gw2-on-mac -p '*.dmg' -D ~/Downloads
@@ -1332,7 +1332,9 @@ gh release download v0.2.0-dev.5 -R jdrly/gw2-on-mac -p '*.dmg' -D ~/Downloads
   `dxmt-arm64-<commit>.tar.xz` of jdrly/dxmt's `arm64-builds`, checked against GitHub's digest,
   or until that exists, the artifact `dxmt-arm64-<commit>` of the fork's `GW2` run, fetched with
   the run's own token. A commit that isn't on the branch, or whose run hasn't finished green, is
-  refused.
+  refused. Without `dxmt_commit` the plan job takes the newest commit whose `GW2` run for its push
+  ended success, so a head whose run is still going doesn't stop the build. A notice on the run
+  names that commit and, when it isn't the head, the head's run and its state.
 - My `ntdll.so` comes only with `wine_commit`, a commit on my Wine fork's `gw2-on-mac`: the
   release asset `ntdll-arm64-<commit>.tar.xz` of jdrly/wine's `arm64-builds`, checked against
   GitHub's digest. A commit that isn't on the branch or has no asset is refused. Without
