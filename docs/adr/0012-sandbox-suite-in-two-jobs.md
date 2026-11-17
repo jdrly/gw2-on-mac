@@ -32,3 +32,6 @@ needs an install the second part can start from, which is a change of its own.
 
 Source: `advisor-plans/2026-11-17-ci/002-app-sandbox-two-groups-and-section-seconds.md` in my
 workspace, for #230.
+
+On 2026-11-17 I split `steam` into `settings` and `sessions`, and `sessions` makes its own
+install. 0015 records the three groups and their jobs.
