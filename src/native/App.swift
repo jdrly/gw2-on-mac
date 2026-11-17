@@ -74,7 +74,7 @@ final class Installer {
     let finishingDetail = interface ? "The sharper interface and the shader cache" : "The shader cache"
     let finishing = Step(id: 5, title: "Finishing touches", detail: finishingDetail)
     let common = [
-      Step(id: 1, title: "The Wine engine", detail: "athei's Mach9 0.3.1 · as it ships"),
+      Step(id: 1, title: "The Wine engine", detail: "athei's Mach9 0.4.0 · as it ships"),
       Step(id: 2, title: "The game's own bottle", detail: "Retina mode"),
     ]
     let files = "Cloned or copied; the originals stay as they are"
@@ -611,7 +611,7 @@ enum AppActions {
     ]
   }
 
-  // "Engine mach9-v0.3.1 · DXMT fork e02a4d6 · ntdll 0a1b2c3 · winemac 4d5e6f7 · FEX bff3f7c ·
+  // "Engine mach9-v0.4.0 · DXMT fork e02a4d6 · ntdll 0a1b2c3 · winemac 4d5e6f7 · FEX bff3f7c ·
   // Sparkle 2.10.0" from Resources/VERSIONS (its lines "dxmt <commit> <version>", my fork's build in
   // the app, "ntdll <commit> <sha256>", "macdrv <commit> <sha256>" and "fex <commit> <sha256>", or
   // "none", my ntdll.so, winemac.so and FEX, and "engine <name> wine <commit> ...")

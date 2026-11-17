@@ -4,7 +4,7 @@ One decision per file. The files go by number, not by date. 0001 to 0011 record 
 wrote them down on 2026-11-17, after 0012 and 0013 had landed, and kept their numbers below
 those two. Their dates don't follow their numbers. A new decision takes the next free number.
 
-0001, 0002 and 0014 are about 0.1.x and live on `main`. 0003 to 0010, 0012, 0013 and 0015 are
+0001, 0002 and 0014 are about 0.1.x and live on `main`. 0003 to 0010, 0012, 0013, 0015 and 0016 are
 about the 0.2 line on this branch, `arm64`. 0011 is on both. The two branches share one set of
 numbers, so a number taken on one is not used on the other.
 
@@ -25,3 +25,4 @@ numbers, so a number taken on one is not used on the other.
 | [0013](0013-checks-skip-renders-and-addon-by-change.md) | 2026-11-17 | A pull request skips `renders` when every file it changes is on a list the pictures can't depend on, and runs `addon` only when it touches the addon. |
 | `0014-cooler-job-workers-are-off-by-default-on-0.1.x.md`, on `main` | 2026-11-17 | *Cooler job workers* defaults to off from 0.1.5, and an untouched 3 from an older install reads as off. |
 | [0015](0015-sandbox-suite-in-three-jobs.md) | 2026-11-17 | The suite's `steam` group splits into `settings` and `sessions`, and `sessions` starts from an install it makes itself. Three jobs, 15 minutes each. |
+| [0016](0016-an-engine-of-another-release-is-replaced-by-repair.md) | 2026-11-17 | An engine an earlier version of the app installed counts as installed. Play refuses and names Repair, which replaces it with the pinned one. |

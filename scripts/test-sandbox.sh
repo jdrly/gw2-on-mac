@@ -63,7 +63,7 @@ COMP="$APP/Contents/Resources/components"
 if [ -f "$COMP/ntdll/ntdll.so" ]; then MYWINE=mine; else MYWINE=engine; fi
 # the commit of the app's build (its VERSION's commit: line), and the engine's Wine's
 MYWINE_COMMIT="$(sed -n 's/^commit: //p' "$COMP/ntdll/VERSION" 2>/dev/null || true)"
-ENGINE_WINE=53def89293a
+ENGINE_WINE=501796b0ed1
 # (MYWINE=mine only: the checks of my file say "skip" without it)
 mine() { [ "$MYWINE" = mine ]; }
 skip() { echo "  skip   $* (this app has no ntdll.so of mine)"; }
@@ -91,7 +91,7 @@ drvsays() { # mine|engine: the line the switch to that set logs
 # engine's own FEX is in place until a check sets fex mine
 if [ -f "$COMP/fex/aarch64-windows/libarm64ecfex.dll" ]; then MYFEX=yes; else MYFEX=no; fi
 MYFEX_COMMIT="$(sed -n 's/^commit: //p' "$COMP/fex/VERSION" 2>/dev/null || true)"
-ENGINE_FEX=9d4fa4b46b1
+ENGINE_FEX=597e7ccbedd
 fexb() { [ "$MYFEX" = yes ]; }
 skipfex() { echo "  skip   $* (this app has no FEX of mine)"; }
 mkdir -p "$H"
@@ -483,13 +483,13 @@ check "  with the rules file and no WINE_COMPATDB" eval 'echo "$out" | grep -qxF
 check "dry-run creates nothing" eval '[ ! -e "$AD" ] && [ ! -e "$CACHE" ]'
 check "fresh status: not installed" [ "$(st installed)" = no ]
 check "fresh status: no engine" [ "$(st engine_installed)" = no ]
-check "fresh status: the engine's pins (Mach9 0.3.1: Wine, FEX, DXMT commits)" \
-  [ "$(st engine)/$(st engine_wine)/$(st engine_fex)/$(st engine_dxmt)" = mach9-v0.3.1/53def89293a/9d4fa4b46b1/d903db89036 ]
+check "fresh status: the engine's pins (Mach9 0.4.0: Wine, FEX, DXMT commits)" \
+  [ "$(st engine)/$(st engine_wine)/$(st engine_fex)/$(st engine_dxmt)" = mach9-v0.4.0/501796b0ed1/597e7ccbedd/10e27aed3f5 ]
 check "fresh status: gamemode=engine (the engine's loader)" [ "$(st gamemode)" = engine ]
 check "fresh status: disk_free is a number" [ "$(st disk_free)" -gt 0 ]
 out=$(env -u GW2_ON_MAC_ENGINE_URL -u GW2_ON_MAC_ENGINE_SHA256 -u GW2_ON_MAC_ENGINE_SIZE GW2_ON_MAC_DRY_RUN=1 "$G" install steam 2>&1)
-check "dry-run without the stand-in: the real engine, Mach9 0.3.1 from athei/mach9" \
-  has <(echo "$out") "^\[dry-run\] download https://github.com/athei/mach9/releases/download/v0.3.1/wine-v0.3.1-macos-arm64.tar.xz (128991668 bytes, sha256 90aff9a897ed0ff9aac44d0e06f0aecd3ee985afb38037f3f915451e51fa974e)"
+check "dry-run without the stand-in: the real engine, Mach9 0.4.0 from athei/mach9" \
+  has <(echo "$out") "^\[dry-run\] download https://github.com/athei/mach9/releases/download/v0.4.0/wine-v0.4.0-macos-arm64.tar.xz (131698496 bytes, sha256 3b81aac9b93d5652872673b400769ec525f3bc2f1f7e2ec82c9f851d0a0db05d)"
 check "  no WINE_COMPATDB, no WINEDLLPATH" eval '! echo "$out" | grep -q -e WINE_COMPATDB= -e WINEDLLPATH'
 check "  and still nothing created" eval '[ ! -e "$AD" ] && [ ! -e "$CACHE" ]'
 
@@ -712,7 +712,7 @@ check "set metalfx on: DXMT_SUBSAMPLE_METALFX=1" sh -c "'$G' set metalfx on >/de
 out=$(g set dxmt engine 2>&1) && rc=0 || rc=$?
 check "set dxmt engine: the engine's own tree is the active one, mine waits next to it" \
   eval '[ "$rc" = 0 ] && dxgi_is engine && [ -f "$ENG/lib/wine/dxgi/dxmt.fork/.gw2om-dxmt" ] && [ "$(st graphics)/$(st dxmt_tree)" = yes/engine ] && ! echo "$out" | grep -q Repair'
-check "  it says which" has <(echo "$out") "^DXMT: the engine's own DXMT (athei/dxmt d903db89036) draws the game"
+check "  it says which" has <(echo "$out") "^DXMT: the engine's own DXMT (athei/dxmt 10e27aed3f5) draws the game"
 check "  warming, MetalFX and Metal greyed with the reason; set warm and set metal refused" \
   eval '[ "$(sett warm_state)" = "off:Needs my DXMT fork, and the engine'"'"'s own DXMT is chosen." ] && [ "$(sett metalfx_state)" = "$(sett warm_state)" ] && [ "$(sett metal_state)" = "$(sett warm_state)" ] && ! "$G" set warm off >/dev/null 2>&1 && ! "$G" set metal 4 >/dev/null 2>&1'
 check "  none of the fork's variables in the environment" sh -c "! '$G' env | grep -qE 'DXMT_(CACHE_DIR|WARM|DEPENDENCY_COMPRESSION|SUBSAMPLE|STATS)'"
@@ -725,6 +725,23 @@ check "  wine.app untouched" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")"
 out=$(g set dxmt fork 2>&1) && rc=0 || rc=$?
 check "set dxmt fork: mine again, the engine's own kept as it ships" eval '[ "$rc" = 0 ] && dxgi_is fork && [ "$(st graphics)/$(st dxmt_tree)" = yes/fork ] && ! echo "$out" | grep -q Repair'
 check "  wine.app untouched" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
+# My files go into the engine only when it is this app's and their records name its engine
+# (engine_refusal). First an engine an earlier version of the app left: its record of the archive
+# is Mach9 0.3.1's. Then my DXMT's VERSION without an engine: line, which counts as built for 0.3.1.
+cp "$ENG/.gw2om-source" "$SANDBOX/gw2om-source.keep"
+echo 90aff9a897ed0ff9aac44d0e06f0aecd3ee985afb38037f3f915451e51fa974e >"$ENG/.gw2om-source"
+out=$(g set dxmt engine 2>&1) && rc=0 || rc=$?
+check "Mach9 0.3.1's engine in place: set dxmt engine leaves the engine's files as they are, saying why" \
+  eval '[ "$rc" = 0 ] && dxgi_is fork && echo "$out" | grep -qxF "@warn The engine here is Mach9 0.3.1 · Wine 11.21, and my files are built for Mach9 0.4.0 · Wine 11.21, so they stay out of it. Click Repair to put Mach9 0.4.0 · Wine 11.21 in place."'
+cp "$SANDBOX/gw2om-source.keep" "$ENG/.gw2om-source"
+cp "$COMP/dxmt/VERSION" "$SANDBOX/dxmt-VERSION.keep"
+grep -v '^engine: ' "$SANDBOX/dxmt-VERSION.keep" >"$COMP/dxmt/VERSION"
+out=$(g set dxmt engine 2>&1) && rc=0 || rc=$?
+check "my DXMT's VERSION names no engine: set dxmt engine leaves my tree in place, saying why" \
+  eval '[ "$rc" = 0 ] && [ -f "$ENG/lib/wine/dxgi/dxmt/.gw2om-dxmt" ] && [ -d "$ENG/lib/wine/dxgi/dxmt.engine" ] && echo "$out" | grep -qxF "@warn My DXMT fork in this app is built for Mach9 0.3.1 · Wine 11.21, not for Mach9 0.4.0 · Wine 11.21, so none of my files go into the engine."'
+cp "$SANDBOX/dxmt-VERSION.keep" "$COMP/dxmt/VERSION"
+check "  its VERSION back: the tree is mine as it was, and the engine's own swaps in again" \
+  eval 'dxgi_is fork && g set dxmt engine >/dev/null && dxgi_is engine && g set dxmt fork >/dev/null && dxgi_is fork'
 # A swap cut short (the Mac off, a kill): between its two renames there is no active tree, and
 # during the copy an unfinished dxmt.fork.new; the next call puts the asked-for tree in
 DX="$ENG/lib/wine/dxgi"
@@ -1077,7 +1094,7 @@ kill $hp 2>/dev/null; wait $hp 2>/dev/null
 rm -rf "$GD/addons"
 
 section "The game's compatdb rules (compatdb.rules)"
-# The texts are pinned in scripts/compatdb-check/rules, which CI reads with Mach9 0.3.1's
+# The texts are pinned in scripts/compatdb-check/rules, which CI reads with Mach9 0.4.0's
 # compatdb-core; there the sandbox's home is /Users/me
 FIX="$ROOT/scripts/compatdb-check/rules"
 rules_are() { g rules | sed "s|$H|/Users/me|g" | cmp -s - "$FIX/$1.rules"; }
@@ -1362,7 +1379,7 @@ check "Steam -applaunch 1284210 with the launch options" has "$STANDIN_LOG" 'ste
 check "  with DXMT's config file and the rules file" eval 'has "$STANDIN_LOG" "DXMT_CONFIG_FILE=$AD/dxmt.conf" && grep -qxF "  WINE_COMPATDB_FILE=$AD/compatdb.rules" "$STANDIN_LOG"'
 check "  play wrote compatdb.rules before it: the rules and compatdb.local" eval '[ "$(cat "$AD/compatdb.rules")" = "$(g rules)" ] && grep -q FEX_HOSTFEATURES "$AD/compatdb.rules"'
 check "  session.env records the engine, its commits, the settings, the environment and the rules" \
-  eval 'has "$LOGS/session.env" "^ENGINE=mach9-v0.3.1$" && has "$LOGS/session.env" "^ENGINE_FEX=" && has "$LOGS/session.env" "^SETTING_hud=off$" && has "$LOGS/session.env" "^SETTING_metal=3$" && has "$LOGS/session.env" "^WINE_COMPATDB_FILE=" && [ "$(sed -n "s/^RULE=//p" "$LOGS/session.env")" = "$(cat "$AD/compatdb.rules")" ]'
+  eval 'has "$LOGS/session.env" "^ENGINE=mach9-v0.4.0$" && has "$LOGS/session.env" "^ENGINE_FEX=" && has "$LOGS/session.env" "^SETTING_hud=off$" && has "$LOGS/session.env" "^SETTING_metal=3$" && has "$LOGS/session.env" "^WINE_COMPATDB_FILE=" && [ "$(sed -n "s/^RULE=//p" "$LOGS/session.env")" = "$(cat "$AD/compatdb.rules")" ]'
 check "  and which DXMT the session loads: my fork, its build" \
   eval 'has "$LOGS/session.env" "^DXMT_TREE=fork$" && [ "$(sed -n "s/^DXMT_FORK=//p" "$LOGS/session.env")" = "$(head -1 "$COMP/dxmt/VERSION")" ] && has "$LOGS/session.env" "^SETTING_dxmt=fork$"'
 if mine; then
@@ -1690,7 +1707,7 @@ sed -i '' -e 's/^DXMT_TREE=.*/DXMT_TREE=engine/' -e 's/^RULE=exe=Gw2-64.exe;/&gc
 echo "info:  Using feature level D3D_FEATURE_LEVEL_11_1" >"$LOGS/engine-only_d3d11.log"
 out=$("$APP/Contents/Resources/session-report.sh" "$LOGS/engine-only_d3d11.log" 2>&1)
 check "the session report of the engine's DXMT: says which, and that it writes no STATS lines" \
-  eval 'echo "$out" | grep -q "^DXMT that ran: the engine.s own DXMT, athei/dxmt d903db89036$" && echo "$out" | grep -q "writes no STATS lines"'
+  eval 'echo "$out" | grep -q "^DXMT that ran: the engine.s own DXMT, athei/dxmt 10e27aed3f5$" && echo "$out" | grep -q "writes no STATS lines"'
 check "  a session with raw mouse-look off: the pointer's movement" has <(echo "$out") "^Mouse the game had: the pointer's movement, as Wine does it (gcmouse=false)$"
 mv -f "$SANDBOX/session.env.keep" "$LOGS/session.env"; rm -f "$LOGS/engine-only_d3d11.log"
 check "  the Steam account name is gone" sh -c "! grep -rq zz_acct_name '$Z'"
@@ -2507,7 +2524,7 @@ g set launchopts -maploadinfo >/dev/null
 sed -i '' -e 's/"version": "[^"]*"/"version": "0.2.0-dev.0"/' "$MF"
 out=$(g play 2>&1); started
 check "an earlier version's manifest: Play brings it to this version" [ "$(plutil -extract version raw -o - "$MF")" = "$(st version)" ]
-check "  the manifest names the engine's build" eval '[ "$(plutil -extract engine raw -o - "$MF")/$(plutil -extract engine_dxmt raw -o - "$MF")" = mach9-v0.3.1/d903db89036 ]'
+check "  the manifest names the engine's build" eval '[ "$(plutil -extract engine raw -o - "$MF")/$(plutil -extract engine_dxmt raw -o - "$MF")" = mach9-v0.4.0/10e27aed3f5 ]'
 watch_done
 echo "shader" >"$DXMT_CACHE/shaders_320.db"
 mkdir -p "$DXMT_CACHE_ENGINE" && echo "shader" >"$DXMT_CACHE_ENGINE/shaders_320.db"
@@ -2540,6 +2557,29 @@ g set uiscale off >/dev/null
 qc | while IFS= read -r f; do xattr -d com.apple.quarantine "$f"; done
 rm -f "$SANDBOX/cp-check"
 rm -rf "$SANDBOX/tar-check"
+# An engine of another release, as an earlier version of the app left it (docs/adr/0016): its
+# record of the archive is Mach9 0.3.1's. It counts as installed, and Play refuses, naming Repair.
+# Repair replaces it, but not while the old engine's Wine runs, and a failed download keeps it.
+OLD_SHA=90aff9a897ed0ff9aac44d0e06f0aecd3ee985afb38037f3f915451e51fa974e
+echo "$OLD_SHA" >"$ENG/.gw2om-source"
+check "Mach9 0.3.1's engine in place: installed=yes, engine_installed=old" [ "$(st installed)/$(st engine_installed)" = yes/old ]
+: >"$STANDIN_LOG"; out=$(g play 2>&1) && rc=0 || rc=$?
+check "  Play refuses, naming both engines and Repair, and starts no Wine" \
+  eval '[ "$rc" != 0 ] && echo "$out" | grep -qxF "@error The engine here is Mach9 0.3.1 · Wine 11.21, and this version of $APP_NAME runs on Mach9 0.4.0 · Wine 11.21. Click Repair to put it in place." && ! grep -q "^wine " "$STANDIN_LOG"'
+mv "$ENG/bin/wineserver" "$ENG/bin/wineserver.heat" && cp "$SANDBOX/sleeper" "$ENG/bin/wineserver"
+"$ENG/bin/wineserver" 60 & sp=$!
+sleep 0.3
+out=$(g repair 2>&1) && rc=0 || rc=$?
+check "  repair while the old engine's Wine runs: refused, the old engine kept" \
+  eval '[ "$rc" != 0 ] && echo "$out" | grep -q "^@error " && [ "$(cat "$ENG/.gw2om-source")" = "$OLD_SHA" ] && [ "$(st engine_installed)" = old ]'
+kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
+mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
+out=$(GW2_ON_MAC_ENGINE_URL="file://$SANDBOX/missing.tar.xz" g repair 2>&1) && rc=0 || rc=$?
+check "  repair with a failed download: the old engine kept, and the error says so" \
+  eval '[ "$rc" != 0 ] && echo "$out" | grep -q "^@error The download of the Wine engine.* The engine here, Mach9 0.3.1 · Wine 11.21, stays in place. Click Repair to try again.$" && [ "$(cat "$ENG/.gw2om-source")" = "$OLD_SHA" ] && [ -x "$ENG/bin/wine" ] && [ ! -e "$ENG.new" ]'
+out=$(g repair 2>&1) && rc=0 || rc=$?
+check "  repair once nothing runs: this app's engine replaces it, with my files in it, saying so" \
+  eval '[ "$rc" = 0 ] && echo "$out" | grep -qxF "The engine here is Mach9 0.3.1 · Wine 11.21; Mach9 0.4.0 · Wine 11.21 replaces it" && [ "$(st installed)/$(st engine_installed)" = yes/yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ] && dxgi_is fork && ntdll_is $MYWINE && winemac_is $MYDRV'
 mkdir "$AD/.lock"
 check "a second operation is refused while one runs (lock)" sh -c "'$G' repair 2>&1 | grep -q 'Another $APP_NAME'"
 rmdir "$AD/.lock"

@@ -11,5 +11,5 @@ dependencies = [
 
 [[package]]
 name = "compatdb-core"
-version = "0.3.1"
-source = "git+https://github.com/athei/mach9?rev=39f186e88de52e1960341d9939e5bf5ebb2a889d#39f186e88de52e1960341d9939e5bf5ebb2a889d"
+version = "0.4.0"
+source = "git+https://github.com/athei/mach9?rev=cc71942acedec93aa48c98fcdba73ddf0f383399#cc71942acedec93aa48c98fcdba73ddf0f383399"

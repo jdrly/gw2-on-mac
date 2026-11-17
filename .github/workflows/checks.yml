@@ -62,7 +62,7 @@ jobs:
           "$RUNNER_TEMP/actionlint" -color
 
   # The game's compatdb rules as gw2om.sh writes them (scripts/compatdb-check/rules, which
-  # test-sandbox.sh pins), read strictly with the crate Mach9 0.3.1's compatdb.so is built from
+  # test-sandbox.sh pins), read strictly with the crate Mach9 0.4.0's compatdb.so is built from
   compatdb:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -241,7 +241,7 @@ jobs:
             mkdir -p "$d/files"
             for f in "$@"; do echo 'int gw2om_check;' | clang -x c -dynamiclib -o "$d/files/$f" -; done
             { echo "wine-11.21-0-g0000000"; echo "commit: $commit"; echo "base: $engine_wine"
-              echo "engine: Mach9 v0.3.1 (wine-v0.3.1-macos-arm64.tar.xz, sha256 $engine_sha)"
+              echo "engine: Mach9 v0.4.0 (wine-v0.4.0-macos-arm64.tar.xz, sha256 $engine_sha)"
               for f in "$@"; do echo "$f: sha256 $(sum "$d/files/$f")"; done; } >"$d/files/VERSION"
             echo "LGPL" >"$d/files/COPYING.LIB" && echo "Wine's LICENSE" >"$d/files/LICENSE"
             tar -cJf "$d/$k-arm64-$commit.tar.xz" -C "$d/files" "$@" VERSION COPYING.LIB LICENSE
@@ -259,8 +259,8 @@ jobs:
             echo 'int gw2om_check;' | clang -x c -dynamiclib -o "$fd/files/aarch64-unix/lib${h}fex.so" -
           done
           { echo "FEX-2610-1-g1111111"; echo "commit: $commit"; echo "switches:"
-            echo "base: 9d4fa4b46b1d8d834462a540539f37528883eec4 (FEX-2610-215-g9d4fa4b, athei/FEX, the tag engine-0.3.1)"
-            echo "engine: Mach9 v0.3.1 (wine-v0.3.1-macos-arm64.tar.xz, sha256 $engine_sha)"
+            echo "base: 597e7ccbedd2b88a19c575bbad2538da447e6c3d (FEX-2610-226-g597e7cc, athei/FEX, the tag engine-0.4.0)"
+            echo "engine: Mach9 v0.4.0 (wine-v0.4.0-macos-arm64.tar.xz, sha256 $engine_sha)"
             for f in aarch64-windows/libarm64ecfex.dll aarch64-windows/libwow64fex.dll aarch64-unix/libarm64ecfex.so aarch64-unix/libwow64fex.so; do
               echo "$f: sha256 $(sum "$fd/files/$f")"
             done; } >"$fd/files/VERSION"
