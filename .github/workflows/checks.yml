@@ -74,6 +74,54 @@ jobs:
       - name: compatdb-core reads each rules text and writes it back byte for byte
         run: cargo run --locked --manifest-path scripts/compatdb-check/Cargo.toml -- scripts/compatdb-check/rules/*.rules
 
+  # What this run's change can reach, so two macOS jobs don't run for nothing
+  # (docs/adr/0013-checks-skip-renders-and-addon-by-change.md).
+  # renders: skipped when every file of the pull request is one the pictures and the Swift model
+  #   can't depend on (the list below). scripts/ui-render.swift starts no gw2om.sh.
+  # addon: run only when the pull request touches addon/, scripts/build-addon.sh or this file. In a
+  #   dev build the components job has run build-addon.sh on the same commit.
+  # Anything else (a push, a list that can't be read) runs both.
+  # The token has only contents: read. devbuild.yml calls this file with no more, and a called
+  # job can't ask for more than its caller. The repository is public, so that reads the list.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      renders: ${{ steps.look.outputs.renders }}
+      addon: ${{ steps.look.outputs.addon }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      DEV_BUILD: ${{ inputs.components != '' }}
+    steps:
+      - name: Which jobs this change can reach
+        id: look
+        run: |
+          renders=1 addon=1 read="no list"
+          if [[ $DEV_BUILD == true ]]; then
+            addon=0 read="a dev build"
+          elif [[ $GITHUB_EVENT_NAME == pull_request && -n $PR ]]; then
+            # (a rename counts with both names)
+            if files=$(gh api --paginate "repos/$GH_REPO/pulls/$PR/files" -q '.[] | .filename, (.previous_filename // empty)') && [[ -n $files ]]; then
+              renders=0 addon=0 read="$(wc -l <<<"$files") file names"
+              while IFS= read -r f; do
+                case "$f" in
+                  addon/*|scripts/build-addon.sh|.github/workflows/checks.yml) addon=1 ;;
+                esac
+                case "$f" in
+                  src/gw2om.sh|src/collect-logs.sh|scripts/test-sandbox.sh|scripts/session-report.sh) ;;
+                  scripts/compatdb-check/*|release-notes/*|*.md|addon/*|scripts/build-addon.sh) ;;
+                  *) renders=1 ;;
+                esac
+              done <<<"$files"
+            else
+              echo "::warning::Couldn't read pull request #$PR's files, so renders and addon run"
+            fi
+          fi
+          echo "renders=$renders addon=$addon ($read)" | tee -a "$GITHUB_STEP_SUMMARY"
+          { echo "renders=$renders"; echo "addon=$addon"; } >>"$GITHUB_OUTPUT"
+
   build:
     # build.sh needs the macOS 27 SDK. GitHub has no macos-27 label; its macOS 27 image with
     # Xcode 27 is xcode-27, a public preview (actions/runner-images#14404;
@@ -326,7 +374,8 @@ jobs:
           retention-days: 14
 
   renders:
-    needs: build
+    needs: [build, changes]
+    if: needs.changes.outputs.renders != '0'
     runs-on: xcode-27
     timeout-minutes: 20
     env:
@@ -357,8 +406,11 @@ jobs:
   # The jobs above take the addon's version.dll prebuilt from the components archive, so on a pull
   # request this is the one job that compiles addon/ui-scale and runs its native test
   # (addon/ui-scale/test/test.c), with Homebrew's mingw-w64, the toolchain the shipped addon is
-  # built with. In a dev build it runs too, next to the components job's build of the same commit.
+  # built with. It runs when the pull request touches addon/, scripts/build-addon.sh or this file
+  # (the changes job). A dev build's components job has run the same script on the same commit.
   addon:
+    needs: changes
+    if: needs.changes.outputs.addon != '0'
     runs-on: xcode-27
     timeout-minutes: 20
     steps:
