@@ -1928,7 +1928,7 @@ install_engine() {
   say "Unpacking the Wine engine ($ENGINE_TITLE)"
   run rm -rf "$dst.new"
   run mkdir -p "$dst.new"
-  run tar -xJf "$FETCHED" -C "$dst.new" --strip-components 1
+  run tar -xJf "$FETCHED" -C "$dst.new" --strip-components 1 || die "The Wine engine could not be unpacked (the log shows tar's error)."
   if [ -z "$DRY" ]; then
     # An archive downloaded in a browser carries the quarantine attribute and tar copies it onto
     # every file: the loader is notarized and would pass, the engine's ad hoc signed libraries not
