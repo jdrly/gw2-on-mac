@@ -224,7 +224,7 @@ check "Game Mode bundle's ntdll.so link resolves" [ -f "$AD/gamemode/GW2.app/Con
 check "Steam started with the install page" has "$STANDIN_LOG" 'wine C:\\Program Files (x86)\\Steam\\steam.exe steam://install/1284210'
 check "  with the heat event pool" has "$STANDIN_LOG" "WINE_HEAT_EVPOOL=1"
 check "  with shader warming by use" has "$STANDIN_LOG" "DXMT_WARM=all"
-check "  with 3 cooler workers" has "$STANDIN_LOG" "WINE_HEAT_QOS=1=utility:3"
+check "  without cooler job workers (off by default)" sh -c "! grep -q WINE_HEAT_QOS '$STANDIN_LOG'"
 check "  with WINEDLLPATH (Game Mode)" has "$STANDIN_LOG" "WINEDLLPATH=$ENG/lib/wine"
 check "  with x87sidecar off" has "$STANDIN_LOG" "ROSETTA_X87_PATH="
 check "the Game Mode link in the sandbox's temp folder" sh -c "ls '$SANDBOX/usertmp/'winetemp-*/Gw2-64.exe >/dev/null 2>&1"
@@ -250,13 +250,22 @@ check "stage=finished" [ "$(st stage)" = finished ]
 check "DXMT's cache folder" [ -d "$DXMT_CACHE" ]
 
 section "Settings"
-check "defaults: warm on, coolworkers 3, fastlocks on, ncpu 8, uiscale off" \
-  [ "$(sett warm)$(sett coolworkers)$(sett fastlocks)$(sett ncpu)$(sett uiscale)" = on3on8off ]
+check "defaults: warm on, coolworkers off, fastlocks on, ncpu 8, uiscale off" \
+  [ "$(sett warm)$(sett coolworkers)$(sett fastlocks)$(sett ncpu)$(sett uiscale)" = onoffon8off ]
 check "default: Steam in the background on" [ "$(sett steambg)" = on ]
 check "default: Quit Steam when the game quits on" [ "$(sett quitsteam)" = on ]
 check "set coolworkers 5" g set coolworkers 5
 check "  WINE_HEAT_QOS=1=utility:5 in the environment" has <(g env) "WINE_HEAT_QOS=1=utility:5"
 check "set coolworkers off: no WINE_HEAT_QOS" sh -c "'$G' set coolworkers off >/dev/null && ! '$G' env | grep -q WINE_HEAT_QOS"
+# 0.1.4 and earlier wrote their default, coolworkers=3, into settings.conf at install (docs/adr/0014)
+sed -i '' 's/^coolworkers=.*/coolworkers=3/' "$AD/settings.conf"
+check "0.1.4's coolworkers=3, never picked (no set line in install.log): off" [ "$(sett coolworkers)" = off ]
+check "  no WINE_HEAT_QOS" sh -c "! '$G' env | grep -q WINE_HEAT_QOS"
+check "  the next write puts off in settings.conf" sh -c "'$G' set fastlocks on >/dev/null && grep -qx coolworkers=off '$AD/settings.conf'"
+check "set coolworkers 3: WINE_HEAT_QOS=1=utility:3" sh -c "'$G' set coolworkers 3 >/dev/null && '$G' env | grep -qx 'WINE_HEAT_QOS=1=utility:3'"
+check "  a picked 3 stays 3 after the next write" sh -c "'$G' set fastlocks on >/dev/null && grep -qx coolworkers=3 '$AD/settings.conf'"
+check "  and reads as 3" [ "$(sett coolworkers)" = 3 ]
+check "set coolworkers off again" g set coolworkers off
 check "set fastlocks off: no WINE_HEAT_SPIN" sh -c "'$G' set fastlocks off >/dev/null && ! '$G' env | grep -q WINE_HEAT_SPIN"
 check "set warm off: no DXMT_WARM" sh -c "'$G' set warm off >/dev/null && ! '$G' env | grep -q DXMT_WARM"
 check "set ncpu all: no WINENCPU" sh -c "'$G' set ncpu all >/dev/null && ! '$G' env | grep -q WINENCPU"
