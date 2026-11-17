@@ -2379,7 +2379,8 @@ out=$(GW2_ON_MAC_WATCH_POLL=0 g show-steam 2>&1) && rc=0 || rc=$?
 check "  the lock held, no watcher named yet (a Play handing over): refused, no request, no window" eval '[ "$rc" != 0 ] && has <(echo "$out") "@error .*handing the session over" && [ ! -s "$AD/session.req" ] && ! has "$STANDIN_LOG" "steam://open/main"'
 : >"$AD/session.req"
 session_file waiting_game
-kill $wp 2>/dev/null; wait $wp 2>/dev/null
+# (its sleep first: a TERM ends the stand-in's bash, not the sleep it waits on)
+pkill -P $wp; kill $wp 2>/dev/null; wait $wp 2>/dev/null
 check "a dead watcher's unfinished session is over: Steam on its own is stage=none" eval '[ "$(ss stage)/$(ss closing)/$(ss quit_steam)/$(ss watching)" = none/no/no/no ]'
 check "  status: session=none (busy=steam)" [ "$(st session)/$(st busy)" = none/steam ]
 kill $lp 2>/dev/null; wait $lp 2>/dev/null
