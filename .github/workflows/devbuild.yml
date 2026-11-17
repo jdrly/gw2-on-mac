@@ -420,6 +420,7 @@ jobs:
     with:
       components: components
       version: ${{ needs.plan.outputs.version }}
+      sandbox: false
 
   package:
     needs: [plan, checks]

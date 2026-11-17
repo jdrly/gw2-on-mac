@@ -24,6 +24,10 @@ on:
         description: GW2_ON_MAC_VERSION for build.sh; empty is build.sh's own
         type: string
         default: ""
+      sandbox:
+        description: Run the sandbox suite; false only for a one-off dev build I asked for without it
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -275,6 +279,7 @@ jobs:
 
   sandbox:
     needs: build
+    if: inputs.sandbox != false
     runs-on: xcode-27
     timeout-minutes: 30
     steps:
