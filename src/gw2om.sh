@@ -1097,9 +1097,9 @@ fex_entries() {
 # mouse speed, DXMT_CHUNKS), a switch that brings back upstream's behaviour (DXMT_DEPTH_PFV,
 # DXMT_STENCIL_PFV), and the rows' own variables. A row whose variable a line of the file sets is
 # greyed while the line is there (dev_sets): the file's entry comes later in the rule and wins. A fork's issues are
-# jdrly/<fork>#n, the app's #n. Unplayed: no session of the game has run with it. My fork's Metal 4
-# switches (DXMT_MTL4_*) stay in with the Metal row at Metal 3, where they do nothing, so my lines
-# last through a switch of Metal; their comments say so. DXMT_MTL4_PRESENT=mtl3 left the table at
+# jdrly/<fork>#n, the app's #n. Unplayed: no session of the game has run with it. A DXMT switch
+# that acts on one Metal only (DXMT_DRAIN_SPLITS, Metal 3) stays in with the Metal row at the other,
+# where it does nothing, so my lines last through a switch of Metal; its comment says so. DXMT_MTL4_PRESENT=mtl3 left the table at
 # version 4: the game's rule has it at Metal 4 in every build (metal_present). DXMT_MTL4_LAYER_SET
 # (jdrly/dxmt#226), a diagnostic for the same stutter, stays out: I turn it on by hand, so a change
 # in play has one cause. My ntdll.so's other changes
@@ -1133,7 +1133,10 @@ DEV_SWITCHES="
 6 fex #165 unplayed FEX_ENTRYCOMPILELOCK=1 threads that miss on the same entry at once compile it once, and FEX's pool allocators read the CPU's counter for their clock instead of QueryPerformanceCounter
 6 fex #118 unplayed FEX_HOSTFEATURES=disableavx the game sees no AVX, AVX2, BMI, FMA or F16C and takes its SSE paths. Another FEX_HOSTFEATURES line here joins this one. A compatdb.local rule for Gw2-64.exe that sets FEX_HOSTFEATURES replaces them, and status says what to write there instead. If the game crashes at start or in play, take this line out first.
 6 dxmt jdrly/dxmt#265 unplayed DXMT_RENAME_TRIM=600 every 2 s, the rename queues give back the allocations the GPU finished with more than 600 sequence ids (about 10 s) ago
-7 dxmt jdrly/dxmt#271 unplayed DXMT_MTL4_SHOWN_WAIT=write only with the Metal row at Metal 4, where the game's rule presents through a Metal 3 command buffer (DXMT_MTL4_PRESENT=mtl3), nothing on Metal 3: the Metal 4 queue waits for the last present's shown event only before the first encoder that writes the presented texture, not before the next frame's work, so that work runs while the present waits for its drawable
+10 dxmt jdrly/dxmt#324 unplayed DXMT_PRESENT_SKIP_NIL=1 a present whose layer gave no drawable (nextDrawable timed out, or the drawable size is zero) is skipped: no pass, no wait and no present call, instead of the nil going to Metal
+10 dxmt jdrly/dxmt#316 unplayed DXMT_DRAIN_SPLITS=1 only with the Metal row at Metal 3, nothing on Metal 4: at teardown the drain also waits for the split-off command buffers of chunks not yet retired, so it frees nothing they still use
+10 dxmt jdrly/dxmt#314 unplayed DXMT_REFRESH_REQUERY=1 the swap chain reads the monitor's refresh rate again after exclusive fullscreen and for a fullscreen mode of 0 Hz, instead of assuming 60 Hz
+10 dxmt jdrly/dxmt#314 unplayed DXMT_STEADY_SLEEP=1 the frame limiter and the background throttle keep their deadlines on QueryPerformanceCounter and sleep for what is left, so a wall clock that steps back can't lengthen a sleep
 "
 # Rows taken out of the table, "<version> <issue> <NAME=value> <off value>". dev_update brings a file
 # older than <version> up to it (dev_gone): the line as the table wrote it goes, with the comment and
@@ -1146,6 +1149,8 @@ DEV_SWITCHES="
 # crashed at exit, and Metal's own shader cache already keeps what it saved) and the present
 # queue's pace (jdrly/dxmt#157: it gave up at frame 181 in every session).
 # Version 9: my DXMT fork has jdrly/dxmt#153, #154 and #204 on by default, and =0 turns each off.
+# Version 10: my DXMT fork has jdrly/dxmt#271's wait on by default (jdrly/dxmt#332), and =next turns
+# it off.
 DEV_GONE="
 4 jdrly/dxmt#227 DXMT_MTL4_PRESENT=mtl3 mtl4
 8 jdrly/dxmt#157 DXMT_PRESENT_QUEUE=pace -
@@ -1154,6 +1159,7 @@ DEV_GONE="
 9 jdrly/dxmt#153 DXMT_MTL4_DEVICE_RESIDENCY=1 0
 9 jdrly/dxmt#154 DXMT_MTL4_TIMESTAMP_REUSE=1 0
 9 jdrly/dxmt#204 DXMT_MTL4_ALLOCATOR_POOL=1 0
+10 jdrly/dxmt#271 DXMT_MTL4_SHOWN_WAIT=write next
 "
 DEV_SWITCHES_VERSION=$(printf '%s\n' "$DEV_SWITCHES" "$DEV_GONE" | awk 'NF && $1 > v { v = $1 } END { print v + 0 }')
 # dev_piece_label <piece>: what the file and the log call it

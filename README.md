@@ -707,7 +707,8 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   has every switch of my forks that is off by default, at the value that turns its new behaviour
   on, apart from diagnostics, anything that can cap the frame rate below 60 (DXMT's lower thread
   priorities and `DXMT_BG_POLICY=occlusion` among them), values only I can choose and the rows'
-  own variables. The `DXMT_MTL4_*` lines act only with the *Metal* row at Metal 4.
+  own variables. A DXMT line that acts on one Metal only, `DXMT_DRAIN_SPLITS` on Metal 3, stays in
+  with the *Metal* row at the other, where it does nothing.
   `DXMT_MTL4_LAYER_SET` (jdrly/dxmt#226) stays out: I turn that one on by hand, never with
   another present switch, so a change in play has one cause. `DXMT_MTL4_PRESENT=mtl3` left the
   table at version 4, since the rule has it at Metal 4 now. Version 4 changes a file of an older
@@ -724,6 +725,14 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   `DXMT_MTL4_DEVICE_RESIDENCY=1`, `DXMT_MTL4_TIMESTAMP_REUSE=1` and `DXMT_MTL4_ALLOCATOR_POOL=1`. A
   line as the table wrote it goes with its comment. One I commented out becomes `NAME=0` under a
   comment, so it stays off.
+  Version 10 adds four lines of my DXMT fork: `DXMT_PRESENT_SKIP_NIL=1` (jdrly/dxmt#324: a present
+  whose layer gave no drawable is skipped), `DXMT_DRAIN_SPLITS=1` (jdrly/dxmt#316: teardown on
+  Metal 3 also waits for the split-off command buffers), `DXMT_REFRESH_REQUERY=1` (jdrly/dxmt#314:
+  the refresh rate is read again after exclusive fullscreen) and `DXMT_STEADY_SLEEP=1`
+  (jdrly/dxmt#314: the frame limiter and the background throttle sleep on
+  `QueryPerformanceCounter`). It takes `DXMT_MTL4_SHOWN_WAIT=write` out, because `write` is my DXMT
+  fork's default now (jdrly/dxmt#332). That line as the table wrote it goes with its comment. One I
+  commented out becomes `DXMT_MTL4_SHOWN_WAIT=next` under a comment, so it stays off.
   A row whose variable a line of the file sets, *Faster locks* with the file's
   `WINE_HEAT_SPIN`, is greyed while that line is there, since the file's entry wins. A line of the table goes in only while the file of mine that
   reads it is in place and has the switch: the `switches:` line of my `ntdll.so`'s,
@@ -746,8 +755,8 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   comes after the app's and replaces that entry, and the app doesn't write that file. The file's
   `FEX_HOSTFEATURES` lines then stay out, and the reason names the value to write in
   `compatdb.local` for both. An update adds `disableavx` to a file whose own `FEX_HOSTFEATURES`
-  lines say nothing about AVX. Version 7 adds `DXMT_MTL4_SHOWN_WAIT=write` (jdrly/dxmt#271). It
-  acts only at Metal 4, where the rule has `DXMT_MTL4_PRESENT=mtl3`: the Metal 4 queue waits for
+  lines say nothing about AVX. Version 7 added `DXMT_MTL4_SHOWN_WAIT=write` (jdrly/dxmt#271), and
+  version 10 took it out again. It acts only at Metal 4, where the rule has `DXMT_MTL4_PRESENT=mtl3`: the Metal 4 queue waits for
   the last present's `shown` event only before the first encoder that writes the presented
   texture, not before the next frame's work, so a GPU frame over 16.7 ms needn't skip a refresh.
   The log says at each
@@ -1259,10 +1268,12 @@ Without one, those checks are skipped. It covers:
   out, `FEX_HOSTFEATURES` joined with a line of mine, `enableavx` after `disableavx`, and out under
   a `compatdb.local` rule for the game but not one for another program, a file at version 5
   updated (with a `FEX_HOSTFEATURES` line of mine, and with AVX already decided there), version
-  7's `DXMT_MTL4_SHOWN_WAIT` in and out, a file at version 6 updated (and with that line
-  commented out, which stays so), a file at version 7 updated (version 8's three lines gone, a
-  changed or commented-out one kept), a file at version 8 updated (version 9's three lines gone,
-  a commented-out one kept off), a line commented out or added, the engine's own DXMT, a second start
+  10's four DXMT lines in and out (in a dry run of Play's rule too, with no `DXMT_MTL4_SHOWN_WAIT`),
+  a file at version 9 updated (and with one of those lines commented out, which stays so), a file
+  at version 7 updated (version 8's three lines gone, a changed or commented-out one kept), a file
+  at version 8 updated (version 9's three lines gone, a commented-out one kept off), a file at
+  version 9 with `DXMT_MTL4_SHOWN_WAIT=write` updated (the line gone, a changed one kept, a
+  commented-out one kept off with `=next`), a line commented out or added, the engine's own DXMT, a second start
   that changes nothing, an update that adds a newer switch and keeps the rest, a row turned off
   that stays off, a release that writes no file and reads none, and a release's install updated
   by a development build

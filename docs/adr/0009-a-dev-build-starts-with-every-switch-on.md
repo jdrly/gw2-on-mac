@@ -34,7 +34,9 @@ from one file I can take lines out of.
 - When a fork deletes a switch, its row leaves the table first (#212). A row whose switch became
   the default in a fork leaves too. The rows of the three Metal 4 switches that jdrly/dxmt #301
   turned on by default left in #243 (PR #244). A line I had commented out to turn one of them off
-  now sets it to `0`.
+  now sets it to `0`. On 2026-11-17 `DXMT_MTL4_SHOWN_WAIT=write` left the same way (#258), after
+  jdrly/dxmt #332 made `write` the default. Its off value is `next`, not `0`, so a line I had
+  commented out becomes `DXMT_MTL4_SHOWN_WAIT=next`.
 - `FEX_ENTRYHEADERLOOKUP` stays out of the rule while the rule can start my Wine fork's sampler
   (#170).
 
@@ -47,7 +49,7 @@ from one file I can take lines out of.
 
 ## Evidence
 
-- #129 (PR #137, `2c24b37`), #170, #178, #202, #212, #243 (PR #244, `5d957c3`).
+- #129 (PR #137, `2c24b37`), #170, #178, #202, #212, #243 (PR #244, `5d957c3`), #258.
 - The dispatcher's note `dev-builds-everything-on` (what I said on 2026-11-12 and 2026-11-15).
 - GW2 on Mac workspace `plans/night/2026-11-11-plan.md`, 2026-11-12 22:10 and 22:40 (the four taken
   out), 2026-11-15 23:50.
