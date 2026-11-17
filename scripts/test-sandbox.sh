@@ -14,6 +14,9 @@
 # Env: SANDBOX (default work/app-sandbox/test in this repository, removed first), KEEP=1 (leave it
 #      for a look), SIGNED_PE (an x86_64 PE signed by ArenaNet; default the game's Gw2-64.exe in
 #      $GW2_ON_MAC_WORKSPACE/work/bottles, the workspace defaulting to ../gw2-on-mac)
+#      GROUP (all, the default; steam: the life of one Steam install, from the dry runs to
+#      Uninstall; rest: what starts from nothing after it. The Checks workflow runs the two as
+#      two jobs. On one Mac run one at a time: each ends every watch-session of this app)
 # Runs under macOS's /bin/bash 3.2.
 # Many variables are read only inside the strings that check() evals, which shellcheck can't see.
 # shellcheck disable=SC2034
@@ -102,6 +105,9 @@ export PATH="$SANDBOX/bin:$PATH"
 other_dxmt_kept() { has "$OTHER_DXMT/shaders_320.db" "another setup's"; }
 
 pass=0 fail=0
+GROUP="${GROUP:-all}"
+case "$GROUP" in all|steam|rest) ;; *) echo "GROUP must be all, steam or rest" >&2; exit 1 ;; esac
+in_group() { [ "$GROUP" = all ] || [ "$GROUP" = "$1" ]; }
 # Each check's commands: what gw2om.sh prints goes to checks/NNNN.txt as well, through G, a wrapper
 # that appends it there (GW2OM is the app's own gw2om.sh). checks.txt lists the results, and a
 # failed check gets a copy of the state files next to it (NNNN.state). After a failure, the end
@@ -144,13 +150,22 @@ end_check() {
 ok() { pass=$((pass + 1)); echo "  ok   $*"; end_check ok "$*"; }
 bad() { fail=$((fail + 1)); echo "  FAIL $*"; end_check FAIL "$*"; }
 check() { local what=$1; shift; if "$@"; then ok "$what"; else bad "$what"; fi; }
-section() { echo; echo "== $*"; }
+# section <name>: its heading; the seconds the one before it took are kept for the end
+SEC_NAME="" SEC_T0=0 SEC_TIMES=""
+section_end() {
+  [ -z "$SEC_NAME" ] || SEC_TIMES="$SEC_TIMES$(printf '%6d s  %s' $((SECONDS - SEC_T0)) "$SEC_NAME")
+"
+  SEC_NAME=""
+}
+section() { section_end; SEC_NAME=$* SEC_T0=$SECONDS; echo; echo "== $*"; }
 g() { "$G" "$@"; }
 st() { g status | sed -n "s/^$1=//p"; }
 sett() { g settings | sed -n "s/^$1=//p"; }
 has() { grep -q -- "$2" "$1" 2>/dev/null; }
 # play starts Wine detached: wait (up to 5 s) for the stand-in's log of that start
 started() { local i=0; while ! grep -q '^wine ' "$STANDIN_LOG" 2>/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done; }
+# the command play started (the stand-in's log of it)
+play_cmd() { : >"$STANDIN_LOG"; g play >/dev/null 2>&1; started; grep -m1 '^wine ' "$STANDIN_LOG"; }
 # regsec <key>: that section of user.reg; noreg <key> <name>: the name isn't set in it
 regsec() { sed -n "/^\[$1\]/,/^\$/p" "$BOTTLE/user.reg" 2>/dev/null; }
 noreg() { ! regsec "$1" | grep -q "^\"$2\"="; }
@@ -257,6 +272,38 @@ export GW2_ON_MAC_WATCH_GRACE=2 GW2_ON_MAC_WATCH_QUITWAIT=2 GW2_ON_MAC_WATCH_POL
 export GW2_ON_MAC_DEV_SWITCHES=off
 ok "stand-in engine ($GW2_ON_MAC_ENGINE_SIZE bytes) and SteamSetup.exe"
 
+# Stand-in PEs (an x86_64 DLL whose export directory holds the given names; a fixture, not a
+# loadable DLL): arcdps exports its extension API (addextension2) and names itself; another addon
+# can carry those words elsewhere and is still not arcdps
+le32w() { printf "\\x$(printf %02x $(($1 & 255)))\\x$(printf %02x $((($1 >> 8) & 255)))\\x$(printf %02x $((($1 >> 16) & 255)))\\x$(printf %02x $((($1 >> 24) & 255)))"; }
+le16w() { printf "\\x$(printf %02x $(($1 & 255)))\\x$(printf %02x $((($1 >> 8) & 255)))"; }
+make_pe() {   # <out> <export names...>
+  local out=$1 strs n size
+  shift
+  strs="d3d11.dll"; for n in "$@"; do strs="$strs $n"; done
+  size=$((40 + $(printf '%s\n' $strs | wc -c)))
+  {
+    printf 'MZ'; head -c 58 /dev/zero; le32w 64
+    printf 'PE\0\0'; le16w 34404; le16w 1; head -c 12 /dev/zero; le16w 240; le16w 8226
+    le16w 523; head -c 106 /dev/zero; le32w 16; le32w 4096; le32w "$size"; head -c 120 /dev/zero
+    printf '.edata\0\0'; le32w 512; le32w 4096; le32w 512; le32w 512; head -c 16 /dev/zero
+    head -c 144 /dev/zero
+    head -c 12 /dev/zero; le32w 4136; le32w 1; head -c 20 /dev/zero
+    for n in $strs; do printf '%s\0' "$n"; done
+    head -c $((512 - size)) /dev/zero
+  } >"$out"
+}
+ARCSRV="$SANDBOX/deltaconnected"
+mkdir -p "$ARCSRV" "$SANDBOX/pe"
+make_pe "$SANDBOX/pe/arcdps.dll" CreateDXGIFactory D3D11CreateDevice addextension2 listextension removeextension2
+printf 'arcdps build 20261023 (stand-in)\n' >>"$SANDBOX/pe/arcdps.dll"
+make_pe "$SANDBOX/pe/nexus.dll" CreateDXGIFactory D3D11CreateDevice
+printf 'GetProcAddress addextension2 for arcdps\n' >>"$SANDBOX/pe/nexus.dll"
+# (macOS kills copies of /bin/sleep: an ad-hoc signed program of my own keeps its signature)
+printf '#include <unistd.h>\n#include <stdlib.h>\nint main(int c, char **v) { sleep(c > 1 ? atoi(v[1]) : 60); return 0; }\n' >"$SANDBOX/sleeper.c"
+clang -O2 -o "$SANDBOX/sleeper" "$SANDBOX/sleeper.c"
+
+if in_group steam; then
 # --- Dry runs change nothing
 section "Dry runs"
 out=$(GW2_ON_MAC_DRY_RUN=1 g install steam 2>&1); rc=$?
@@ -866,33 +913,6 @@ check "  turning it off leaves it alone too" has "$GD/version.dll" "another addo
 rm -f "$GD/version.dll"
 
 section "arcdps (Settings › Interface)"
-# Stand-in PEs (an x86_64 DLL whose export directory holds the given names; a fixture, not a
-# loadable DLL): arcdps exports its extension API (addextension2) and names itself; another addon
-# can carry those words elsewhere and is still not arcdps
-le32w() { printf "\\x$(printf %02x $(($1 & 255)))\\x$(printf %02x $((($1 >> 8) & 255)))\\x$(printf %02x $((($1 >> 16) & 255)))\\x$(printf %02x $((($1 >> 24) & 255)))"; }
-le16w() { printf "\\x$(printf %02x $(($1 & 255)))\\x$(printf %02x $((($1 >> 8) & 255)))"; }
-make_pe() {   # <out> <export names...>
-  local out=$1 strs n size
-  shift
-  strs="d3d11.dll"; for n in "$@"; do strs="$strs $n"; done
-  size=$((40 + $(printf '%s\n' $strs | wc -c)))
-  {
-    printf 'MZ'; head -c 58 /dev/zero; le32w 64
-    printf 'PE\0\0'; le16w 34404; le16w 1; head -c 12 /dev/zero; le16w 240; le16w 8226
-    le16w 523; head -c 106 /dev/zero; le32w 16; le32w 4096; le32w "$size"; head -c 120 /dev/zero
-    printf '.edata\0\0'; le32w 512; le32w 4096; le32w 512; le32w 512; head -c 16 /dev/zero
-    head -c 144 /dev/zero
-    head -c 12 /dev/zero; le32w 4136; le32w 1; head -c 20 /dev/zero
-    for n in $strs; do printf '%s\0' "$n"; done
-    head -c $((512 - size)) /dev/zero
-  } >"$out"
-}
-ARCSRV="$SANDBOX/deltaconnected"
-mkdir -p "$ARCSRV" "$SANDBOX/pe"
-make_pe "$SANDBOX/pe/arcdps.dll" CreateDXGIFactory D3D11CreateDevice addextension2 listextension removeextension2
-printf 'arcdps build 20261023 (stand-in)\n' >>"$SANDBOX/pe/arcdps.dll"
-make_pe "$SANDBOX/pe/nexus.dll" CreateDXGIFactory D3D11CreateDevice
-printf 'GetProcAddress addextension2 for arcdps\n' >>"$SANDBOX/pe/nexus.dll"
 cp "$SANDBOX/pe/arcdps.dll" "$ARCSRV/d3d11.dll"
 echo "$(md5 -q "$ARCSRV/d3d11.dll")  d3d11.dll" >"$ARCSRV/d3d11.dll.md5sum"
 export GW2_ON_MAC_ARCDPS_URL="file://$ARCSRV"
@@ -1720,8 +1740,6 @@ rm -rf "$GD/addons" "$GD/d3d11.dll" "$AD/compatdb.local" "$STEAM/dumps" "$GD/Cra
 
 section "Steam in the background after the first login"
 LU="$STEAM/config/loginusers.vdf"
-# the command play started (the stand-in's log of it)
-play_cmd() { : >"$STANDIN_LOG"; g play >/dev/null 2>&1; started; grep -m1 '^wine ' "$STANDIN_LOG"; }
 rm -f "$LU"
 check "no login yet (no loginusers.vdf): Steam with its window" sh -c "'$G' settings | grep -qx steam_login=no"
 c=$(play_cmd); check "  steam.exe -applaunch 1284210, no -silent" eval '[[ "$c" == *"steam.exe -applaunch 1284210 -maploadinfo" ]]'
@@ -1736,9 +1754,6 @@ g set steambg on >/dev/null
 
 section "Busy checks (a sleeper at the engine's paths)"
 watch_done   # the watchers of the Plays above have given up (no Steam came)
-# (macOS kills copies of /bin/sleep: an ad-hoc signed program of my own keeps its signature)
-printf '#include <unistd.h>\n#include <stdlib.h>\nint main(int c, char **v) { sleep(c > 1 ? atoi(v[1]) : 60); return 0; }\n' >"$SANDBOX/sleeper.c"
-clang -O2 -o "$SANDBOX/sleeper" "$SANDBOX/sleeper.c"
 cp "$SANDBOX/sleeper" "$ENG/bin/leftover"
 "$ENG/bin/leftover" 60 & lp=$!
 sleep 0.3
@@ -2514,7 +2529,9 @@ check "its caches are gone" eval '[ ! -e "$CACHE" ] && [ ! -e "$DXMT_CACHE" ]'
 check "the per-user cache folder's dxmt/ stays (another setup's)" other_dxmt_kept
 check "the logs stay" [ -f "$LOGS/install.log" ]
 check "status: not installed" [ "$(st installed)/$(st engine_installed)" = no/no ]
+fi
 
+if in_group rest; then
 section "ArenaNet route"
 if [ -f "$SIGNED_PE" ]; then
   cp -c "$SIGNED_PE" "$SANDBOX/Gw2Setup-64.exe"
@@ -3285,7 +3302,13 @@ check "a release's Collect Logs leaves out the dev-switches.conf a development b
   eval '[ -f "$RDEVF" ] && [ -f "$zip" ] && grep -q settings.conf "$SANDBOX/relzip.txt" && ! grep -q dev-switches.conf "$SANDBOX/relzip.txt"'
 for k in ntdll macdrv fex; do [ ! -f "$DEVKEEP/$k" ] || cp "$DEVKEEP/$k" "$COMP/$k/VERSION"; done
 rm -rf "$DROOT" "$RROOT" "$DEVR" "$RELR"
+fi
 
+section_end
+echo
+echo "Seconds per section (GROUP=$GROUP, $SECONDS s in all):"
+printf '%s' "$SEC_TIMES"
+[ -z "${GITHUB_STEP_SUMMARY:-}" ] || { echo "### test-sandbox.sh, GROUP=$GROUP: $SECONDS s"; echo '```'; printf '%s' "$SEC_TIMES"; echo '```'; } >>"$GITHUB_STEP_SUMMARY"
 echo
 echo "$pass passed, $fail failed"
 end_sandbox_processes
