@@ -2755,6 +2755,8 @@ DEVTABLE=$(sed -n '/^DEV_SWITCHES="$/,/^"$/p' "$APP/Contents/Resources/gw2om.sh"
 DEVVER=$(sed -n -e '/^DEV_SWITCHES="$/,/^"$/p' -e '/^DEV_GONE="$/,/^"$/p' "$APP/Contents/Resources/gw2om.sh" | awk 'NF > 3 && $1 > v { v = $1 } END { print v + 0 }')
 # Version 8's rows of DEV_GONE, as dev_update names them after "out of the list:"
 GONE8="DXMT_PRESENT_QUEUE=pace DXMT_PSO_ARCHIVE=1 DXMT_PSO_GENERATIONS=1"
+# Version 9's rows of DEV_GONE
+GONE9="DXMT_MTL4_DEVICE_RESIDENCY=1 DXMT_MTL4_TIMESTAMP_REUSE=1 DXMT_MTL4_ALLOCATOR_POOL=1"
 table_pieces() { local p; [ "$DEVVER" -ge 1 ] || return 1; for p in wine macdrv win32u fex fexany dxmt; do printf '%s\n' "$DEVTABLE" | grep -q "^$p " || return 1; done; }
 check "the table has switches of each piece" table_pieces
 # The components' records, narrowed: my ntdll.so names WINE_HEAT_SPIN, my winemac.so
@@ -3046,16 +3048,16 @@ dev_files
 check "  one that has DXMT_MTL4_SHOWN_WAIT: DXMT_MTL4_SHOWN_WAIT=write in the rule and status" \
   eval 'rule_has DXMT_MTL4_SHOWN_WAIT=write && in_status DXMT_MTL4_SHOWN_WAIT=write && ! out_status DXMT_MTL4_SHOWN_WAIT'
 dg status >"$SANDBOX/dev-status.txt" 2>&1
-check "  DXMT_MTL4_ALLOCATOR_POOL=1 among those out, and the rule's own DXMT_MTL4_PRESENT=mtl3 out at Metal 4, the default, each saying so" \
-  eval 'sed -n "s/^dev_switches_out=//p" "$SANDBOX/dev-status.txt" | grep -qF "DXMT_MTL4_ALLOCATOR_POOL=1 (my DXMT fork doesn'"'"'t have it)" && grep -qx metal=4 "$SANDBOX/dev-status.txt" && grep -qxF "metal_present_out=DXMT_MTL4_PRESENT=mtl3 (my DXMT fork doesn'"'"'t have it)" "$SANDBOX/dev-status.txt"'
-# (jdrly/dxmt#204's allocator pool: in the rule only with a build that names it, whatever the Metal
+check "  DXMT_RENAME_TRIM=600 among those out, and the rule's own DXMT_MTL4_PRESENT=mtl3 out at Metal 4, the default, each saying so" \
+  eval 'sed -n "s/^dev_switches_out=//p" "$SANDBOX/dev-status.txt" | grep -qF "DXMT_RENAME_TRIM=600 (my DXMT fork doesn'"'"'t have it)" && grep -qx metal=4 "$SANDBOX/dev-status.txt" && grep -qxF "metal_present_out=DXMT_MTL4_PRESENT=mtl3 (my DXMT fork doesn'"'"'t have it)" "$SANDBOX/dev-status.txt"'
+# (jdrly/dxmt#271's shown wait: in the rule only with a build that names it, whatever the Metal
 # row says, as it acts only on Metal 4. jdrly/dxmt#227's present: the rule's own entry at Metal 4,
 # before the file's lines. Status and the rules to files, for grep)
-dtree_names() { printf 'x\0DXMT_MTL4_PRESENT\0DXMT_MTL4_ALLOCATOR_POOL\0' >"$DTREE/d3d11.dll"; }
+dtree_names() { printf 'x\0DXMT_MTL4_PRESENT\0DXMT_MTL4_SHOWN_WAIT\0' >"$DTREE/d3d11.dll"; }
 dtree_names
 dg status >"$SANDBOX/dev-status.txt" 2>&1; dg rules >"$SANDBOX/dev-rules.txt" 2>&1
-check "  one that has both, at Metal 4: DXMT_MTL4_PRESENT=mtl3 right after DXMT_METAL4=1 and not a line of the file, DXMT_MTL4_ALLOCATOR_POOL=1 among the file's; both unset for CefHost.exe" \
-  eval 'sed -n 1p "$SANDBOX/dev-rules.txt" | grep -q ";env=DXMT_METAL4=1;env=DXMT_MTL4_PRESENT=mtl3;.*;env=DXMT_MTL4_ALLOCATOR_POOL=1" && grep -qx "metal_present=DXMT_MTL4_PRESENT=mtl3" "$SANDBOX/dev-status.txt" && grep -q "^dev_switches=.*DXMT_MTL4_ALLOCATOR_POOL=1" "$SANDBOX/dev-status.txt" && ! grep -q "^dev_switches=.*DXMT_MTL4_PRESENT" "$SANDBOX/dev-status.txt" && sed -n 2p "$SANDBOX/dev-rules.txt" | grep -q ";env=DXMT_METAL4=;env=DXMT_MTL4_PRESENT=;" && sed -n 2p "$SANDBOX/dev-rules.txt" | grep -qE ";env=DXMT_MTL4_ALLOCATOR_POOL=(;|\$)"'
+check "  one that has both, at Metal 4: DXMT_MTL4_PRESENT=mtl3 right after DXMT_METAL4=1 and not a line of the file, DXMT_MTL4_SHOWN_WAIT=write among the file's; both unset for CefHost.exe" \
+  eval 'sed -n 1p "$SANDBOX/dev-rules.txt" | grep -q ";env=DXMT_METAL4=1;env=DXMT_MTL4_PRESENT=mtl3;.*;env=DXMT_MTL4_SHOWN_WAIT=write" && grep -qx "metal_present=DXMT_MTL4_PRESENT=mtl3" "$SANDBOX/dev-status.txt" && grep -q "^dev_switches=.*DXMT_MTL4_SHOWN_WAIT=write" "$SANDBOX/dev-status.txt" && ! grep -q "^dev_switches=.*DXMT_MTL4_PRESENT" "$SANDBOX/dev-status.txt" && sed -n 2p "$SANDBOX/dev-rules.txt" | grep -q ";env=DXMT_METAL4=;env=DXMT_MTL4_PRESENT=;" && sed -n 2p "$SANDBOX/dev-rules.txt" | grep -qE ";env=DXMT_MTL4_SHOWN_WAIT=(;|\$)"'
 # (a line of mine with the same variable: after the rule's entry, so it wins)
 echo DXMT_MTL4_PRESENT=done >>"$DEVF"
 dg status >"$SANDBOX/dev-status.txt" 2>&1; dg rules >"$SANDBOX/dev-rules.txt" 2>&1
@@ -3064,8 +3066,8 @@ check "  a DXMT_MTL4_PRESENT=done line of mine: in the rule after the rule's own
 sed -i '' '/^DXMT_MTL4_PRESENT=done$/d' "$DEVF"
 dg set metal 3 >/dev/null
 dg status >"$SANDBOX/dev-status.txt" 2>&1; dg rules >"$SANDBOX/dev-rules.txt" 2>&1
-check "  at Metal 3: no DXMT_MTL4_PRESENT, status says why; DXMT_MTL4_ALLOCATOR_POOL=1 still in" \
-  eval 'sed -n 1p "$SANDBOX/dev-rules.txt" | grep -q ";env=DXMT_METAL4=0;.*;env=DXMT_MTL4_ALLOCATOR_POOL=1" && ! grep -q DXMT_MTL4_PRESENT "$SANDBOX/dev-rules.txt" && grep -qxF "metal_present_out=DXMT_MTL4_PRESENT=mtl3 (the Metal row is at Metal 3)" "$SANDBOX/dev-status.txt"'
+check "  at Metal 3: no DXMT_MTL4_PRESENT, status says why; DXMT_MTL4_SHOWN_WAIT=write still in" \
+  eval 'sed -n 1p "$SANDBOX/dev-rules.txt" | grep -q ";env=DXMT_METAL4=0;.*;env=DXMT_MTL4_SHOWN_WAIT=write" && ! grep -q DXMT_MTL4_PRESENT "$SANDBOX/dev-rules.txt" && grep -qxF "metal_present_out=DXMT_MTL4_PRESENT=mtl3 (the Metal row is at Metal 3)" "$SANDBOX/dev-status.txt"'
 dg set metal 4 >/dev/null
 rm -rf "$DTREE" && cp -Rp "$SANDBOX/dtree.keep" "$DTREE"
 if mine; then
@@ -3085,7 +3087,7 @@ check "a second start (Repair) changes neither file and adds nothing" \
 sed -i '' -e 's/^version=.*/version=0/' -e '/DXMT_COMPILE_DEMAND/d' -e '/compile service.s declared policy/d' "$DEVF"
 out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
 check "Play with the file older than the table: it would write the file (dry run)" \
-  eval 'echo "$out" | grep -qxF "[dry-run] write $DEVF" && echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: DXMT_COMPILE_DEMAND=1; out of the list: DXMT_MTL4_PRESENT=mtl3 $GONE8"'
+  eval 'echo "$out" | grep -qxF "[dry-run] write $DEVF" && echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: DXMT_COMPILE_DEMAND=1; out of the list: DXMT_MTL4_PRESENT=mtl3 $GONE8 $GONE9"'
 dg repair >/dev/null 2>&1
 check "  updated: the newer switch at the end, on, under its comment; the commented-out line and mine kept" \
   eval '[ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && [ "$(tail -1 "$DEVF")" = DXMT_COMPILE_DEMAND=1 ] && tail -2 "$DEVF" | head -1 | grep -q "^# my DXMT fork " && grep -qx "#FEX_DYNAMICL1CACHE=0" "$DEVF" && ! grep -qx "FEX_DYNAMICL1CACHE=0" "$DEVF" && grep -qx MY_OWN_SWITCH=1 "$DEVF"'
@@ -3116,7 +3118,7 @@ drop_rows "$DEVF" FEX_DISPATCHERL1LOOKUP FEX_ENTRYHEADERLOOKUP | sed 's/^version
 cp "$SANDBOX/devf.v4old" "$DEVF"
 GW2_ON_MAC_DRY_RUN=1 dg play >"$SANDBOX/v4play.txt" 2>&1
 check "a file at version 4: Play would add FEX_DISPATCHERL1LOOKUP=1 and FEX_ENTRYHEADERLOOKUP=1 (dry run)" \
-  eval '[ "$(grep -c "^FEX_.*LOOKUP=" "$DEVF")" = 0 ] && grep -qxF "dev-switches.conf: version $DEVVER, switched on: FEX_DISPATCHERL1LOOKUP=1 FEX_ENTRYHEADERLOOKUP=1; out of the list: $GONE8" "$SANDBOX/v4play.txt"'
+  eval '[ "$(grep -c "^FEX_.*LOOKUP=" "$DEVF")" = 0 ] && grep -qxF "dev-switches.conf: version $DEVVER, switched on: FEX_DISPATCHERL1LOOKUP=1 FEX_ENTRYHEADERLOOKUP=1; out of the list: $GONE8 $GONE9" "$SANDBOX/v4play.txt"'
 dg repair >/dev/null 2>&1
 n=$(wc -l <"$DEVF" | tr -d ' ')
 awk -v n="$n" 'NR > 1 && NR <= n - 6' "$DEVF" >"$SANDBOX/devf.v5"
@@ -3147,7 +3149,7 @@ drop_rows "$DEVF" FEX_LEA32BITADDS FEX_SIGNEXTENDINGLOADS FEX_ENTRYCOMPILELOCK F
 cp "$SANDBOX/devf.v5old" "$DEVF"
 GW2_ON_MAC_DRY_RUN=1 dg play >"$SANDBOX/v5play.txt" 2>&1
 check "a file at version 5: Play would add the six lines of versions 6 and 7 (dry run)" \
-  eval '[ "$DEVVER" = 8 ] && [ "$(grep -c -e "^FEX_LEA32BITADDS=" -e "^FEX_HOSTFEATURES=" -e "^DXMT_RENAME_TRIM=" -e "^DXMT_MTL4_SHOWN_WAIT=" "$DEVF")" = 0 ] && grep -qxF "dev-switches.conf: version $DEVVER, switched on: $V5ON; out of the list: $GONE8" "$SANDBOX/v5play.txt"'
+  eval '[ "$DEVVER" = 9 ] && [ "$(grep -c -e "^FEX_LEA32BITADDS=" -e "^FEX_HOSTFEATURES=" -e "^DXMT_RENAME_TRIM=" -e "^DXMT_MTL4_SHOWN_WAIT=" "$DEVF")" = 0 ] && grep -qxF "dev-switches.conf: version $DEVVER, switched on: $V5ON; out of the list: $GONE8 $GONE9" "$SANDBOX/v5play.txt"'
 dg repair >/dev/null 2>&1
 n=$(wc -l <"$DEVF" | tr -d ' ')
 awk -v n="$n" 'NR > 1 && NR <= n - 18' "$DEVF" >"$SANDBOX/devf.v5new"
@@ -3158,11 +3160,11 @@ check "  updated: the table's version, the six lines at the end, each under a co
 v5_with() { { cat "$SANDBOX/devf.v5old"; echo "$1"; } >"$DEVF"; GW2_ON_MAC_DRY_RUN=1 dg play >"$SANDBOX/v5play.txt" 2>&1; dg repair >/dev/null 2>&1; }
 v5_with FEX_HOSTFEATURES=enableafp
 check "  a version-5 file with a FEX_HOSTFEATURES=enableafp line of mine: disableavx added at the end all the same, mine kept" \
-  eval 'grep -qxF "dev-switches.conf: version $DEVVER, switched on: $V5ON; out of the list: $GONE8" "$SANDBOX/v5play.txt" && grep -qx FEX_HOSTFEATURES=enableafp "$DEVF" && [ "$(sed -n "/^FEX_HOSTFEATURES=disableavx\$/=" "$DEVF")" -gt "$(sed -n "/^FEX_HOSTFEATURES=enableafp\$/=" "$DEVF")" ]'
+  eval 'grep -qxF "dev-switches.conf: version $DEVVER, switched on: $V5ON; out of the list: $GONE8 $GONE9" "$SANDBOX/v5play.txt" && grep -qx FEX_HOSTFEATURES=enableafp "$DEVF" && [ "$(sed -n "/^FEX_HOSTFEATURES=disableavx\$/=" "$DEVF")" -gt "$(sed -n "/^FEX_HOSTFEATURES=enableafp\$/=" "$DEVF")" ]'
 for hand in FEX_HOSTFEATURES=enableavx,enableafp '#FEX_HOSTFEATURES=disableavx'; do
   v5_with "$hand"
   check "  a version-5 file with $hand: the other five added, no FEX_HOSTFEATURES line" \
-    eval 'grep -qxF "dev-switches.conf: version $DEVVER, switched on: FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1 FEX_ENTRYCOMPILELOCK=1 DXMT_RENAME_TRIM=600 DXMT_MTL4_SHOWN_WAIT=write; out of the list: $GONE8" "$SANDBOX/v5play.txt" && [ "$(grep -c "FEX_HOSTFEATURES=" "$DEVF")" = 1 ] && grep -qxF "$hand" "$DEVF"'
+    eval 'grep -qxF "dev-switches.conf: version $DEVVER, switched on: FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1 FEX_ENTRYCOMPILELOCK=1 DXMT_RENAME_TRIM=600 DXMT_MTL4_SHOWN_WAIT=write; out of the list: $GONE8 $GONE9" "$SANDBOX/v5play.txt" && [ "$(grep -c "FEX_HOSTFEATURES=" "$DEVF")" = 1 ] && grep -qxF "$hand" "$DEVF"'
 done
 # A file at version 6, before jdrly/dxmt#271's row (version 7): DXMT_MTL4_SHOWN_WAIT=write added at
 # the end, on, under its comment, and nothing else changes. With that line commented out in the
@@ -3171,7 +3173,7 @@ drop_rows "$SANDBOX/devf.full" DXMT_MTL4_SHOWN_WAIT | sed 's/^version=.*/version
 cp "$SANDBOX/devf.v6old" "$DEVF"
 GW2_ON_MAC_DRY_RUN=1 dg play >"$SANDBOX/v6play.txt" 2>&1
 check "a file at version 6: Play would add DXMT_MTL4_SHOWN_WAIT=write alone (dry run)" \
-  eval '[ "$(grep -c DXMT_MTL4_SHOWN_WAIT "$DEVF")" = 0 ] && grep -qxF "dev-switches.conf: version $DEVVER, switched on: DXMT_MTL4_SHOWN_WAIT=write; out of the list: $GONE8" "$SANDBOX/v6play.txt"'
+  eval '[ "$(grep -c DXMT_MTL4_SHOWN_WAIT "$DEVF")" = 0 ] && grep -qxF "dev-switches.conf: version $DEVVER, switched on: DXMT_MTL4_SHOWN_WAIT=write; out of the list: $GONE8 $GONE9" "$SANDBOX/v6play.txt"'
 dg repair >/dev/null 2>&1
 n=$(wc -l <"$DEVF" | tr -d ' ')
 awk -v n="$n" 'NR > 1 && NR <= n - 3' "$DEVF" >"$SANDBOX/devf.v6new"
@@ -3184,28 +3186,21 @@ GW2_ON_MAC_DRY_RUN=1 dg play >"$SANDBOX/v6play.txt" 2>&1
 dg repair >/dev/null 2>&1
 dev_files
 check "  a version-6 file with #DXMT_MTL4_SHOWN_WAIT=write: nothing added, the line still commented out, and not in the rule or status" \
-  eval 'grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: $GONE8" "$SANDBOX/v6play.txt" && [ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && [ "$(grep -c DXMT_MTL4_SHOWN_WAIT "$DEVF")" = 1 ] && grep -qx "#DXMT_MTL4_SHOWN_WAIT=write" "$DEVF" && ! grep -q DXMT_MTL4_SHOWN_WAIT "$SANDBOX/dev-rules.txt" "$SANDBOX/dev-status.txt"'
+  eval 'grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: $GONE8 $GONE9" "$SANDBOX/v6play.txt" && [ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && [ "$(grep -c DXMT_MTL4_SHOWN_WAIT "$DEVF")" = 1 ] && grep -qx "#DXMT_MTL4_SHOWN_WAIT=write" "$DEVF" && ! grep -q DXMT_MTL4_SHOWN_WAIT "$SANDBOX/dev-rules.txt" "$SANDBOX/dev-status.txt"'
 cp "$SANDBOX/devf.full" "$DEVF"
-# A file at version 2: DXMT_MTL4_ALLOCATOR_POOL (version 3) added at the end, on, under its comment,
-# and nothing else changes. (A version-2 build's file had DXMT_MTL4_PRESENT=mtl3 too: the version-4
-# checks below have it.)
-sed -i '' -e 's/^version=.*/version=2/' -e '/DXMT_MTL4_ALLOCATOR_POOL/d' -e '/jdrly\/dxmt#204/d' "$DEVF"
-sed 1d "$DEVF" >"$SANDBOX/devf.v2"
-out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
-check "a file at version 2: Play would add DXMT_MTL4_ALLOCATOR_POOL=1 alone, and say DXMT_MTL4_PRESENT=mtl3 left the list (dry run)" \
-  eval '[ "$DEVVER" = 8 ] && echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: DXMT_MTL4_ALLOCATOR_POOL=1; out of the list: DXMT_MTL4_PRESENT=mtl3 $GONE8"'
-dg repair >/dev/null 2>&1
-n=$(wc -l <"$DEVF" | tr -d ' ')
-awk -v n="$n" 'NR > 1 && NR <= n - 3' "$DEVF" >"$SANDBOX/devf.v4"
-tail -3 "$DEVF" >"$SANDBOX/devf.added"
-check "  updated: the table's version, the line at the end under a comment saying it acts only with the Metal row at Metal 4, the rest as it was" \
-  eval '[ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && same "$SANDBOX/devf.v2" "$SANDBOX/devf.v4" && [ -z "$(sed -n 1p "$SANDBOX/devf.added")" ] && sed -n 2p "$SANDBOX/devf.added" | grep -q "^# my DXMT fork (jdrly/dxmt#204), unplayed: only with the Metal row at Metal 4, nothing on Metal 3: " && [ "$(sed -n 3p "$SANDBOX/devf.added")" = DXMT_MTL4_ALLOCATOR_POOL=1 ]'
-# The same over a file at version 1: DXMT_MTL4_PRESENT=mtl3 isn't added any more
-sed -i '' -e 's/^version=.*/version=1/' -e '/DXMT_MTL4_ALLOCATOR_POOL/d' -e '/jdrly\/dxmt#204/d' "$DEVF"
-out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
-check "a file at version 1: Play would add DXMT_MTL4_ALLOCATOR_POOL=1 alone, not DXMT_MTL4_PRESENT=mtl3 (dry run)" \
-  eval 'echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: DXMT_MTL4_ALLOCATOR_POOL=1; out of the list: DXMT_MTL4_PRESENT=mtl3 $GONE8"'
-dg repair >/dev/null 2>&1
+# A file at version 2 or 1: nothing is added, since version 3's DXMT_MTL4_ALLOCATOR_POOL left the
+# table at version 9 and the file names every later row. Play says which lines left the list.
+for old in 2 1; do
+  sed -i '' -e "s/^version=.*/version=$old/" "$DEVF"
+  sed 1d "$DEVF" >"$SANDBOX/devf.v$old"
+  out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
+  check "a file at version $old: Play would switch nothing on and say what left the list (dry run)" \
+    eval '[ "$DEVVER" = 9 ] && echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: DXMT_MTL4_PRESENT=mtl3 $GONE8 $GONE9"'
+  dg repair >/dev/null 2>&1
+  sed 1d "$DEVF" >"$SANDBOX/devf.v${old}new"
+  check "  updated: the table's version, the rest as it was" \
+    eval '[ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && same "$SANDBOX/devf.v$old" "$SANDBOX/devf.v${old}new"'
+done
 # The table (version 4 took DXMT_MTL4_PRESENT=mtl3 out) over the file of a build at version 3, which has DXMT_MTL4_PRESENT=mtl3
 # under the comment that build wrote (here at the end): as written, the line and its comment go; a
 # value I changed stays; commented out, it becomes DXMT_MTL4_PRESENT=mtl4. Nothing else changes.
@@ -3218,7 +3213,7 @@ v3_present() { # <line>: the file as a version-3 build would have it, <line> las
 v3_present DXMT_MTL4_PRESENT=mtl3
 out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
 check "a file at version 3 with DXMT_MTL4_PRESENT=mtl3: Play would switch nothing on and say it left the list (dry run)" \
-  eval 'echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: DXMT_MTL4_PRESENT=mtl3 $GONE8"'
+  eval 'echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: DXMT_MTL4_PRESENT=mtl3 $GONE8 $GONE9"'
 dg repair >/dev/null 2>&1
 check "  updated: the line, its comment and the empty line above them gone, the table's version, the rest as it was" same "$DEVF" "$SANDBOX/devf.now"
 v3_present DXMT_MTL4_PRESENT=done
@@ -3238,7 +3233,7 @@ awk -v n="$n" 'NR > 1 && NR < n - 1' "$DEVF" >"$SANDBOX/devf.v4"
 dtree_names
 dg rules >"$SANDBOX/dev-rules.txt" 2>&1
 check "  commented out (to play Metal 4's own present): DXMT_MTL4_PRESENT=mtl4 in its place under a comment saying why, the rest as it was, and in the rule after the rule's own entry" \
-  eval '[ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && same "$SANDBOX/devf.v3" "$SANDBOX/devf.v4" && [ "$(tail -1 "$DEVF")" = DXMT_MTL4_PRESENT=mtl4 ] && tail -2 "$DEVF" | head -1 | grep -q "^# Commented out before version 4\. The game.s rule has DXMT_MTL4_PRESENT=mtl3 now, so this keeps it off\." && sed -n 1p "$SANDBOX/dev-rules.txt" | grep -qE ";env=DXMT_METAL4=1;env=DXMT_MTL4_PRESENT=mtl3;(.*;)?env=DXMT_MTL4_PRESENT=mtl4(;|\$)"'
+  eval '[ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && same "$SANDBOX/devf.v3" "$SANDBOX/devf.v4" && [ "$(tail -1 "$DEVF")" = DXMT_MTL4_PRESENT=mtl4 ] && tail -2 "$DEVF" | head -1 | grep -q "^# Commented out before version 4\. DXMT_MTL4_PRESENT=mtl3 is on without this line now, so this keeps it off\." && sed -n 1p "$SANDBOX/dev-rules.txt" | grep -qE ";env=DXMT_METAL4=1;env=DXMT_MTL4_PRESENT=mtl3;(.*;)?env=DXMT_MTL4_PRESENT=mtl4(;|\$)"'
 rm -rf "$DTREE" && cp -Rp "$SANDBOX/dtree.keep" "$DTREE"
 # The table (version 8 took the PSO archive's two lines and DXMT_PRESENT_QUEUE=pace out: my DXMT
 # fork deletes those switches) over the file of a build at version 7, which has the three lines
@@ -3257,7 +3252,7 @@ v7_gone() { # <the DXMT_PRESENT_QUEUE line> <the DXMT_PSO_GENERATIONS line>
 v7_gone DXMT_PRESENT_QUEUE=pace DXMT_PSO_GENERATIONS=1
 out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
 check "a file at version 7 with the PSO archive's lines and DXMT_PRESENT_QUEUE=pace: Play would switch nothing on and say they left the list (dry run)" \
-  eval 'echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: $GONE8"'
+  eval 'echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: $GONE8 $GONE9"'
 dg repair >/dev/null 2>&1
 check "  updated: the three lines, their comments and the empty lines above them gone, the table's version, the rest as it was" same "$DEVF" "$SANDBOX/devf.now8"
 v7_gone DXMT_PRESENT_QUEUE=two '#DXMT_PSO_GENERATIONS=1'
@@ -3265,6 +3260,30 @@ dg repair >/dev/null 2>&1
 check "  a DXMT_PRESENT_QUEUE=two line (a value I changed) and a #DXMT_PSO_GENERATIONS=1 line (commented out): both kept as they are, DXMT_PSO_ARCHIVE=1 gone, and nothing says a rule keeps them off" \
   eval '[ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && grep -qx DXMT_PRESENT_QUEUE=two "$DEVF" && grep -qx "#DXMT_PSO_GENERATIONS=1" "$DEVF" && ! grep -q "^DXMT_PSO_ARCHIVE=" "$DEVF" && ! grep -q "^DXMT_PSO_GENERATIONS=" "$DEVF" && ! grep -q "Commented out before version 8" "$DEVF"'
 cp "$SANDBOX/devf.now8" "$DEVF"
+# The table (version 9 took three Metal 4 lines out: my DXMT fork has them on by default) over the
+# file of a build at version 8, which has them under the comments that build wrote: as written,
+# each line and its comment go; commented out, a line becomes NAME=0 under a comment saying why.
+cp "$DEVF" "$SANDBOX/devf.now9"
+v8_gone() { # <the DXMT_MTL4_ALLOCATOR_POOL line>
+  { echo version=8; sed 1d "$SANDBOX/devf.now9"; echo
+    echo "# my DXMT fork (jdrly/dxmt#153), unplayed: Metal 4 only, nothing on Metal 3: pipelines and argument buffers stay in the device's residency set, out of each chunk's"
+    echo "DXMT_MTL4_DEVICE_RESIDENCY=1"; echo
+    echo "# my DXMT fork (jdrly/dxmt#154), unplayed: Metal 4 only, nothing on Metal 3: timestamp queries read the chunk's last command buffer, with no empty one after it"
+    echo "DXMT_MTL4_TIMESTAMP_REUSE=1"; echo
+    echo "# my DXMT fork (jdrly/dxmt#204), unplayed: only with the Metal row at Metal 4, nothing on Metal 3: a Metal 4 queue's chunks take their command allocator from a pool that keeps at most 8 idle, instead of one allocator per ring slot"
+    echo "$1"; } >"$DEVF"
+}
+v8_gone DXMT_MTL4_ALLOCATOR_POOL=1
+out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
+check "a file at version 8 with the three Metal 4 lines: Play would switch nothing on and say they left the list (dry run)" \
+  eval 'echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: $GONE9"'
+dg repair >/dev/null 2>&1
+check "  updated: the three lines, their comments and the empty lines above them gone, the table's version, the rest as it was" same "$DEVF" "$SANDBOX/devf.now9"
+v8_gone '#DXMT_MTL4_ALLOCATOR_POOL=1'
+dg repair >/dev/null 2>&1
+check "  commented out: DXMT_MTL4_ALLOCATOR_POOL=0 in its place under a comment saying why, the other two gone" \
+  eval '[ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && [ "$(tail -1 "$DEVF")" = DXMT_MTL4_ALLOCATOR_POOL=0 ] && tail -2 "$DEVF" | head -1 | grep -q "^# Commented out before version 9\. DXMT_MTL4_ALLOCATOR_POOL=1 is on without this line now, so this keeps it off\." && ! grep -q "^DXMT_MTL4_DEVICE_RESIDENCY=\|^DXMT_MTL4_TIMESTAMP_REUSE=" "$DEVF"'
+cp "$SANDBOX/devf.now9" "$DEVF"
 
 # A release: no file, its defaults; a file there anyway changes nothing
 out=$(rg install steam 2>&1) && rc=0 || rc=$?
