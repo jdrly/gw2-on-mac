@@ -43,9 +43,9 @@
 # FEX_BUILD=work/fex-arm64/install (jdrly/FEX's asset fex-arm64-<commit>.tar.xz, unpacked; without
 # it no fex/) and UISCALE_BUILD=work/ui-scale/build (relative to the workspace, or absolute). It
 # refuses a DXMT build, a Wine build or a FEX build of mine for another engine than
-# src/gw2om.sh's ENGINE_SHA256, a Wine build on another base than its ENGINE_WINE, a FEX build on
-# another base than its ENGINE_FEX, a winemetal.so, ntdll.so, winemac.so or libarm64ecfex.so
-# without a valid signature, an ntdll.so, winemac.so or FEX file that isn't the file its VERSION
+# src/gw2om.sh's ENGINE_SHA256 (its VERSION's engine: line; without one, Mach9 0.3.1), a Wine
+# build on another base than its ENGINE_WINE, a FEX build on another base than its ENGINE_FEX,
+# a winemetal.so, ntdll.so, winemac.so or libarm64ecfex.so without a valid signature, an ntdll.so, winemac.so or FEX file that isn't the file its VERSION
 # names, and, with DXMT_COMMIT, WINE_COMMIT (ntdll.so), MACDRV_COMMIT (winemac.so) or FEX_COMMIT
 # set, a build of another commit (or, for the Wine and FEX ones, none). STAGED_FROM replaces "the development workspace" in the first line of
 # prebuilt/STAGED (the dev build workflow names the fork's commit and where its files came from).
@@ -61,8 +61,10 @@
 # README.md (Building) says how I publish it.
 #
 # --standin adds a stand-in for each of dxmt/, ntdll/, macdrv/ and fex/ that prebuilt/ lacks (files
-# in the layout of the fork's build that only name themselves), for the checks and the sandbox
-# until prebuilt.lock pins the real ones. build.sh takes them; scripts/release.sh refuses them.
+# in the layout of the fork's build that only name themselves, and a VERSION whose engine: line
+# names src/gw2om.sh's engine, as gw2om.sh asks of my files before they go into it), for the
+# checks and the sandbox until prebuilt.lock pins the real ones. build.sh takes them;
+# scripts/release.sh refuses them.
 # Their VERSIONs' switches: lines are the real builds' (jdrly/wine 472d7774368, jdrly/FEX
 # c2e25accebc), so a pull request's sandbox reads the switches a dev build's does: when a build
 # drops or adds one, these lines change with it.
@@ -97,6 +99,17 @@ lock_get() { sed -n "s/^$1=//p" "$LOCK"; }
 # The engine gw2om.sh installs: the DXMT and Wine builds name its tarball's sha256
 engine_sha="$(sed -n 's/^ENGINE_SHA256=\([0-9a-f]*\).*/\1/p' "$ROOT/src/gw2om.sh")"
 [ -n "$engine_sha" ] || die "no ENGINE_SHA256 in src/gw2om.sh"
+engine_name="$(sed -n 's/^ENGINE_NAME=\([^ ]*\).*/\1/p' "$ROOT/src/gw2om.sh")"
+# check_engine <VERSION>: that record of mine names the engine above, else the refusal says which
+# engine it names (a record without an engine: line is from before records named one: 0.3.1's)
+check_engine() {
+  local named
+  grep -q "^engine: .*sha256 $engine_sha" "$1" && return 0
+  named="$(sed -n 's/^engine: \(Mach9 [^ ]*\).*/\1/p' "$1" | head -1)"
+  die "$1 names another engine than ENGINE_SHA256 ($engine_sha): it is built for ${named:-Mach9 v0.3.1 (it has no engine: line)}, and src/gw2om.sh installs $engine_name"
+}
+# (the line a stand-in's VERSION has)
+engine_line="engine: ${engine_name/mach9-/Mach9 } (stand-in record, sha256 $engine_sha)"
 # and the commit of athei/wine it was built from, which my Wine builds' VERSION names as their base
 engine_wine="$(sed -n 's/^ENGINE_WINE=\([0-9a-f]*\).*/\1/p' "$ROOT/src/gw2om.sh")"
 [ -n "$engine_wine" ] || die "no ENGINE_WINE in src/gw2om.sh"
@@ -123,7 +136,7 @@ check_wine() {
   wine_kind "$1"
   libs=$(wine_libs "$1" "$2")
   for f in $libs VERSION LICENSE COPYING.LIB; do need "$2/$f"; done
-  grep -q "^engine: .*sha256 $engine_sha" "$2/VERSION" || die "$2/VERSION names another engine than ENGINE_SHA256 ($engine_sha)"
+  check_engine "$2/VERSION"
   grep -q "^base: $engine_wine" "$2/VERSION" || die "$2/VERSION names another base than ENGINE_WINE ($engine_wine)"
   [ -z "$WK_COMMIT" ] || grep -qx "commit: $WK_COMMIT" "$2/VERSION" || die "$2/VERSION is not commit $WK_COMMIT"
   for f in $libs; do
@@ -157,7 +170,7 @@ engine_fex="$(sed -n 's/^ENGINE_FEX=\([0-9a-f]*\).*/\1/p' "$ROOT/src/gw2om.sh")"
 check_fex() {
   local f
   for f in $FEX_FILES $FEX_META; do need "$1/$f"; done
-  grep -q "^engine: .*sha256 $engine_sha" "$1/VERSION" || die "$1/VERSION names another engine than ENGINE_SHA256 ($engine_sha)"
+  check_engine "$1/VERSION"
   grep -q "^base: $engine_fex" "$1/VERSION" || die "$1/VERSION names another base than ENGINE_FEX ($engine_fex)"
   [ -z "${FEX_COMMIT:-}" ] || grep -qx "commit: $FEX_COMMIT" "$1/VERSION" || die "$1/VERSION is not commit $FEX_COMMIT"
   for f in $FEX_FILES; do
@@ -218,7 +231,7 @@ if [ "${1:-}" = --standin ]; then
       mkdir -p "$P/dxmt.new/$(dirname "$f")"
       echo "stand-in $f" >"$P/dxmt.new/$f"
     done
-    echo "stand-in v0.80-0-g0000000 (not a build: scripts/stage-components.sh --standin)" >"$P/dxmt.new/VERSION"
+    { echo "stand-in v0.80-0-g0000000 (not a build: scripts/stage-components.sh --standin)"; echo "$engine_line"; } >"$P/dxmt.new/VERSION"
     record "$P/dxmt.new"
     mv "$P/dxmt.new" "$P/dxmt"
     echo "dxmt stand-in by scripts/stage-components.sh --standin" >>"$P/STAGED"
@@ -230,6 +243,7 @@ if [ "${1:-}" = --standin ]; then
     for f in $WK_FILE VERSION LICENSE COPYING.LIB; do echo "stand-in $f" >"$P/$k.new/$f"; done
     { echo "stand-in wine-11.21-0-g0000000 (not a build: scripts/stage-components.sh --standin)"
       echo "commit: 0000000000000000000000000000000000000000"
+      echo "$engine_line"
       case "$k" in
         ntdll) echo "switches: WINE_HEAT_COUNT WINE_HEAT_EVPOOL WINE_HEAT_EXE WINE_HEAT_LOG WINE_HEAT_PROF WINE_HEAT_PROF_FEX WINE_HEAT_PROF_HZ WINE_HEAT_PROF_THREADS WINE_HEAT_SPIN WINE_HEAT_SPIN_PAUSE WINE_HEAT_WAKE" ;;
         macdrv) echo "switches: WINE_MACDRV_CALL WINE_MACDRV_CLIP WINE_MACDRV_DRAIN WINE_MACDRV_MOUSE_SCALE WINE_MACDRV_SURFACE WINE_MACDRV_VIEW WINE_WIN32U_PEEK_YIELD WINE_WIN32U_SETCURSOR" ;;
@@ -244,6 +258,7 @@ if [ "${1:-}" = --standin ]; then
     for f in $FEX_FILES $FEX_META; do mkdir -p "$P/fex.new/$(dirname "$f")" && echo "stand-in $f" >"$P/fex.new/$f"; done
     { echo "stand-in FEX-2610-0-g0000000 (not a build: scripts/stage-components.sh --standin)"
       echo "commit: 0000000000000000000000000000000000000000"
+      echo "$engine_line"
       echo "switches: FEX_DISPATCHERL1LOOKUP FEX_ENTRYCOMPILELOCK FEX_ENTRYHEADERLOOKUP FEX_HARDWARETSOSYSCALLS FEX_INITIALCODEBUFFERMB FEX_LEA32BITADDS FEX_SIGNEXTENDINGLOADS FEX_HOSTFEATURES=disableavx"
       for f in $FEX_FILES; do echo "$f: sha256 $(sha "$P/fex.new/$f")"; done
       echo "libarm64ecfex.dll: build id 0123456789abcdef0123456789abcdef age 1, SizeOfImage 0x426000"; } >"$P/fex.new/VERSION"
@@ -315,7 +330,7 @@ for f in $DXMT_FILES; do need "$DXMT_BUILD/$f"; done
 # Built for the engine gw2om.sh installs (VERSION's engine: line names its tarball's sha256), from
 # the commit asked for (DXMT_COMMIT, a full sha; the dev build sets it), and a winemetal.so with a
 # valid signature (the linker's: nothing signs it again before the engine loads it)
-grep -q "^engine: .*sha256 $engine_sha" "$DXMT_BUILD/VERSION" || die "$DXMT_BUILD/VERSION names another engine than ENGINE_SHA256 ($engine_sha)"
+check_engine "$DXMT_BUILD/VERSION"
 [ -z "${DXMT_COMMIT:-}" ] || grep -qx "commit: $DXMT_COMMIT" "$DXMT_BUILD/VERSION" || die "$DXMT_BUILD/VERSION is not commit $DXMT_COMMIT"
 codesign --verify "$DXMT_BUILD/aarch64-unix/winemetal.so" || die "$DXMT_BUILD/aarch64-unix/winemetal.so has no valid signature"
 need "$UISCALE_BUILD/version.dll" "$UISCALE_BUILD/gw2-ui-scale.ini"

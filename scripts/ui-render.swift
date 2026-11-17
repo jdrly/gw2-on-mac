@@ -121,14 +121,14 @@ func compare(design: URL, render: NSBitmapImageRep, to url: URL) {
 func installer(_ state: String) -> Installer {
   let i = Installer()
   var st: [String: String] = [
-    "version": "0.2.0-dev.2", "engine": "mach9-v0.3.1", "engine_title": "Mach9 0.3.1 · Wine 11.21",
-    "engine_dxmt": "d903db89036", "dxmt": "fork", "dxmt_tree": "fork", "dxmt_version": "v0.80-489-g2483559",
+    "version": "0.2.0-dev.2", "engine": "mach9-v0.4.0", "engine_title": "Mach9 0.4.0 · Wine 11.21",
+    "engine_dxmt": "10e27aed3f5", "dxmt": "fork", "dxmt_tree": "fork", "dxmt_version": "v0.80-489-g2483559",
     "dxmt_release": "0.80", "dxmt_commit": "2483559", "metal": "4",
     "wine": "mine", "wine_ready": "yes", "wine_file": "mine", "wine_commit": "d831f808236c", "wine_release": "11.21",
     "wine_build": "d831f808236c",
     "macdrv": "mine", "macdrv_ready": "yes", "macdrv_file": "mine", "macdrv_commit": "d831f808236c", "macdrv_release": "11.21",
     "macdrv_build": "d831f808236c",
-    "fex": "engine", "fex_ready": "yes", "fex_file": "engine", "fex_commit": "9d4fa4b46b1", "fex_build": "bff3f7c3686b",
+    "fex": "engine", "fex_ready": "yes", "fex_file": "engine", "fex_commit": "597e7ccbedd", "fex_build": "bff3f7c3686b",
     "macos": "27.2", "macos_min": "26.4", "macos_ok": "yes",
     "arch": "arm64", "installed": "yes", "installed_version": "0.2.0-dev.2", "engine_installed": "yes", "graphics": "yes",
     "gamemode": "engine", "route": "steam", "steam": "yes", "game": "yes", "stage": "finished",
@@ -144,11 +144,11 @@ func installer(_ state: String) -> Installer {
   case "ready-engine":
     // the engine's own ntdll.so, winemac.so and DXMT, as Settings can ask for them
     st = st.merging(["dxmt": "engine", "dxmt_tree": "engine", "wine": "engine", "wine_file": "engine",
-                     "wine_commit": "53def89293a", "wine_release": "", "macdrv": "engine", "macdrv_file": "engine",
-                     "macdrv_commit": "53def89293a", "macdrv_release": ""]) { $1 }
+                     "wine_commit": "501796b0ed1", "wine_release": "", "macdrv": "engine", "macdrv_file": "engine",
+                     "macdrv_commit": "501796b0ed1", "macdrv_release": ""]) { $1 }
   case "ready-mixed":
     // my ntdll.so next to the engine's own winemac.so
-    st = st.merging(["macdrv": "engine", "macdrv_file": "engine", "macdrv_commit": "53def89293a",
+    st = st.merging(["macdrv": "engine", "macdrv_file": "engine", "macdrv_commit": "501796b0ed1",
                      "macdrv_release": ""]) { $1 }
   case "ready-other":
     // another ntdll.so (an earlier build of mine) that the next Play replaces, next to my winemac.so
@@ -343,26 +343,26 @@ func renderAll(_ dir: URL, exports: URL?) async {
     "session-steam-update": .starting]
   // the Engine and Graphics checks' texts for the files gw2om.sh status can report (a model check)
   do {
-    let engine = "Mach9 0.3.1 · Wine 11.21"
+    let engine = "Mach9 0.4.0 · Wine 11.21"
     let other = ["wine_file": "other", "wine_commit": "", "wine_release": ""]
     let cases: [(String, [String: String], String, String)] = [
       ("ready", [:], "Wine 11.21 · d831f80", "DXMT 0.80 · 2483559"),
-      ("ready-engine", [:], engine, "DXMT · d903db8"),
-      ("ready-mixed", [:], "Mach9 0.3.1 · ntdll d831f80", "DXMT 0.80 · 2483559"),
-      ("ready-mixed", other, "Mach9 0.3.1 · another ntdll", "DXMT 0.80 · 2483559"),
+      ("ready-engine", [:], engine, "DXMT · 10e27ae"),
+      ("ready-mixed", [:], "Mach9 0.4.0 · ntdll d831f80", "DXMT 0.80 · 2483559"),
+      ("ready-mixed", other, "Mach9 0.4.0 · another ntdll", "DXMT 0.80 · 2483559"),
       ("ready-other", [:], "another ntdll · winemac d831f80", "DXMT 0.80 · 2483559"),
       ("ready-engine", ["macdrv_file": "mine", "macdrv_commit": "d831f808236c", "macdrv_release": "11.21"],
-       "Mach9 0.3.1 · winemac d831f80", "DXMT · d903db8"),
+       "Mach9 0.4.0 · winemac d831f80", "DXMT · 10e27ae"),
       ("ready", ["macdrv_commit": "1a2b3c4d5e6f"], "ntdll d831f80 · winemac 1a2b3c4", "DXMT 0.80 · 2483559"),
       ("ready", ["macdrv_file": "other", "macdrv_commit": ""], "ntdll d831f80 · another winemac", "DXMT 0.80 · 2483559"),
       ("ready", other.merging(["macdrv_file": "other", "macdrv_commit": ""]) { $1 },
        "another ntdll · another winemac", "DXMT 0.80 · 2483559"),
       ("ready", ["wine_release": "", "dxmt_release": ""], "Wine · d831f80", "DXMT · 2483559"),
       ("ready-fex", [:], "Wine 11.21 · d831f80 · FEX bff3f7c", "DXMT 0.80 · 2483559"),
-      ("ready-engine", ["fex_file": "mine", "fex_commit": "bff3f7c3686b"], "\(engine) · FEX bff3f7c", "DXMT · d903db8"),
+      ("ready-engine", ["fex_file": "mine", "fex_commit": "bff3f7c3686b"], "\(engine) · FEX bff3f7c", "DXMT · 10e27ae"),
       ("ready-fex", ["fex_file": "mix", "fex_commit": ""], "Wine 11.21 · d831f80", "DXMT 0.80 · 2483559"),
       ("ready", ["macdrv_file": "mix", "macdrv_commit": ""], "ntdll d831f80 · winemac and win32u mixed", "DXMT 0.80 · 2483559"),
-      ("ready-engine", ["macdrv_file": "mix", "macdrv_commit": ""], "Mach9 0.3.1 · winemac and win32u mixed", "DXMT · d903db8"),
+      ("ready-engine", ["macdrv_file": "mix", "macdrv_commit": ""], "Mach9 0.4.0 · winemac and win32u mixed", "DXMT · 10e27ae"),
     ]
     for (state, extra, wantWine, wantDXMT) in cases {
       let s = installer(state).status.merging(extra) { $1 }
@@ -380,7 +380,7 @@ func renderAll(_ dir: URL, exports: URL?) async {
     let cases: [([String: String], String)] = [
       (ready, "DXMT 0.80 · 2483559 · Metal 4"),
       (ready.merging(["metal": "3"]) { $1 }, "DXMT 0.80 · 2483559 · Metal 3"),
-      (installer("ready-engine").status, "DXMT · d903db8"),
+      (installer("ready-engine").status, "DXMT · 10e27ae"),
       (ready.filter { $0.key != "metal" }, "DXMT 0.80 · 2483559"),
     ]
     for (s, want) in cases where ThisMac.dxmtMetal(s) != want {
@@ -464,12 +464,12 @@ func renderAll(_ dir: URL, exports: URL?) async {
       "macdrv_ready": "switch", "macdrv_file": "mix", "macdrv_commit": "", "macdrv_release": "",
       "graphics": "switch", "macos": "26.3", "macos_ok": "no", "route": "arenanet"]) { $1 }
     let long: [(String, String, [String: String], String)] = [
-      ("engine-own-fex", "ready-engine", fex, "Mach9 0.3.1 · Wine 11.21 · FEX bff3f7c"),
+      ("engine-own-fex", "ready-engine", fex, "Mach9 0.4.0 · Wine 11.21 · FEX bff3f7c"),
       ("engine-switch", "ready", ["wine_ready": "switch"], "Wine 11.21 · d831f80 · at the next Play"),
-      ("engine-ntdll-fex", "ready-mixed", fex, "Mach9 0.3.1 · ntdll d831f80 · FEX bff3f7c"),
+      ("engine-ntdll-fex", "ready-mixed", fex, "Mach9 0.4.0 · ntdll d831f80 · FEX bff3f7c"),
       ("engine-winemac-fex", "ready-engine",
        fex.merging(["macdrv_file": "mine", "macdrv_commit": "d831f808236c", "macdrv_release": "11.21"]) { $1 },
-       "Mach9 0.3.1 · winemac d831f80 · FEX bff3f7c"),
+       "Mach9 0.4.0 · winemac d831f80 · FEX bff3f7c"),
       ("engine-two-builds-fex", "ready", fex.merging(["macdrv_commit": "1a2b3c4d5e6f"]) { $1 },
        "ntdll d831f80 · winemac 1a2b3c4 · FEX bff3f7c"),
       ("engine-others-fex", "ready", fex.merging(others) { $1 }, "another ntdll · another winemac · FEX bff3f7c"),
@@ -477,7 +477,7 @@ func renderAll(_ dir: URL, exports: URL?) async {
       ("engine-repair", "ready",
        fex.merging(others) { $1 }.merging(["wine_ready": "other", "macdrv_ready": "other", "fex_ready": "other",
                                            "fex_file": "other"]) { $1 },
-       "Mach9 0.3.1 · ntdll and winemac and FEX needs Repair"),
+       "Mach9 0.4.0 · ntdll and winemac and FEX needs Repair"),
       ("longest", "ready", longest, "another ntdll · winemac and win32u mixed · FEX bff3f7c · at the next Play"),
     ]
     for (name, state, extra, want) in long {

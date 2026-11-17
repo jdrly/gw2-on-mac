@@ -123,38 +123,45 @@ VERSION="${VERSION:-dev}"
 CHANNEL="$(sed -n 's/^channel=//p' "$RES/app.properties" 2>/dev/null || true)"
 CHANNEL="${CHANNEL:-release}"
 
-# --- The engine: athei's Mach9 0.3.1, an arm64 Wine 11.21 that runs x86_64 Windows code with FEX,
+# --- The engine: athei's Mach9 0.4.0, an arm64 Wine 11.21 that runs x86_64 Windows code with FEX,
 # with his DXMT build, downloaded at install time (never bundled) and used as it ships. Bump name,
 # URL, size, sha256 and the files' hashes together.
-ENGINE_NAME=mach9-v0.3.1
-ENGINE_TITLE="Mach9 0.3.1 · Wine 11.21"
-ENGINE_URL=https://github.com/athei/mach9/releases/download/v0.3.1/wine-v0.3.1-macos-arm64.tar.xz
+ENGINE_NAME=mach9-v0.4.0
+ENGINE_TITLE="Mach9 0.4.0 · Wine 11.21"
+ENGINE_URL=https://github.com/athei/mach9/releases/download/v0.4.0/wine-v0.4.0-macos-arm64.tar.xz
 # the same file through GitHub's API (the release asset's id): the download's second way
-ENGINE_API_URL=https://api.github.com/repos/athei/mach9/releases/assets/730461181
-ENGINE_SIZE=128991668
-ENGINE_SHA256=90aff9a897ed0ff9aac44d0e06f0aecd3ee985afb38037f3f915451e51fa974e
+ENGINE_API_URL=https://api.github.com/repos/athei/mach9/releases/assets/758011620
+ENGINE_SIZE=131698496
+ENGINE_SHA256=3b81aac9b93d5652872673b400769ec525f3bc2f1f7e2ec82c9f851d0a0db05d
 # What it was built from (the release page's Components list): status, the manifest and Collect
 # Logs print them
-ENGINE_WINE=53def89293a   # athei/wine, wine-11.21-37
-ENGINE_FEX=9d4fa4b46b1
-ENGINE_DXMT=d903db89036   # athei/dxmt
+ENGINE_WINE=501796b0ed1   # athei/wine, wine-11.21-54
+ENGINE_FEX=597e7ccbedd
+ENGINE_DXMT=10e27aed3f5   # athei/dxmt
 # Checked after unpacking (engine_matches): the loader, a signed app bundle that every Wine process
 # runs as (nothing may change inside it: a copied or re-signed loader exits), and ntdll.so,
 # winemac.so and win32u.so, which also tell the engine's own from mine (unix_lib). The DXMT tree's
 # d3d11.dll and winemetal.so tell the engine's own DXMT from mine (dxmt_tree).
 ENGINE_LOADER_APP=lib/wine/aarch64-unix/wine.app
-ENGINE_LOADER_SHA256=fac8babc821737c25483679e179f2e61e9dd2c43e3122decb1a77c5870dbeb99
+ENGINE_LOADER_SHA256=1feebbe2764cc3c759d7a7bf90a44235bef5d0a61488882836e980418e797b49
 ENGINE_LOADER_ID=app.mach9.loader
 ENGINE_TEAM=WLKUUJD25W
-ENGINE_NTDLL_SHA256=a0df4d34bc4918886606bcf9d04c9f853c521636fcbf3b6cce08e8c11b74e787
-ENGINE_WINEMAC_SHA256=ae468edce407781dbd19a7ac8aad68844a212688dd4132748341c492a0986b2f
-ENGINE_WIN32U_SHA256=e7b0d6a0800d31e9dbafda66493cee4bb64469de9946d202a3ba3d0958d6f1e2
-ENGINE_D3D11_SHA256=49099142c39d2aa066527d0f1a573d61e3177d317e638b4f7f1457978a61b8df
-ENGINE_WINEMETAL_SHA256=c28171fd25beb364d01c097a5546e2bba9780d34641acb65ad7b63fec985c64f
+ENGINE_NTDLL_SHA256=2b7972a767126f85557915383a3c33ffaaac265441a4141d25267826176c8f11
+ENGINE_WINEMAC_SHA256=19c5ff04d31d2b5016b30bcba7b0793ab2805fb14c5aeaf9939498fe2d980f76
+ENGINE_WIN32U_SHA256=1ac94b076bd2d60e41a34af3dcb138218c29389020a7d0192ffdd45413293b0c
+ENGINE_D3D11_SHA256=89119817edc2e7b152d6245d18d41ef6965cdede9cc8c75a6adeea79825fa02c
+ENGINE_WINEMETAL_SHA256=1ad9bf4d38726c00c7484aae70ea253f3b73976a20e06fc9c5894612a4251b77
 # FEX's ARM64EC half, which tells the engine's own from mine (fex_file): lib/wine/aarch64-windows/
 # xtajit64.dll and libarm64ecfex.dll (one file under two names) and aarch64-unix/libarm64ecfex.so
-ENGINE_FEX_DLL_SHA256=99eb322ea77f5daf286f508871d75629ca69ecc53cefbebad61fe40beec4c64c
+ENGINE_FEX_DLL_SHA256=cd6803d9ad0733c43c31aebca84203aac5256779093bc3d0b71324d2d564a429
 ENGINE_FEX_SO_SHA256=0a3e7ea4b76a3acc634993ec98f2ef7e4d52b3806a871856e8f808099577bc4b
+# My files in components/ are built for one engine, and their records (each VERSION) name it:
+# "engine: Mach9 v0.4.0 (wine-v0.4.0-macos-arm64.tar.xz, sha256 <its sha256>)". A record without
+# that line counts as built for Mach9 0.3.1, the engine before 0.4.0. They go into the engine only
+# when it is the one this pin names (apply_engine_files): an engine of another release runs
+# another wineserver protocol.
+ENGINE_PIN_SHA256=$ENGINE_SHA256
+ENGINE_0_3_1_SHA256=90aff9a897ed0ff9aac44d0e06f0aecd3ee985afb38037f3f915451e51fa974e
 # The loader's entitlements need macOS 26.4 (wine.app's own Info.plist says so too)
 MACOS_MIN=26.4
 # Valve's Steam installer, from Valve's CDN (Valve updates it in place: not pinned, its sha256
@@ -886,7 +893,7 @@ cdb_value() {
 }
 
 # rules_text: the game's compatdb rules, one line each, in the canonical text of Mach9's compatdb
-# 0.3.1 (Table's Display: the fields in the order of Key::ALL, words in lowercase), which CI's
+# 0.4.0 (Table's Display: the fields in the order of Key::ALL, words in lowercase), which CI's
 # compatdb check reads back byte for byte. The engine's built-in rules already give every process
 # DXMT, DPI awareness, raw mouse from GameController and FEX's reduced x87 precision. Gw2-64.exe:
 #   gcmouse=false      rawmouse=off: the game's raw input is the pointer's movement, as Wine does
@@ -1383,6 +1390,38 @@ write_rules() {
 # --- Engine
 
 engine_ok() { [ -x "$ENG/bin/wine" ] && [ "$(cat "$ENG/.gw2om-source" 2>/dev/null || true)" = "$ENGINE_SHA256" ]; }
+# engine_label <its tarball's sha256>: the engine by name
+engine_label() {
+  case "$1" in
+    "$ENGINE_SHA256" | "$ENGINE_PIN_SHA256") echo "$ENGINE_TITLE" ;;
+    "$ENGINE_0_3_1_SHA256") echo "Mach9 0.3.1 · Wine 11.21" ;;
+    *) echo "another build of the engine" ;;
+  esac
+}
+# record_engine <VERSION>: the sha256 of the engine that record of mine is built for (0.3.1's
+# without an engine: line)
+record_engine() {
+  local s
+  s=$(sed -n 's/^engine: .*sha256 \([0-9a-f]\{64\}\).*/\1/p' "$1" 2>/dev/null | head -1)
+  echo "${s:-$ENGINE_0_3_1_SHA256}"
+}
+# engine_refusal: why none of my files may go into the engine now, or nothing. Either the engine
+# there is not this app's (an earlier version of the app left one of another release: Repair
+# replaces it), or one of my files' records names another engine than the pin.
+engine_refusal() {
+  local d n
+  if ! engine_ok; then
+    echo "The engine here is $(engine_label "$(cat "$ENG/.gw2om-source" 2>/dev/null || true)"), and my files are built for $ENGINE_TITLE, so they stay out of it. Click Repair to put $ENGINE_TITLE in place."
+    return
+  fi
+  for d in dxmt ntdll macdrv fex; do
+    [ -f "$COMP/$d/VERSION" ] || continue
+    [ "$(record_engine "$COMP/$d/VERSION")" != "$ENGINE_PIN_SHA256" ] || continue
+    case $d in dxmt) n="My DXMT fork" ;; ntdll) n="My ntdll.so" ;; macdrv) n="My Mac driver" ;; *) n="My FEX" ;; esac
+    echo "$n in this app is built for $(engine_label "$(record_engine "$COMP/$d/VERSION")"), not for $ENGINE_TITLE, so none of my files go into the engine."
+    return
+  done
+}
 
 # engine_matches <dir>: the unpacked engine is the expected build: its loader's sha256, the
 # engine's own ntdll.so, winemac.so and win32u.so (in place, or next to mine as <file>.engine: every
@@ -1825,15 +1864,20 @@ fex_switch() {
 
 # apply_engine_files: dxmt_switch, lib_switch for each of UNIX_LIBS and fex_switch while no session
 # runs or starts (the session's lock, as apply_registry takes it), else at the next game start that
-# finds none (Play)
+# finds none (Play). Nothing while engine_refusal says why not: the engine's files stay as they are.
 apply_engine_files() {
-  local k
+  local k why
   if [ ! -x "$ENG/bin/wine" ]; then
     if [ -n "$DRY" ]; then
       echo "[dry-run] $(dxmt_label "$(setting dxmt)") as the engine's DXMT tree"
       for k in $UNIX_LIBS; do echo "[dry-run] $(lib_label "$k" "$(lib_want "$k")") in the engine"; done
       echo "[dry-run] $(fex_label "$(fex_want)") in the engine"
     fi
+    return 0
+  fi
+  why=$(engine_refusal)
+  if [ -n "$why" ]; then
+    warn "$why"
     return 0
   fi
   if ! registry_lock; then
@@ -2756,7 +2800,8 @@ install_bottle() {
     run rm -rf "$BOTTLE"
     run mkdir -p "$BOTTLE"
     CREATED="$CREATED bottle"
-    # (no Mono or Gecko: the engine's built-in rules leave both out for every process)
+    # (no Gecko and no prompt for Mono: the engine's built-in rules leave Gecko out for every process
+    # and Mono out for rundll32.exe)
     wine_do wineboot --init || { stop_wine; die "Wine could not create the bottle (details in $LOGS/install.log)."; }
     stop_wine
     [ -n "$DRY" ] || [ -f "$BOTTLE/user.reg" ] || die "Wine did not create the bottle (details in $LOGS/install.log)."

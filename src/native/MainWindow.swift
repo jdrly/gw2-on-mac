@@ -373,7 +373,7 @@ struct ThisMac: View {
         Check(id: $0, icon: ThisMac.icons[$0]!, value: "Checking…", tone: .off)
       }
     }
-    let engine = s["engine_title"] ?? "Mach9 0.3.1 · Wine 11.21"
+    let engine = s["engine_title"] ?? "Mach9 0.4.0 · Wine 11.21"
     let short = engine.components(separatedBy: " · ").first ?? engine
     // (FEX too: its three files switch together, fex_ready as the libraries' _ready)
     let libs = [("wine", "ntdll"), ("macdrv", "winemac"), ("fex", "FEX")]
@@ -435,7 +435,7 @@ struct ThisMac: View {
 
   // Both mine from one build: "Wine 11.21 · d831f80", the release and commit of my build. Both the
   // engine's own: the engine's title. One of mine or another file next to the engine's own:
-  // "Mach9 0.3.1 · ntdll d831f80", "Mach9 0.3.1 · another winemac". Two that aren't one build of
+  // "Mach9 0.4.0 · ntdll d831f80", "Mach9 0.4.0 · another winemac". Two that aren't one build of
   // mine: each with its commit, or "another". My Mac driver's winemac.so and win32u.so, which
   // switch as one set, half mine and half the engine's own (macdrv_file mix): "winemac and win32u
   // mixed".

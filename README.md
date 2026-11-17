@@ -2,7 +2,7 @@
 
 GW2 on Mac is a small macOS app I wrote to play [Guild Wars 2](https://www.guildwars2.com) on
 Apple silicon. It installs the game into a Wine engine and bottle of its own and starts it. The
-engine is athei's [Mach9](https://github.com/athei/mach9) 0.3.1, an arm64 Wine 11.21 that runs the
+engine is athei's [Mach9](https://github.com/athei/mach9) 0.4.0, an arm64 Wine 11.21 that runs the
 game's x86_64 code with FEX, used as it ships but for three parts: the game's Direct3D 11 goes to
 Metal through my DXMT fork, built for this engine, which the app puts into the engine's DXMT tree,
 and every Wine process loads my builds of Wine's `ntdll.so` and of its Mac driver, `winemac.so`,
@@ -381,7 +381,7 @@ Storage, stays where it is.
 ```mermaid
 flowchart LR
     app["GW2 on Mac arm64.app<br/>SwiftUI window"] -->|"runs"| sh["gw2om.sh<br/>install, play, settings"]
-    sh -->|"downloads, checks"| engine["Wine engine<br/>Mach9 0.3.1, Wine 11.21, FEX"]
+    sh -->|"downloads, checks"| engine["Wine engine<br/>Mach9 0.4.0, Wine 11.21, FEX"]
     sh -->|"creates"| bottle["Bottle<br/>Steam and the game"]
     engine -->|"runs"| game["Gw2-64.exe"]
     bottle --- game
@@ -395,9 +395,9 @@ bash 3.2. The window calls it for everything: `status`, `install`, `play`, `sett
 script reports back in lines that start with `@`, such as `@phase`, `@progress` and `@error`.
 
 The Wine engine is not in the app. It is athei's
-[Mach9 0.3.1](https://github.com/athei/mach9/releases/tag/v0.3.1), the release asset
-`wine-v0.3.1-macos-arm64.tar.xz`, built from Wine `athei/wine@53def89293a`, which is wine-11.21-37,
-FEX `9d4fa4b46b1`, DXMT `athei/dxmt@d903db89036` and the other components its release page lists. The script
+[Mach9 0.4.0](https://github.com/athei/mach9/releases/tag/v0.4.0), the release asset
+`wine-v0.4.0-macos-arm64.tar.xz`, built from Wine `athei/wine@501796b0ed1`, which is wine-11.21-54,
+FEX `597e7ccbedd`, DXMT `athei/dxmt@10e27aed3f5` and the other components its release page lists. The script
 downloads it at install time, pinned by size and sha256. The download resumes, retries and has a
 second address through GitHub's API. `status`, the manifest and Collect Logs name the three
 commits.
@@ -416,6 +416,16 @@ The app writes nothing into the engine afterwards but its DXMT tree, `ntdll.so`,
 provisioning profile, and a re-signed, edited or copied loader exits. The check of the engine's
 `ntdll.so`, `winemac.so`, `win32u.so` and FEX files takes each where it is, in place or next to
 mine as `<file>.engine`.
+
+My files are built for one engine, and each `VERSION` in `components/` names it in a line
+`engine: Mach9 v0.4.0 (wine-v0.4.0-macos-arm64.tar.xz, sha256 <the tarball's>)`. A `VERSION`
+without that line counts as built for Mach9 0.3.1, the engine before 0.4.0. Files built for 0.3.1
+don't run on 0.4.0: its wineserver speaks protocol 973, 0.3.1's 972. So none of my files go into
+the engine while it is another one than the app's pin (its `.gw2om-source` names another tarball,
+as an engine an earlier version of the app left does), or while a `VERSION` of mine names another
+engine. The app then leaves the engine's files as they are and says why in an `@warn` that names
+both engines. Repair puts the app's engine in place. `stage-components.sh` refuses such a build of
+mine before it gets into the app at all.
 
 ### The DXMT tree
 
@@ -477,7 +487,7 @@ and `wine_ready`: `yes`, `switch` when the next start puts the asked-for file in
 the engine's own is neither in place nor next to it. Repair then unpacks the engine again. The
 *This Mac* panel's Engine cell shows `Wine 11.21 · d831f80` when my `ntdll.so` and `winemac.so`
 from one build are in place, the engine's title with both of its own, and the engine's name with
-the other file, such as `Mach9 0.3.1 · ntdll d831f80` or `Mach9 0.3.1 · another winemac`, when
+the other file, such as `Mach9 0.4.0 · ntdll d831f80` or `Mach9 0.4.0 · another winemac`, when
 only one is mine. A Mac driver set cut short shows as `winemac and win32u mixed`.
 
 The app tells my file from the engine's by comparing it with `components/ntdll/ntdll.so`, not by
@@ -499,7 +509,7 @@ its web helper's, the game's launcher and the game. My build of it comes from th
 commit line as my `ntdll.so` and is in the app as `components/macdrv`. The app installs it the same
 way, with its own setting, `macdrv`, so I can take my driver out and keep my `ntdll.so`, or the
 other way round. The engine's own goes aside as `winemac.so.engine`, and the pin is its sha256,
-`ae468edc…`. `status` prints `macdrv`, `macdrv_ready`, `macdrv_file`, `macdrv_commit`,
+`19c5ff04…`. `status` prints `macdrv`, `macdrv_ready`, `macdrv_file`, `macdrv_commit`,
 `macdrv_release` and `macdrv_build`, and the *This Mac* panel counts my driver in with my
 `ntdll.so`.
 
@@ -515,7 +525,7 @@ My Wine fork's archive for the driver also holds my `win32u.so` when that commit
 of it. `win32u.so` is the layer every process that draws or handles input calls, and it calls into
 the driver, so the two come from one tree and must never load from two builds. The app installs
 them as one set under the same setting: both mine or both the engine's own. The engine's own
-`win32u.so` goes aside as `win32u.so.engine`, pinned by its sha256, `e7b0d6a0…` (2,370,520
+`win32u.so` goes aside as `win32u.so.engine`, pinned by its sha256, `1ac94b07…` (2,370,696
 bytes). A switch copies my files next to theirs first and then renames file by file, so a switch
 cut short leaves a mix: `macdrv_file=mix`, which the next switch finishes and Play never starts
 on. While Steam still runs, Play says to quit it. When one of the engine's own files is gone,
@@ -539,7 +549,7 @@ processes use, stays the engine's.
 The setting `fex` starts at `engine`: my FEX goes in only after `gw2om.sh set fex mine` from
 Terminal, and `gw2om.sh set fex engine` takes it out again. There is no row in the Settings window.
 The swap works as for my `ntdll.so`, while no session runs or starts: each of the engine's own
-files goes aside as `<file>.engine` once, and only when its sha256 is the pin's, `99eb322e…` for
+files goes aside as `<file>.engine` once, and only when its sha256 is the pin's, `cd6803d9…` for
 both DLL names and `0a3e7ea4…` for the `.so`. Three files in two folders can't change in one step,
 so the switch copies all three of mine next to theirs first and then renames them back to back.
 Back to the engine's own is three renames. A switch cut short leaves a mix of mine and the
@@ -611,7 +621,7 @@ The install's own Wine calls, `wineboot` and Valve's Steam installer, get `WINEP
 the app's. If the app inherited `WINE_COMPATDB`, `WINE_COMPATDB_FILE`, `WINE_LARGE_ADDRESS_AWARE`
 or `WINE_PROF_SERVICE`, they are removed from every Wine start, because each changes what the
 engine does for every process. The engine's built-in rules already give each process DXMT, leave
-Mono and Gecko out, and set Steam's web helper up.
+Gecko out, keep `rundll32.exe` from offering to install Mono, and set Steam's web helper up.
 
 `settings.conf` holds the settings. Every start turns them into three things: the environment of
 the session's first process, `dxmt.conf`, and the game's compatdb rules. `gw2om.sh env` and
@@ -768,7 +778,7 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
 
 The engine's built-in rules already give every process DXMT, DPI awareness, raw mouse input from
 GameController and FEX's reduced x87 precision. The `compatdb` check on GitHub's runners reads each
-text the sandbox suite pins (`scripts/compatdb-check/rules`) with Mach9 0.3.1's `compatdb-core` and
+text the sandbox suite pins (`scripts/compatdb-check/rules`) with Mach9 0.4.0's `compatdb-core` and
 checks that it writes back byte for byte.
 
 A setting change that only changes the rules or `dxmt.conf` takes effect at the next game start.
@@ -1070,7 +1080,8 @@ pre-release `arm64-builds`: `ntdll.so`, `VERSION`, `COPYING.LIB` and `LICENSE`. 
 lines `commit: <full sha>`, `engine: … sha256 <the engine tarball's>` and `ntdll.so: sha256 <the
 file's>`. `stage-components.sh` copies it, unpacked, from `work/ntdll-arm64/install` in the
 workspace (`NTDLL_BUILD` overrides it) and writes `prebuilt/ntdll/SHA256SUMS`. It refuses a build
-for another engine than `ENGINE_SHA256` or on another base than `ENGINE_WINE` (`VERSION`'s `base:`
+for another engine than `ENGINE_SHA256` (a `VERSION` without an `engine:` line counts as built for
+Mach9 0.3.1, and the refusal names the engine the record names) or on another base than `ENGINE_WINE` (`VERSION`'s `base:`
 line), an `ntdll.so` that isn't the file its `VERSION` names or
 has no valid signature, and with `WINE_COMMIT` set, a build of another commit or none. Without a
 build and without `WINE_COMMIT` it stages no `ntdll/`, and the app leaves the engine's own in
@@ -1169,7 +1180,7 @@ Mac. It has read-only access and no secrets, and its actions are pinned by commi
 
 - `lint`: `shellcheck -S warning` on the bash scripts and `actionlint` on the workflows
 - `compatdb`: `scripts/compatdb-check`, a small Rust program, reads each rules text the sandbox
-  suite pins with Mach9 0.3.1's `compatdb-core` (`Table::parse_strict`) and checks that it writes
+  suite pins with Mach9 0.4.0's `compatdb-core` (`Table::parse_strict`) and checks that it writes
   back byte for byte. It needs `cargo`, so it runs only there, never in the app's build.
 - `build`: `bash -n` (macOS's 3.2) on the scripts, `stage-components.sh --fetch`, `./build.sh`,
   then the build's `VERSIONS` and component hashes in the run's summary. `build.sh` writes
