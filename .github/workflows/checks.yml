@@ -1,7 +1,8 @@
 # Checks every pull request and every push to main on GitHub's runners, so none of it runs on my
 # Mac: the scripts and workflows lint clean, the app builds, the sandbox suite passes on the built
 # app and the windows render. No secrets and read-only access. Signing, notarizing and releasing
-# stay on my Mac (scripts/release.sh).
+# stay on my Mac (scripts/release.sh). A push to main whose tree a green pull request tested runs
+# only lint and the tested job, which looks that up.
 #
 # A runner has no development workspace, so scripts/stage-components.sh fetches prebuilt/ as the
 # archive pinned in prebuilt.lock and checks its sha256 (README.md, Building).
@@ -46,7 +47,56 @@ jobs:
           tar -xzf "$RUNNER_TEMP/actionlint.tgz" -C "$RUNNER_TEMP" actionlint
           "$RUNNER_TEMP/actionlint" -color
 
+  # A push to main whose tree a merged pull request's green run already tested skips build, sandbox,
+  # renders and addon (the pattern of jdrly/dxmt's Tested tree job). A pull request's run tests
+  # GitHub's merge of its head into main, so the job asks for two things: the head has the pushed
+  # commit's tree, and main before the push (the commit's parent) is an ancestor of the head. Then
+  # every main the run could have merged was already in the head, and the run tested the head's
+  # tree. Any other push, and a failed lookup, run everything.
+  tested:
+    name: Tested tree
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      green: ${{ steps.look.outputs.green }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      COMMIT: ${{ github.sha }}
+    steps:
+      - name: Whether a green pull request tested this tree
+        id: look
+        run: |
+          green=0
+          if [[ $GITHUB_EVENT_NAME == push ]]; then
+            tree=$(gh api "repos/$GH_REPO/commits/$COMMIT" -q .commit.tree.sha) || tree=""
+            parent=$(gh api "repos/$GH_REPO/commits/$COMMIT" -q '.parents[0].sha // empty') || parent=""
+            while read -r pr head; do
+              [[ -n $pr && -n $tree && -n $parent ]] || continue
+              [[ $(gh api "repos/$GH_REPO/commits/$head" -q .commit.tree.sha) == "$tree" ]] || continue
+              [[ $(gh api "repos/$GH_REPO/compare/$parent...$head" -q .status) == ahead ]] || continue
+              run=$(gh api "repos/$GH_REPO/actions/workflows/checks.yml/runs?event=pull_request&status=success&head_sha=$head" \
+                -q '.workflow_runs[0].html_url // empty') || run=""
+              if [[ -n $run ]]; then
+                green=1
+                echo "pull request #$pr's green run tested this tree: $run" | tee -a "$GITHUB_STEP_SUMMARY"
+                break
+              fi
+            done < <(gh api "repos/$GH_REPO/commits/$COMMIT/pulls" -q '.[] | select(.merged_at != null) | "\(.number) \(.head.sha)"')
+            if (( !green )); then
+              echo "::warning::no green pull request run tested the tree of $COMMIT, so this push runs every check" |
+                tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+          echo "green=$green" >>"$GITHUB_OUTPUT"
+
   build:
+    needs: tested
+    if: needs.tested.outputs.green != '1'
     # build.sh needs the macOS 27 SDK. GitHub has no macos-27 label; its macOS 27 image with
     # Xcode 27 is xcode-27, a public preview (actions/runner-images#14404;
     # .github/actionlint.yaml lists it). Its default Xcode is 27.1; DEVELOPER_DIR picks 27.2,
@@ -166,6 +216,8 @@ jobs:
   # (addon/ui-scale/test/test.c), with Homebrew's mingw-w64, the toolchain the shipped addon is
   # built with.
   addon:
+    needs: tested
+    if: needs.tested.outputs.green != '1'
     runs-on: xcode-27
     timeout-minutes: 20
     steps:
