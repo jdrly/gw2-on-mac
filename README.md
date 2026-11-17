@@ -427,6 +427,13 @@ engine. The app then leaves the engine's files as they are and says why in an `@
 both engines. Repair puts the app's engine in place. `stage-components.sh` refuses such a build of
 mine before it gets into the app at all.
 
+An app update that moves the pin finds the engine of the release before it. That engine still
+counts as installed (`installed=yes`, `engine_installed=old`), and the *Ready* panel's chip and
+the Engine cell say "Repair to update". Play refuses and names Repair. Repair downloads the pinned
+engine and replaces the old one, but not while Steam, the game or the bottle's Wine runs. A failed
+download leaves the old engine in place, and the error says so
+([ADR 0016](docs/adr/0016-an-engine-of-another-release-is-replaced-by-repair.md)).
+
 ### The DXMT tree
 
 The engine's compatdb gives every process `lib/wine/dxgi/dxmt` as its DXGI tree (the built-in

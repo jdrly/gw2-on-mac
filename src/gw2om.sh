@@ -262,7 +262,9 @@ say() { echo "$*"; log "$*"; }
 step() { echo "@step $*"; log "== $*"; }
 phase() { echo "@phase $1"; }
 warn() { echo "@warn $*"; log "WARNING: $*"; }
-die() { echo "@error $*"; log "ERROR: $*"; exit 1; }
+# (DIE_NOTE, when set, ends the text: install_engine's while it replaces an engine of another release)
+DIE_NOTE=""
+die() { echo "@error $*${DIE_NOTE:+ $DIE_NOTE}"; log "ERROR: $*${DIE_NOTE:+ $DIE_NOTE}"; exit 1; }
 open_log() { if [ -z "$DRY" ]; then mkdir -p "$LOGS"; LOGFILE="$LOGS/install.log"; fi; }
 
 # run <command...>: a change to the system (only printed in a dry run)
@@ -1390,6 +1392,10 @@ write_rules() {
 # --- Engine
 
 engine_ok() { [ -x "$ENG/bin/wine" ] && [ "$(cat "$ENG/.gw2om-source" 2>/dev/null || true)" = "$ENGINE_SHA256" ]; }
+# engine_old: an engine is there, but not this app's: one of another release that an earlier
+# version of the app installed (docs/adr/0016). It still counts as installed; Play refuses and
+# Repair replaces it.
+engine_old() { [ -x "$ENG/bin/wine" ] && ! engine_ok; }
 # engine_label <its tarball's sha256>: the engine by name
 engine_label() {
   case "$1" in
@@ -1914,6 +1920,10 @@ install_engine() {
     say "The Wine engine ($ENGINE_TITLE) is already in place"
     return
   fi
+  if engine_old; then
+    say "The engine here is $(engine_label "$(cat "$ENG/.gw2om-source" 2>/dev/null || true)"); $ENGINE_TITLE replaces it"
+    DIE_NOTE="The engine here, $(engine_label "$(cat "$ENG/.gw2om-source" 2>/dev/null || true)"), stays in place. Click Repair to try again."
+  fi
   fetch "$ENGINE_URL" "$ENGINE_SHA256" "$ENGINE_SIZE" "Wine engine" "$ENGINE_API_URL"
   say "Unpacking the Wine engine ($ENGINE_TITLE)"
   run rm -rf "$dst.new"
@@ -1932,6 +1942,7 @@ install_engine() {
   fi
   run rm -rf "$dst"
   run mv "$dst.new" "$dst"
+  DIE_NOTE=""
   CREATED="$CREATED engine"
   log "engine: $ENGINE_NAME (Wine $ENGINE_WINE, FEX $ENGINE_FEX, DXMT $ENGINE_DXMT)"
 }
@@ -2538,10 +2549,11 @@ status() {
   echo "macos=$(macos_version)"
   echo "macos_min=$MACOS_MIN"
   echo "macos_ok=$(macos_ok && echo yes || echo no)"
-  [ -f "$MANIFEST" ] && engine_ok && [ -f "$BOTTLE/system.reg" ] && installed=yes
+  # (an engine of another release counts: Repair replaces it, engine_installed=old)
+  [ -f "$MANIFEST" ] && [ -x "$ENG/bin/wine" ] && [ -f "$BOTTLE/system.reg" ] && installed=yes
   echo "installed=$installed"
   echo "installed_version=$(json_get "$MANIFEST" version)"
-  echo "engine_installed=$(engine_ok && echo yes || echo no)"
+  echo "engine_installed=$(if engine_ok; then echo yes; elif engine_old; then echo old; else echo no; fi)"
   dxmt_look "$DXGI/dxmt"
   echo "graphics=$(graphics_state)"
   # (the DXMT Settings asks for, the one in the engine's tree now, and my fork's build)
@@ -3383,6 +3395,8 @@ cmd_play() {
   local key k
   open_log
   log "---- play $VERSION root=${ROOT:-/} dry=${DRY:-0}"
+  ! { [ -f "$MANIFEST" ] && engine_old; } ||
+    die "The engine here is $(engine_label "$(cat "$ENG/.gw2om-source" 2>/dev/null || true)"), and this version of $APP_NAME runs on $ENGINE_TITLE. Click Repair to put it in place."
   [ -f "$MANIFEST" ] && engine_ok || [ -n "$DRY" ] || die "$APP_NAME is not installed. Install it first."
   [ "$(state stage)" = finished ] || [ -n "$DRY" ] || die "Guild Wars 2 is not installed yet."
   game_state

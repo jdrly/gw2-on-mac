@@ -391,6 +391,19 @@ struct ThisMac: View {
     } else {
       game = Check(id: "Guild Wars 2", icon: "swords", value: "Not installed yet", tone: .off)
     }
+    // (switch: Settings changed a file while Steam ran; other: neither the engine's nor mine; old: an
+    // engine of another release that an earlier version of the app installed, docs/adr/0016)
+    let engineCheck: Check
+    if s["engine_installed"] == "old" {
+      engineCheck = Check(id: "Engine", icon: "wine", value: "\(engine) · Repair to update", tone: .bad)
+    } else {
+      engineCheck = Check(id: "Engine", icon: "wine",
+            value: s["engine_installed"] != "yes" ? "\(engine) · not set up"
+              : switching ? "\(wine) · at the next Play"
+              : !repair.isEmpty ? "\(short) · \(repair.joined(separator: " and ")) needs Repair" : wine,
+            tone: s["engine_installed"] != "yes" ? .off : switching ? .pending
+              : !repair.isEmpty ? .bad : .good)
+    }
     let free = installer.diskFree
     let disk = installer.diskLow
       ? Check(id: "Disk space", icon: "hard-drive",
@@ -401,13 +414,7 @@ struct ThisMac: View {
       Check(id: "macOS", icon: "cpu",
             value: installer.macosOK ? macos : "\(macos) · needs \(s["macos_min"] ?? "26.4")",
             tone: installer.macosOK ? .good : .bad),
-      // (switch: Settings changed a file while Steam ran; other: neither the engine's nor mine)
-      Check(id: "Engine", icon: "wine",
-            value: s["engine_installed"] != "yes" ? "\(engine) · not set up"
-              : switching ? "\(wine) · at the next Play"
-              : !repair.isEmpty ? "\(short) · \(repair.joined(separator: " and ")) needs Repair" : wine,
-            tone: s["engine_installed"] != "yes" ? .off : switching ? .pending
-              : !repair.isEmpty ? .bad : .good),
+      engineCheck,
       // (switch: Settings changed it while Steam ran; the next Play puts it in)
       Check(id: "Graphics", icon: "sparkles",
             value: s["graphics"] == "yes" ? ThisMac.dxmtMetal(s)
@@ -1117,8 +1124,9 @@ struct ReadyPanel: View {
 
   // after an update of the app: an engine with the DXMT Settings asks for is this version's (Play
   // only brings the manifest along); anything else, an earlier build of my DXMT fork too, takes
-  // Repair (or the next Play) to update
+  // Repair (or the next Play) to update. An engine of another release takes Repair (docs/adr/0016).
   private var versionChip: (warn: Bool, text: String) {
+    if installer.status["engine_installed"] == "old" { return (true, "\(installer.installedVersion) · Repair to update") }
     guard installer.installedOtherVersion else { return (false, "Installed · \(installer.installedVersion)") }
     return installer.status["graphics"] == "yes"
       ? (false, "Installed · \(installer.appVersion)") : (true, "\(installer.installedVersion) · Repair to update")

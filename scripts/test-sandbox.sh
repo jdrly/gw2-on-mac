@@ -2557,6 +2557,29 @@ g set uiscale off >/dev/null
 qc | while IFS= read -r f; do xattr -d com.apple.quarantine "$f"; done
 rm -f "$SANDBOX/cp-check"
 rm -rf "$SANDBOX/tar-check"
+# An engine of another release, as an earlier version of the app left it (docs/adr/0016): its
+# record of the archive is Mach9 0.3.1's. It counts as installed, and Play refuses, naming Repair.
+# Repair replaces it, but not while the old engine's Wine runs, and a failed download keeps it.
+OLD_SHA=90aff9a897ed0ff9aac44d0e06f0aecd3ee985afb38037f3f915451e51fa974e
+echo "$OLD_SHA" >"$ENG/.gw2om-source"
+check "Mach9 0.3.1's engine in place: installed=yes, engine_installed=old" [ "$(st installed)/$(st engine_installed)" = yes/old ]
+: >"$STANDIN_LOG"; out=$(g play 2>&1) && rc=0 || rc=$?
+check "  Play refuses, naming both engines and Repair, and starts no Wine" \
+  eval '[ "$rc" != 0 ] && echo "$out" | grep -qxF "@error The engine here is Mach9 0.3.1 · Wine 11.21, and this version of $APP_NAME runs on Mach9 0.4.0 · Wine 11.21. Click Repair to put it in place." && ! grep -q "^wine " "$STANDIN_LOG"'
+mv "$ENG/bin/wineserver" "$ENG/bin/wineserver.heat" && cp "$SANDBOX/sleeper" "$ENG/bin/wineserver"
+"$ENG/bin/wineserver" 60 & sp=$!
+sleep 0.3
+out=$(g repair 2>&1) && rc=0 || rc=$?
+check "  repair while the old engine's Wine runs: refused, the old engine kept" \
+  eval '[ "$rc" != 0 ] && echo "$out" | grep -q "^@error " && [ "$(cat "$ENG/.gw2om-source")" = "$OLD_SHA" ] && [ "$(st engine_installed)" = old ]'
+kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
+mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
+out=$(GW2_ON_MAC_ENGINE_URL="file://$SANDBOX/missing.tar.xz" g repair 2>&1) && rc=0 || rc=$?
+check "  repair with a failed download: the old engine kept, and the error says so" \
+  eval '[ "$rc" != 0 ] && echo "$out" | grep -q "^@error The download of the Wine engine.* The engine here, Mach9 0.3.1 · Wine 11.21, stays in place. Click Repair to try again.$" && [ "$(cat "$ENG/.gw2om-source")" = "$OLD_SHA" ] && [ -x "$ENG/bin/wine" ] && [ ! -e "$ENG.new" ]'
+out=$(g repair 2>&1) && rc=0 || rc=$?
+check "  repair once nothing runs: this app's engine replaces it, with my files in it, saying so" \
+  eval '[ "$rc" = 0 ] && echo "$out" | grep -qxF "The engine here is Mach9 0.3.1 · Wine 11.21; Mach9 0.4.0 · Wine 11.21 replaces it" && [ "$(st installed)/$(st engine_installed)" = yes/yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ] && dxgi_is fork && ntdll_is $MYWINE && winemac_is $MYDRV'
 mkdir "$AD/.lock"
 check "a second operation is refused while one runs (lock)" sh -c "'$G' repair 2>&1 | grep -q 'Another $APP_NAME'"
 rmdir "$AD/.lock"
