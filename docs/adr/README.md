@@ -4,9 +4,9 @@ One decision per file. The files go by number, not by date. 0001 to 0011 record 
 wrote them down on 2026-11-17, after 0012 and 0013 had landed, and kept their numbers below
 those two. Their dates don't follow their numbers. A new decision takes the next free number.
 
-0001 and 0002 are about 0.1.x and live on `main`. 0003 to 0010, 0012 and 0013 are about the 0.2
-line on this branch, `arm64`. 0011 is on both. The two branches share one set of numbers, so a
-number taken on one is not used on the other.
+0001, 0002 and 0014 are about 0.1.x and live on `main`. 0003 to 0010, 0012, 0013 and 0015 are
+about the 0.2 line on this branch, `arm64`. 0011 is on both. The two branches share one set of
+numbers, so a number taken on one is not used on the other.
 
 | File | Decided | One line |
 |---|---|---|
@@ -23,3 +23,5 @@ number taken on one is not used on the other.
 | [0011](0011-the-project-rules-that-bind-the-app.md) | recorded 2026-11-17 | The project-wide rules in a sentence each, pointing to the workspace ADRs. |
 | [0012](0012-sandbox-suite-in-two-jobs.md) | 2026-11-17 | The sandbox suite stays one file and runs as two groups in two jobs, each with a 20-minute limit. |
 | [0013](0013-checks-skip-renders-and-addon-by-change.md) | 2026-11-17 | A pull request skips `renders` when every file it changes is on a list the pictures can't depend on, and runs `addon` only when it touches the addon. |
+| `0014-cooler-job-workers-are-off-by-default-on-0.1.x.md`, on `main` | 2026-11-17 | *Cooler job workers* defaults to off from 0.1.5, and an untouched 3 from an older install reads as off. |
+| [0015](0015-sandbox-suite-in-three-jobs.md) | 2026-11-17 | The suite's `steam` group splits into `settings` and `sessions`, and `sessions` starts from an install it makes itself. Three jobs, 15 minutes each. |
