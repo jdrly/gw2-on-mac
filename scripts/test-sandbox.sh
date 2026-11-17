@@ -14,9 +14,10 @@
 # Env: SANDBOX (default work/app-sandbox/test in this repository, removed first), KEEP=1 (leave it
 #      for a look), SIGNED_PE (an x86_64 PE signed by ArenaNet; default the game's Gw2-64.exe in
 #      $GW2_ON_MAC_WORKSPACE/work/bottles, the workspace defaulting to ../gw2-on-mac)
-#      GROUP (all, the default; steam: the life of one Steam install, from the dry runs to
-#      Uninstall; rest: what starts from nothing after it. The Checks workflow runs the two as
-#      two jobs. On one Mac run one at a time: each ends every watch-session of this app)
+#      GROUP (all, the default; settings: the dry runs to Collect Logs, on one Steam install;
+#      sessions: Steam in the background to Uninstall, on an install it makes itself
+#      (fixture_install); rest: what starts from nothing. The Checks workflow runs the three as
+#      three jobs. On one Mac run one at a time: each ends every watch-session of this app)
 # Runs under macOS's /bin/bash 3.2.
 # Many variables are read only inside the strings that check() evals, which shellcheck can't see.
 # shellcheck disable=SC2034
@@ -106,7 +107,7 @@ other_dxmt_kept() { has "$OTHER_DXMT/shaders_320.db" "another setup's"; }
 
 pass=0 fail=0
 GROUP="${GROUP:-all}"
-case "$GROUP" in all|steam|rest) ;; *) echo "GROUP must be all, steam or rest" >&2; exit 1 ;; esac
+case "$GROUP" in all|settings|sessions|rest) ;; *) echo "GROUP must be all, settings, sessions or rest" >&2; exit 1 ;; esac
 in_group() { [ "$GROUP" = all ] || [ "$GROUP" = "$1" ]; }
 # Each check's commands: what gw2om.sh prints goes to checks/NNNN.txt as well, through G, a wrapper
 # that appends it there (GW2OM is the app's own gw2om.sh). checks.txt lists the results, and a
@@ -185,6 +186,91 @@ sess() { sed -n "s/^$1=//p" "$AD/session" 2>/dev/null; }
 wait_stage() { local i=0; while [ "$(sess stage)" != "$1" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; [ "$(sess stage)" = "$1" ]; }
 watcher_runs() { local p; p=$(sess watcher_pid); [ -n "$p" ] && kill -0 "$p" 2>/dev/null; }
 watch_done() { local i=0; while { watcher_runs || [ "$(sess stage)" != "done" ]; } && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; ! watcher_runs && [ "$(sess stage)" = "done" ]; }
+
+# dxgi_is fork|engine: the engine's DXMT trees as the app leaves them (lib/wine/dxgi). fork: dxmt is
+# the stand-in engine's tree with every file of the app's components/dxmt over it (its winemetal.so
+# a file of its own, not the engine's link) and the mark, and dxmt.engine the engine's own as it
+# ships (its link included). engine: dxmt is the engine's own, and no dxmt.engine.
+dxgi_is() {
+  local D="$ENG/lib/wine/dxgi" f
+  if [ "$1" = engine ]; then
+    diff -r "$S/lib/wine/dxgi/dxmt" "$D/dxmt" >/dev/null && [ -L "$D/dxmt/aarch64-unix/winemetal.so" ] && [ ! -e "$D/dxmt.engine" ]
+    return
+  fi
+  diff -r "$S/lib/wine/dxgi/dxmt" "$D/dxmt.engine" >/dev/null && [ -L "$D/dxmt.engine/aarch64-unix/winemetal.so" ] &&
+    [ -f "$D/dxmt/.gw2om-dxmt" ] && [ ! -e "$D/dxmt.fork" ] && [ ! -L "$D/dxmt/aarch64-unix/winemetal.so" ] &&
+    same "$S/lib/wine/dxgi/dxmt/aarch64-windows/d3d10.dll" "$D/dxmt/aarch64-windows/d3d10.dll" || return 1
+  for f in $(cd "$COMP/dxmt" && find . -type f); do same "$COMP/dxmt/$f" "$D/dxmt/$f" || return 1; done
+  # (and the engine's own winemetal.so, which the link points at, as it ships)
+  same "$S/lib/wine/aarch64-unix/winemetal.so" "$ENG/lib/wine/aarch64-unix/winemetal.so"
+}
+# wineapp_sums <engine>: every file in wine.app with its sha256
+wineapp_sums() { (cd "$1/lib/wine/aarch64-unix/wine.app" && find . -type f -exec shasum -a 256 {} + | LC_ALL=C sort); }
+# unix_is <file> <its folder in components/> mine|engine: the engine's <file> as the app leaves
+# it. mine: the app's components/<folder>/<file>, the engine's own next to it as <file>.engine.
+# engine: the engine's own, nothing next to it. Never an unfinished <file>.new.
+NT="$ENG/lib/wine/aarch64-unix"
+unix_is() {
+  [ ! -e "$NT/$1.new" ] || return 1
+  if [ "$3" = engine ]; then
+    same "$S/lib/wine/aarch64-unix/$1" "$NT/$1" && [ ! -e "$NT/$1.engine" ]
+    return
+  fi
+  same "$COMP/$2/$1" "$NT/$1" && same "$S/lib/wine/aarch64-unix/$1" "$NT/$1.engine"
+}
+# ntdll_is, winemac_is and win32u_is mine|engine: my ntdll.so's and my Mac driver's two files
+ntdll_is() { unix_is ntdll.so ntdll "$1"; }
+winemac_is() { unix_is winemac.so macdrv "$1"; }
+win32u_is() { unix_is win32u.so macdrv "$1"; }
+# fex_is mine|engine: FEX's three files as the app leaves them. mine: the app's
+# components/fex/aarch64-windows/libarm64ecfex.dll as both DLLs and its libarm64ecfex.so, the
+# engine's own next to each as <file>.engine. engine: the engine's own, nothing next to them. Never
+# an unfinished <file>.new, and the i386 half as it ships
+FW="$ENG/lib/wine"
+FEXF="aarch64-windows/xtajit64.dll aarch64-windows/libarm64ecfex.dll aarch64-unix/libarm64ecfex.so"
+fex_src_of() { case "$1" in *.dll) echo "$COMP/fex/aarch64-windows/libarm64ecfex.dll" ;; *) echo "$COMP/fex/$1" ;; esac; }
+fex_is() {
+  local f
+  same "$S/lib/wine/aarch64-windows/xtajit.dll" "$FW/aarch64-windows/xtajit.dll" || return 1
+  for f in $FEXF; do
+    [ ! -e "$FW/$f.new" ] || return 1
+    if [ "$1" = engine ]; then
+      same "$S/lib/wine/$f" "$FW/$f" && [ ! -e "$FW/$f.engine" ] || return 1
+    else
+      same "$(fex_src_of "$f")" "$FW/$f" && same "$S/lib/wine/$f" "$FW/$f.engine" || return 1
+    fi
+  done
+}
+
+# (the engine as it ships: every file the stand-in's, minus the SDK, plus the app's record of the
+# archive; nothing of the app's in it but its DXMT trees, ntdll.so, winemac.so and win32u.so, which
+# dxgi_is, ntdll_is, winemac_is and win32u_is check)
+engine_diff() { diff -rq -x dxgi -x 'ntdll.so*' -x 'winemac.so*' -x 'win32u.so*' "$S" "$ENG" 2>&1 | sed -e "s|$S|S|g" -e "s|$ENG|E|g" | LC_ALL=C sort | tr '\n' '|'; }
+SDK_DIFF="Only in E: .gw2om-source|Only in S/lib/wine: tests|Only in S/lib/wine: x86_64-windows|Only in S/share: man|Only in S: include|"
+# the game's folder in the bottle
+GD="$STEAM/steamapps/common/Guild Wars 2"
+
+# fixture_install: a finished Steam install with the game, as the first half's sections leave it
+# for the session checks (GROUP=sessions starts here; with GROUP=all those sections made it)
+fixture_install() {
+  g install steam >/dev/null 2>&1 || return 1
+  local m="$STEAM/steamapps/appmanifest_1284210.acf"
+  printf '"AppState"\n{\n\t"appid"\t\t"1284210"\n\t"installdir"\t\t"Guild Wars 2"\n\t"StateFlags"\t\t"4"\n\t"BytesToDownload"\t\t"58900000000"\n\t"BytesDownloaded"\t\t"21400000000"\n}\n' >"$m"
+  mkdir -p "$STEAM/steamapps/common/Guild Wars 2"
+  echo "stand-in game" >"$STEAM/steamapps/common/Guild Wars 2/Gw2-64.exe"
+  g finish >/dev/null 2>&1 || return 1
+  # (what the first half's sections leave, found by comparing the two sandboxes where the session
+  # checks start; each line names the section that leaves it)
+  g set launchopts -maploadinfo >/dev/null   # Settings
+  # (Settings: on a Mac with fewer than 8 CPUs, as GitHub's runners, ncpu ends at all of them)
+  local c; c=$(sysctl -n hw.logicalcpu); [ "$c" -ge 8 ] || g set ncpu "$c" >/dev/null
+  g set uiscale_size 2.0 >/dev/null          # The larger interface (addon)
+  g set uiscale_sans off >/dev/null          # The larger interface (addon)
+  g set metal 3 >/dev/null                   # The game's compatdb rules
+  g set debug off >/dev/null                 # The game's compatdb rules
+  # (Collect Logs: Steam's config/ is where the session checks write loginusers.vdf)
+  mkdir -p "$STEAM/config" "$STEAM/logs" "$BOTTLE/drive_c/users/$BUSER/AppData/Roaming/Guild Wars 2"
+}
 
 # --- The stand-in engine: the real engine's layout (Mach9's: the loader in an app bundle, bin/wine
 # and lib/wine/aarch64-unix/wine links to it, the dxmt tree for arm64), files that only pretend
@@ -302,8 +388,79 @@ printf 'GetProcAddress addextension2 for arcdps\n' >>"$SANDBOX/pe/nexus.dll"
 # (macOS kills copies of /bin/sleep: an ad-hoc signed program of my own keeps its signature)
 printf '#include <unistd.h>\n#include <stdlib.h>\nint main(int c, char **v) { sleep(c > 1 ? atoi(v[1]) : 60); return 0; }\n' >"$SANDBOX/sleeper.c"
 clang -O2 -o "$SANDBOX/sleeper" "$SANDBOX/sleeper.c"
+# (a stand-in for macOS's vmmap, $ROOT/bin/vmmap: it notes the pid it was given and prints an
+# excerpt of the first 0.2 session's, with FEX's three code buffers among other regions)
+# (with the file vmmap.hang it hangs instead)
+{ printf '#!/bin/bash\necho "$1" >>"%s/vmmap.args"\n[ ! -e "%s/vmmap.hang" ] || exec sleep 60\ncat <<'"'"'MAP'"'"'\n' "$SANDBOX" "$SANDBOX"; cat <<'EOF'; echo MAP; } >"$SANDBOX/bin/vmmap"
+Process:         Gw2-64.exe [70549]
+Path:            /Users/*/Library/Application Support/GW2 on Mac arm64/*/wine.app/Contents/MacOS/wine
+Load Address:    0x104508000
+Identifier:      wine
+Version:         11.21 (0)
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  launchd [1]
+Target Type:     live task (Roots Present)
 
-if in_group steam; then
+Date/Time:       2026-11-11 18:29:37.635 +0100
+Launch Time:     2026-11-11 18:22:04.591 +0100
+OS Version:      macOS 27.2 (26B123)
+Report Version:  7
+Analysis Tool:   /usr/bin/vmmap
+
+Physical footprint:         8.4G
+Physical footprint (peak):  9.0G
+Idle exit:                  untracked
+----
+
+Virtual Memory Map of process 70549 (Gw2-64.exe)
+Output report format:  2.4  -- 64-bit process
+VM page size:  16384 bytes
+Collected with PhysFootprint mode enabled
+
+==== regions for process 70549  (non-writable and writable regions are interleaved)
+REGION TYPE                    START - END         [ VSIZE  RSDNT  DIRTY   SWAP] PRT/MAX SHRMOD PURGE    REGION DETAIL
+mapped file                     10000-12000        [    8K     8K     0K     0K] r--/r-x SM=ALI          /Users/USER/Library/Application Support/GW2 o
+Untagged                        12000-22000        [   64K     0K     0K     0K] ---/rwx SM=NUL
+Untagged                 7fe9dbbf1000-7fe9dbff1000 [ 4096K     0K     0K    16K] rw-/rwx SM=COW
+Untagged                 7fe9dbff1000-7fe9dbff2000 [    4K     0K     0K     0K] ---/rwx SM=NUL
+Untagged                 7fe9dc000000-7fe9dffff000 [ 64.0M  25.4M  25.4M   224K] rwx/rwx SM=PRV
+Untagged                 7fe9dffff000-7fe9e0000000 [    4K     0K     0K     0K] ---/rwx SM=PRV
+Untagged                 7fea90b90000-7fea91b90000 [ 16.0M     0K     0K   112K] rw-/rwx SM=COW
+Untagged                 7fea91b90000-7fea93b8f000 [ 32.0M  24.8M  24.8M  7392K] rwx/rwx SM=PRV
+Untagged                 7fea93b8f000-7fea93b90000 [    4K     4K     4K     0K] ---/rwx SM=PRV
+Untagged                 7feffdb30000-7feffdb31000 [    4K     4K     4K     0K] rw-/rwx SM=COW
+Untagged                 7feffdb40000-7feffeb3f000 [ 16.0M  9280K  9280K  7100K] rwx/rwx SM=PRV
+Untagged                 7feffeb3f000-7feffeb40000 [    4K     0K     0K     4K] ---/rwx SM=PRV
+owned unmapped (graphics)    unmapped-unmapped     [  352K   352K   352K     0K] rw-/rw- SM=PRV PURGE=N  owned physical footprint (unmapped) (graphics
+page table in kernel           kernel-kernel       [ 21.8M  21.8M  21.8M     0K] rw-/rw- SM=PRV          charged to process physical footprint
+
+==== Legend
+SM=sharing mode:
+        COW=copy_on_write PRV=private NUL=empty ALI=aliased
+        SHM=shared ZER=zero_filled S/A=shared_alias
+PURGE=purgeable mode:
+        V=volatile N=nonvolatile E=empty   otherwise is unpurgeable
+
+==== Summary for process 70549
+ReadOnly portion of Libraries: Total=3.0G resident=898.2M(29%) swapped_out_or_unallocated=2.1G(71%)
+Writable regions: Total=268.0G written=5.0G(2%) resident=6.2G(2%) swapped_out=1.2G(0%) unallocated=260.6G(97%)
+
+                                VIRTUAL RESIDENT    DIRTY  SWAPPED VOLATILE   NONVOL    EMPTY   REGION
+REGION TYPE                        SIZE     SIZE     SIZE     SIZE     SIZE     SIZE     SIZE    COUNT (non-coalesced)
+===========                     ======= ========    =====  ======= ========   ======    =====  =======
+Accelerate Framework               128K      32K      32K      96K       0K      32K       0K        1
+Activity Tracing                   256K      24K      48K       0K       0K      24K       0K        1
+page table in kernel              21.8M    21.8M    21.8M       0K       0K       0K       0K        1
+shared memory                     13.7M    12.8M    12.8M       0K       0K      12K       0K       46
+unused but dirty shlib __DATA      420K     243K     243K     177K       0K       0K       0K      353
+===========                     ======= ========    =====  ======= ========   ======    =====  =======
+TOTAL                              1.0T     7.3G     6.7G     1.4G      68K   514.4M    11.5M    52825
+TOTAL, minus reserved VM space   745.6G     7.3G     6.7G     1.4G      68K   514.4M    11.5M    52825
+EOF
+chmod 755 "$SANDBOX/bin/vmmap"
+
+if in_group settings; then
 # --- Dry runs change nothing
 section "Dry runs"
 out=$(GW2_ON_MAC_DRY_RUN=1 g install steam 2>&1); rc=$?
@@ -358,61 +515,6 @@ check "  nothing left of those installs but the verified download and the log" \
   eval '[ -z "$(ls -A "$AD" 2>/dev/null)" ] && [ "$(ls "$CACHE/downloads")" = engine.tar.xz ]'
 rm -rf "$CACHE"
 
-# dxgi_is fork|engine: the engine's DXMT trees as the app leaves them (lib/wine/dxgi). fork: dxmt is
-# the stand-in engine's tree with every file of the app's components/dxmt over it (its winemetal.so
-# a file of its own, not the engine's link) and the mark, and dxmt.engine the engine's own as it
-# ships (its link included). engine: dxmt is the engine's own, and no dxmt.engine.
-dxgi_is() {
-  local D="$ENG/lib/wine/dxgi" f
-  if [ "$1" = engine ]; then
-    diff -r "$S/lib/wine/dxgi/dxmt" "$D/dxmt" >/dev/null && [ -L "$D/dxmt/aarch64-unix/winemetal.so" ] && [ ! -e "$D/dxmt.engine" ]
-    return
-  fi
-  diff -r "$S/lib/wine/dxgi/dxmt" "$D/dxmt.engine" >/dev/null && [ -L "$D/dxmt.engine/aarch64-unix/winemetal.so" ] &&
-    [ -f "$D/dxmt/.gw2om-dxmt" ] && [ ! -e "$D/dxmt.fork" ] && [ ! -L "$D/dxmt/aarch64-unix/winemetal.so" ] &&
-    same "$S/lib/wine/dxgi/dxmt/aarch64-windows/d3d10.dll" "$D/dxmt/aarch64-windows/d3d10.dll" || return 1
-  for f in $(cd "$COMP/dxmt" && find . -type f); do same "$COMP/dxmt/$f" "$D/dxmt/$f" || return 1; done
-  # (and the engine's own winemetal.so, which the link points at, as it ships)
-  same "$S/lib/wine/aarch64-unix/winemetal.so" "$ENG/lib/wine/aarch64-unix/winemetal.so"
-}
-# wineapp_sums <engine>: every file in wine.app with its sha256
-wineapp_sums() { (cd "$1/lib/wine/aarch64-unix/wine.app" && find . -type f -exec shasum -a 256 {} + | LC_ALL=C sort); }
-# unix_is <file> <its folder in components/> mine|engine: the engine's <file> as the app leaves
-# it. mine: the app's components/<folder>/<file>, the engine's own next to it as <file>.engine.
-# engine: the engine's own, nothing next to it. Never an unfinished <file>.new.
-NT="$ENG/lib/wine/aarch64-unix"
-unix_is() {
-  [ ! -e "$NT/$1.new" ] || return 1
-  if [ "$3" = engine ]; then
-    same "$S/lib/wine/aarch64-unix/$1" "$NT/$1" && [ ! -e "$NT/$1.engine" ]
-    return
-  fi
-  same "$COMP/$2/$1" "$NT/$1" && same "$S/lib/wine/aarch64-unix/$1" "$NT/$1.engine"
-}
-# ntdll_is, winemac_is and win32u_is mine|engine: my ntdll.so's and my Mac driver's two files
-ntdll_is() { unix_is ntdll.so ntdll "$1"; }
-winemac_is() { unix_is winemac.so macdrv "$1"; }
-win32u_is() { unix_is win32u.so macdrv "$1"; }
-# fex_is mine|engine: FEX's three files as the app leaves them. mine: the app's
-# components/fex/aarch64-windows/libarm64ecfex.dll as both DLLs and its libarm64ecfex.so, the
-# engine's own next to each as <file>.engine. engine: the engine's own, nothing next to them. Never
-# an unfinished <file>.new, and the i386 half as it ships
-FW="$ENG/lib/wine"
-FEXF="aarch64-windows/xtajit64.dll aarch64-windows/libarm64ecfex.dll aarch64-unix/libarm64ecfex.so"
-fex_src_of() { case "$1" in *.dll) echo "$COMP/fex/aarch64-windows/libarm64ecfex.dll" ;; *) echo "$COMP/fex/$1" ;; esac; }
-fex_is() {
-  local f
-  same "$S/lib/wine/aarch64-windows/xtajit.dll" "$FW/aarch64-windows/xtajit.dll" || return 1
-  for f in $FEXF; do
-    [ ! -e "$FW/$f.new" ] || return 1
-    if [ "$1" = engine ]; then
-      same "$S/lib/wine/$f" "$FW/$f" && [ ! -e "$FW/$f.engine" ] || return 1
-    else
-      same "$(fex_src_of "$f")" "$FW/$f" && same "$S/lib/wine/$f" "$FW/$f.engine" || return 1
-    fi
-  done
-}
-
 # --- Steam route
 section "Install through Steam"
 # (a file in the downloads folder under the engine's name that isn't the engine, as a player may
@@ -460,11 +562,6 @@ check "steam=yes" [ "$(st steam)" = yes ]
 check "stage=waiting_game" [ "$(st stage)" = waiting_game ]
 check "route=steam" [ "$(st route)" = steam ]
 check "game=no yet" [ "$(st game)" = no ]
-# (the engine as it ships: every file the stand-in's, minus the SDK, plus the app's record of the
-# archive; nothing of the app's in it but its DXMT trees, ntdll.so, winemac.so and win32u.so, which
-# dxgi_is, ntdll_is, winemac_is and win32u_is check)
-engine_diff() { diff -rq -x dxgi -x 'ntdll.so*' -x 'winemac.so*' -x 'win32u.so*' "$S" "$ENG" 2>&1 | sed -e "s|$S|S|g" -e "s|$ENG|E|g" | LC_ALL=C sort | tr '\n' '|'; }
-SDK_DIFF="Only in E: .gw2om-source|Only in S/lib/wine: tests|Only in S/lib/wine: x86_64-windows|Only in S/share: man|Only in S: include|"
 check "the engine is the stand-in as it ships, without its SDK (include, tests, x86_64-windows, man)" [ "$(engine_diff)" = "$SDK_DIFF" ]
 check "  wine.app's files have the stand-in's hashes" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
 check "  bin/wine and lib/wine/aarch64-unix/wine still link to the loader in wine.app" \
@@ -894,7 +991,6 @@ check "unknown key refused" sh -c "! '$G' set colour red >/dev/null"
 check "settings.conf has every key and settings_version" [ "$(grep -c '=' "$AD/settings.conf")" = 28 ]
 
 section "The larger interface (addon)"
-GD="$STEAM/steamapps/common/Guild Wars 2"
 check "uiscale_addon=off by default" [ "$(sett uiscale_addon)" = off ]
 check "set uiscale on" g set uiscale on
 check "  version.dll in the game folder" same "$COMP/ui-scale/version.dll" "$GD/version.dll"
@@ -1332,77 +1428,6 @@ for pid in 9101 9202 9303 9404; do
   touch -t "20250101000$n" "$LOGS/heat-$pid.log" "$LOGS/heat-requests-$pid.log"
 done
 echo "profile" >"$LOGS/heat-prof-9404.log"
-# (a stand-in for macOS's vmmap, $ROOT/bin/vmmap: it notes the pid it was given and prints an
-# excerpt of the first 0.2 session's, with FEX's three code buffers among other regions)
-# (with the file vmmap.hang it hangs instead)
-{ printf '#!/bin/bash\necho "$1" >>"%s/vmmap.args"\n[ ! -e "%s/vmmap.hang" ] || exec sleep 60\ncat <<'"'"'MAP'"'"'\n' "$SANDBOX" "$SANDBOX"; cat <<'EOF'; echo MAP; } >"$SANDBOX/bin/vmmap"
-Process:         Gw2-64.exe [70549]
-Path:            /Users/*/Library/Application Support/GW2 on Mac arm64/*/wine.app/Contents/MacOS/wine
-Load Address:    0x104508000
-Identifier:      wine
-Version:         11.21 (0)
-Code Type:       ARM64
-Platform:        macOS
-Parent Process:  launchd [1]
-Target Type:     live task (Roots Present)
-
-Date/Time:       2026-11-11 18:29:37.635 +0100
-Launch Time:     2026-11-11 18:22:04.591 +0100
-OS Version:      macOS 27.2 (26B123)
-Report Version:  7
-Analysis Tool:   /usr/bin/vmmap
-
-Physical footprint:         8.4G
-Physical footprint (peak):  9.0G
-Idle exit:                  untracked
-----
-
-Virtual Memory Map of process 70549 (Gw2-64.exe)
-Output report format:  2.4  -- 64-bit process
-VM page size:  16384 bytes
-Collected with PhysFootprint mode enabled
-
-==== regions for process 70549  (non-writable and writable regions are interleaved)
-REGION TYPE                    START - END         [ VSIZE  RSDNT  DIRTY   SWAP] PRT/MAX SHRMOD PURGE    REGION DETAIL
-mapped file                     10000-12000        [    8K     8K     0K     0K] r--/r-x SM=ALI          /Users/USER/Library/Application Support/GW2 o
-Untagged                        12000-22000        [   64K     0K     0K     0K] ---/rwx SM=NUL
-Untagged                 7fe9dbbf1000-7fe9dbff1000 [ 4096K     0K     0K    16K] rw-/rwx SM=COW
-Untagged                 7fe9dbff1000-7fe9dbff2000 [    4K     0K     0K     0K] ---/rwx SM=NUL
-Untagged                 7fe9dc000000-7fe9dffff000 [ 64.0M  25.4M  25.4M   224K] rwx/rwx SM=PRV
-Untagged                 7fe9dffff000-7fe9e0000000 [    4K     0K     0K     0K] ---/rwx SM=PRV
-Untagged                 7fea90b90000-7fea91b90000 [ 16.0M     0K     0K   112K] rw-/rwx SM=COW
-Untagged                 7fea91b90000-7fea93b8f000 [ 32.0M  24.8M  24.8M  7392K] rwx/rwx SM=PRV
-Untagged                 7fea93b8f000-7fea93b90000 [    4K     4K     4K     0K] ---/rwx SM=PRV
-Untagged                 7feffdb30000-7feffdb31000 [    4K     4K     4K     0K] rw-/rwx SM=COW
-Untagged                 7feffdb40000-7feffeb3f000 [ 16.0M  9280K  9280K  7100K] rwx/rwx SM=PRV
-Untagged                 7feffeb3f000-7feffeb40000 [    4K     0K     0K     4K] ---/rwx SM=PRV
-owned unmapped (graphics)    unmapped-unmapped     [  352K   352K   352K     0K] rw-/rw- SM=PRV PURGE=N  owned physical footprint (unmapped) (graphics
-page table in kernel           kernel-kernel       [ 21.8M  21.8M  21.8M     0K] rw-/rw- SM=PRV          charged to process physical footprint
-
-==== Legend
-SM=sharing mode:
-        COW=copy_on_write PRV=private NUL=empty ALI=aliased
-        SHM=shared ZER=zero_filled S/A=shared_alias
-PURGE=purgeable mode:
-        V=volatile N=nonvolatile E=empty   otherwise is unpurgeable
-
-==== Summary for process 70549
-ReadOnly portion of Libraries: Total=3.0G resident=898.2M(29%) swapped_out_or_unallocated=2.1G(71%)
-Writable regions: Total=268.0G written=5.0G(2%) resident=6.2G(2%) swapped_out=1.2G(0%) unallocated=260.6G(97%)
-
-                                VIRTUAL RESIDENT    DIRTY  SWAPPED VOLATILE   NONVOL    EMPTY   REGION
-REGION TYPE                        SIZE     SIZE     SIZE     SIZE     SIZE     SIZE     SIZE    COUNT (non-coalesced)
-===========                     ======= ========    =====  ======= ========   ======    =====  =======
-Accelerate Framework               128K      32K      32K      96K       0K      32K       0K        1
-Activity Tracing                   256K      24K      48K       0K       0K      24K       0K        1
-page table in kernel              21.8M    21.8M    21.8M       0K       0K       0K       0K        1
-shared memory                     13.7M    12.8M    12.8M       0K       0K      12K       0K       46
-unused but dirty shlib __DATA      420K     243K     243K     177K       0K       0K       0K      353
-===========                     ======= ========    =====  ======= ========   ======    =====  =======
-TOTAL                              1.0T     7.3G     6.7G     1.4G      68K   514.4M    11.5M    52825
-TOTAL, minus reserved VM space   745.6G     7.3G     6.7G     1.4G      68K   514.4M    11.5M    52825
-EOF
-chmod 755 "$SANDBOX/bin/vmmap"
 rm -f "$SANDBOX/vmmap.args"
 mkdir -p "$SANDBOX/zip"
 zip=$("$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip" 2>"$SANDBOX/collect.err" | tail -1)
@@ -1738,6 +1763,11 @@ rm -rf "$GD/addons" "$GD/d3d11.dll" "$AD/compatdb.local" "$STEAM/dumps" "$GD/Cra
   "$BOTTLE/drive_c/library" "$SANDBOX/outside" \
   "$H/decoy.dmp" "$BOTTLE/drive_c/decoy.dmp" "$H/Library/Logs/DiagnosticReports/Gw2-64.exe.dmp"
 
+fi
+
+if in_group sessions; then
+# (alone, this group starts from an install of its own: the sections before it didn't run)
+[ "$GROUP" = all ] || fixture_install || { echo "the fixture's install failed" >&2; exit 1; }
 section "Steam in the background after the first login"
 LU="$STEAM/config/loginusers.vdf"
 rm -f "$LU"

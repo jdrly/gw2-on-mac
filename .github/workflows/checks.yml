@@ -321,18 +321,19 @@ jobs:
           if scripts/stage-components.sh --fetch >"$RUNNER_TEMP/stage.txt" 2>&1; then echo "stage-components.sh took a changed archive"; exit 1; fi
           grep 'does not match the sha256 in prebuilt.lock' "$RUNNER_TEMP/stage.txt"
 
-  # The suite as two groups side by side (scripts/test-sandbox.sh, GROUP): steam is the life of
-  # one Steam install, from the dry runs to Uninstall, and rest is what starts from nothing after
-  # it. On a pull request steam takes about 11 minutes and rest about 5.
+  # The suite as three groups side by side (scripts/test-sandbox.sh, GROUP): settings is the dry
+  # runs to Collect Logs on one Steam install, sessions is Steam in the background to Uninstall on
+  # an install it makes itself, and rest is what starts from nothing. On a pull request the
+  # suite's own seconds are about 7, 6 and 6 minutes.
   sandbox:
     needs: build
     runs-on: xcode-27
     name: sandbox (${{ matrix.group }})
-    timeout-minutes: 20
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        group: [steam, rest]
+        group: [settings, sessions, rest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
