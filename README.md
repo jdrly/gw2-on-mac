@@ -720,6 +720,10 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   shader cache already keeps what it saved) and `DXMT_PRESENT_QUEUE=pace` (it gave up at frame 181
   in every session). A line as the table wrote it goes with its comment. One I changed or commented
   out stays as it is, and does nothing once my DXMT fork's build no longer has the switch.
+  Version 9 takes three more lines out, because my DXMT fork has their switches on by default now:
+  `DXMT_MTL4_DEVICE_RESIDENCY=1`, `DXMT_MTL4_TIMESTAMP_REUSE=1` and `DXMT_MTL4_ALLOCATOR_POOL=1`. A
+  line as the table wrote it goes with its comment. One I commented out becomes `NAME=0` under a
+  comment, so it stays off.
   A row whose variable a line of the file sets, *Faster locks* with the file's
   `WINE_HEAT_SPIN`, is greyed while that line is there, since the file's entry wins. A line of the table goes in only while the file of mine that
   reads it is in place and has the switch: the `switches:` line of my `ntdll.so`'s,
@@ -1257,7 +1261,8 @@ Without one, those checks are skipped. It covers:
   updated (with a `FEX_HOSTFEATURES` line of mine, and with AVX already decided there), version
   7's `DXMT_MTL4_SHOWN_WAIT` in and out, a file at version 6 updated (and with that line
   commented out, which stays so), a file at version 7 updated (version 8's three lines gone, a
-  changed or commented-out one kept), a line commented out or added, the engine's own DXMT, a second start
+  changed or commented-out one kept), a file at version 8 updated (version 9's three lines gone,
+  a commented-out one kept off), a line commented out or added, the engine's own DXMT, a second start
   that changes nothing, an update that adds a newer switch and keeps the rest, a row turned off
   that stays off, a release that writes no file and reads none, and a release's install updated
   by a development build

@@ -1122,13 +1122,10 @@ DEV_SWITCHES="
 1 fex #112 unplayed FEX_INITIALCODEBUFFERMB=128 the first code buffer is 128 MB instead of 16
 1 fex #113 unplayed FEX_HARDWARETSOSYSCALLS=keep the hardware memory ordering stays on through Wine's system calls
 1 fexany #47 unplayed FEX_DYNAMICL1CACHE=0 a fixed L1 lookup cache instead of the dynamic one (16 MB of address space a thread). Hung once at process start on the runner (jdrly/FEX run 43315659403, #132): if a development build doesn't start, take this line out first.
-1 dxmt jdrly/dxmt#153 unplayed DXMT_MTL4_DEVICE_RESIDENCY=1 Metal 4 only, nothing on Metal 3: pipelines and argument buffers stay in the device's residency set, out of each chunk's
-1 dxmt jdrly/dxmt#154 unplayed DXMT_MTL4_TIMESTAMP_REUSE=1 Metal 4 only, nothing on Metal 3: timestamp queries read the chunk's last command buffer, with no empty one after it
 1 dxmt jdrly/dxmt#185 unplayed DXMT_PRESENTER_FREE=1 a swap chain's presenter is freed with its last reference
 1 dxmt jdrly/dxmt#159 unplayed DXMT_WARM_JOBS=2 with Shader warming, two speculative jobs at once while Metal's cache is cold
 1 dxmt jdrly/dxmt#147 unplayed DXMT_SKIP_SAME_SRV=1 SetShaderResources skips a slot that already holds the incoming view
 1 dxmt jdrly/dxmt#73 unplayed DXMT_COMPILE_DEMAND=1 the compile service's declared policy (Shader warming turns it on too)
-3 dxmt jdrly/dxmt#204 unplayed DXMT_MTL4_ALLOCATOR_POOL=1 only with the Metal row at Metal 4, nothing on Metal 3: a Metal 4 queue's chunks take their command allocator from a pool that keeps at most 8 idle, instead of one allocator per ring slot
 5 fex #161 unplayed FEX_DISPATCHERL1LOOKUP=1 the dispatcher looks in the thread's L1 before it leaves for the lookup in C++
 5 fex #162 unplayed FEX_ENTRYHEADERLOOKUP=1 a block's entry stores nothing, and faults, suspends and self-modifying code find the block from the host PC. Stays out while the sampler can run (WINE_HEAT_PROF or WINE_HEAT_CONTROL), which reads what the entries stored.
 6 fex #164 unplayed FEX_LEA32BITADDS=1 lea with a 32-bit destination computes its address with 32-bit adds, one instruction instead of two
@@ -1148,11 +1145,15 @@ DEV_SWITCHES="
 # present. Version 8: my DXMT fork deletes the PSO archive (jdrly/dxmt#5, #75: with it on the game
 # crashed at exit, and Metal's own shader cache already keeps what it saved) and the present
 # queue's pace (jdrly/dxmt#157: it gave up at frame 181 in every session).
+# Version 9: my DXMT fork has jdrly/dxmt#153, #154 and #204 on by default, and =0 turns each off.
 DEV_GONE="
 4 jdrly/dxmt#227 DXMT_MTL4_PRESENT=mtl3 mtl4
 8 jdrly/dxmt#157 DXMT_PRESENT_QUEUE=pace -
 8 jdrly/dxmt#5 DXMT_PSO_ARCHIVE=1 -
 8 jdrly/dxmt#75 DXMT_PSO_GENERATIONS=1 -
+9 jdrly/dxmt#153 DXMT_MTL4_DEVICE_RESIDENCY=1 0
+9 jdrly/dxmt#154 DXMT_MTL4_TIMESTAMP_REUSE=1 0
+9 jdrly/dxmt#204 DXMT_MTL4_ALLOCATOR_POOL=1 0
 "
 DEV_SWITCHES_VERSION=$(printf '%s\n' "$DEV_SWITCHES" "$DEV_GONE" | awk 'NF && $1 > v { v = $1 } END { print v + 0 }')
 # dev_piece_label <piece>: what the file and the log call it
@@ -1284,7 +1285,7 @@ dev_gone() {
               if (i > 2 && l[i - 2] == "") drop[i - 2] = 1
             }
           } else if (off[k] != "-" && !(k in on) && l[i] ~("^[[:space:]]*#[#[:space:]]*" k "=")) {
-            l[i] = "# Commented out before version " since[k] ". The game\047s rule has " line[k] " now, so this keeps it off. Take this line out to use the rule\047s.\n" k "=" off[k]
+            l[i] = "# Commented out before version " since[k] ". " line[k] " is on without this line now, so this keeps it off. Take this line out to turn it on.\n" k "=" off[k]
             on[k] = 1
           }
         }
