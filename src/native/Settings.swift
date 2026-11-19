@@ -453,7 +453,7 @@ struct SettingsView: View {
           InkPopup(selection: settings.choice("fpscap", "off"), options: GameSettings.frameCaps)
         }
         // (my DXMT fork's display sync: DXMT_DISPLAY_SYNC=0 in the game's rule when off)
-        SettingRow("Vsync", "With the game's own Vertical Sync on, each frame waits for your display's next refresh (Metal's display sync). Off, DXMT asks Metal for a minimum time between frames instead: one refresh, or the frame cap's interval.", off: off("vsync")) {
+        SettingRow("Vsync", "Metal shows each frame on one of your display's refreshes (display sync). Off, DXMT asks Metal for a minimum time between frames instead: one refresh, or the frame cap's interval. Acts only while the game's own Vertical Sync is on.", off: off("vsync")) {
           InkSwitch(isOn: settings.toggle("vsync"))
         }
       }
