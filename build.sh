@@ -29,7 +29,8 @@
 # ships, but for its DXMT tree, its ntdll.so and its winemac.so (mine, the engine's own kept next
 # to each), and its FEX after `set fex mine`. Steam and the game come from Valve or ArenaNet.
 #
-# Built with the macOS 27 SDK (Xcode 27) for macOS 26.4 and later (the engine's loader needs it).
+# Built with the macOS 27 SDK (Xcode 27) for macOS 26.0 and later, as 0.1.x: below 26.4, what the
+# engine's loader needs (gw2om.sh's MACOS_MIN), the app opens only to say so (docs/adr/0021).
 #
 #   ./build.sh                   build into dist/, ad-hoc signed
 #
@@ -69,10 +70,10 @@ case "$APP_VERSION" in *-*) CHANNEL=dev ;; *) CHANNEL=release ;; esac
 APP_AUTHOR="Jan Drlý"
 GITHUB_URL=https://github.com/jdrly
 REPO_URL=https://github.com/jdrly/gw2-on-mac
-# The macOS the app and its helpers are built for (swiftc's -target, clang's -mmacosx-version-min).
-# Info.plist's LSMinimumSystemVersion is the macOS the app opens on, and src/gw2om.sh's MACOS_MIN
-# the one the engine needs, which the update feed's item names (scripts/release.sh).
-MACOS_MIN=26.4
+# The macOS the app and its helpers are built for (swiftc's -target, clang's -mmacosx-version-min):
+# Info.plist's LSMinimumSystemVersion, the macOS the app opens on, so the two can't differ. The one
+# the engine needs is src/gw2om.sh's MACOS_MIN, which the update feed's item names (scripts/release.sh).
+APP_MACOS_MIN="$(plutil -extract LSMinimumSystemVersion raw src/Info.plist)"
 CACHE="$ROOT/.cache"
 # The app's name (gw2om.sh has the one definition), which is also its file name, and its bundle id:
 # 0.1.x's both, so Sparkle in a 0.1.x install takes 0.2 as its update and puts it in its place
@@ -213,7 +214,7 @@ printf 'APPL????' >"$APP/Contents/PkgInfo"
 
 # Development builds compile their dev-only UI (badge, About line) in with GW2_DEV.
 dev_flags=(); [ "$CHANNEL" = release ] || dev_flags=(-D GW2_DEV)
-swiftc -parse-as-library -O ${dev_flags[@]+"${dev_flags[@]}"} -target "arm64-apple-macos$MACOS_MIN" -F "$SPARKLE" -framework Sparkle \
+swiftc -parse-as-library -O ${dev_flags[@]+"${dev_flags[@]}"} -target "arm64-apple-macos$APP_MACOS_MIN" -F "$SPARKLE" -framework Sparkle \
   -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
   -o "$APP/Contents/MacOS/GW2onMac" src/native/*.swift
 mkdir -p "$APP/Contents/Frameworks"
@@ -256,9 +257,9 @@ fi
 
 # The process lister gw2om.sh tells its own Wine processes by (proc_pidpath)
 mkdir -p "$R/helpers"
-clang -O2 -arch arm64 -mmacosx-version-min=$MACOS_MIN -o "$R/helpers/procpaths" src/helpers/procpaths.c
+clang -O2 -arch arm64 -mmacosx-version-min=$APP_MACOS_MIN -o "$R/helpers/procpaths" src/helpers/procpaths.c
 # The session's lock (flock on an inherited descriptor: one watcher per game session)
-clang -O2 -arch arm64 -mmacosx-version-min=$MACOS_MIN -o "$R/helpers/sessionlock" src/helpers/sessionlock.c
+clang -O2 -arch arm64 -mmacosx-version-min=$APP_MACOS_MIN -o "$R/helpers/sessionlock" src/helpers/sessionlock.c
 
 # Licences: the app's own (zlib), the overview of what is bundled and what is downloaded
 # (THIRD_PARTY_NOTICES.md), and each component's
@@ -350,7 +351,7 @@ icon="$CACHE/AppIcon"
 rm -rf "$icon"
 mkdir -p "$icon"
 xcrun actool "$ROOT/src/AppIcon.icon" --compile "$icon" --platform macosx \
-  --minimum-deployment-target "$(plutil -extract LSMinimumSystemVersion raw src/Info.plist)" \
+  --minimum-deployment-target "$APP_MACOS_MIN" \
   --app-icon AppIcon --output-partial-info-plist "$icon/partial.plist" >"$icon/actool.txt"
 [ -f "$icon/Assets.car" ] && [ -f "$icon/AppIcon.icns" ] || { cat "$icon/actool.txt" >&2; exit 1; }
 cp "$icon/Assets.car" "$icon/AppIcon.icns" "$R/"

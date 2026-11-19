@@ -186,6 +186,10 @@ final class Installer {
   var isBusy: Bool { isOperating }
   var loaded: Bool { !status.isEmpty }
   var macosOK: Bool { status["macos_ok"] != "no" }
+  // Below the engine's macOS (status macos_ok=no) the app opens only to show the popup that sends
+  // the player to the last 0.1.x (RollbackSheet's gate): no move, no install, no Sparkle, and the
+  // window calls nothing but status (docs/adr/0021)
+  var gated: Bool { status["macos_ok"] == "no" }
   var appleSilicon: Bool { status["arch"].map { $0 == "arm64" } ?? true }
   // the setup (engine, bottle and graphics) is in place
   var installed: Bool { status["installed"] == "yes" }
@@ -300,6 +304,7 @@ final class Installer {
 
   private func applyStatus(_ values: [String: String]) {
     status = values
+    guard values["macos_ok"] != "no" else { return }
     // a session runs (the window opened while the game starts or runs, or Steam closes after it):
     // follow it. (Not for Steam alone, which may just idle after a session; nor right after a
     // session ended.)
@@ -786,8 +791,9 @@ struct AppCommands: Commands {
         openWindow(id: "settings")
       }
       .keyboardShortcut(",")
-      // (before an install too while 0.1 has one: Troubleshooting's Start fresh)
-      .disabled(!installer.installed && installer.status["old_install"] != "yes")
+      // (before an install too while 0.1 has one: Troubleshooting's Start fresh; never below the
+      // engine's macOS)
+      .disabled(installer.gated || !installer.installed && installer.status["old_install"] != "yes")
       Button(logs.busy ? "Collecting Logs…" : "Collect Logs…") { logs.collect() }
         .disabled(logs.busy)
     }
@@ -844,8 +850,11 @@ struct GW2onMacApp: App {
           updates.sheetOpen = { [installer] in installer.sheetOpen }
           updates.closeSheets = { [installer] in installer.closeSheets += 1 }
           installer.onIdle = { [updates] in updates.installerIdle() }
-          updates.start()
-          installer.refresh()
+          // (Sparkle once the first status says this Mac runs the engine: below its macOS, no update
+          // check, and Check for Updates… stays disabled)
+          installer.refresh { [updates, installer] in
+            if !installer.gated { updates.start() }
+          }
           settings.reload()
           NSApp.activate()
         }

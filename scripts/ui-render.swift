@@ -409,6 +409,24 @@ func renderAll(_ dir: URL, exports: URL?) async {
       exit(1)
     }
   }
+  // below the engine's macOS (status macos_ok=no, from 26.0 to 26.3) the window is gated, and the
+  // popup's Download opens the DMG of gw2om.sh's LAST_01 as status reports it; at 26.4, 26.10, 27.0
+  // (macos_ok=yes) and before the first status, not (a model check)
+  do {
+    let sh = (try? String(contentsOf: Brand.resources.appendingPathComponent("gw2om.sh"), encoding: .utf8)) ?? ""
+    let last = sh.split(separator: "\n").first { $0.hasPrefix("LAST_01=") }.map { String($0.dropFirst(8)) } ?? ""
+    let dmg = "https://github.com/jdrly/gw2-on-mac/releases/download/v\(last)/GW2-on-Mac-\(last).dmg"
+    let cases: [(String?, Bool)] = [("no", true), ("yes", false), (nil, false)]
+    for (ok, want) in cases {
+      let i = Installer()
+      i.status = ["rollback_version": last, "rollback_dmg": dmg]
+      if let ok { i.status["macos_ok"] = ok }
+      guard !last.isEmpty, i.gated == want, i.rollbackVersion == last, i.rollbackDMG?.absoluteString == dmg else {
+        print("FAIL the macOS gate, macos_ok=\(ok ?? "nil"): gated \(i.gated), not \(want), or the DMG \(i.rollbackDMG?.absoluteString ?? "nil") isn't LAST_01's (\(last))")
+        exit(1)
+      }
+    }
+  }
   // the Engine and Graphics checks' texts for the files gw2om.sh status can report (a model check)
   do {
     let engine = "Mach9 0.4.0 · Wine 11.21"
@@ -631,6 +649,14 @@ func renderAll(_ dir: URL, exports: URL?) async {
       isPresented: .constant(true))
     write(await render(rollbackSheet, size: CGSize(width: 460, height: 250), dark: dark, chrome: false),
           dir.appendingPathComponent("sheet-rollback-\(dark ? "dark" : "light").png"))
+    // below the engine's macOS: the same popup, before Download and after it
+    for downloaded in [false, true] {
+      let gateSheet = RollbackSheet(version: "0.1.4",
+        dmg: URL(string: "https://github.com/jdrly/gw2-on-mac/releases/download/v0.1.4/GW2-on-Mac-0.1.4.dmg"),
+        isPresented: .constant(true), gate: .init(macos: "26.3", needs: "26.4", appVersion: "0.2.0"), downloaded: downloaded)
+      write(await render(gateSheet, size: CGSize(width: 460, height: downloaded ? 270 : 230), dark: dark, chrome: false),
+            dir.appendingPathComponent("sheet-macos-gate-\(downloaded ? "steps" : "download")-\(dark ? "dark" : "light").png"))
+    }
     let presetSheet = AddonWarning.preset(isPresented: .constant(true), name: "Golden Hour.ini") {}
     write(await render(presetSheet, size: CGSize(width: 460, height: 172), dark: dark, chrome: false),
           dir.appendingPathComponent("sheet-reshade-preset-\(dark ? "dark" : "light").png"))

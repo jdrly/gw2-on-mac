@@ -60,6 +60,14 @@ struct MainView: View {
     .sheet(isPresented: $showRollbackSheet) {
       RollbackSheet(version: installer.rollbackVersion, dmg: installer.rollbackDMG, isPresented: $showRollbackSheet)
     }
+    // below the engine's macOS: the popup that sends the player to the last 0.1.x, at every start,
+    // with no way past it but Quit
+    .sheet(isPresented: .constant(installer.gated)) {
+      RollbackSheet(version: installer.rollbackVersion, dmg: installer.rollbackDMG, isPresented: .constant(true),
+                    gate: .init(macos: installer.status["macos"] ?? "?", needs: installer.status["macos_min"] ?? "26.4",
+                                appVersion: installer.appVersion))
+        .interactiveDismissDisabled()
+    }
     .onChange(of: installer.closeSheets) { _, _ in
       showLogSheet = false
       showRollbackSheet = false
