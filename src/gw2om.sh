@@ -3796,13 +3796,15 @@ move_links() {
     die "$bad is a link out of the files the move cloned, so $APP_NAME doesn't move this install: what it writes there would reach $OLD_LABEL's files. Start fresh in Settings › Troubleshooting installs anew."
 }
 
-# move_paths <ini>: 0.1.x's folders in it, as ReShade's ini spells them (Z:\...\GW2 on Mac, a
+# move_paths <ini>: 0.1.x's folders in it (or in the file it links to), as ReShade's ini spells them (Z:\...\GW2 on Mac, a
 # comma doubled), now this app's: its BasePath, IntermediateCachePath (0.1.x's cache folder) and any
 # path a player set by hand. A name is replaced where it ends: at a backslash, a quote, a comma,
 # a semicolon or the line's end.
 move_paths() {
   local f=$1 tmp
-  [ -f "$f" ] && [ ! -L "$f" ] || return 0
+  [ -f "$f" ] || return 0
+  # (a link: the file it leads to, which move_links has kept inside this app's folder)
+  if [ -L "$f" ]; then f=$(realpath "$f") || return 1; fi
   if [ -n "$DRY" ]; then echo "[dry-run] $OLD_LABEL's folders in $f renamed to this app's"; return 0; fi
   tmp="$f.gw2om-new.$$"
   OA="$(winpath "$OLD_APPDIR")" NA="$(winpath "$APPDIR")" OC="$(winpath "$OLD_CACHE")" NC="$(winpath "$CACHE")" LC_ALL=C awk '
@@ -4132,8 +4134,10 @@ settings() {
   reshade_lines
   echo "cpus=$CPU_MAX"
   echo "steam_login=$(steam_remembers_login && echo yes || echo no)"
-  # (Troubleshooting's Start fresh: shown while 0.1.x has an install and I haven't chosen it)
+  # (Troubleshooting's Start fresh: shown over the moved install, origin move or moved, or before
+  # the move while 0.1.x has an install)
   echo "old_install=$(old_install && echo yes || echo no)"
+  echo "origin=$(state origin)"
   echo "move_record=$(head -1 "$MOVE_RECORD" 2>/dev/null || true)"
 }
 
@@ -5361,27 +5365,35 @@ cmd_uninstall() {
 }
 
 # start-fresh [--before-move|--moved] (Settings › Troubleshooting): the move from 0.1.x doesn't
-# start by itself any more (MOVE_RECORD skipped), and this app's install, the moved one, goes as
-# Uninstall removes it; the window then shows the install choices. --before-move is what I
-# confirmed while nothing was installed: if the move has finished since, nothing changes. The
-# decision and the record are made under the install lock, so no move starts in between, and an
-# install there afterwards goes through Uninstall's own lock. 0.1.x's install stays as it is; the
+# start by itself any more (MOVE_RECORD skipped), and the install it moved goes first, as Uninstall
+# removes it; the window then shows the install choices. The intent is what I confirmed:
+# --before-move while nothing was installed (if the move has finished since, nothing changes),
+# --moved over the moved install (state origin move or moved: never another install). A failed
+# Uninstall changes nothing. While the moved install goes, MOVE_RECORD still says moved, so no move
+# starts before skipped is written, under the install lock. 0.1.x's install stays as it is; the
 # install choices still list its game.
 cmd_start_fresh() {
-  local have=no
+  local want=${1:-} have=no
   open_log
-  log "---- start-fresh ${1:-} $VERSION root=${ROOT:-/} dry=${DRY:-0}"
-  lock
-  if [ -f "$MANIFEST" ] || [ -d "$BOTTLE" ] || [ -d "$ENG" ]; then have=yes; fi
-  if [ "${1:-}" = --before-move ] && [ "$have" = yes ]; then
-    unlock
+  log "---- start-fresh $want $VERSION root=${ROOT:-/} dry=${DRY:-0}"
+  if [ -f "$MANIFEST" ] || [ -d "$BOTTLE" ]; then have=yes; fi
+  [ -n "$want" ] || { if [ "$have" = yes ]; then want=--moved; else want=--before-move; fi; }
+  if [ "$want" = --before-move ] && [ "$have" = yes ]; then
     die "The move from $OLD_LABEL has finished meanwhile, so Start fresh changed nothing. To remove the moved install, choose Start fresh again."
+  fi
+  if [ "$have" = yes ]; then
+    case "$(state origin)" in move|moved) ;; *) die "This install isn't the one moved from $OLD_LABEL, so Start fresh leaves it. Uninstall removes it." ;; esac
+    ( cmd_uninstall ) || exit $?
+  fi
+  lock
+  if [ -f "$MANIFEST" ] || [ -d "$BOTTLE" ]; then
+    unlock
+    die "An install started meanwhile, so Start fresh changed nothing."
   fi
   [ -n "$DRY" ] || mkdir -p "$APPDIR"
   echo skipped | put "$MOVE_RECORD" 644
   log "start fresh: $OLD_LABEL's install doesn't move by itself any more"
   unlock
-  if [ "$have" = yes ]; then ( cmd_uninstall ) || exit $?; fi
   echo "@done $APP_NAME starts fresh: choose how to install Guild Wars 2 in the main window. $OLD_LABEL stays as it was, and its game files are under Game files I already have."
 }
 

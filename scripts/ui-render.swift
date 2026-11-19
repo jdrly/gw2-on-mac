@@ -551,7 +551,7 @@ func renderAll(_ dir: URL, exports: URL?) async {
       write(rep, dir.appendingPathComponent(name + ".png"))
       // (Troubleshooting with Start fresh: after a move from 0.1, and before one, nothing installed)
       if pane == .troubleshooting {
-        for (n, extra) in [("moved", ["old_install": "yes", "move_record": "moved"]),
+        for (n, extra) in [("moved", ["old_install": "yes", "move_record": "moved", "origin": "moved"]),
                            ("not-installed", ["installed": "no", "old_install": "yes", "move_record": ""])] {
           write(await render(SettingsView(settings: settings(extra)), size: SettingsView.designSize, dark: dark),
                 dir.appendingPathComponent("settings-troubleshooting-start-fresh-\(n)-light.png"))

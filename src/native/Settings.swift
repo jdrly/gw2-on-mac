@@ -637,7 +637,7 @@ struct SettingsView: View {
     case .troubleshooting:
       // (Start fresh: over an install moved from GW2 on Mac 0.1, or before the move, while 0.1 has
       // an install and neither a move nor Start fresh happened here)
-      if settings.installed ? settings.values["move_record"] == "moved"
+      if settings.installed ? ["move", "moved"].contains(settings.values["origin"] ?? "")
           : settings.values["old_install"] == "yes" && (settings.values["move_record"] ?? "").isEmpty {
         SettingsGroup {
           SettingRow("Start fresh", settings.installed

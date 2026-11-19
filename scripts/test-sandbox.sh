@@ -3580,6 +3580,8 @@ old01() { # <steam|arenanet> <arcdps|both> [<settings.conf lines>]
     printf '[GENERAL]\nEffectSearchPaths=.\\Shaders\\**\nPresetPath=.\\Presets\\Mine.ini\nIntermediateCachePath=%s\n\n[PROXY]\nEnableProxyLibrary=1\nProxyLibrary=C:\\%s\\%s\n\n[SCREENSHOT]\nSavePath=%s\\Screenshots\n' \
       "$(winp "$OC/reshade")" "$(printf %s "${g#"$O1B/drive_c/"}" | tr / '\\')" "$CHAINW" "$(winp "$O1RS")" >"$O1RS/ReShade.ini"
     echo "[Mine]" >"$O1RS/Presets/Mine.ini" && echo "// fxh" >"$O1RS/Shaders/Standard/ReShade.fxh"
+    # (on the ArenaNet route its ini is a link to a file beside it, as a player may keep one)
+    if [ "$1" = arenanet ]; then mv "$O1RS/ReShade.ini" "$O1RS/Mine-settings.ini" && ln -s Mine-settings.ini "$O1RS/ReShade.ini"; fi
   fi
   if [ -n "${3+x}" ]; then printf '%s' "$3" >"$O1/settings.conf"
   else
@@ -3632,6 +3634,10 @@ for p in "$O1/engine/bin/steam.exe:steam" "$O1/gamemode/GW2.app/Contents/MacOS/G
     eval '[ "$(st move_busy)" = "$k" ] && [ -n "$(st move_wait)" ] && [ "$rc" != 0 ] && has <(echo "$out") "^@error $(st move_wait | sed "s/[().]/./g")" && nothing_made'
   kill "$sp" 2>/dev/null; wait "$sp" 2>/dev/null; rm -f "$f"
 done
+out=$(g start-fresh --before-move 2>&1) && rc=0 || rc=$?
+check "Start fresh before the move: the move no longer starts by itself, nothing else made" \
+  eval '[ "$rc" = 0 ] && [ "$(st move) $(st move_record)" = "no skipped" ] && [ "$(ls -A "$AD")" = moved-from-0.1 ]'
+rm -f "$AD/moved-from-0.1"
 check "  Steam's sentence names 0.1 and says to quit Steam there" \
   eval 'cp "$SANDBOX/sleeper" "$O1/engine/bin/steam.exe" && { "$O1/engine/bin/steam.exe" 30 & sp=$!; sleep 0.3; w=$(st move_wait); kill $sp; wait $sp 2>/dev/null; rm -f "$O1/engine/bin/steam.exe"; [ "$w" = "Steam is running in GW2 on Mac 0.1. Quit Steam there (Steam > Exit), and the move starts." ]; }'
 O1SNAP=$(o1snap)
@@ -3743,6 +3749,11 @@ check "uninstall after a move keeps the move's record: no second move by itself"
 out=$(g install move 2>&1) && rc=0 || rc=$?
 check "  install move refused with the record there, nothing else made" \
   eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac doesn.t move GW2 on Mac 0.1.s install again: it was moved here before" && [ "$(ls -A "$AD")" = moved-from-0.1 ] && o1_same'
+g install steam >/dev/null 2>&1
+out=$(g start-fresh --moved 2>&1) && rc=0 || rc=$?
+check "  Start fresh over an install made after it (not the moved one): refused, the install stays" \
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error This install isn.t the one moved from GW2 on Mac 0.1" && [ "$(st installed) $(st move_record)" = "yes moved" ]'
+g uninstall >/dev/null 2>&1
 rm -rf "$AD"
 
 old01 arenanet both
@@ -3756,8 +3767,8 @@ check "  route=arenanet origin=move game=yes, the game in Program Files" \
   eval '[ "$(st route) $(st origin) $(st game)" = "arenanet move yes" ] && [ "$(st game_dir)" = "$GA" ] && [ "$(stat -f %z "$GA/Gw2.dat")" = 2147483648 ]'
 check "  the game's settings; no Steam files in the profile" \
   eval 'same "$O1U/AppData/Roaming/Guild Wars 2/Local.dat" "$BOTTLE/drive_c/users/crossover/AppData/Roaming/Guild Wars 2/Local.dat" && [ ! -e "$BOTTLE/drive_c/users/crossover/AppData/Local/Steam" ]'
-check "  arcdps at the chain path, ReShade in, both inis name only this app's folders" \
-  eval 'same "$SANDBOX/pe/arcdps.dll" "$GA/$ARC_CHAIN" && [ "$(st arcdps_state) $(st reshade_state)" = "on on" ] && ini_clean "$GA/ReShade.ini" && ini_clean "$AD/ReShade/ReShade.ini" && has "$AD/ReShade/ReShade.ini" "^ProxyLibrary=C:.Program Files.Guild Wars 2.addons.arcdps.chain.d3d11.dll\$"'
+check "  arcdps at the chain path, ReShade in, both inis name only this app's folders, the linked one's file too" \
+  eval 'same "$SANDBOX/pe/arcdps.dll" "$GA/$ARC_CHAIN" && [ "$(st arcdps_state) $(st reshade_state)" = "on on" ] && ini_clean "$GA/ReShade.ini" && ini_clean "$AD/ReShade/ReShade.ini" && ini_clean "$AD/ReShade/Mine-settings.ini" && [ -L "$AD/ReShade/ReShade.ini" ] && has "$AD/ReShade/ReShade.ini" "^ProxyLibrary=C:.Program Files.Guild Wars 2.addons.arcdps.chain.d3d11.dll\$"'
 check "  the summary" has <(mv_done) "^Your install moved from GW2 on Mac 0.1: Guild Wars 2 (cloned, no extra space), your game settings, your addons as they were (arcdps, ReShade with your presets, the larger interface) and your settings\..* GW2 on Mac 0.1 stays as it was\. Press Play\.$"
 check "  0.1's folders as they were" o1_same
 # a bottle an earlier version made keeps its user's name (the Mac's login there)
