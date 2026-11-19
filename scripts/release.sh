@@ -14,7 +14,8 @@
 #   release/<version>/<Name>-<version>-from-<old>.delta delta updates from older versions
 #   release/<version>/appcast.xml                       the feed, with only this version
 #   release/updates/                                    DMGs of this and the 5 previous versions
-# then creates a draft GitHub release v<version> with the DMG, the deltas and appcast.xml.
+# then creates a draft GitHub release v<version> with the DMG, the deltas and appcast.xml, its tag
+# on the commit the app was built from (HEAD, which must be pushed).
 # Publishing the draft makes the update live: the app reads
 # https://github.com/jdrly/gw2-on-mac/releases/latest/download/appcast.xml.
 #
@@ -185,6 +186,12 @@ case "$MODE$DEV_NO_RELEASE" in
   ""|--ci|--dev|--adhoc)
     gh auth status >/dev/null 2>&1 || { echo "gh is not logged in" >&2; exit 1; }
     ! gh release view "v$VERSION" --repo "$REPO" >/dev/null 2>&1 || { echo "Release v$VERSION already exists" >&2; exit 1; }
+    if [ -z "$MODE" ]; then
+      # The release's tag goes on the commit this was built from (arm64 for 0.2, not the default
+      # branch main, which is 0.1.x), so that commit must be pushed: checked before notarizing
+      head=$(git rev-parse HEAD)
+      git branch -r --contains "$head" | grep -q . || { echo "Push $head first" >&2; exit 1; }
+    fi
     if [ "$MODE" = --adhoc ]; then
       # A tag without a release would become this release's tag, on another commit
       if out="$(gh api "repos/$REPO/git/ref/tags/v$VERSION" 2>&1)"; then
@@ -533,7 +540,7 @@ case "$MODE" in
     echo "[release] draft v$VERSION complete; publish it to make the update live" ;;
   *)
     echo "[release] creating the draft GitHub release v$VERSION"
-    gh release create "v$VERSION" --repo "$REPO" --draft --title "$APP_NAME $VERSION" \
+    gh release create "v$VERSION" --repo "$REPO" --draft --target "$head" --title "$APP_NAME $VERSION" \
       --notes-file "$NOTES" "$DMG" ${deltas[@]+"${deltas[@]}"} "$OUT/appcast.xml"
     echo "[release] $DMG ($(du -h "$DMG" | cut -f1)); publish the draft to make the update live" ;;
 esac

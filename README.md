@@ -1502,7 +1502,7 @@ staged, the addon, fonts, art and licences. It
 downloads Sparkle at a pinned version and sha256, and compiles the Icon Composer icon
 `src/AppIcon.icon` with actool into `Assets.car` and a fallback `AppIcon.icns`.
 
-- `GW2_ON_MAC_VERSION` sets the version, 0.2.0-dev.5 by default. `X.Y.Z-dev.N` makes a development build,
+- `GW2_ON_MAC_VERSION` sets the version, 0.2.0 by default. `X.Y.Z-dev.N` makes a development build,
   as in SWTOR on Mac, and `X.Y.Z-rc.N` a release candidate, N below 1000 in both. A release
   candidate is a development build in everything but its name: the chip says "Release candidate ·
   0.2.0-rc.1" and the release's title "(release candidate)". Its `CFBundleVersion` sorts above
@@ -1710,6 +1710,8 @@ delta updates and checks it with `scripts/check-appcast.swift`.
 - Every mode that creates or changes a GitHub release stops unless `GW2_ON_MAC_PUBLISH=1`. The
   default mode creates a draft release, and publishing the draft makes the update live. Installed
   apps read `https://github.com/jdrly/gw2-on-mac/releases/latest/download/appcast.xml`.
+- The draft's tag goes on the commit I built from, `HEAD`, as the pre-releases' do, and not on
+  `main`, which is 0.1.x. The script stops before signing when that commit isn't pushed.
 - The feed needs an app built with `GW2_ON_MAC_FEED_URL` and `GW2_ON_MAC_ED_PUBLIC_KEY`.
 - `--sign-only` and `--no-notarize` run locally without touching GitHub.
 - The appcast's item names the macOS the engine needs, `src/gw2om.sh`'s `MACOS_MIN` (26.4), as
@@ -1756,12 +1758,14 @@ publishes it as the pre-release `v<version>`. A release candidate (`-f version=0
 the same way ([ADR 0017](docs/adr/0017-a-release-candidate-is-a-dev-build-by-another-name.md)):
 
 ```sh
-gh workflow run devbuild.yml --ref arm64                    # DXMT's newest green commit, build.sh's version
-gh workflow run devbuild.yml --ref arm64 -f dxmt_commit=<sha> -f wine_commit=<sha> -f macdrv_commit=<sha> -f fex_commit=<sha> -f version=0.2.0-dev.6
+gh workflow run devbuild.yml --ref arm64 -f version=0.2.0-rc.3   # DXMT's newest green commit
+gh workflow run devbuild.yml --ref arm64 -f dxmt_commit=<sha> -f wine_commit=<sha> -f macdrv_commit=<sha> -f fex_commit=<sha> -f version=0.2.1-dev.1
 gh workflow run devbuild.yml --ref arm64 -f publish=false   # a dry run: the DMG as an artifact, 7 days
 gh release download v0.2.0-dev.5 -R jdrly/gw2-on-mac -p '*.dmg' -D ~/Downloads
 ```
 
+- Without `version` the run takes `build.sh`'s. That is 0.2.0, a release, so a publishing run
+  stops and asks for one, and a dry run, such as a pull request's, builds 0.2.0-rc.999.
 - DXMT is my fork's build of a commit on its `gw2-on-mac`: the release asset
   `dxmt-arm64-<commit>.tar.xz` of jdrly/dxmt's `arm64-builds`, checked against GitHub's digest,
   or until that exists, the artifact `dxmt-arm64-<commit>` of the fork's `GW2` run, fetched with

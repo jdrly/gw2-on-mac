@@ -8,7 +8,8 @@
 #               GW2 run for its push ended success, printed with the branch head's state), the Wine
 #               and Mac driver commits (full shas on jdrly/wine's gw2-on-mac, by default none), the
 #               FEX commit (a full sha on jdrly/FEX's gw2-on-mac, by default none) and the version
-#               (by default build.sh's)
+#               (by default build.sh's; when that is a release, X.Y.Z, a dry run takes X.Y.Z-rc.999
+#               and a publishing run stops and asks for one)
 #   components  my DXMT fork's build of that commit: the release asset dxmt-arm64-<commit>.tar.xz of
 #               jdrly/dxmt's arm64-builds, checked against the digest GitHub reports, or else the
 #               artifact dxmt-arm64-<commit> of the fork's GW2 run for it, fetched with this run's
@@ -63,7 +64,7 @@ on:
         type: string
         default: ""
       version:
-        description: X.Y.Z-dev.N or X.Y.Z-rc.N (N below 1000, as build.sh takes them), not lower than build.sh's; empty is build.sh's
+        description: X.Y.Z-dev.N or X.Y.Z-rc.N (N below 1000, as build.sh takes them), not lower than build.sh's; empty is build.sh's, which a release (X.Y.Z) can't be
         type: string
         default: ""
       publish:
@@ -161,10 +162,21 @@ jobs:
           [ -z "$WINE_COMMIT" ] || on_branch wine_commit "$WINE_REPO" "$WINE_BRANCH" "$WINE_COMMIT"
           [ -z "$MACDRV_COMMIT" ] || on_branch macdrv_commit "$WINE_REPO" "$WINE_BRANCH" "$MACDRV_COMMIT"
           [ -z "$FEX_COMMIT" ] || on_branch fex_commit "$FEX_REPO" "$FEX_BRANCH" "$FEX_COMMIT"
-          # shellcheck disable=SC2016 # (build.sh's line, literally)
-          [ -n "$VERSION" ] || VERSION="$(sed -n 's/^APP_VERSION=${GW2_ON_MAC_VERSION:-\(.*\)}$/\1/p' build.sh)"
-          # (the forms build.sh's bundle_version takes, but for a plain X.Y.Z)
           v="(0|[1-9][0-9]?[0-9]?[0-9]?)"
+          if [ -z "$VERSION" ]; then
+            # shellcheck disable=SC2016 # (build.sh's line, literally)
+            VERSION="$(sed -n 's/^APP_VERSION=${GW2_ON_MAC_VERSION:-\(.*\)}$/\1/p' build.sh)"
+            # build.sh's version is a release, X.Y.Z, while one is prepared and after it: a dry run
+            # builds X.Y.Z-rc.999 (above every release candidate of it, and not below build.sh's for
+            # release.sh --adhoc, which proves that check on the runner's sort), a publishing run
+            # needs a version given
+            if [[ $VERSION =~ ^$v\.$v\.$v$ ]]; then
+              [ "$PUBLISH" != true ] || fail "build.sh's version $VERSION is a release, not a dev build; give one with -f version=X.Y.Z-dev.N or X.Y.Z-rc.N"
+              echo "::notice title=Version::build.sh's version $VERSION is a release; this dry run builds $VERSION-rc.999"
+              VERSION="$VERSION-rc.999"
+            fi
+          fi
+          # (the forms build.sh's bundle_version takes, but for a plain X.Y.Z)
           [[ $VERSION =~ ^$v\.$v\.$v-(dev|rc)\.(0|[1-9][0-9]?[0-9]?)$ ]] && [[ $VERSION != 0.0.0-* ]] ||
             fail "version is not X.Y.Z-dev.N or X.Y.Z-rc.N above 0.0.0, with no leading zeros, X, Y and Z below 10000 and N below 1000: $VERSION"
           if [ "$PUBLISH" = true ] && [ "$GITHUB_REF" != refs/heads/arm64 ]; then
