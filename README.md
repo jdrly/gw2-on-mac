@@ -19,7 +19,8 @@ only when I choose it from Terminal. It changes nothing you already have install
 > Sparkle: `GW2 on Mac.app`, bundle id `cz.jandrly.gw2onmac`, 0.1.x's feed, so a 0.1.x install
 > updates to it (ADR 0018). Every build of this branch has that identity, a dev build too, and
 > replaces whatever `GW2 on Mac.app` is in `/Applications`. Its folders in `~/Library` keep their
-> own name, *GW2 on Mac arm64*, and 0.1.x's folders are only ever read. A text that names one of
+> own name, *GW2 on Mac arm64*, and 0.1.x's folders are only ever read: at its first start it moves
+> 0.1.x's install into them ([Moving from GW2 on Mac 0.1](#moving-from-gw2-on-mac-01)). A text that names one of
 > its folders gives the folder's real name. The app's name and file name are `APP_NAME` at the top
 > of `src/gw2om.sh` and `collect-logs.sh` and `appName` in `src/native/App.swift`; the folders'
 > name is `APP_FOLDER` in those two scripts and `session-report.sh`, and `appFolder` in
@@ -126,6 +127,59 @@ the install state it created, and any game files it copied. Other files it made 
 stay, such as cached downloads, logs and `dxmt.conf`. You can quit
 the app during a Steam or ArenaNet download. The window picks the download up again when you open
 it, and *Stop waiting* stops following it but keeps the engine and the bottle.
+
+## Moving from GW2 on Mac 0.1
+
+When the app finds GW2 on Mac 0.1's install and has no install of its own, it moves that install
+at its first start, by itself. The window shows the move's steps in place of the install choices.
+Nothing of 0.1 is moved in the sense of taken away: 0.1's folders are only read, at every step,
+and stay as they were on the day of the move.
+
+- The move makes a new bottle with this engine. Its Windows user is `crossover`, as in 0.1's
+  bottle: CrossOver's Wine names every user so, and Mach9's Wine takes the name from `USER`, which
+  the app passes. With the same name the profile stays `C:\users\crossover`, and Wine's
+  `CryptProtectData` derives the same key, so what a program protected in 0.1's bottle can be read
+  in the new one. Every new bottle of this app gets that name. A bottle an earlier build made
+  keeps the name it has.
+- On Steam's route it installs Steam from Valve first, for Steam's registry entries, then puts a
+  clone of 0.1's whole Steam folder in its place: Steam with its remembered login, its config and
+  `userdata`, and the library with the game. Then the profile's `AppData\Local\Steam`. On
+  ArenaNet's route it clones the game's folder.
+- The game's settings folder, `AppData\Roaming\Guild Wars 2`, comes whole.
+- The addons come as they were in the game folder: arcdps as `d3d11.dll`, or at ReShade's chain
+  path, with its settings; ReShade's `d3d11.dll`, `ReShade.ini` and compiler. The ReShade folder
+  with your presets and shaders is cloned into this app's folder, with the record of the compiler
+  0.1 placed. Both `ReShade.ini` files then name this app's folders instead of 0.1's: `BasePath`,
+  the compiled effects' cache and any path you set by hand. The interface addon's files are
+  written again from your settings, and the finishing touches put the addons in order, as at every
+  Play.
+
+On the same disk it clones, which takes no space until one of the copies changes. From another
+disk, such as a bottle you linked to an external drive, it copies after checking the free space.
+DXMT's shader caches and ReShade's compiled effects don't come along. The game builds them again
+while you play.
+
+The move waits while anything of 0.1 runs: its Steam, the game, ArenaNet's installer or 0.1's Wine.
+The window says what it waits for, and the move starts once that has quit. A move that 0.1
+interrupts, that fails or that you cancel removes everything it created, and the app is not
+installed again. *Try again* runs it once more, and so does the next start of the app.
+
+Steam may ask you to sign in once in the new bottle. I haven't tested yet whether its remembered
+login survives the move, so the first Play after it shows Steam's window, even with *Start Steam in
+the background* on.
+
+Going back is 0.1's app from its release page, dragged over this one. It finds its install as it
+was on the day of the move.
+
+*Start fresh* in Settings › Troubleshooting installs anew instead. While the move waits or after it
+failed, it stops the move. After a move it removes the moved install, as Uninstall does. Either
+way the move no longer starts by itself, and the install choices list 0.1's game under *Game files
+I already have*. The app keeps that in `moved-from-0.1` in its folder (`moved` or `skipped`), which
+Uninstall leaves, so uninstalling a moved install doesn't move 0.1's again.
+
+The app moves an install when 0.1's folder has its manifest, a bottle and a complete game where
+0.1's state says: in Steam's own library, or in the folder ArenaNet's route used. A game in
+another Steam library isn't moved, and *Game files I already have* can still import it.
 
 ## Playing
 
@@ -454,6 +508,7 @@ nothing in `/Applications` besides itself.
 | `…/GW2 on Mac arm64/bottle/` | the game's Wine prefix with Steam, the game's files and the game's settings. About 75 GB, or no extra space for a clone of files on the same disk | removed, with the game |
 | `…/GW2 on Mac arm64/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `compatdb.rules`, `compatdb.local`, `dev-switches.conf`, `session`, `session.req`, `.session.lock`, `reshade-compiler` | settings, install state, what was installed, DXMT's options, the game's compatdb rules and my own, a development build's switches, the current game session and its lock, the sha256 of the compiler the app put next to `Gw2-64.exe` | removed |
 | `…/GW2 on Mac arm64/ReShade/` | ReShade's settings, log, presets, shaders, textures and screenshots | kept |
+| `…/GW2 on Mac arm64/moved-from-0.1` | `moved` once the move from GW2 on Mac 0.1 has run, `skipped` after *Start fresh*: either way the move doesn't start by itself again | kept |
 | `~/Library/Caches/GW2 on Mac arm64/downloads/` | the engine archive, `SteamSetup.exe`, a copy of `Gw2Setup-64.exe`, and in `reshade/` the checked `ReShade64.dll` and fxc2's compiler | removed |
 | `~/Library/Caches/GW2 on Mac arm64/fork/dxmt/` | my DXMT fork's caches (`DXMT_CACHE_DIR`): `Gw2-64.exe/` holds the game's shaders, recorded pipelines and pipeline archives, and the other processes keep theirs next to it | removed. *Reset the shader cache* in Settings empties it too |
 | `~/Library/Caches/GW2 on Mac arm64/dxmt/Gw2-64.exe/` | the engine's own DXMT's shader cache for the game, where 0.2.0-dev.1 kept it, apart from my fork's, which translates shaders differently. Other processes keep theirs where the engine's DXMT puts it by default | removed, and emptied by *Reset the shader cache* |
@@ -467,13 +522,13 @@ on, and ReShade's
 on. The app never touches another program's `version.dll`, `d3d11.dll`, `dxgi.dll`,
 `d3dcompiler_47.dll` or `ReShade.ini` there. The app's own preferences, such as the chosen
 route and the last Settings pane, live in the defaults domain `cz.jandrly.gw2onmac`, 0.1.x's. Other Wine
-apps' bottles are only ever read.
+apps' bottles are only ever read, and so are GW2 on Mac 0.1's folders.
 
 ## Uninstall
 
 *Uninstall…* in the window asks first and tells you the game's files go with the bottle. Close the
 game and Steam before you run it. It removes everything in the table above except the logs and
-the ReShade folder. To do it by hand:
+the ReShade folder and the move's record. To do it by hand:
 
 ```sh
 rm -rf ~/Library/"Application Support/GW2 on Mac arm64" ~/Library/Caches/"GW2 on Mac arm64"   # the ReShade folder too
@@ -760,11 +815,22 @@ then Steam on the Steam route, then places the folder in the bottle's
 ArenaNet. `gw2om.sh scan` finds the installs and `gw2om.sh check-game <dir>` checks one folder.
 Both only read.
 
+A move, `gw2om.sh install move`, runs the same phases from 0.1's install
+([Moving from GW2 on Mac 0.1](#moving-from-gw2-on-mac-01)). On Steam's route 0.1's Steam folder
+replaces the one Valve's installer made. It refuses while 0.1's Wine runs, and checks again before each folder it clones
+and after the last. A failed or cancelled move also removes the ReShade folder and
+`reshade-compiler` it brought, `dxmt.conf` and `.session.lock`, so the app's folder is as empty as
+before. `gw2om.sh status` prints `old_install`, `move` (yes when the window should start it),
+`move_record`, `move_route`, `move_busy` and `move_wait`. `gw2om.sh start-fresh` is
+Troubleshooting's *Start fresh*.
+
 ## The game's environment
 
-The install's own Wine calls, `wineboot` and Valve's Steam installer, get `WINEPREFIX`,
+The install's own Wine calls, `wineboot` and Valve's Steam installer, get `USER`, `WINEPREFIX`,
 `WINEDEBUG=-all`, `WINEMSYNC=1` and `WINEDLLOVERRIDES=winemenubuilder.exe=d`, and nothing else of
-the app's. If the app inherited `WINE_COMPATDB`, `WINE_COMPATDB_FILE`, `WINE_LARGE_ADDRESS_AWARE`
+the app's. `USER` is the bottle's Windows user, the name of its folder in `drive_c/users`, or
+`crossover` for a new bottle: Mach9's Wine names the user after it
+([ADR 0019](docs/adr/0019-0.1.x-moves-into-a-new-bottle-at-the-first-start.md)). If the app inherited `WINE_COMPATDB`, `WINE_COMPATDB_FILE`, `WINE_LARGE_ADDRESS_AWARE`
 or `WINE_PROF_SERVICE`, they are removed from every Wine start, because each changes what the
 engine does for every process. The engine's built-in rules already give each process DXMT, leave
 Gecko out, keep `rundll32.exe` from offering to install Mono, and set Steam's web helper up.
@@ -774,7 +840,7 @@ the session's first process, `dxmt.conf`, and the game's compatdb rules. `gw2om.
 `gw2om.sh rules` print what Play would use.
 
 The environment is fixed while Steam runs, because Steam passes its own on to the game. It holds
-`WINEPREFIX`, `WINEDEBUG=-all`, `WINEDLLOVERRIDES=winemenubuilder.exe=d`, `WINEMSYNC=1`,
+`USER`, `WINEPREFIX`, `WINEDEBUG=-all`, `WINEDLLOVERRIDES=winemenubuilder.exe=d`, `WINEMSYNC=1`,
 `DXMT_CONFIG_FILE`, `DXMT_LOG_PATH`, `WINE_COMPATDB_FILE`, and `WINENCPU` unless the game sees every
 CPU. Debug logging adds `DXMT_LOG_LEVEL=debug` and sets `WINEDEBUG=err+all,fixme-all`, with
 `,Gw2-64.exe:+macsurface` while my `winemac.so` is in place: my driver's channel, in the launcher

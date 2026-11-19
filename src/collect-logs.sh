@@ -64,9 +64,9 @@ LOGS="$H/Library/Logs/$APP_FOLDER"
 DIAG="$H/Library/Logs/DiagnosticReports"
 BOTTLE="$APPDIR/bottle"
 STEAM="$BOTTLE/drive_c/Program Files (x86)/Steam"
-# The bottle's Windows user, as gw2om.sh's bottle_user finds it (upstream Wine names it after the
-# Mac's user)
-BOTTLE_USER="$(id -un)"
+# The bottle's Windows user, as gw2om.sh's bottle_user finds it (its users/ folder; crossover, the
+# name a new bottle gets, without one)
+BOTTLE_USER=crossover
 for u in "$BOTTLE/drive_c/users"/*; do
   [ -d "$u" ] || continue
   case "${u##*/}" in Public|public) continue ;; esac

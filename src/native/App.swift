@@ -51,12 +51,16 @@ final class Installer {
       self.sameDisk = sameDisk; self.hasSettings = hasSettings; self.path = path
     }
   }
-  enum Operation: String { case install, finish, repair, uninstall }
+  // move: GW2 on Mac 0.1's install into this app (gw2om.sh install move), which the window starts by
+  // itself at the first start
+  enum Operation: String { case install, finish, repair, uninstall, move }
   enum Phase: Equatable {
     case idle
     case working(Operation)
     // Steam or ArenaNet's installer is downloading the game; the window follows it (status)
     case waitingForGame
+    // the move waits while something of GW2 on Mac 0.1 runs (status: move_busy, move_wait)
+    case waitingForOld
     case succeeded(Operation, String)
     case failed(Operation, String)
   }
@@ -103,6 +107,20 @@ final class Installer {
         finishing,
       ]
     }
+  }
+  // The move from GW2 on Mac 0.1 (gw2om.sh install move): as an import, its files from 0.1's install
+  static func moveSteps(_ route: Route, interface: Bool) -> [Step] {
+    let finishingDetail = interface ? "Your addons, the sharper interface and the shader cache" : "Your addons and the shader cache"
+    let common = [
+      Step(id: 1, title: "The Wine engine", detail: "athei's Mach9 0.4.0 · as it ships"),
+      Step(id: 2, title: "The game's own bottle", detail: "With 0.1's Windows user"),
+    ]
+    let files = Step(id: route == .arenanet ? 3 : 4, title: "Your install, from GW2 on Mac 0.1",
+                     detail: route == .arenanet ? "The game, its settings and ReShade, cloned" : "Steam with your login, the game, its settings and ReShade, cloned")
+    return route == .arenanet
+      ? common + [files, Step(id: 4, title: "Finishing touches", detail: finishingDetail)]
+      : common + [Step(id: 3, title: "Steam, from Valve", detail: "SteamSetup.exe, then 0.1's Steam in its place"), files,
+                  Step(id: 5, title: "Finishing touches", detail: finishingDetail)]
   }
   static let uninstallSteps = [
     Step(id: 1, title: "Stop the game's Wine", detail: "Steam, the game and their Wine session"),
@@ -195,6 +213,7 @@ final class Installer {
   var steps: [Step] {
     if operation == .uninstall { return Installer.uninstallSteps }
     let interface = status["uiscale"] == "on"
+    if moving { return Installer.moveSteps(Route(rawValue: status["move_route"] ?? "") ?? installedRoute ?? .steam, interface: interface) }
     // an install that runs now follows the route chosen in the window (the status is from before)
     if case .working(.install) = phase {
       return route == .existing
@@ -206,13 +225,24 @@ final class Installer {
   }
   // the game's files came from the Mac (gw2om.sh install import)
   var imported: Bool { status["origin"] == "import" }
+  // the move from GW2 on Mac 0.1 runs, waits, failed while it can still go ahead, or Steam brings
+  // the moved game up to date
+  var moving: Bool {
+    switch phase {
+    case .working(.move), .waitingForOld: return true
+    case .failed(.move, _): return status["move"] == "yes"
+    case .waitingForGame: return status["origin"] == "move"
+    default: return false
+    }
+  }
 
   // The panel the right column shows
   enum Panel { case choose, installing, ready, starting, playing }
   var panel: Panel {
     switch phase {
     case .working(.uninstall): return .installing
-    case .working, .waitingForGame: return .installing
+    case .working, .waitingForGame, .waitingForOld: return .installing
+    case .failed(.move, _) where moving: return .installing
     default:
       guard ready else { return .choose }
       switch sessionStage {
@@ -284,6 +314,27 @@ final class Installer {
     } else if phase == .waitingForGame {
       phase = .idle
     }
+    // GW2 on Mac 0.1's install moves by itself at the first start, once nothing of 0.1 runs
+    switch Installer.moveNext(values, phase: phase) {
+    case .start: start(.move)
+    case .wait:
+      phase = .waitingForOld
+      scheduleGameWatch()
+    case .none:
+      if phase == .waitingForOld { phase = .idle }
+    }
+  }
+
+  // What the window does about the move from 0.1 with this status (not while an operation runs):
+  // start it, wait for 0.1's Steam or game to quit, or nothing (no move to do, a Mac that can't run
+  // the engine, or a move that failed: Try again or the next start of the app runs it again)
+  enum MoveNext { case start, wait, none }
+  static func moveNext(_ values: [String: String], phase: Phase) -> MoveNext {
+    guard values["move"] == "yes", values["installed"] != "yes", values["macos_ok"] != "no",
+          (values["arch"] ?? "arm64") == "arm64" else { return .none }
+    if (values["move_busy"] ?? "none") != "none" { return .wait }
+    if case .failed(.move, _) = phase { return .none }
+    return .start
   }
   private var lastFinishError: String {
     if case .failed(.finish, let m) = phase { return m }
@@ -296,7 +347,7 @@ final class Installer {
   private func scheduleGameWatch() {
     watch?.cancel()
     let work = DispatchWorkItem { [weak self] in
-      MainActor.assumeIsolated { if self?.phase == .waitingForGame { self?.refresh() } }
+      MainActor.assumeIsolated { if self?.phase == .waitingForGame || self?.phase == .waitingForOld { self?.refresh() } }
     }
     watch = work
     DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: work)
@@ -374,7 +425,8 @@ final class Installer {
     warnings = []
     watch?.cancel()
 
-    var arguments = [script.path, operation.rawValue]
+    var arguments = [script.path, operation == .move ? "install" : operation.rawValue]
+    if operation == .move { arguments.append("move") }
     if operation == .install {
       if route == .existing, let chosenGame {
         arguments += ["import", chosenGame.path]

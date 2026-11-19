@@ -221,6 +221,31 @@ func installer(_ state: String) -> Installer {
     i.operation = .uninstall
     i.phase = .working(.uninstall)
     i.stepIndex = 1
+  case "move-waiting", "moving", "move-failed":
+    // the first start after the update from 0.1: the move waits for 0.1's Steam, runs (Steam's
+    // folder copied from another disk), or failed
+    st = st.merging(["installed": "no", "engine_installed": "no", "graphics": "no", "game": "no", "stage": "none",
+                     "steam": "no", "route": "", "installed_version": "", "old_install": "yes", "move": "yes",
+                     "move_route": "steam", "move_busy": "none", "move_wait": ""]) { $1 }
+    i.operation = .move
+    if state == "move-waiting" {
+      st["move_busy"] = "steam"
+      st["move_wait"] = "Steam is running in GW2 on Mac 0.1. Quit Steam there (Steam > Exit), and the move starts."
+      i.phase = .waitingForOld
+    } else if state == "moving" {
+      i.phase = .working(.move)
+      i.stepIndex = 3
+      i.progress = .init(label: "Steam and Guild Wars 2", done: 31_200_000_000, total: 72_400_000_000)
+    } else {
+      i.phase = .failed(.move, "The download of the Wine engine failed (curl status 6). Check your internet connection and try again.")
+    }
+  case "moved":
+    // Ready after the move (the summary under the panel)
+    st = st.merging(["origin": "move", "old_install": "yes", "move": "no", "move_record": "moved"]) { $1 }
+    i.phase = .succeeded(.move, "Your install moved from GW2 on Mac 0.1: Steam with Guild Wars 2 in its library (cloned, no extra space), "
+                         + "your game settings, your addons as they were (arcdps, ReShade with your presets) and your settings. "
+                         + "Changed from GW2 on Mac 0.1: Fast locks is off, this version's default. Steam may ask you to sign in once. "
+                         + "GW2 on Mac 0.1 stays as it was. Press Play.")
   case let s where s.hasPrefix("session-"):
     // after Play: the start's stages, Playing, Steam closing after the game (Session.swift)
     st["busy"] = "steam"
@@ -323,6 +348,12 @@ func renderAll(_ dir: URL, exports: URL?) async {
     ("main-arenanet-dark", "arenanet", true, nil),
     ("main-importing-light", "importing", false, nil),
     ("main-imported-light", "imported", false, nil),
+    ("main-move-waiting-light", "move-waiting", false, nil),
+    ("main-move-waiting-dark", "move-waiting", true, nil),
+    ("main-moving-light", "moving", false, nil),
+    ("main-moving-dark", "moving", true, nil),
+    ("main-move-failed-light", "move-failed", false, nil),
+    ("main-moved-light", "moved", false, nil),
     ("main-starting-light", "session-starting", false, "7-starting.png"),
     ("main-starting-dark", "session-starting", true, "7-starting-dark.png"),
     ("main-playing-light", "session-playing", false, "8-playing.png"),
@@ -340,7 +371,24 @@ func renderAll(_ dir: URL, exports: URL?) async {
   let panels: [String: Installer.Panel] = ["session-starting": .starting, "session-updating": .starting,
     "session-signing-in": .starting, "session-loading": .starting, "session-arenanet": .starting,
     "session-playing": .playing, "session-playing-nohint": .playing, "session-closing": .ready,
-    "session-steam-update": .starting]
+    "session-steam-update": .starting,
+    "move-waiting": .installing, "moving": .installing, "move-failed": .installing, "moved": .ready]
+  // what the window does about the move from 0.1 for a status (a model check): start it, wait for
+  // 0.1, or nothing (installed, no move, a Mac below the engine's macOS, a failed move; a failed
+  // one while 0.1 runs waits, and starts again once it has quit)
+  do {
+    let base = ["installed": "no", "move": "yes", "move_busy": "none", "macos_ok": "yes", "arch": "arm64"]
+    let failed = Installer.Phase.failed(.move, "x")
+    let cases: [([String: String], Installer.Phase, Installer.MoveNext)] = [
+      ([:], .idle, .start), (["move_busy": "steam"], .idle, .wait), (["move_busy": "game"], .waitingForOld, .wait),
+      ([:], .waitingForOld, .start), ([:], failed, .none), (["move_busy": "steam"], failed, .wait),
+      (["installed": "yes"], .idle, .none), (["move": "no"], .idle, .none), (["macos_ok": "no"], .idle, .none),
+    ]
+    for (extra, phase, want) in cases where Installer.moveNext(base.merging(extra) { $1 }, phase: phase) != want {
+      print("FAIL the move's next step, \(extra) \(phase): \(Installer.moveNext(base.merging(extra) { $1 }, phase: phase)), not \(want)")
+      exit(1)
+    }
+  }
   // the Engine and Graphics checks' texts for the files gw2om.sh status can report (a model check)
   do {
     let engine = "Mach9 0.4.0 · Wine 11.21"
@@ -500,6 +548,14 @@ func renderAll(_ dir: URL, exports: URL?) async {
       let name = "settings-\(pane.rawValue)-\(dark ? "dark" : "light")"
       let rep = await render(SettingsView(settings: settings()), size: SettingsView.designSize, dark: dark)
       write(rep, dir.appendingPathComponent(name + ".png"))
+      // (Troubleshooting with Start fresh: after a move from 0.1, and before one, nothing installed)
+      if pane == .troubleshooting {
+        for (n, extra) in [("moved", ["old_install": "yes", "move_record": "moved"]),
+                           ("not-installed", ["installed": "no", "old_install": "yes", "move_record": ""])] {
+          write(await render(SettingsView(settings: settings(extra)), size: SettingsView.designSize, dark: dark),
+                dir.appendingPathComponent("settings-troubleshooting-start-fresh-\(n)-light.png"))
+        }
+      }
       if let exports, pane == .performance, !dark {
         compare(design: exports.appendingPathComponent("4-settings-performance.png"), render: rep,
                 to: dir.appendingPathComponent("compare-" + name + ".png"))

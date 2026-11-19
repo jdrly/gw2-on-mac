@@ -67,6 +67,10 @@ struct MainView: View {
     .onChange(of: settings.saving) { _, saving in
       if !saving { installer.refresh() }
     }
+    // (after Troubleshooting's actions: Start fresh changes what this window shows)
+    .onChange(of: settings.action) { _, action in
+      if action == nil { installer.refresh() }
+    }
     .alert("Uninstall \(appName)?", isPresented: $confirmUninstall) {
       Button("Uninstall", role: .destructive) { installer.start(.uninstall) }
       Button("Cancel", role: .cancel) {}
@@ -388,8 +392,10 @@ struct ThisMac: View {
     let game: Check
     if installer.gameInstalled {
       game = Check(id: "Guild Wars 2", icon: "swords", value: "Installed · \(route)", tone: .good)
+    } else if installer.phase == .waitingForOld {
+      game = Check(id: "Guild Wars 2", icon: "swords", value: "In GW2 on Mac 0.1 · moves next", tone: .pending)
     } else if installer.phase == .waitingForGame || installer.isOperating && installer.operation != .uninstall {
-      game = Check(id: "Guild Wars 2", icon: "swords", value: "Installing…", tone: .pending)
+      game = Check(id: "Guild Wars 2", icon: "swords", value: installer.moving ? "Moving…" : "Installing…", tone: .pending)
     } else {
       game = Check(id: "Guild Wars 2", icon: "swords", value: "Not installed yet", tone: .off)
     }
@@ -635,7 +641,8 @@ struct ResultNote: View {
         }
       }
     // (an install that ends in Ready: existing game files; the downloads go on to waiting)
-    case .succeeded(.uninstall, let message), .succeeded(.repair, let message), .succeeded(.install, let message):
+    case .succeeded(.uninstall, let message), .succeeded(.repair, let message), .succeeded(.install, let message),
+         .succeeded(.move, let message):
       HStack(alignment: .top, spacing: 7) {
         LucideIcon(name: "circle-check", size: 13).foregroundStyle(Brand.good).padding(.top, 1)
         Text(message).font(.body(12.5)).bodyBox(12.5).foregroundStyle(Brand.fg2).fixedSize(horizontal: false, vertical: true)
@@ -998,6 +1005,7 @@ struct InstallingPanel: View {
   let actions: PanelActions
 
   private var title: String {
+    if installer.moving { return "Moving from GW2 on Mac 0.1" }
     switch installer.operation {
     case .uninstall: return "Uninstalling"
     case .repair: return "Repairing"
@@ -1010,7 +1018,14 @@ struct InstallingPanel: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       InkHeading(title: title, size: 17, alignment: .center) {
-        if installer.operation != .uninstall {
+        if case .failed(.move, _) = installer.phase {
+          Button("Try again") { installer.start(.move) }
+            .buttonStyle(QuietButtonStyle(color: Brand.accent))
+            .font(.body(13, .semibold)).bodyBox(13)
+            .help("Runs the move again. It starts from nothing: the last one left nothing behind.")
+        } else if installer.phase == .waitingForOld {
+          EmptyView()
+        } else if installer.operation != .uninstall {
           Button(installer.phase == .waitingForGame ? "Stop waiting" : "Cancel") { installer.cancel() }
             .buttonStyle(QuietButtonStyle(color: Brand.fg3))
             .font(.body(13, .semibold)).bodyBox(13)
@@ -1025,7 +1040,9 @@ struct InstallingPanel: View {
         StepRow(step: step, state: state(index), last: index == steps.count - 1,
                 detail: detail(index, step), progress: index == installer.stepIndex ? installer.progress : nil)
       }
-      if installer.phase == .waitingForGame {
+      if installer.moving {
+        MoveNote(installer: installer)
+      } else if installer.phase == .waitingForGame {
         Text(installer.imported
              ? "Sign in to Steam: it brings your Guild Wars 2 up to date. This window follows it."
              : installer.installedRoute == .arenanet
@@ -1054,6 +1071,34 @@ struct InstallingPanel: View {
       return "\(p.label) · \(Installer.gigabytes(p.done)) of \(Installer.gigabytes(p.total))"
     }
     return "\(p.label) · \(Installer.megabytes(p.done)) of \(Installer.megabytes(p.total)) MB"
+  }
+}
+
+// Under the move's steps: what it waits for, or what happens to 0.1, and where Start fresh is
+struct MoveNote: View {
+  let installer: Installer
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      if installer.phase == .waitingForOld, let wait = installer.status["move_wait"], !wait.isEmpty {
+        HStack(alignment: .top, spacing: 7) {
+          LucideIcon(name: "loader-circle", size: 13).foregroundStyle(Brand.gold).padding(.top, 1)
+          Text(wait).font(.body(12.5)).bodyBox(12.5, 1.3).foregroundStyle(Brand.fg2)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
+      Text(text).font(.body(12)).bodyBox(12, 1.3).foregroundStyle(Brand.fg3)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+    .padding(.top, 2)
+  }
+
+  private var text: String {
+    switch installer.phase {
+    case .waitingForGame: return "Steam brings your Guild Wars 2 up to date, and may ask you to sign in once. This window follows it."
+    case .working: return "GW2 on Mac 0.1 stays as it is: its files are cloned, not moved. Steam may ask you to sign in once."
+    default: return "To install anew instead: Settings › Troubleshooting › Start fresh."
+    }
   }
 }
 

@@ -331,16 +331,17 @@ EOF
 cat >"$S/$LOADER" <<'EOF'
 #!/bin/bash
 # stand-in wine: pretends, and logs each start with the environment the game would get
-{ echo "wine $*"; env | grep -E '^(WINE|DXMT_|MTL_)' | sort | sed 's/^/  /'; } >>"$STANDIN_LOG"
+{ echo "wine $*"; env | grep -E '^(WINE|DXMT_|MTL_|USER=)' | sort | sed 's/^/  /'; } >>"$STANDIN_LOG"
 case "${1:-}" in
   wineboot)
-    mkdir -p "$WINEPREFIX/drive_c/windows/system32" "$WINEPREFIX/drive_c/users/$(id -un)"
+    mkdir -p "$WINEPREFIX/drive_c/windows/system32" "$WINEPREFIX/drive_c/users/${USER:-$(id -un)}"
     printf 'WINE REGISTRY Version 2\n;; All keys relative to \\\\Machine\n' >"$WINEPREFIX/system.reg"
     printf 'WINE REGISTRY Version 2\n;; All keys relative to \\\\User\\\\S-1-5-21\n\n[Software\\\\Wine] 1700000000\n#time=1\n' >"$WINEPREFIX/user.reg"
     cp "$WINEPREFIX/system.reg" "$WINEPREFIX/userdef.reg" ;;
   *SteamSetup.exe)
-    mkdir -p "$WINEPREFIX/drive_c/Program Files (x86)/Steam/steamapps"
-    echo "stand-in steam" >"$WINEPREFIX/drive_c/Program Files (x86)/Steam/steam.exe" ;;
+    mkdir -p "$WINEPREFIX/drive_c/Program Files (x86)/Steam/steamapps" "$WINEPREFIX/drive_c/users/${USER:-$(id -un)}/AppData/Local/Steam"
+    echo "stand-in steam" >"$WINEPREFIX/drive_c/Program Files (x86)/Steam/steam.exe"
+    echo "a new Steam's" >"$WINEPREFIX/drive_c/users/${USER:-$(id -un)}/AppData/Local/Steam/htmlcache.txt" ;;
   *steam.exe)
     # -shutdown ends the stand-in Steam (a sleeper whose pid is in steam.pid), unless steam.stubborn;
     # with steam.autostart, a start of steam.exe starts that sleeper, as Wine starts Steam (once)
@@ -353,8 +354,11 @@ esac
 EOF
 chmod 755 "$S/$LOADER" "$S/bin/wineserver"
 export STANDIN_LOG
-# (the bottle's Windows user, named after the Mac's user as upstream Wine does)
-BUSER="$(id -un)"
+# (the bottle's Windows user: Mach9's Wine names it after USER, as the stand-in's wineboot does, and
+# the app passes crossover for a new bottle, the name 0.1.x's engine gave it)
+BUSER=crossover
+# every_wine_as <user>: each Wine start in the stand-in's log has USER=<user> (and there is one)
+every_wine_as() { awk -v u="  USER=$1" '/^wine / { n++ } $0 == u { m++ } END { exit !(n > 0 && n == m) }' "$STANDIN_LOG"; }
 ( cd "$SANDBOX/standin" && tar -cJf ../engine.tar.xz wine )
 echo "stand-in SteamSetup.exe" >"$SANDBOX/SteamSetup.exe"
 export GW2_ON_MAC_ROOT="$SANDBOX"
@@ -624,7 +628,9 @@ check "EmulateModeset=N (0.1.x's behaviour, not Mach9's launcher's Y: #90)" reg 
 check "ShowCrashDialog=dword:0" eval 'regsec "Software\\\\\\\\Wine\\\\\\\\WineDbg" | grep -qx "\"ShowCrashDialog\"=dword:00000000"'
 check "  nothing for Gw2-64.exe (AppDefaults) and no raw mouse-look values" sh -c "! grep -q -e AppDefaults -e RawMouse '$BOTTLE/user.reg'"
 check "wineboot with WINEMSYNC=1 and winemenubuilder off, nothing else of the app's" \
-  eval '[ "$(awk "/^wine wineboot/ { f = 1; next } /^[^ ]/ { f = 0 } f" "$STANDIN_LOG" | sed "s/^  //" | tr "\n" "|")" = "WINEDEBUG=-all|WINEDLLOVERRIDES=winemenubuilder.exe=d|WINEMSYNC=1|WINEPREFIX=$BOTTLE|" ]'
+  eval '[ "$(awk "/^wine wineboot/ { f = 1; next } /^[^ ]/ { f = 0 } f" "$STANDIN_LOG" | sed "s/^  //" | tr "\n" "|")" = "USER=crossover|WINEDEBUG=-all|WINEDLLOVERRIDES=winemenubuilder.exe=d|WINEMSYNC=1|WINEPREFIX=$BOTTLE|" ]'
+check "  every Wine start of the install as the bottle's user, crossover (its folder in users/)" \
+  eval 'every_wine_as crossover && [ -d "$BOTTLE/drive_c/users/crossover" ] && [ "$(ls "$BOTTLE/drive_c/users")" = crossover ]'
 check "  no inherited compatdb variable reached any of the install's Wine starts (Steam's has the app's rules file)" \
   sh -c "! grep -q -e WINE_COMPATDB= -e WINE_LARGE_ADDRESS_AWARE -e WINE_PROF_SERVICE '$STANDIN_LOG' && [ \"\$(grep WINE_COMPATDB_FILE '$STANDIN_LOG')\" = '  WINE_COMPATDB_FILE=$AD/compatdb.rules' ]"
 check "Steam started with the install page" has "$STANDIN_LOG" 'wine C:\\Program Files (x86)\\Steam\\steam.exe steam://install/1284210'
@@ -1437,8 +1443,8 @@ check "compatdb.local is appended as it is" eval '[ "$(g rules | tail -1)" = "ex
 cp "$AD/settings.conf" "$SANDBOX/settings.keep"
 sed -i '' -e 's/^metalfx=.*/metalfx=on/' -e 's/^hud=.*/hud=on/' -e 's/^debug=.*/debug=on/' "$AD/settings.conf"
 out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
-check "dry-run play: the engine's variables, the app's files, my DXMT fork's switches and the CPUs, nothing else" \
-  eval '[ "$(echo "$out" | sed -n "s/^\[dry-run\]   //p" | grep -v ^WINENCPU= | tr "\n" "|")" = "WINEPREFIX=$BOTTLE|WINEDEBUG=$WINEDEBUG_ON|WINEDLLOVERRIDES=winemenubuilder.exe=d|WINEMSYNC=1|DXMT_CONFIG_FILE=$AD/dxmt.conf|DXMT_LOG_PATH=$LOGS|WINE_COMPATDB_FILE=$AD/compatdb.rules|DXMT_CACHE_DIR=$CACHE/fork|DXMT_DEPENDENCY_COMPRESSION=1|DXMT_WARM=all|DXMT_SUBSAMPLE_METALFX=1|DXMT_LOG_LEVEL=debug|DXMT_STATS=1|" ] && echo "$out" | grep -q "^\[dry-run\]   WINENCPU="'
+check "dry-run play: the bottle's user, the engine's variables, the app's files, my DXMT fork's switches and the CPUs, nothing else" \
+  eval '[ "$(echo "$out" | sed -n "s/^\[dry-run\]   //p" | grep -v ^WINENCPU= | tr "\n" "|")" = "USER=crossover|WINEPREFIX=$BOTTLE|WINEDEBUG=$WINEDEBUG_ON|WINEDLLOVERRIDES=winemenubuilder.exe=d|WINEMSYNC=1|DXMT_CONFIG_FILE=$AD/dxmt.conf|DXMT_LOG_PATH=$LOGS|WINE_COMPATDB_FILE=$AD/compatdb.rules|DXMT_CACHE_DIR=$CACHE/fork|DXMT_DEPENDENCY_COMPRESSION=1|DXMT_WARM=all|DXMT_SUBSAMPLE_METALFX=1|DXMT_LOG_LEVEL=debug|DXMT_STATS=1|" ] && echo "$out" | grep -q "^\[dry-run\]   WINENCPU="'
 check "  none of 0.1.x's Wine variables in the environment (my ntdll.so's switches are in the rules)" \
   eval '! echo "$out" | sed -n "s/^\[dry-run\]   //p" | grep -qE "WINE_HEAT_|ROSETTA_X87_PATH|WINEDLLPATH|WINE_COMPATDB=|MTL_HUD"'
 cp "$SANDBOX/settings.keep" "$AD/settings.conf"
@@ -3512,6 +3518,202 @@ check "a copy without the free space is refused" eval '[ "$rc" != 0 ] && has <(e
 check "  and leaves nothing behind" eval '[ ! -e "$AD/engine" ] && [ ! -e "$AD/bottle" ] && [ ! -e "$AD/state" ] && [ ! -e "$AD/.lock" ]'
 check "the sources never changed" sources_unchanged
 check "0.1's folders: still the same checksum" [ "$(o1sum)" = "$O1SUM" ]
+
+section "Move GW2 on Mac 0.1's install (install move)"
+# GW2 on Mac 0.1.4's install as its folders hold it (main's gw2om.sh): a manifest, its state and
+# settings, an engine, a bottle whose Windows user is crossover with Steam (its login, config and
+# userdata) and the game in Steam's library, or the game in Program Files (ArenaNet's route); the
+# game's settings and Steam's files in the profile; the addons in the game folder, arcdps alone
+# as d3d11.dll or with ReShade, then at ReShade's chain path; the ReShade folder outside the bottle,
+# its ini naming 0.1's folders, and the record of the compiler 0.1 placed.
+OC="$H/Library/Caches/GW2 on Mac"
+# (this app's folder empty, as on a Mac that had only 0.1: the sections before leave files in it)
+rm -rf "$AD"
+O1B="$O1/bottle" O1ST="$O1/bottle/drive_c/Program Files (x86)/Steam" O1U="$O1/bottle/drive_c/users/crossover"
+O1RS="$O1/ReShade"
+winp() { printf 'Z:%s' "$1" | tr / '\\'; }
+ARC_CHAIN=addons/arcdps/chain/d3d11.dll CHAINW='addons\arcdps\chain\d3d11.dll'
+GW2_ON_MAC_RESHADE_DLL_SHA256="$(shasum -a 256 "$SANDBOX/pe/ReShade64.dll" | cut -d' ' -f1)"
+export GW2_ON_MAC_RESHADE_DLL_SHA256
+old01() { # <steam|arenanet> <arcdps|both>
+  local g
+  rm -rf "$O1" "$OC"
+  mkdir -p "$O1/engine/bin" "$O1/engine/lib/wine/x86_64-unix" "$O1B/drive_c/windows" "$O1U/AppData/Local/Steam" \
+    "$O1U/AppData/Roaming/Guild Wars 2/Screens" "$O1/gamemode/GW2.app/Contents/MacOS" "$OC/reshade" "$OC/dxmt/Gw2-64.exe"
+  echo "0.1's loader" >"$O1/engine/lib/wine/x86_64-unix/wine"
+  printf '{\n  "app": "GW2 on Mac",\n  "version": "0.1.4"\n}\n' >"$O1/install-manifest.json"
+  printf 'WINE REGISTRY Version 2\n' >"$O1B/system.reg" && cp "$O1B/system.reg" "$O1B/user.reg"
+  echo "0.1's local.vdf" >"$O1U/AppData/Local/Steam/local.vdf"
+  echo "0.1 local.dat" >"$O1U/AppData/Roaming/Guild Wars 2/Local.dat"
+  echo "<GSA_SDK 0.1/>" >"$O1U/AppData/Roaming/Guild Wars 2/GFXSettings.Gw2-64.exe.xml"
+  echo "JPG" >"$O1U/AppData/Roaming/Guild Wars 2/Screens/gw001.jpg"
+  echo "0.1's shaders" >"$OC/dxmt/Gw2-64.exe/shaders.bin" && echo "compiled" >"$OC/reshade/effect.bin"
+  if [ "$1" = steam ]; then
+    g="$O1ST/steamapps/common/Guild Wars 2"
+    mkdir -p "$g" "$O1ST/config" "$O1ST/userdata/12345/config"
+    echo "0.1's steam" >"$O1ST/steam.exe"
+    printf '"users"\n{\n\t"76561190000000000"\n\t{\n\t\t"AccountName"\t\t"someone"\n\t\t"RememberPassword"\t\t"1"\n\t}\n}\n' >"$O1ST/config/loginusers.vdf"
+    echo "0.1's config.vdf" >"$O1ST/config/config.vdf" && echo "0.1's localconfig" >"$O1ST/userdata/12345/config/localconfig.vdf"
+    printf '"AppState"\n{\n\t"appid"\t\t"1284210"\n\t"installdir"\t\t"Guild Wars 2"\n\t"StateFlags"\t\t"4"\n}\n' >"$O1ST/steamapps/appmanifest_1284210.acf"
+    printf 'route=steam\nstage=finished\ngame_dir=%s\ngame_exe=\norigin=download\n' "$g" >"$O1/state"
+  else
+    g="$O1B/drive_c/Program Files/Guild Wars 2"
+    mkdir -p "$g"
+    printf 'route=arenanet\nstage=finished\ngame_dir=%s\ngame_exe=\norigin=download\n' "$g" >"$O1/state"
+  fi
+  O1GAME=$g
+  echo "stand-in game" >"$g/Gw2-64.exe" && mkfile -n 2g "$g/Gw2.dat"
+  mkdir -p "$g/addons/arcdps" && echo "[session]" >"$g/addons/arcdps/arcdps.ini"
+  cp "$COMP/ui-scale/version.dll" "$g/version.dll" && echo "0.1's" >>"$g/version.dll" && echo "scale=1.5" >"$g/gw2-ui-scale.ini"
+  if [ "$2" = arcdps ]; then
+    cp "$SANDBOX/pe/arcdps.dll" "$g/d3d11.dll"
+  else
+    cp "$SANDBOX/pe/ReShade64.dll" "$g/d3d11.dll"
+    mkdir -p "$g/addons/arcdps/chain" && cp "$SANDBOX/pe/arcdps.dll" "$g/$ARC_CHAIN"
+    echo "0.1's compiler" >"$g/d3dcompiler_47.dll" && shasum -a 256 "$g/d3dcompiler_47.dll" | cut -d' ' -f1 >"$O1/reshade-compiler"
+    printf '[INSTALL]\nBasePath=%s\n' "$(winp "$O1RS")" >"$g/ReShade.ini"
+    mkdir -p "$O1RS/Presets" "$O1RS/Shaders/Standard" "$O1RS/Textures" "$O1RS/Screenshots"
+    printf '[GENERAL]\nEffectSearchPaths=.\\Shaders\\**\nPresetPath=.\\Presets\\Mine.ini\nIntermediateCachePath=%s\n\n[PROXY]\nEnableProxyLibrary=1\nProxyLibrary=C:\\%s\\%s\n\n[SCREENSHOT]\nSavePath=%s\\Screenshots\n' \
+      "$(winp "$OC/reshade")" "$(printf %s "${g#"$O1B/drive_c/"}" | tr / '\\')" "$CHAINW" "$(winp "$O1RS")" >"$O1RS/ReShade.ini"
+    echo "[Mine]" >"$O1RS/Presets/Mine.ini" && echo "// fxh" >"$O1RS/Shaders/Standard/ReShade.fxh"
+  fi
+  { echo "# GW2 on Mac settings"; echo "uiscale=on"; echo "reshade=$([ "$2" = both ] && echo on || echo off)"; } >"$O1/settings.conf"
+}
+# what the app's folder holds, the bottle with Steam and the game in it, and 0.1's: its content and
+# every file's and folder's size, mtime and mode
+o1snap() { find "$O1" "$OC" -exec stat -f '%N %z %m %p' {} + | LC_ALL=C sort; o1sum; }
+o1_same() { [ "$(o1snap)" = "$O1SNAP" ]; }
+nothing_made() { [ -z "$(ls -A "$AD" 2>/dev/null)" ]; }
+# ini_clean <file>: no line names 0.1's folders (Application Support's or Caches' GW2 on Mac)
+ini_clean() { ! grep -iqF -e "$(winp "$O1")\\" -e "$(winp "$OC")\\" "$1" && ! grep -iqE "$(winp "$O1" | sed 's/\\/\\\\/g')$" "$1"; }
+mv_done() { echo "$out" | sed -n 's/^@done //p'; }
+
+old01 steam both
+check "status: 0.1's install, to move (the Steam route, nothing of 0.1 runs)" \
+  [ "$(st old_install) $(st move) $(st move_route) $(st move_busy)" = "yes yes steam none" ]
+# 0.1's processes, a sleeper at each place 0.1's proc_list counts: its Steam, the game as the Game
+# Mode bundle's copy of the loader, the stock wineserver kept next to mine, and the game through a
+# winetemp link of the loader
+WT="$SANDBOX/T/winetemp-$(stat -f '%i-%z' "$O1/engine/lib/wine/x86_64-unix/wine")-x"
+mkdir -p "$WT"
+O1SNAP=$(o1snap)
+for p in "$O1/engine/bin/steam.exe:steam" "$O1/gamemode/GW2.app/Contents/MacOS/Gw2-64.exe:game" \
+  "$O1/engine/bin/wineserver.stock:session" "$WT/Gw2-64.exe:game"; do
+  f=${p%:*} k=${p##*:}
+  cp "$SANDBOX/sleeper" "$f"
+  "$f" 30 & sp=$!
+  sleep 0.3
+  out=$(g install move 2>&1) && rc=0 || rc=$?
+  check "  $k of 0.1 runs ($(basename "$f")): status says so, the move is refused with why, nothing made" \
+    eval '[ "$(st move_busy)" = "$k" ] && [ -n "$(st move_wait)" ] && [ "$rc" != 0 ] && has <(echo "$out") "^@error $(st move_wait | sed "s/[().]/./g")" && nothing_made'
+  kill "$sp" 2>/dev/null; wait "$sp" 2>/dev/null; rm -f "$f"
+done
+check "  Steam's sentence names 0.1 and says to quit Steam there" \
+  eval 'cp "$SANDBOX/sleeper" "$O1/engine/bin/steam.exe" && { "$O1/engine/bin/steam.exe" 30 & sp=$!; sleep 0.3; w=$(st move_wait); kill $sp; wait $sp 2>/dev/null; rm -f "$O1/engine/bin/steam.exe"; [ "$w" = "Steam is running in GW2 on Mac 0.1. Quit Steam there (Steam > Exit), and the move starts." ]; }'
+O1SNAP=$(o1snap)
+
+out=$(GW2_ON_MAC_DRY_RUN=1 g install move 2>&1) && rc=0 || rc=$?
+check "dry-run install move: exits 0, makes nothing; every Wine call as crossover; it would clone Steam's folder" \
+  eval '[ "$rc" = 0 ] && nothing_made && echo "$out" | grep -qxF "[dry-run] wine (USER=crossover) wineboot --init" && ! echo "$out" | grep "^\[dry-run\] wine " | grep -qv "(USER=crossover)" && has <(echo "$out") "^\[dry-run\] clone $O1ST to "'
+
+# a failure at each step, and a cancel after the clone: nothing of the move stays, 0.1 as it was
+for p in engine bottle steam files profile reshade finish; do
+  out=$(GW2_ON_MAC_MOVE_FAIL=$p g install move 2>&1) && rc=0 || rc=$?
+  check "the move failing at $p leaves nothing, and 0.1 as it was" \
+    eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error The move failed at $p" && nothing_made && o1_same && [ "$(st move)" = yes ]'
+done
+PAUSE="$SANDBOX/pause"
+touch "$PAUSE"
+GW2_ON_MAC_TEST_PAUSE="$PAUSE" GW2_ON_MAC_TEST_PAUSE_AT=move-cloned "$GW2OM" install move >"$SANDBOX/cancel.txt" 2>&1 & mp=$!
+i=0; until [ -e "$PAUSE.at" ] || [ $i -ge 100 ]; do sleep 0.1; i=$((i + 1)); done
+kill -TERM "$mp" 2>/dev/null; rm -f "$PAUSE"; wait "$mp"; rc=$?
+check "a move cancelled after the clone (TERM) leaves nothing, and 0.1 as it was" eval '[ "$rc" = 143 ] && nothing_made && o1_same'
+rm -f "$PAUSE.at"
+out=$(GW2_ON_MAC_IMPORT_COPY=1 GW2_ON_MAC_FREE_KB=3020000 g install move 2>&1) && rc=0 || rc=$?
+check "the copy path without the free space is refused, leaves nothing, 0.1 as it was" \
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error Not enough free disk space to copy Steam.s folder" && nothing_made && o1_same'
+# a game folder that is a link (out of 0.1's bottle): refused once cloned, nothing written through it
+mv "$O1GAME" "$SANDBOX/linked-game" && ln -s "$SANDBOX/linked-game" "$O1GAME"
+LSNAP=$(find "$SANDBOX/linked-game" -exec stat -f '%N %z %m %p' {} + | LC_ALL=C sort)
+out=$(g install move 2>&1) && rc=0 || rc=$?
+check "a game folder that is a link: refused, nothing written through it, nothing left" \
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error .* leads outside" && nothing_made && [ "$(find "$SANDBOX/linked-game" -exec stat -f "%N %z %m %p" {} + | LC_ALL=C sort)" = "$LSNAP" ]'
+rm "$O1GAME" && mv "$SANDBOX/linked-game" "$O1GAME"
+O1SNAP=$(o1snap)
+
+: >"$STANDIN_LOG"
+out=$(g install move 2>&1) && rc=0 || rc=$?
+GM="$GD" U="$BOTTLE/drive_c/users/crossover"
+check "install move (Steam, ReShade with arcdps) exits 0, the phases 1-5" \
+  eval '[ "$rc" = 0 ] && [ "$(echo "$out" | grep "^@phase" | tr "\n" " ")" = "@phase 1 @phase 2 @phase 3 @phase 4 @phase 5 " ]'
+check "  installed, route=steam origin=move stage=finished game=yes; the move is done and won't start again" \
+  [ "$(st installed) $(st route) $(st origin) $(st stage) $(st game) $(st move) $(st move_record)" = "yes steam move finished yes no moved" ]
+check "  every Wine call as crossover, and the bottle's user is crossover" eval 'every_wine_as crossover && [ "$(ls "$BOTTLE/drive_c/users")" = crossover ]'
+check "  0.1's Steam folder in place of Valve's new one (not inside it): steam.exe, the login, config, userdata, the record of the game" \
+  eval 'same "$O1ST/steam.exe" "$STEAM/steam.exe" && same "$O1ST/config/loginusers.vdf" "$STEAM/config/loginusers.vdf" && same "$O1ST/config/config.vdf" "$STEAM/config/config.vdf" && same "$O1ST/userdata/12345/config/localconfig.vdf" "$STEAM/userdata/12345/config/localconfig.vdf" && same "$O1ST/steamapps/appmanifest_1284210.acf" "$STEAM/steamapps/appmanifest_1284210.acf" && [ ! -e "$STEAM/Steam" ]'
+check "  the game's files" eval '[ "$(stat -f %z "$GM/Gw2.dat")" = 2147483648 ] && same "$O1GAME/Gw2-64.exe" "$GM/Gw2-64.exe"'
+check "  the profile's Steam files in place of the new Steam's, and the game's settings folder whole" \
+  eval 'same "$O1U/AppData/Local/Steam/local.vdf" "$U/AppData/Local/Steam/local.vdf" && [ ! -e "$U/AppData/Local/Steam/htmlcache.txt" ] && [ ! -e "$U/AppData/Local/Steam/Steam" ] && same "$O1U/AppData/Roaming/Guild Wars 2/Local.dat" "$U/AppData/Roaming/Guild Wars 2/Local.dat" && same "$O1U/AppData/Roaming/Guild Wars 2/GFXSettings.Gw2-64.exe.xml" "$U/AppData/Roaming/Guild Wars 2/GFXSettings.Gw2-64.exe.xml" && has "$U/AppData/Roaming/Guild Wars 2/Screens/gw001.jpg" JPG'
+check "  arcdps at ReShade's chain path, its settings with it; ReShade as d3d11.dll with the compiler and its record" \
+  eval 'same "$SANDBOX/pe/arcdps.dll" "$GM/$ARC_CHAIN" && has "$GM/addons/arcdps/arcdps.ini" session && same "$SANDBOX/pe/ReShade64.dll" "$GM/d3d11.dll" && same "$O1GAME/d3dcompiler_47.dll" "$GM/d3dcompiler_47.dll" && same "$O1/reshade-compiler" "$AD/reshade-compiler" && [ "$(st arcdps_state) $(st reshade_state)" = "on on" ]'
+check "  the game folder's ReShade.ini names this app's ReShade folder" \
+  eval '[ "$(cat "$GM/ReShade.ini")" = "$(printf "[INSTALL]\nBasePath=%s" "$(winp "$AD/ReShade")")" ]'
+check "  the ReShade folder with the preset and shaders; its ini names this app's cache and folder, the chain path on" \
+  eval 'same "$O1RS/Presets/Mine.ini" "$AD/ReShade/Presets/Mine.ini" && same "$O1RS/Shaders/Standard/ReShade.fxh" "$AD/ReShade/Shaders/Standard/ReShade.fxh" && has "$AD/ReShade/ReShade.ini" "^IntermediateCachePath=$(winp "$CACHE/reshade" | sed "s/\\\\/\\\\\\\\/g")\$" && has "$AD/ReShade/ReShade.ini" "^SavePath=$(winp "$AD/ReShade" | sed "s/\\\\/\\\\\\\\/g")\\\\Screenshots\$" && has "$AD/ReShade/ReShade.ini" "^EnableProxyLibrary=1\$"'
+check "  no line of either ini names a folder of 0.1's" eval 'ini_clean "$GM/ReShade.ini" && ini_clean "$AD/ReShade/ReShade.ini"'
+check "  the larger interface's files follow this app's setting, off" eval '[ ! -e "$GM/version.dll" ] && [ ! -e "$GM/gw2-ui-scale.ini" ]'
+check "  no DXMT or ReShade cache of 0.1's came along" eval '[ -z "$(find "$CACHE" -type f \( -name shaders.bin -o -name effect.bin \) 2>/dev/null)" ]'
+check "  the summary: what came along, what changed, Steam's login, 0.1 as it was" \
+  eval 'has <(mv_done) "^Your install moved from GW2 on Mac 0.1: Steam with Guild Wars 2 in its library (cloned, no extra space), your game settings and your addons as they were (arcdps, ReShade with your presets)\. Steam may ask you to sign in once\. GW2 on Mac 0\.1 stays as it was\. Press Play\.$" || { mv_done; false; }'
+check "  0.1's folders as they were" o1_same
+c=$(play_cmd)
+check "  Play: Steam as crossover" eval 'every_wine_as crossover && [[ "$c" == *"steam.exe -applaunch 1284210"* ]]'
+sessions_reset
+out=$(g start-fresh 2>&1) && rc=0 || rc=$?
+check "Start fresh: this app's install goes, the move doesn't start by itself again, 0.1 as it was" \
+  eval '[ "$rc" = 0 ] && [ "$(st installed) $(st move) $(st move_record) $(st old_install)" = "no no skipped yes" ] && [ "$(ls -A "$AD" | LC_ALL=C sort | tr "\n" " ")" = "ReShade moved-from-0.1 " ] && o1_same'
+rm -rf "$AD"
+
+# arcdps alone
+old01 steam arcdps
+O1SNAP=$(o1snap)
+out=$(g install move 2>&1) && rc=0 || rc=$?
+check "install move (Steam, arcdps alone) exits 0" [ "$rc" = 0 ]
+check "  arcdps as d3d11.dll, no ReShade, no ReShade folder made" \
+  eval 'same "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll" && [ "$(st arcdps_state) $(st reshade_state)" = "on off" ] && [ ! -e "$AD/ReShade" ]'
+c=$(play_cmd)
+check "  the first Play shows Steam's window though Steam remembers a login; the next goes silent again" \
+  eval '[[ "$c" == *"steam.exe -applaunch 1284210"* && "$c" != *-silent* ]] && [ "$(st origin)" = moved ]'
+sessions_reset
+check "  0.1's folders as they were" o1_same
+out=$(g uninstall 2>&1)
+check "uninstall after a move keeps the move's record: no second move by itself" \
+  eval '[ "$(st installed) $(st move) $(st move_record)" = "no no moved" ] && [ "$(ls -A "$AD")" = moved-from-0.1 ]'
+rm -rf "$AD"
+
+old01 arenanet both
+O1SNAP=$(o1snap)
+: >"$STANDIN_LOG"
+out=$(g install move 2>&1) && rc=0 || rc=$?
+GA="$BOTTLE/drive_c/Program Files/Guild Wars 2"
+check "install move (ArenaNet, ReShade with arcdps) exits 0, the phases 1-4, no Steam" \
+  eval '[ "$rc" = 0 ] && [ "$(echo "$out" | grep "^@phase" | tr "\n" " ")" = "@phase 1 @phase 2 @phase 3 @phase 4 " ] && [ "$(st steam)" = no ] && ! grep -q SteamSetup "$STANDIN_LOG"'
+check "  route=arenanet origin=move game=yes, the game in Program Files" \
+  eval '[ "$(st route) $(st origin) $(st game)" = "arenanet move yes" ] && [ "$(st game_dir)" = "$GA" ] && [ "$(stat -f %z "$GA/Gw2.dat")" = 2147483648 ]'
+check "  the game's settings; no Steam files in the profile" \
+  eval 'same "$O1U/AppData/Roaming/Guild Wars 2/Local.dat" "$BOTTLE/drive_c/users/crossover/AppData/Roaming/Guild Wars 2/Local.dat" && [ ! -e "$BOTTLE/drive_c/users/crossover/AppData/Local/Steam" ]'
+check "  arcdps at the chain path, ReShade in, both inis name only this app's folders" \
+  eval 'same "$SANDBOX/pe/arcdps.dll" "$GA/$ARC_CHAIN" && [ "$(st arcdps_state) $(st reshade_state)" = "on on" ] && ini_clean "$GA/ReShade.ini" && ini_clean "$AD/ReShade/ReShade.ini" && has "$AD/ReShade/ReShade.ini" "^ProxyLibrary=C:.Program Files.Guild Wars 2.addons.arcdps.chain.d3d11.dll\$"'
+check "  the summary" has <(mv_done) "^Your install moved from GW2 on Mac 0.1: Guild Wars 2 (cloned, no extra space), your game settings and your addons as they were (arcdps, ReShade with your presets)\..* GW2 on Mac 0.1 stays as it was\. Press Play\.$"
+check "  0.1's folders as they were" o1_same
+# a bottle an earlier version made keeps its user's name (the Mac's login there)
+mv "$BOTTLE/drive_c/users/crossover" "$BOTTLE/drive_c/users/$(id -un)x"
+c=$(play_cmd)
+check "a bottle with another user's name: Wine runs as that user" eval 'every_wine_as "$(id -un)x" && [[ "$c" == *Gw2-64.exe* ]]'
+sessions_reset
+g uninstall >/dev/null 2>&1
+rm -rf "$AD" "$O1" "$OC"
+check "no 0.1 install: status offers no move" [ "$(st old_install) $(st move)" = "no no" ]
 
 section "A development build's switches (dev-switches.conf)"
 # Two copies of the app's Resources, each entry a link to the app's, but gw2om.sh (a copy: its
