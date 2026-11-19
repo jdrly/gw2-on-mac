@@ -42,6 +42,11 @@ ROOT="$PWD"
 
 # GW2_ON_MAC_VERSION overrides the version for test builds.
 APP_VERSION=${GW2_ON_MAC_VERSION:-0.2.0}
+# The Dev build workflow's version when it is given none, and the lowest one release.sh --adhoc
+# publishes, so no dev build or release candidate number goes out twice. This script doesn't use it:
+# APP_VERSION above is the release while I prepare it.
+# shellcheck disable=SC2034 # (read by .github/workflows/devbuild.yml and scripts/release.sh)
+DEV_VERSION=0.2.0-rc.3
 
 # Development builds: X.Y.Z-dev.N, as SWTOR on Mac's, and release candidates X.Y.Z-rc.N, N below
 # 1000 in both. CFBundleShortVersionString is the version as is; CFBundleVersion (what Sparkle
@@ -195,7 +200,7 @@ if [ ! -d "$SPARKLE/Sparkle.framework" ]; then
 fi
 
 echo "Assembling $APP"
-rm -rf "$APP"
+rm -rf "$APP" "$ROOT/dist/$APP_NAME.commit"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 R="$APP/Contents/Resources"
 sed -e "s/@NAME@/$APP_NAME/g" -e "s/@BUNDLE_ID@/$APP_ID/g" -e "s/@VERSION@/$APP_VERSION/g" -e "s/@BUILD@/$BUNDLE_VERSION/g" -e "s/@CHANNEL@/$CHANNEL/g" \
@@ -366,4 +371,10 @@ codesign --force --sign - "$APP"
 codesign --verify --strict "$APP"
 # Every file's sha256, what scripts/release.sh --adhoc compares the app in its DMG with
 scripts/app-files.sh "$APP" >"$ROOT/dist/$APP_NAME.files"
+# The commit the app was built from, what release.sh tags: "<sha>", "<sha> with changes" when
+# tracked files differ from it, or "none" outside a git checkout
+if built_from=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null); then
+  git -C "$ROOT" diff --quiet HEAD -- || built_from="$built_from with changes"
+else built_from=none; fi
+echo "$built_from" >"$ROOT/dist/$APP_NAME.commit"
 echo "Built $APP ($(du -sh "$APP" | cut -f1))"

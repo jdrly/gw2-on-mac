@@ -15,7 +15,8 @@
 #   release/<version>/appcast.xml                       the feed, with only this version
 #   release/updates/                                    DMGs of this and the 5 previous versions
 # then creates a draft GitHub release v<version> with the DMG, the deltas and appcast.xml, its tag
-# on the commit the app was built from (HEAD, which must be pushed).
+# on the commit the app was built from: HEAD, as build.sh recorded it in dist/<name>.commit, with no
+# changes, and on origin/arm64 (RELEASE_BRANCH).
 # Publishing the draft makes the update live: the app reads
 # https://github.com/jdrly/gw2-on-mac/releases/latest/download/appcast.xml.
 #
@@ -46,7 +47,8 @@
 #                                    Developer ID: the app as build.sh
 #                                    signed it (ad hoc, verified, never re-signed), an unsigned DMG,
 #                                    no notarization, then a GitHub pre-release with the DMG and the
-#                                    build's record. The version may not be lower than build.sh's.
+#                                    build's record. The version may not be lower than build.sh's
+#                                    DEV_VERSION.
 #                                    The app in the DMG must match the file list build.sh wrote
 #                                    (APP_FILES, default dist/<name>.files). BUILD_RECORD is the
 #                                    workflow's record of the build; the DMG's sha256 is added to it.
@@ -72,7 +74,7 @@
 #                                    build and check the feed, and upload appcast.xml and the
 #                                    deltas to the draft
 #
-# Overrides: IDENTITY, NOTARY_PROFILE, or NOTARY_KEY/NOTARY_KEY_ID/NOTARY_ISSUER (an App Store
+# Overrides: RELEASE_BRANCH (default arm64), IDENTITY, NOTARY_PROFILE, or NOTARY_KEY/NOTARY_KEY_ID/NOTARY_ISSUER (an App Store
 # Connect API key file instead of the keychain profile, as in CI); RELEASE_DIR (default
 # release), DOWNLOAD_URL_PREFIX (where the appcast points, default the version's GitHub
 # release), ED_KEY_FILE (a private EdDSA key file instead of the keychain, for test keys),
@@ -144,12 +146,12 @@ esac
 case "$VERSION" in *-rc.*) KIND="release candidate" ;; *) KIND="development build" ;; esac
 APP_ID="$(sed -n 's/^APP_ID=//p' build.sh)"
 if [ "$MODE" = --adhoc ]; then
-  # Never below the version build.sh builds by default, so a dev number isn't used twice (sort -V
-  # puts X.Y.Z-dev.N before X.Y.Z-rc.N)
-  base="$(sed -n 's/^APP_VERSION=${GW2_ON_MAC_VERSION:-\(.*\)}$/\1/p' build.sh)"
-  [ -n "$base" ] && [ -n "$APP_ID" ] || { echo "No APP_VERSION or APP_ID line in build.sh" >&2; exit 1; }
+  # Never below build.sh's DEV_VERSION, so a dev number isn't used twice (sort -V puts X.Y.Z-dev.N
+  # before X.Y.Z-rc.N)
+  base="$(sed -n 's/^DEV_VERSION=//p' build.sh)"
+  [ -n "$base" ] && [ -n "$APP_ID" ] || { echo "No DEV_VERSION or APP_ID line in build.sh" >&2; exit 1; }
   [ "$(printf '%s\n' "$base" "$VERSION" | sort -V | head -1)" = "$base" ] ||
-    { echo "$VERSION is lower than build.sh's $base" >&2; exit 1; }
+    { echo "$VERSION is lower than build.sh's DEV_VERSION $base" >&2; exit 1; }
   APP_FILES="${APP_FILES:-dist/$APP_NAME.files}"
   [ -f "$APP_FILES" ] || { echo "Missing $APP_FILES, the file list build.sh writes" >&2; exit 1; }
   [ -f "${BUILD_RECORD:-}" ] || { echo "Missing BUILD_RECORD, the build's record" >&2; exit 1; }
@@ -187,12 +189,17 @@ case "$MODE$DEV_NO_RELEASE" in
     gh auth status >/dev/null 2>&1 || { echo "gh is not logged in" >&2; exit 1; }
     ! gh release view "v$VERSION" --repo "$REPO" >/dev/null 2>&1 || { echo "Release v$VERSION already exists" >&2; exit 1; }
     if [ -z "$MODE" ]; then
-      # The release's tag goes on the commit this was built from (arm64 for 0.2, not the default
-      # branch main, which is 0.1.x), so that commit must be pushed: checked before notarizing
+      # The release's tag goes on the commit the app in dist/ was built from (build.sh's record), not
+      # on the default branch main, which is 0.1.x. That is HEAD, with no changes, and it is on
+      # origin's RELEASE_BRANCH (default arm64, the 0.2 line). Checked before signing.
       head=$(git rev-parse HEAD)
-      git branch -r --contains "$head" | grep -q . || { echo "Push $head first" >&2; exit 1; }
+      built="$(cat "dist/$APP_NAME.commit" 2>/dev/null || true)"
+      [ "$built" = "$head" ] ||
+        { echo "The app in dist/ wasn't built from HEAD $head (dist/$APP_NAME.commit: ${built:-missing}); run ./build.sh again" >&2; exit 1; }
+      git merge-base --is-ancestor "$head" "origin/${RELEASE_BRANCH:-arm64}" ||
+        { echo "$head is not on origin/${RELEASE_BRANCH:-arm64}: push it there first (git fetch if it is)" >&2; exit 1; }
     fi
-    if [ "$MODE" = --adhoc ]; then
+    if [ "$MODE" = --adhoc ] || [ -z "$MODE" ]; then
       # A tag without a release would become this release's tag, on another commit
       if out="$(gh api "repos/$REPO/git/ref/tags/v$VERSION" 2>&1)"; then
         echo "Tag v$VERSION already exists" >&2; exit 1
