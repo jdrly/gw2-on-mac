@@ -1711,8 +1711,9 @@ delta updates and checks it with `scripts/check-appcast.swift`.
   default mode creates a draft release, and publishing the draft makes the update live. Installed
   apps read `https://github.com/jdrly/gw2-on-mac/releases/latest/download/appcast.xml`.
 - The draft's tag goes on the commit the app was built from, and not on `main`, which is 0.1.x.
-  `build.sh` writes that commit to `dist/<name>.commit`. Before signing, the script stops unless
-  it is `HEAD` with no changes and on `origin/arm64` (`RELEASE_BRANCH`), and unless the tag is free.
+  `build.sh` writes that commit to `dist/<name>.commit`, marked "with changes" when the checkout
+  had a changed or untracked file before or after the build. Before signing, the script stops
+  unless that record is `HEAD` as is, on `origin/arm64` (`RELEASE_BRANCH`), and the tag is free.
 - The feed needs an app built with `GW2_ON_MAC_FEED_URL` and `GW2_ON_MAC_ED_PUBLIC_KEY`.
 - `--sign-only` and `--no-notarize` run locally without touching GitHub.
 - The appcast's item names the macOS the engine needs, `src/gw2om.sh`'s `MACOS_MIN` (26.4), as
@@ -1759,15 +1760,15 @@ publishes it as the pre-release `v<version>`. A release candidate (`-f version=0
 the same way ([ADR 0017](docs/adr/0017-a-release-candidate-is-a-dev-build-by-another-name.md)):
 
 ```sh
-gh workflow run devbuild.yml --ref arm64                    # DXMT's newest green commit, build.sh's DEV_VERSION
+gh workflow run devbuild.yml --ref arm64 -f version=0.2.0-rc.3   # DXMT's newest green commit
 gh workflow run devbuild.yml --ref arm64 -f dxmt_commit=<sha> -f wine_commit=<sha> -f macdrv_commit=<sha> -f fex_commit=<sha> -f version=0.2.0-rc.4
 gh workflow run devbuild.yml --ref arm64 -f publish=false   # a dry run: the DMG as an artifact, 7 days
 gh release download v0.2.0-dev.5 -R jdrly/gw2-on-mac -p '*.dmg' -D ~/Downloads
 ```
 
-- Without `version` the run takes `DEV_VERSION` from `build.sh`, the next dev build or release
-  candidate, and never `APP_VERSION`, which is 0.2.0 while I prepare that release. A version below
-  `DEV_VERSION` is refused, so a number isn't published twice.
+- Without `version` the run takes `DEV_VERSION` from `build.sh`, and never `APP_VERSION`, which is
+  0.2.0 while I prepare that release. A version below `DEV_VERSION` is refused, so a number isn't
+  published twice. `DEV_VERSION` is still 0.2.0-dev.5, so a run without `version` stops at its tag.
 - DXMT is my fork's build of a commit on its `gw2-on-mac`: the release asset
   `dxmt-arm64-<commit>.tar.xz` of jdrly/dxmt's `arm64-builds`, checked against GitHub's digest,
   or until that exists, the artifact `dxmt-arm64-<commit>` of the fork's `GW2` run, fetched with

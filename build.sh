@@ -46,7 +46,7 @@ APP_VERSION=${GW2_ON_MAC_VERSION:-0.2.0}
 # publishes, so no dev build or release candidate number goes out twice. This script doesn't use it:
 # APP_VERSION above is the release while I prepare it.
 # shellcheck disable=SC2034 # (read by .github/workflows/devbuild.yml and scripts/release.sh)
-DEV_VERSION=0.2.0-rc.3
+DEV_VERSION=0.2.0-dev.5
 
 # Development builds: X.Y.Z-dev.N, as SWTOR on Mac's, and release candidates X.Y.Z-rc.N, N below
 # 1000 in both. CFBundleShortVersionString is the version as is; CFBundleVersion (what Sparkle
@@ -198,6 +198,12 @@ if [ ! -d "$SPARKLE/Sparkle.framework" ]; then
   tar -xJf "$sparkle_txz" -C "$SPARKLE.part"
   rm -rf "$SPARKLE" && mv "$SPARKLE.part" "$SPARKLE"
 fi
+
+# The commit the app is built from, what release.sh tags (dist/<name>.commit, written at the end):
+# "<sha>", "<sha> with changes" when the checkout differs from it before or after the build (a
+# tracked file changed or an untracked one that isn't ignored), or "none" outside a git checkout
+built_from=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null) || built_from=none
+[ "$built_from" = none ] || [ -z "$(git -C "$ROOT" status --porcelain)" ] || built_from="$built_from with changes"
 
 echo "Assembling $APP"
 rm -rf "$APP" "$ROOT/dist/$APP_NAME.commit"
@@ -371,10 +377,10 @@ codesign --force --sign - "$APP"
 codesign --verify --strict "$APP"
 # Every file's sha256, what scripts/release.sh --adhoc compares the app in its DMG with
 scripts/app-files.sh "$APP" >"$ROOT/dist/$APP_NAME.files"
-# The commit the app was built from, what release.sh tags: "<sha>", "<sha> with changes" when
-# tracked files differ from it, or "none" outside a git checkout
-if built_from=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null); then
-  git -C "$ROOT" diff --quiet HEAD -- || built_from="$built_from with changes"
-else built_from=none; fi
+case "$built_from" in
+  none|*" with changes") ;;
+  *) [ "$(git -C "$ROOT" rev-parse HEAD)" = "$built_from" ] && [ -z "$(git -C "$ROOT" status --porcelain)" ] ||
+       built_from="$built_from with changes" ;;
+esac
 echo "$built_from" >"$ROOT/dist/$APP_NAME.commit"
 echo "Built $APP ($(du -sh "$APP" | cut -f1))"

@@ -195,7 +195,7 @@ case "$MODE$DEV_NO_RELEASE" in
       head=$(git rev-parse HEAD)
       built="$(cat "dist/$APP_NAME.commit" 2>/dev/null || true)"
       [ "$built" = "$head" ] ||
-        { echo "The app in dist/ wasn't built from HEAD $head (dist/$APP_NAME.commit: ${built:-missing}); run ./build.sh again" >&2; exit 1; }
+        { echo "The app in dist/ wasn't built from HEAD $head as committed (dist/$APP_NAME.commit: ${built:-missing}); commit or remove what git status shows, then run ./build.sh again" >&2; exit 1; }
       git merge-base --is-ancestor "$head" "origin/${RELEASE_BRANCH:-arm64}" ||
         { echo "$head is not on origin/${RELEASE_BRANCH:-arm64}: push it there first (git fetch if it is)" >&2; exit 1; }
     fi
