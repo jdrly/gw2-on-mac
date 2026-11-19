@@ -155,6 +155,11 @@ and stay as they were on the day of the move.
   Play.
 - Your settings come over as the *From 0.1* column under [Settings](#settings) says.
 
+A clone copies a link as a link, so every link in what the move clones must lead to a file inside
+this app's folder. A link to a folder, into 0.1's folders or to a folder elsewhere that 0.1 uses
+too, such as a ReShade folder on an external drive, stops the move before anything writes through
+it. *Start fresh* then installs anew.
+
 On the same disk it clones, which takes no space until one of the copies changes. From another
 disk, such as a bottle you linked to an external drive, it copies after checking the free space.
 DXMT's shader caches and ReShade's compiled effects don't come along. The game builds them again
@@ -173,7 +178,8 @@ Going back is 0.1's app from its release page, dragged over this one. It finds i
 was on the day of the move.
 
 *Start fresh* in Settings › Troubleshooting installs anew instead. While the move waits or after it
-failed, it stops the move. After a move it removes the moved install, as Uninstall does. Either
+failed, it stops the move. After a move it removes the moved install, as Uninstall does, and
+never another install. Either
 way the move no longer starts by itself, and the install choices list 0.1's game under *Game files
 I already have*. The app keeps that in `moved-from-0.1` in its folder (`moved` or `skipped`), which
 Uninstall leaves, so uninstalling a moved install doesn't move 0.1's again.

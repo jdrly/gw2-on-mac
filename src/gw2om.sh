@@ -3776,11 +3776,13 @@ move_inside() {
   die "$1 leads outside $2 (a link in $OLD_LABEL's folder?), so $APP_NAME doesn't move this install. Start fresh in Settings › Troubleshooting installs anew."
 }
 
-# move_links <folder>...: every link in what the move cloned stays inside this app's folder, its
-# whole chain resolved (realpath). cp -R copies a link as a link, and what writes after the clone
-# (ReShade's ini, arcdps's renames, the addons, then Steam, the game and ReShade themselves) would
-# write through it: into 0.1.x's folders, or into a folder elsewhere that 0.1.x links to as well,
-# such as a ReShade folder on another disk. A link that leads nowhere counts as leading out.
+# move_links <folder>...: every link in what the move cloned or kept leads to a file inside this
+# app's folder, its whole chain resolved (realpath). cp -R copies a link as a link, and what writes
+# after the clone (ReShade's ini, arcdps's renames, the addons, then Steam, the game and ReShade
+# themselves) would write through it: into 0.1.x's folders, or into a folder elsewhere that 0.1.x
+# links to as well, such as a ReShade folder on another disk. A link to a folder counts as leading
+# out wherever it leads (what is in that folder isn't looked through), and so does one that leads
+# nowhere.
 move_links() {
   local d l p ap bad
   [ -z "$DRY" ] || return 0
@@ -3789,11 +3791,11 @@ move_links() {
       { [ -e "$d" ] || [ -L "$d" ]; } || continue
       find "$d" -type l 2>/dev/null | while IFS= read -r l; do
         p=$(realpath "$l" 2>/dev/null) || p=""
-        case "$p/" in "$ap/"?*) ;; *) echo "$l" ;; esac
+        [ -n "$p" ] && [ -f "$p" ] && case "$p/" in "$ap/"?*) true ;; *) false ;; esac || echo "$l"
       done
     done | head -1) || true
   [ -z "$bad" ] ||
-    die "$bad is a link out of the files the move cloned, so $APP_NAME doesn't move this install: what it writes there would reach $OLD_LABEL's files. Start fresh in Settings › Troubleshooting installs anew."
+    die "$bad is a link to a folder or out of the files the move cloned, so $APP_NAME doesn't move this install: what it writes there would reach $OLD_LABEL's files. Start fresh in Settings › Troubleshooting installs anew."
 }
 
 # move_paths <ini>: 0.1.x's folders in it (or in the file it links to), as ReShade's ini spells them (Z:\...\GW2 on Mac, a
@@ -3803,8 +3805,12 @@ move_links() {
 move_paths() {
   local f=$1 tmp
   [ -f "$f" ] || return 0
-  # (a link: the file it leads to, which move_links has kept inside this app's folder)
-  if [ -L "$f" ]; then f=$(realpath "$f") || return 1; fi
+  # (a link: the file it leads to, which move_links has kept inside this app's folder; checked
+  # again here, since this is the one write the move makes in a file it didn't create)
+  if [ -L "$f" ]; then
+    f=$(realpath "$f") || return 1
+    case "$f" in "$(cd "$APPDIR" && pwd -P)/"?*) ;; *) return 1 ;; esac
+  fi
   if [ -n "$DRY" ]; then echo "[dry-run] $OLD_LABEL's folders in $f renamed to this app's"; return 0; fi
   tmp="$f.gw2om-new.$$"
   OA="$(winpath "$OLD_APPDIR")" NA="$(winpath "$APPDIR")" OC="$(winpath "$OLD_CACHE")" NC="$(winpath "$CACHE")" LC_ALL=C awk '
@@ -5333,7 +5339,6 @@ cmd_env() {
 }
 
 cmd_uninstall() {
-  local c
   open_log
   log "---- uninstall $VERSION root=${ROOT:-/} dry=${DRY:-0}"
   phase 1
@@ -5342,6 +5347,12 @@ cmd_uninstall() {
   lock
   # (the folder itself goes too once empty)
   trap 'unlock; rmdir "$APPDIR" 2>/dev/null || true' EXIT
+  uninstall_files
+}
+
+# uninstall_files: Uninstall's removal, with the install lock held (cmd_uninstall, Start fresh)
+uninstall_files() {
+  local c
   stop_watcher
   [ -n "$DRY" ] || stop_wine
   phase 2
@@ -5368,14 +5379,17 @@ cmd_uninstall() {
 # start by itself any more (MOVE_RECORD skipped), and the install it moved goes first, as Uninstall
 # removes it; the window then shows the install choices. The intent is what I confirmed:
 # --before-move while nothing was installed (if the move has finished since, nothing changes),
-# --moved over the moved install (state origin move or moved: never another install). A failed
-# Uninstall changes nothing. While the moved install goes, MOVE_RECORD still says moved, so no move
-# starts before skipped is written, under the install lock. 0.1.x's install stays as it is; the
-# install choices still list its game.
+# --moved over the moved install (state origin move or moved: never another install). One install
+# lock covers the check, Uninstall's removal (uninstall_files) and the record, so nothing installs
+# or moves in between; while the game or Steam runs nothing changes. 0.1.x's install stays as it is;
+# the install choices still list its game.
 cmd_start_fresh() {
   local want=${1:-} have=no
   open_log
   log "---- start-fresh $want $VERSION root=${ROOT:-/} dry=${DRY:-0}"
+  check_not_running
+  lock
+  trap 'unlock' EXIT
   if [ -f "$MANIFEST" ] || [ -d "$BOTTLE" ]; then have=yes; fi
   [ -n "$want" ] || { if [ "$have" = yes ]; then want=--moved; else want=--before-move; fi; }
   if [ "$want" = --before-move ] && [ "$have" = yes ]; then
@@ -5383,17 +5397,11 @@ cmd_start_fresh() {
   fi
   if [ "$have" = yes ]; then
     case "$(state origin)" in move|moved) ;; *) die "This install isn't the one moved from $OLD_LABEL, so Start fresh leaves it. Uninstall removes it." ;; esac
-    ( cmd_uninstall ) || exit $?
-  fi
-  lock
-  if [ -f "$MANIFEST" ] || [ -d "$BOTTLE" ]; then
-    unlock
-    die "An install started meanwhile, so Start fresh changed nothing."
+    uninstall_files
   fi
   [ -n "$DRY" ] || mkdir -p "$APPDIR"
   echo skipped | put "$MOVE_RECORD" 644
   log "start fresh: $OLD_LABEL's install doesn't move by itself any more"
-  unlock
   echo "@done $APP_NAME starts fresh: choose how to install Guild Wars 2 in the main window. $OLD_LABEL stays as it was, and its game files are under Game files I already have."
 }
 
