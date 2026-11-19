@@ -3661,15 +3661,22 @@ mv "$O1GAME" "$SANDBOX/linked-game" && ln -s "$SANDBOX/linked-game" "$O1GAME"
 LSNAP=$(find "$SANDBOX/linked-game" -exec stat -f '%N %z %m %p' {} + | LC_ALL=C sort)
 out=$(g install move 2>&1) && rc=0 || rc=$?
 check "a game folder that is a link: refused, nothing written through it, nothing left" \
-  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error .* leads outside" && nothing_made && [ "$(find "$SANDBOX/linked-game" -exec stat -f "%N %z %m %p" {} + | LC_ALL=C sort)" = "$LSNAP" ]'
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error .*Guild Wars 2 is a link out of the files the move cloned" && nothing_made && [ "$(find "$SANDBOX/linked-game" -exec stat -f "%N %z %m %p" {} + | LC_ALL=C sort)" = "$LSNAP" ]'
 rm "$O1GAME" && mv "$SANDBOX/linked-game" "$O1GAME"
 # a link into 0.1's ReShade folder inside its Steam folder: refused after the clone, nothing left
 ln -s "$O1RS" "$O1ST/linked-reshade"
 O1SNAP=$(o1snap)
 out=$(g install move 2>&1) && rc=0 || rc=$?
 check "a link into 0.1's folders inside its Steam folder: refused, nothing left, 0.1 as it was" \
-  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error .*linked-reshade is a link into GW2 on Mac 0.1.s folders" && nothing_made && o1_same'
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error .*linked-reshade is a link out of the files the move cloned" && nothing_made && o1_same'
 rm "$O1ST/linked-reshade"
+# 0.1's ReShade folder's screenshots on another disk, which 0.1 writes too: refused, nothing left
+mkdir -p "$SANDBOX/ext-shots" && rmdir "$O1RS/Screenshots" && ln -s "$SANDBOX/ext-shots" "$O1RS/Screenshots"
+O1SNAP=$(o1snap)
+out=$(g install move 2>&1) && rc=0 || rc=$?
+check "a link in 0.1's ReShade folder to a folder elsewhere: refused, nothing left, 0.1 as it was" \
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error .*Screenshots is a link out of the files the move cloned" && nothing_made && o1_same && [ -z "$(ls -A "$SANDBOX/ext-shots")" ]'
+rm "$O1RS/Screenshots" && mkdir "$O1RS/Screenshots"
 O1SNAP=$(o1snap)
 
 : >"$STANDIN_LOG"
@@ -3703,7 +3710,10 @@ check "  0.1's folders as they were" o1_same
 c=$(play_cmd)
 check "  Play: Steam as crossover" eval 'every_wine_as crossover && [[ "$c" == *"steam.exe -applaunch 1284210"* ]]'
 sessions_reset
-out=$(g start-fresh 2>&1) && rc=0 || rc=$?
+out=$(g start-fresh --before-move 2>&1) && rc=0 || rc=$?
+check "Start fresh confirmed before the move, with the move finished meanwhile: refused, the install stays" \
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error The move from GW2 on Mac 0.1 has finished meanwhile" && [ "$(st installed) $(st move_record)" = "yes moved" ]'
+out=$(g start-fresh --moved 2>&1) && rc=0 || rc=$?
 check "Start fresh: this app's install goes, the move doesn't start by itself again, 0.1 as it was" \
   eval '[ "$rc" = 0 ] && [ "$(st installed) $(st move) $(st move_record) $(st old_install)" = "no no skipped yes" ] && [ "$(ls -A "$AD" | LC_ALL=C sort | tr "\n" " ")" = "ReShade moved-from-0.1 " ] && o1_same'
 rm -rf "$AD"

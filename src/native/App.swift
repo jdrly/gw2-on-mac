@@ -333,7 +333,11 @@ final class Installer {
   static func moveNext(_ values: [String: String], phase: Phase) -> MoveNext {
     guard values["move"] == "yes", values["installed"] != "yes", values["macos_ok"] != "no",
           (values["arch"] ?? "arm64") == "arm64" else { return .none }
-    if case .failed(.move, _) = phase { return .none }
+    // (a status from before a move ended says move=yes still: no second move after one)
+    switch phase {
+    case .failed(.move, _), .succeeded(.move, _): return .none
+    default: break
+    }
     if (values["move_busy"] ?? "none") != "none" { return .wait }
     return .start
   }

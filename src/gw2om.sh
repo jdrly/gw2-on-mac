@@ -45,8 +45,10 @@
 #   gw2om.sh uninstall         removes everything this app created: the bottle (with the game in
 #                              it), the engine, the settings, its caches (DXMT's in them); logs
 #                              stay
-#   gw2om.sh start-fresh       Settings › Troubleshooting: removes this app's install as uninstall
-#                              does, and the move from 0.1.x no longer starts by itself
+#   gw2om.sh start-fresh [--before-move|--moved]
+#                              Settings › Troubleshooting: the move from 0.1.x no longer starts by
+#                              itself, and this app's install goes as uninstall removes it
+#                              (--before-move: not if the move has finished meanwhile)
 #   gw2om.sh play              starts the game (Steam: steam.exe -applaunch 1284210, -silent once
 #                              Steam remembers a login; ArenaNet: Gw2-64.exe) with the settings as
 #                              its environment and its compatdb rules (compatdb.rules), and the
@@ -3770,28 +3772,24 @@ move_inside() {
   die "$1 leads outside $2 (a link in $OLD_LABEL's folder?), so $APP_NAME doesn't move this install. Start fresh in Settings › Troubleshooting installs anew."
 }
 
-# move_links <folder>...: no link in what the move cloned leads into 0.1.x's folders. cp -R copies
-# a link as a link, and the steps after the clone write through what they find there (ReShade's
-# ini, arcdps's renames, the addons). A link elsewhere (a screenshots folder on another disk) stays.
+# move_links <folder>...: every link in what the move cloned stays inside this app's folder, its
+# whole chain resolved (realpath). cp -R copies a link as a link, and what writes after the clone
+# (ReShade's ini, arcdps's renames, the addons, then Steam, the game and ReShade themselves) would
+# write through it: into 0.1.x's folders, or into a folder elsewhere that 0.1.x links to as well,
+# such as a ReShade folder on another disk. A link that leads nowhere counts as leading out.
 move_links() {
-  local d l t q p oa oc bad
+  local d l p ap bad
   [ -z "$DRY" ] || return 0
-  oa=$(cd "$OLD_APPDIR" 2>/dev/null && pwd -P) || oa=$OLD_APPDIR
-  oc=$(cd "$OLD_CACHE" 2>/dev/null && pwd -P) || oc=$OLD_CACHE
+  ap=$(cd "$APPDIR" && pwd -P)
   bad=$(for d in "$@"; do
       { [ -e "$d" ] || [ -L "$d" ]; } || continue
       find "$d" -type l 2>/dev/null | while IFS= read -r l; do
-        t=$(readlink "$l")
-        case "$t" in /*) ;; *) t="$(dirname "$l")/$t" ;; esac
-        if [ -d "$t" ]; then p=$(cd "$t" && pwd -P) || p=$t
-        elif q=$(cd "$(dirname "$t")" 2>/dev/null && pwd -P); then p="$q/$(basename "$t")"
-        else p=$t
-        fi
-        case "$p/" in "$oa/"*|"$oc/"*) echo "$l" ;; esac
+        p=$(realpath "$l" 2>/dev/null) || p=""
+        case "$p/" in "$ap/"?*) ;; *) echo "$l" ;; esac
       done
     done | head -1) || true
   [ -z "$bad" ] ||
-    die "$bad is a link into $OLD_LABEL's folders, and $APP_NAME would write through it, so it doesn't move this install. Start fresh in Settings › Troubleshooting installs anew."
+    die "$bad is a link out of the files the move cloned, so $APP_NAME doesn't move this install: what it writes there would reach $OLD_LABEL's files. Start fresh in Settings › Troubleshooting installs anew."
 }
 
 # move_paths <ini>: 0.1.x's folders in it, as ReShade's ini spells them (Z:\...\GW2 on Mac, a
@@ -4272,14 +4270,14 @@ on_install_exit() {
     stop_wine >/dev/null 2>&1 || true
     # all or nothing: what this run created goes again (an earlier engine or bottle stays)
     for c in $CREATED; do
-      if [ -e "$APPDIR/$c" ]; then rm -rf "${APPDIR:?}/$c"; log "removed $c (install failed)"; fi
+      if [ -e "$APPDIR/$c" ] || [ -L "$APPDIR/$c" ]; then rm -rf "${APPDIR:?}/$c"; log "removed $c (install failed)"; fi
     done
     # the game's files this run cloned or copied (and Steam's record of them), if the bottle stays
     if [ -n "${FETCH_PID:-}" ]; then wait "$FETCH_PID" 2>/dev/null || true; fi
     if [ -n "${IMPORT_DST:-}" ] && [ -e "$IMPORT_DST" ]; then rm -rf "$IMPORT_DST"; log "removed $IMPORT_DST (install failed)"; fi
     if [ -n "${IMPORT_ACF:-}" ] && [ -e "$IMPORT_ACF" ]; then rm -f "$IMPORT_ACF"; fi
     rm -rf "$APPDIR"/*.new 2>/dev/null || true
-    rm -f "$APPDIR"/*.new.[0-9]* 2>/dev/null || true
+    rm -f "$APPDIR"/*.new.$$ 2>/dev/null || true
     log "install failed (status $st)"
   fi
   unlock
@@ -5358,21 +5356,28 @@ cmd_uninstall() {
   echo "@done $APP_NAME is removed, with the bottle and the game in it. Logs stay in $LOGS."
 }
 
-# Start fresh (Settings › Troubleshooting): this app's install goes as Uninstall removes it, and
-# the move from 0.1.x doesn't start by itself any more (MOVE_RECORD skipped), so the window shows
-# the install choices. 0.1.x's install stays as it is; the install choices still list its game.
+# start-fresh [--before-move|--moved] (Settings › Troubleshooting): the move from 0.1.x doesn't
+# start by itself any more (MOVE_RECORD skipped), and this app's install, the moved one, goes as
+# Uninstall removes it; the window then shows the install choices. --before-move is what I
+# confirmed while nothing was installed: if the move has finished since, nothing changes. The
+# decision and the record are made under the install lock, so no move starts in between, and an
+# install there afterwards goes through Uninstall's own lock. 0.1.x's install stays as it is; the
+# install choices still list its game.
 cmd_start_fresh() {
+  local have=no
   open_log
-  log "---- start-fresh $VERSION root=${ROOT:-/} dry=${DRY:-0}"
-  if [ -f "$MANIFEST" ] || [ -d "$BOTTLE" ] || [ -d "$ENG" ]; then
-    ( cmd_uninstall ) || exit $?
-  else
-    lock
-    trap 'unlock' EXIT
+  log "---- start-fresh ${1:-} $VERSION root=${ROOT:-/} dry=${DRY:-0}"
+  lock
+  if [ -f "$MANIFEST" ] || [ -d "$BOTTLE" ] || [ -d "$ENG" ]; then have=yes; fi
+  if [ "${1:-}" = --before-move ] && [ "$have" = yes ]; then
+    unlock
+    die "The move from $OLD_LABEL has finished meanwhile, so Start fresh changed nothing. To remove the moved install, choose Start fresh again."
   fi
   [ -n "$DRY" ] || mkdir -p "$APPDIR"
   echo skipped | put "$MOVE_RECORD" 644
   log "start fresh: $OLD_LABEL's install doesn't move by itself any more"
+  unlock
+  if [ "$have" = yes ]; then ( cmd_uninstall ) || exit $?; fi
   echo "@done $APP_NAME starts fresh: choose how to install Guild Wars 2 in the main window. $OLD_LABEL stays as it was, and its game files are under Game files I already have."
 }
 
@@ -5464,7 +5469,7 @@ case "${1:-}" in
   stop-waiting) cmd_stop_waiting ;;
   repair) cmd_repair ;;
   uninstall) cmd_uninstall ;;
-  start-fresh) cmd_start_fresh ;;
+  start-fresh) shift; cmd_start_fresh "$@" ;;
   play) cmd_play ;;
   watch-session) shift; cmd_watch_session "$@" ;;
   session-status) shift; cmd_session_status "$@" ;;

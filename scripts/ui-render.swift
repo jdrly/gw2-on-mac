@@ -382,6 +382,7 @@ func renderAll(_ dir: URL, exports: URL?) async {
     let cases: [([String: String], Installer.Phase, Installer.MoveNext)] = [
       ([:], .idle, .start), (["move_busy": "steam"], .idle, .wait), (["move_busy": "game"], .waitingForOld, .wait),
       ([:], .waitingForOld, .start), ([:], failed, .none), (["move_busy": "steam"], failed, .none),
+      ([:], .succeeded(.move, "x"), .none),
       (["installed": "yes"], .idle, .none), (["move": "no"], .idle, .none), (["macos_ok": "no"], .idle, .none),
     ]
     for (extra, phase, want) in cases where Installer.moveNext(base.merging(extra) { $1 }, phase: phase) != want {

@@ -221,14 +221,14 @@ final class GameSettings {
     }
   }
 
-  // gw2om.sh reset-shaders / reinstall-engine
-  func run(_ command: String) {
+  // gw2om.sh reset-shaders / reinstall-engine / start-fresh
+  func run(_ command: String, _ extra: [String] = []) {
     guard action == nil else { return }
     action = command
     actionResult = nil
     let script = script
     Task {
-      let output = await Installer.capture(script: script, arguments: [command])
+      let output = await Installer.capture(script: script, arguments: [command] + extra)
       action = nil
       actionResult = output.split(separator: "\n").last { $0.hasPrefix("@done ") || $0.hasPrefix("@error ") }
         .map { String($0.drop { $0 != " " }.dropFirst()) } ?? "Done."
@@ -304,6 +304,9 @@ struct SettingsView: View {
   @State private var confirmArcdps = false
   @State private var confirmReshade = false
   @State private var confirmAction: String?
+  // Start fresh's confirmation was opened over the moved install (else before the move): what the
+  // confirmation says, and what gw2om.sh start-fresh is told
+  @State private var freshMoved = false
   @Environment(\.colorScheme) private var scheme
 
   var body: some View {
@@ -365,7 +368,7 @@ struct SettingsView: View {
     }
     .alert(confirmTitle, isPresented: Binding(get: { confirmAction != nil }, set: { if !$0 { confirmAction = nil } })) {
       Button(confirmButton, role: .destructive) {
-        if let a = confirmAction { settings.run(a) }
+        if let a = confirmAction { settings.run(a, a == "start-fresh" ? [freshMoved ? "--moved" : "--before-move"] : []) }
         confirmAction = nil
       }
       Button("Cancel", role: .cancel) { confirmAction = nil }
@@ -396,7 +399,7 @@ struct SettingsView: View {
         + "its compiled shaders, pipeline archives and recorded pipelines. The next sessions build "
         + "them again, with more hitches at first."
     case "start-fresh":
-      (settings.installed
+      (freshMoved
        ? "This removes \(appName)'s install, the one moved from GW2 on Mac 0.1, as Uninstall does: the engine and the bottle with the game in it. "
        : "")
         + "The main window then shows the install choices, and GW2 on Mac 0.1's install no longer moves by itself. "
@@ -641,6 +644,7 @@ struct SettingsView: View {
                      ? "Removes the install moved from GW2 on Mac 0.1 and shows the install choices, to install Steam and the game anew. GW2 on Mac 0.1 stays as it is."
                      : "Skips the move and shows the install choices, to install Steam and the game anew. GW2 on Mac 0.1 stays as it is.") {
             SmallButton(settings.action == "start-fresh" ? "Starting fresh…" : "Start fresh…", icon: "rotate-ccw") {
+              freshMoved = settings.installed
               confirmAction = "start-fresh"
             }
             .disabled(settings.action != nil || settings.running)
