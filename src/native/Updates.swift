@@ -197,8 +197,8 @@ final class UserDriver: NSObject, SPUUserDriver {
 
   // The window's title and line when Sparkle finds no update. When the newest version needs a newer
   // macOS than this Mac has (Sparkle's reason "system is too old", with the feed's item), it says
-  // which version and which macOS. Every other reason keeps "is the latest version" and the usual
-  // title (nil). The renders' model check calls it.
+  // which version and which macOS, and where to update macOS. Every other reason keeps "is the
+  // latest version" and the usual title (nil). The renders' model check calls it.
   static func notFound(version: String, reason: SPUNoUpdateFoundReason?, latest: String?, minimum: String?,
                        macOS: OperatingSystemVersion) -> (title: String?, message: String) {
     guard reason == .systemIsTooOld, let latest, let minimum, !minimum.isEmpty else {
@@ -208,7 +208,8 @@ final class UserDriver: NSObject, SPUUserDriver {
     if macOS.patchVersion > 0 { system += ".\(macOS.patchVersion)" }
     return ("The update needs a newer macOS",
             "GW2 on Mac \(latest) needs macOS \(minimum) or later, and this Mac has macOS \(system). "
-              + "Version \(version) keeps working here.")
+              + "Version \(version) keeps working here. "
+              + "Update macOS in System Settings › General › Software Update to get it.")
   }
 
   func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) {
