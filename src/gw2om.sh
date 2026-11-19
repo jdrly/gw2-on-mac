@@ -5550,14 +5550,16 @@ cmd_play() {
     # (a starter that keeps the session's lock, on its fd 8, until this engine's Steam or wineserver
     # shows, or the process that becomes Wine has ended and is reaped. At LAUNCH_POLLS (2 minutes)
     # that process gets SIGKILL and is reaped. Every way out of the starter, a failure included,
-    # runs that same cleanup (its EXIT trap, set -e off), so the lock never goes while a launch is
-    # pending, a Play killed meanwhile included. Wine itself doesn't get the lock: Steam would hold
+    # runs that same cleanup (its EXIT trap, whose kill and wait may fail), so the lock never goes
+    # while a launch is pending, a Play killed meanwhile included. launch runs with set -e, so a
+    # failed write before or after the fork ends the starter with an error; only the watching
+    # after it runs with set -e off. Wine itself doesn't get the lock: Steam would hold
     # it for its whole run, and the next Play needs it. A start that shows nothing is a failure.)
     if [ -z "$DRY" ]; then
-      ( set +e
-        LAUNCH_WAIT=yes LAUNCH_PID="" seen=""
-        trap '[ -n "$seen" ] || [ -z "$LAUNCH_PID" ] || { kill -KILL "$LAUNCH_PID" 2>/dev/null; wait "$LAUNCH_PID" 2>/dev/null; }' EXIT
-        launch "$STEAM_EXE" "steam://install/$GW2_APPID" || exit 1
+      ( LAUNCH_WAIT=yes LAUNCH_PID="" seen=""
+        trap '[ -n "$seen" ] || [ -z "$LAUNCH_PID" ] || { kill -KILL "$LAUNCH_PID" 2>/dev/null || true; wait "$LAUNCH_PID" 2>/dev/null || true; }' EXIT
+        launch "$STEAM_EXE" "steam://install/$GW2_APPID"
+        set +e
         [ -n "$LAUNCH_PID" ] || exit 1
         k=0
         while [ $k -lt "$LAUNCH_POLLS" ]; do

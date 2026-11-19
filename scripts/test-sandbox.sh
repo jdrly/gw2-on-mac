@@ -356,7 +356,8 @@ case "${1:-}" in
     # with steam.autostart, a start of steam.exe starts that sleeper, as Wine starts Steam (once)
     d=$(dirname "$STANDIN_LOG")
     # (steam.delay: a start that hangs before Wine is up, deaf to TERM, as a stopped launcher would)
-    if [ -e "$d/steam.delay" ] && [ "${2:-}" != -shutdown ]; then trap '' TERM; exec sleep 31.25; fi
+    # (steam.delay.pid: its pid, which the exec keeps)
+    if [ -e "$d/steam.delay" ] && [ "${2:-}" != -shutdown ]; then echo $$ >"$d/steam.delay.pid"; trap '' TERM; exec sleep 31.25; fi
     if [ "${2:-}" = -shutdown ] && [ ! -e "$d/steam.stubborn" ] && [ -f "$d/steam.pid" ]; then kill "$(cat "$d/steam.pid")" 2>/dev/null || true
     elif [ "${2:-}" != -shutdown ] && [ -e "$d/steam.autostart" ] && ! kill -0 "$(cat "$d/steam.pid" 2>/dev/null)" 2>/dev/null; then
       ( "$(dirname "$0")/steam.exe" 120 </dev/null >/dev/null 2>&1 & echo $! >"$d/steam.pid" )
@@ -4032,12 +4033,13 @@ g install steam >/dev/null 2>&1
 # Play while the install waits for Steam's download and no Steam runs starts Steam; a start that
 # hangs is ended (SIGKILL, reaped) at the time limit before the session's lock goes
 SD=$(dirname "$STANDIN_LOG")
-touch "$SD/steam.delay"
+rm -f "$SD/steam.delay.pid" && touch "$SD/steam.delay"
 out=$(GW2_ON_MAC_LAUNCH_WAIT=20 g play 2>&1) && rc=0 || rc=$?
-check "Play in waiting_game with a Steam start that hangs: refused at the limit, the start ended, the session's lock free" \
-  eval '[ "$(st stage)" = waiting_game ] && [ "$rc" != 0 ] && has <(echo "$out") "^@error Steam didn.t start" && ! pgrep -f "sleep 31.25" >/dev/null && ! "$APP/Contents/Resources/helpers/sessionlock" held "$AD/.session.lock"'
-rm -f "$SD/steam.delay"
-pkill -f "sleep 31.25" 2>/dev/null || true
+DP=$(cat "$SD/steam.delay.pid" 2>/dev/null || true)
+check "Play in waiting_game with a Steam start that hangs: it reached the hang, refused at the limit, that start ended, the session's lock free" \
+  eval '[ "$(st stage)" = waiting_game ] && [ -n "$DP" ] && [ "$rc" != 0 ] && has <(echo "$out") "^@error Steam didn.t start" && ! kill -0 "$DP" 2>/dev/null && ! "$APP/Contents/Resources/helpers/sessionlock" held "$AD/.session.lock"'
+[ -z "$DP" ] || kill -KILL "$DP" 2>/dev/null || true
+rm -f "$SD/steam.delay" "$SD/steam.delay.pid"
 mkdir -p "$BOTTLE/drive_c/games" && echo "a game" >"$BOTTLE/drive_c/games/Gw2.dat"
 printf 'skipped\0\n' >"$AD/moved-from-0.1"
 out=$(g uninstall 2>&1) && rc=0 || rc=$?
