@@ -3987,14 +3987,17 @@ if hdiutil create -quiet -size 20m -type SPARSE -fs APFS -volname gw2om-mnt "$SA
   out=$(g uninstall 2>&1) && rc=0 || rc=$?
   check "Uninstall with another volume mounted in the bottle: refused, the bottle (a file beside the mount too) and the volume's file stay" \
     eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac kept its bottle" && has "$BOTTLE/drive_c/sentinel.txt" beside && has "$MNT/kept.txt" "another volume" && has "$LOGS/install.log" "another volume is mounted inside it"'
-  # (detached for sure before the next check: a runner may still hold the volume a moment)
+  # (detached for sure before the next check: a runner may still hold the volume a moment. The
+  # mount table read whole, no pipe; a mount that fails to list counts as still mounted. The EXIT
+  # trap that detaches goes only once it is detached)
+  mnt_listed() { local m; m=$(mount) || return 0; case "$m" in *" on $MNT ("*) return 0 ;; esac; return 1; }
   i=0
-  while mount | grep -qF " on $MNT (" && [ $i -lt 20 ]; do
+  while mnt_listed && [ $i -lt 20 ]; do
     hdiutil detach -quiet -force "$MNT" >/dev/null 2>&1 || sleep 0.5
     i=$((i + 1))
   done
-  trap - EXIT
-  check "  the volume is detached again" eval '! mount | grep -qF " on $MNT ("'
+  check "  the volume is detached again" eval '! mnt_listed'
+  mnt_listed || trap - EXIT
 else
   echo "  skip the mounted volume (hdiutil could not attach one)"
 fi
