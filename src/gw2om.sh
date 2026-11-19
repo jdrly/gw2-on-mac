@@ -17,11 +17,13 @@
 #                              (status: stage=waiting_game) and runs finish once it is complete
 #   gw2om.sh install arenanet <Gw2Setup-64.exe>
 #                              the same with ArenaNet's installer (checked first, check-setup)
-#   gw2om.sh install import <game folder> [--no-settings]
+#   gw2om.sh install import <game folder> --copy --confirm-path <path> --confirm-bytes <n> [--no-settings]
 #                              uses game files the Mac already has (another Wine app's Guild Wars
 #                              2): engine, bottle (and Steam, if the folder is Steam's), then the
 #                              folder cloned into the bottle (same disk) or copied, the game's
-#                              settings with it, and the finishing touches; the source is only read
+#                              settings with it, and the finishing touches; the source is only read.
+#                              Only with my yes to that folder at that size (the path and bytes
+#                              check-game or scan gave), and never 0.1.x's game (import_refused)
 #   gw2om.sh install move      GW2 on Mac 0.1.x's install into this app (the window starts it by
 #                              itself at the first start, status: move=yes): engine, a new bottle
 #                              whose Windows user is crossover as 0.1.x's, Steam from Valve, then
@@ -3411,8 +3413,10 @@ cmd_reshade() {
 }
 
 # --- Existing game files (install import): another Wine app's Guild Wars 2, cloned into the bottle
-# (the same disk: APFS clonefile, instant and without extra space) or copied (another disk). The
-# source is only read: its files, its bottle and its app stay as they are.
+# (the same disk: APFS clonefile, instant, but it grows apart from the original at the game's first
+# patch) or copied (another disk). Either takes the game's space in the end, so it runs only after
+# I said yes to that folder at that size (docs/adr/0020). The source is only read: its files, its
+# bottle and its app stay as they are. 0.1.x's game is never taken: the move renames it.
 
 # Where a bottle keeps the game: Steam's default library, ArenaNet's default folder
 GAME_RELS=("Program Files (x86)/Steam/steamapps/common/Guild Wars 2" "Program Files/Steam/steamapps/common/Guild Wars 2"
@@ -3486,25 +3490,62 @@ settings_source() {
   [ -n "$best" ] || return 1
   echo "$best"
 }
-# game_dir_of <path>: the Guild Wars 2 folder at <path>, or in the bottle (or wrapper) at <path>
-game_dir_of() {
+# game_at <path>: the Guild Wars 2 folder at <path>, or in the bottle (or wrapper) at <path>: GAME_LEX
+# as found there, GAME_DIR resolved (pwd -P); 1 if there is none
+game_at() {
   local p=${1:-} b rel
+  GAME_LEX="" GAME_DIR=""
   [ -n "$p" ] && [ -d "$p" ] || return 1
   for b in "$p" "$p/Guild Wars 2" "$p/common/Guild Wars 2" "$p/steamapps/common/Guild Wars 2"; do
-    if game_ok "$b"; then (cd "$b" && pwd -P); return 0; fi
+    if game_ok "$b"; then GAME_LEX=$b GAME_DIR=$(cd "$b" && pwd -P); return 0; fi
   done
   for b in "$p" "$p/drive_c" "$p/Contents/SharedSupport/prefix/drive_c" "$p/Contents/drive_c"; do
     for rel in "${GAME_RELS[@]}"; do
-      if game_ok "$b/$rel"; then (cd "$b/$rel" && pwd -P); return 0; fi
+      if game_ok "$b/$rel"; then GAME_LEX=$b/$rel GAME_DIR=$(cd "$b/$rel" && pwd -P); return 0; fi
     done
   done
   return 1
 }
-# game_line <game dir>: what the window lists, tab-separated:
+# in_old <path>: <path> is 0.1.x's folder or its cache folder or inside one, by their own paths or
+# resolved
+in_old() {
+  local d r
+  for d in "$OLD_APPDIR" "$OLD_CACHE"; do
+    { [ "$1" = "$d" ] || path_under "$1" "$d"; } && return 0
+    r=$(cd "$d" 2>/dev/null && pwd -P) || continue
+    { [ "$1" = "$r" ] || path_under "$1" "$r"; } && return 0
+  done
+  return 1
+}
+# import_refused <game dir as found> <resolved>: the import doesn't take it, and IMPORT_WHY says why:
+# anything in 0.1.x's folders by either path (the move renames its game, and a copy would take the
+# space twice), a folder that is a link, or one with a link in it that leads out (links_out: the
+# copy keeps a link, and what this app writes there would reach the other app's files)
+import_refused() {
+  local l
+  if in_old "$1" || in_old "$2"; then
+    IMPORT_WHY="That is $OLD_LABEL's game, and $APP_NAME doesn't copy it."
+    if [ "$(head -1 "$MOVE_RECORD" 2>/dev/null || true)" = skipped ]; then
+      IMPORT_WHY="$IMPORT_WHY Start fresh was chosen here, so install the game with Steam or ArenaNet's installer."
+    elif [ "$(move_game)" = 01 ]; then
+      IMPORT_WHY="$IMPORT_WHY Move it in again, in the main window, renames it back into this app without extra space."
+    else
+      IMPORT_WHY="$IMPORT_WHY At its first start $APP_NAME moves it in by a rename, without extra space."
+    fi
+    return 0
+  fi
+  if [ -L "$1" ]; then IMPORT_WHY="$1 is a link, so $APP_NAME doesn't copy it. Choose the folder it leads to."; return 0; fi
+  l=$(links_out "$2" "$2") || true
+  [ -n "$l" ] || return 1
+  IMPORT_WHY="$l is a link that leads out of the game folder, so $APP_NAME doesn't copy it: the copy would keep the link, and what this app writes there would reach the other app's files."
+}
+# game_line <game dir> [<as found>]: what the window lists, tab-separated (not a folder the import
+# refuses, import_refused):
 #   game <source> <route> <bytes> <same disk yes|no> <settings yes|no> <path>
 game_line() {
   local d=$1
   case "$d/" in "$BOTTLE/"*) return 0 ;; esac
+  if import_refused "${2:-$d}" "$d"; then return 0; fi
   printf 'game\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(source_label "$d")" "$(game_route_of "$d")" "$(folder_bytes "$d")" \
     "$(same_volume "$d" && echo yes || echo no)" "$(settings_source "$d" >/dev/null && echo yes || echo no)" "$d"
 }
@@ -3513,7 +3554,7 @@ cmd_scan() {
   local c rel
   wine_places | while IFS= read -r c; do
     for rel in "${GAME_RELS[@]}"; do
-      if game_ok "$c/$rel"; then game_line "$(cd "$c/$rel" && pwd -P)"; fi
+      if game_ok "$c/$rel"; then game_line "$(cd "$c/$rel" && pwd -P)" "$c/$rel"; fi
     done
   done | awk -F'\t' '!seen[$NF]++'
   echo "@done scanned"
@@ -3521,9 +3562,11 @@ cmd_scan() {
 
 cmd_check_game() {
   local d
-  d=$(game_dir_of "${1:-}") || { echo "@error This folder has no Guild Wars 2 in it: it needs Gw2-64.exe and a Gw2.dat of more than 1 GB."; exit 1; }
+  game_at "${1:-}" || { echo "@error This folder has no Guild Wars 2 in it: it needs Gw2-64.exe and a Gw2.dat of more than 1 GB."; exit 1; }
+  d=$GAME_DIR
   case "$d/" in "$BOTTLE/"*) echo "@error That is $APP_NAME's own copy of the game."; exit 1 ;; esac
-  game_line "$d"
+  if import_refused "$GAME_LEX" "$d"; then echo "@error $IMPORT_WHY"; exit 1; fi
+  game_line "$d" "$GAME_LEX"
   echo "@done $d"
 }
 
@@ -3617,6 +3660,9 @@ import_game() {
     return
   fi
   run mkdir -p "$(dirname "$dst")"
+  # (checked again under the lock: a link that leads out, made since, isn't copied either)
+  n=$(links_out "$src" "$src") || true
+  [ -z "$n" ] || die "$n is a link that leads out of the game folder, so $APP_NAME doesn't copy it (details in $LOGS/install.log)."
   IMPORT_DST=$dst
   clone_tree "$src" "$dst" "the game's files" "Guild Wars 2" "$total"
   IMPORT_HOW=$CLONE_HOW
@@ -3708,7 +3754,7 @@ install_imported() {
   fi
   write_manifest
   game_state
-  how="cloned from $label (no extra space)"
+  how="cloned from $label (no space today; it grows apart from the original as the game patches)"
   [ "$IMPORT_HOW" != copied ] || how="copied from $label"
   if [ "$GAME" = yes ] || [ -n "$DRY" ]; then
     if [ "$route" = steam ]; then phase 5; else phase 4; fi
@@ -4189,18 +4235,26 @@ path_under() { case "$1" in "$2/"?*) return 0 ;; esac; return 1; }
 # out wherever it leads (what is in that folder isn't looked through), and so does one that leads
 # nowhere.
 move_links() {
-  local d l p ap bad
+  local ap bad
   [ -z "$DRY" ] || return 0
   ap=$(cd "$APPDIR" && pwd -P)
-  bad=$(for d in "$@"; do
-      { [ -e "$d" ] || [ -L "$d" ]; } || continue
-      find "$d" -type l 2>/dev/null | while IFS= read -r l; do
-        p=$(realpath "$l" 2>/dev/null) || p=""
-        [ -n "$p" ] && [ -f "$p" ] && path_under "$p" "$ap" || echo "$l"
-      done
-    done | head -1) || true
+  bad=$(links_out "$ap" "$@") || true
   [ -z "$bad" ] ||
     die "$bad is a link to a folder or out of the files the move brought, so $APP_NAME doesn't move this install: what it writes there would reach $OLD_LABEL's files. Start fresh in Settings › Troubleshooting installs anew."
+}
+
+# links_out <base> <folder>...: the first link in the folders that doesn't lead to a file inside <base>
+# (a resolved path) once resolved; a link to a folder, or to nothing, counts as leading out
+links_out() {
+  local b=$1 d l p
+  shift
+  for d in "$@"; do
+    { [ -e "$d" ] || [ -L "$d" ]; } || continue
+    find "$d" -type l 2>/dev/null | while IFS= read -r l; do
+      p=$(realpath "$l" 2>/dev/null) || p=""
+      [ -n "$p" ] && [ -f "$p" ] && path_under "$p" "$b" || echo "$l"
+    done
+  done | head -1
 }
 
 # move_paths <ini>: 0.1.x's folders in it (or in the file it links to), as ReShade's ini spells them (Z:\...\GW2 on Mac, a
@@ -5313,11 +5367,11 @@ cmd_watch_session() {
 }
 
 cmd_install() {
-  local route=${1:-} setup=${2:-} want src="" with_settings=yes moving="" a
+  local route=${1:-} setup=${2:-} want src="" with_settings=yes moving="" a copy="" cpath="" cbytes="" bytes
   CREATED="" FETCH_PID="" IMPORT_DST="" IMPORT_ACF="" MOVE_MADE="" MOVING=""
   # a first install's state and manifest go too if it fails
   [ -f "$MANIFEST" ] || CREATED="state install-manifest.json"
-  case "$route" in steam|arenanet|import|move) ;; *) echo "@error Usage: gw2om.sh install steam | install arenanet <Gw2Setup-64.exe> | install import <game folder> [--no-settings] | install move"; exit 2 ;; esac
+  case "$route" in steam|arenanet|import|move) ;; *) echo "@error Usage: gw2om.sh install steam | install arenanet <Gw2Setup-64.exe> | install import <game folder> --copy --confirm-path <path> --confirm-bytes <n> [--no-settings] | install move"; exit 2 ;; esac
   if [ "$route" = move ]; then
     old_install || { echo "@error There is no $OLD_LABEL install to move: $OLD_APPDIR has no bottle with a complete Guild Wars 2 in it."; exit 2; }
     old_busy
@@ -5334,9 +5388,34 @@ cmd_install() {
     moving=yes MOVING=yes route=$OLD_ROUTE
   fi
   if [ "$route" = import ]; then
-    [ "${3:-}" != --no-settings ] || with_settings=no
-    src=$(game_dir_of "$setup") || { echo "@error There is no Guild Wars 2 in ${setup:-that folder} (Gw2-64.exe and a Gw2.dat of more than 1 GB)."; exit 2; }
+    set -- "${@:3}"
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --no-settings) with_settings=no ;;
+        --copy) copy=yes ;;
+        --confirm-path|--confirm-bytes)
+          [ $# -ge 2 ] || { echo "@error $1 needs a value."; exit 2; }
+          if [ "$1" = --confirm-path ]; then cpath=$2; else cbytes=$2; fi
+          shift ;;
+        *) echo "@error Usage: gw2om.sh install import <game folder> --copy --confirm-path <path> --confirm-bytes <n> [--no-settings]"; exit 2 ;;
+      esac
+      shift
+    done
+    game_at "$setup" || { echo "@error There is no Guild Wars 2 in ${setup:-that folder} (Gw2-64.exe and a Gw2.dat of more than 1 GB)."; exit 2; }
+    src=$GAME_DIR
     case "$src/" in "$BOTTLE/"*) echo "@error That is $APP_NAME's own copy of the game."; exit 2 ;; esac
+    if import_refused "$GAME_LEX" "$src"; then echo "@error $IMPORT_WHY Nothing changed."; exit 2; fi
+    # (a clone or a copy takes the game's space in the end: only with my yes to this folder at this
+    # size, the path and bytes the window showed)
+    bytes=$(folder_bytes "$src")
+    if [ -z "$copy" ] || [ -z "$cpath" ] || [ -z "$cbytes" ]; then
+      echo "@error $APP_NAME copies $src only after you say yes to it: it takes $(( (bytes + 999999999) / 1000000000 )) GB of this Mac's disk. Nothing changed."
+      exit 1
+    fi
+    if [ "$cpath" != "$src" ] || [ "$cbytes" != "$bytes" ]; then
+      echo "@error The folder isn't the one you said yes to, or it changed since ($cpath, $cbytes bytes; now $src, $bytes bytes). Choose it again. Nothing changed."
+      exit 1
+    fi
     route=$(game_route_of "$src")
     if game_runs_anywhere; then echo "@error Guild Wars 2 is running. Quit it first (in every app), so its files don't change while they are copied."; exit 1; fi
   fi

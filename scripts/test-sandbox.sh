@@ -3394,10 +3394,9 @@ mkdir -p "$CXG/bin64" "$CXS"
 echo "stand-in game" >"$CXG/Gw2-64.exe" && mkfile -n 2g "$CXG/Gw2.dat" && echo "bin" >"$CXG/bin64/CoherentUI64.dll"
 cp "$COMP/ui-scale/version.dll" "$CXG/version.dll" && echo "scale=1.75" >"$CXG/gw2-ui-scale.ini" && echo "arcdps" >"$CXG/d3d11.dll"
 cp "$SANDBOX/pe/nexus.dll" "$CXG/dxgi.dll"
-# (its addons folder a link to one outside the game folder, with arcdps at ReShade's chain path:
-# neither the import nor the install's addon syncs may touch that file)
+# (an addons folder outside the game folder, with arcdps at ReShade's chain path: a link to it in
+# the game folder makes the import refuse, below)
 mkdir -p "$SANDBOX/shared-addons/arcdps/chain" && cp "$SANDBOX/pe/arcdps.dll" "$SANDBOX/shared-addons/arcdps/chain/d3d11.dll"
-ln -s "$SANDBOX/shared-addons" "$CXG/addons"
 printf '"AppState"\n{\n\t"appid"\t\t"1284210"\n\t"installdir"\t\t"Guild Wars 2"\n\t"StateFlags"\t\t"4"\n}\n' >"$CX/Program Files (x86)/Steam/steamapps/appmanifest_1284210.acf"
 echo "cx local.dat" >"$CXS/Local.dat" && echo "<GSA_SDK cx/>" >"$CXS/GFXSettings.Gw2-64.exe.xml"
 WB="$H/Library/Containers/com.isaacmarovitz.Whisky/Bottles/5F0C2A9E-0000-4000-8000-00000000AA01"
@@ -3430,8 +3429,7 @@ BS="$BOTTLE/drive_c/users/$BUSER/AppData/Roaming/Guild Wars 2"
 out=$(g scan)
 line_of() { echo "$out" | awk -F'\t' -v s="$1" '$2 == s'; }
 fields() { line_of "$1" | cut -f3,5,6 | tr '\t' ' '; }
-check "scan finds 0.1's, CrossOver's, Whisky's and the wrapper's, not the broken one" [ "$(echo "$out" | grep -c '^game')" = 4 ]
-check "  0.1's: GW2 on Mac 0.1, the Steam route, the same disk, settings" [ "$(fields 'GW2 on Mac 0.1')" = "steam yes yes" ]
+check "scan finds CrossOver's, Whisky's and the wrapper's, not 0.1's nor the broken one" eval '[ "$(echo "$out" | grep -c "^game")" = 3 ] && [ -z "$(line_of "GW2 on Mac 0.1")" ]'
 check "  CrossOver's: the Steam route, the same disk, settings" [ "$(fields 'CrossOver · Steam GW2')" = "steam yes yes" ]
 check "  its size: the folder's files (over 2 GB)" [ "$(line_of 'CrossOver · Steam GW2' | cut -f4)" -gt 2147483648 ]
 check "  its path" [ "$(line_of 'CrossOver · Steam GW2' | cut -f7)" = "$CXG" ]
@@ -3441,22 +3439,66 @@ check "check-game: a folder without the game" sh -c "'$G' check-game '$SANDBOX/s
 check "check-game: Gw2.dat under 1 GB is not the game" sh -c "'$G' check-game '$BR' | grep -q '^@error'"
 check "check-game: the wrapper app itself finds the game in it" sh -c "'$G' check-game '$WRAP' | grep -q \"\$(printf 'game\tWrapper · Guild Wars 2\tarenanet')\""
 check "check-game: a bottle's folder finds its Steam install" sh -c "'$G' check-game '$(dirname "$CX")' | grep -q \"\$(printf '\tsteam\t')\""
+# gi <folder> [<option>...]: install import with my yes to the folder at its size, as check-game
+# gave them (what the window passes after its alert)
+gi() {
+  local src=$1 l
+  shift
+  l=$(g check-game "$src" | grep '^game' | head -1)
+  g install import "$src" "$@" --copy --confirm-path "$(printf '%s' "$l" | cut -f7)" --confirm-bytes "$(printf '%s' "$l" | cut -f4)"
+}
+# 0.1's game is never taken (the move renames it): by its path, inside its bottle, through a link to
+# it, and through a link in 0.1's folder to a game outside; with a yes passed or not
+check "check-game refuses 0.1's game, and says the first start moves it" sh -c "'$G' check-game '$O1G' | grep -q '^@error That is GW2 on Mac 0.1.s game, and GW2 on Mac doesn.t copy it\. At its first start GW2 on Mac moves it in by a rename, without extra space\.$'"
+check "  and 0.1's bottle" sh -c "'$G' check-game '$O1/bottle' | grep -q '^@error That is GW2 on Mac 0.1.s game'"
+ln -s "$O1G" "$SANDBOX/to-o1"
+check "  and a link to it from outside" sh -c "'$G' check-game '$SANDBOX/to-o1' | grep -q '^@error That is GW2 on Mac 0.1.s game'"
+rm -f "$SANDBOX/to-o1"
+mkgame() { mkdir -p "$1" && echo "stand-in game" >"$1/Gw2-64.exe" && mkfile -n "${2:-1100m}" "$1/Gw2.dat"; }
+mkgame "$SANDBOX/o1-out/Guild Wars 2" && mkdir "$O1C/Program Files" && ln -s "$SANDBOX/o1-out/Guild Wars 2" "$O1C/Program Files/Guild Wars 2"
+check "  and a link in 0.1's bottle to a game outside it" sh -c "'$G' check-game '$O1C/Program Files/Guild Wars 2' | grep -q '^@error That is GW2 on Mac 0.1.s game'"
+out=$(g install import "$O1C/Program Files/Guild Wars 2" --copy --confirm-path "$SANDBOX/o1-out/Guild Wars 2" --confirm-bytes 1153433614 2>&1) && rc=0 || rc=$?
+check "    install import refuses it, even with a yes passed, and creates nothing" eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error That is GW2 on Mac 0.1.s game.* Nothing changed\.$" && [ -z "$(ad_list)" ]'
+rm -f "$O1C/Program Files/Guild Wars 2"; rmdir "$O1C/Program Files"; rm -rf "$SANDBOX/o1-out"
+out=$(g install import "$O1G" --copy --confirm-path "$O1G" --confirm-bytes 1153433614 2>&1) && rc=0 || rc=$?
+check "install import of 0.1's game, a yes passed: refused, nothing created, 0.1's folders as they were" eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error That is GW2 on Mac 0.1.s game.* Nothing changed\.$" && [ -z "$(ad_list)" ] && [ "$(o1sum)" = "$O1SUM" ]'
+mkdir -p "$AD" && echo skipped >"$AD/moved-from-0.1"
+check "  after Start fresh, it says to install the game anew" sh -c "'$G' check-game '$O1G' | grep -q '^@error .* Start fresh was chosen here, so install the game with Steam or ArenaNet.s installer\.$'"
+rm -f "$AD/moved-from-0.1"
+# a folder that is a link, and one with a link that leads out of it: refused
+ln -s "$WHG" "$SANDBOX/to-whisky"
+check "check-game refuses a game folder that is a link" sh -c "'$G' check-game '$SANDBOX/to-whisky' | grep -q '^@error $SANDBOX/to-whisky is a link'"
+rm -f "$SANDBOX/to-whisky"
+ln -s "$SANDBOX/shared-addons" "$CXG/addons"
+check "check-game refuses a game folder with a link that leads out of it" sh -c "'$G' check-game '$CXG' | grep -q '^@error $CXG/addons is a link that leads out of the game folder'"
+out=$(g install import "$CXG" --copy --confirm-path "$CXG" --confirm-bytes 1 2>&1) && rc=0 || rc=$?
+check "  install import too, nothing created; the file it leads to is still there" eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error $CXG/addons is a link" && [ -z "$(ad_list)" ] && same "$SANDBOX/pe/arcdps.dll" "$SANDBOX/shared-addons/arcdps/chain/d3d11.dll"'
+check "  the scan leaves it out" eval '! g scan | grep -qF "$CXG"'
+rm -f "$CXG/addons"
+# (the links above came and went: the sources' snapshot again, for the checks below)
+snap >"$SANDBOX/sources-before.txt"
+# no copy without my yes to this folder at this size
+CXB=$(g check-game "$CXG" | grep '^game' | cut -f4)
+out=$(g install import "$CXG" 2>&1) && rc=0 || rc=$?
+check "install import without a yes: refused with the size, nothing created" eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac copies $CXG only after you say yes to it: it takes 3 GB of this Mac.s disk\. Nothing changed\.$" && [ -z "$(ad_list)" ]'
+out=$(g install import "$CXG" --copy --confirm-path "$CXG" --confirm-bytes "$((CXB - 1))" 2>&1) && rc=0 || rc=$?
+check "  with a yes to another size (the folder changed since): refused, nothing created" eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error The folder isn.t the one you said yes to, or it changed since" && [ -z "$(ad_list)" ]'
+out=$(g install import "$CXG" --copy --confirm-path "$WHG" --confirm-bytes "$CXB" 2>&1) && rc=0 || rc=$?
+check "  with a yes to another folder: refused, nothing created" eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error The folder isn.t the one you said yes to" && [ -z "$(ad_list)" ]'
 
 # a Guild Wars 2 that runs (in another app): its files may change, so nothing is copied
 mkdir -p "$SANDBOX/elsewhere" && cp "$SANDBOX/sleeper" "$SANDBOX/elsewhere/Gw2-64.exe"
 "$SANDBOX/elsewhere/Gw2-64.exe" 60 & ep=$!
 sleep 0.3
-out=$(g install import "$CXG" 2>&1) && rc=0 || rc=$?
+out=$(gi "$CXG" 2>&1) && rc=0 || rc=$?
 check "install import refused while Guild Wars 2 runs elsewhere, nothing created" eval '[ "$rc" != 0 ] && has <(echo "$out") "@error Guild Wars 2 is running" && [ ! -e "$AD/engine" ]'
-out=$(g install import "$O1G" 2>&1) && rc=0 || rc=$?
-check "  0.1's too" eval '[ "$rc" != 0 ] && has <(echo "$out") "@error Guild Wars 2 is running" && [ ! -e "$AD/engine" ]'
 kill $ep 2>/dev/null || true; wait $ep 2>/dev/null || true
 
-out=$(GW2_ON_MAC_DRY_RUN=1 g install import "$CXG" 2>&1) && rc=0 || rc=$?
+out=$(GW2_ON_MAC_DRY_RUN=1 gi "$CXG" 2>&1) && rc=0 || rc=$?
 check "dry-run install import: exits 0, would clone, creates nothing" eval '[ "$rc" = 0 ] && has <(echo "$out") "\[dry-run\] clone" && [ -z "$(ad_list)" ]'
 
 : >"$STANDIN_LOG"
-out=$(g install import "$CXG" 2>&1) && rc=0 || rc=$?
+out=$(gi "$CXG" 2>&1) && rc=0 || rc=$?
 GDI="$STEAM/steamapps/common/Guild Wars 2"
 check "install import (CrossOver's Steam install) exits 0" [ "$rc" = 0 ]
 check "  the phases 1-5 (engine, bottle, Steam, the files, finishing)" [ "$(echo "$out" | grep '^@phase' | tr '\n' ' ')" = "@phase 1 @phase 2 @phase 3 @phase 4 @phase 5 " ]
@@ -3468,33 +3510,20 @@ check "  Steam installed, not started for an install" eval '[ "$(st steam)" = ye
 check "  our own addon left out (version.dll, gw2-ui-scale.ini)" eval '[ ! -e "$GDI/version.dll" ] && [ ! -e "$GDI/gw2-ui-scale.ini" ]'
 check "  another program's d3d11.dll left out, and the summary says so" eval '[ ! -e "$GDI/d3d11.dll" ] && has <(echo "$out") "^@done .*Another program.s d3d11.dll stayed behind\."'
 check "  another addon (not arcdps) came along, and the summary names it" eval 'same "$CXG/dxgi.dll" "$GDI/dxgi.dll" && has <(echo "$out") "^@done .*Addons that came along: dxgi.dll"'
-check "  arcdps at the chain path behind a link: the link came along, and the file it leads to is still there" \
-  eval '[ -L "$GDI/addons" ] && same "$SANDBOX/pe/arcdps.dll" "$SANDBOX/shared-addons/arcdps/chain/d3d11.dll"'
-rm -f "$GDI/addons"
 check "  its ReShade.ini stayed behind, the summary says so; its presets and shaders came along" eval '[ ! -e "$GDI/ReShade.ini" ] && has <(echo "$out") "^@done .*ReShade stayed behind: turn it on in Settings › Interface." && has <(echo "$out") "^ReShade stayed behind in $CXG (ReShade.ini)" && same "$CXG/ReShadePreset.ini" "$GDI/ReShadePreset.ini" && same "$CXG/reshade-shaders/Shaders/Mine.fx" "$GDI/reshade-shaders/Shaders/Mine.fx"'
 check "  the game's settings in the bottle" eval 'same "$CXS/Local.dat" "$BS/Local.dat" && same "$CXS/GFXSettings.Gw2-64.exe.xml" "$BS/GFXSettings.Gw2-64.exe.xml"'
-check "  the summary: cloned, with the settings" has <(echo "$out") "^@done Guild Wars 2 is ready: its files were cloned from CrossOver · Steam GW2 (no extra space), with your game settings"
+check "  the summary: cloned, with the settings" has <(echo "$out") "^@done Guild Wars 2 is ready: its files were cloned from CrossOver · Steam GW2 (no space today; it grows apart from the original as the game patches), with your game settings"
 check "  the source is unchanged" sources_unchanged
 c=$(play_cmd); check "  Play: Steam (no login in this bottle yet: its window)" eval '[[ "$c" == *"steam.exe -applaunch 1284210"* && "$c" != *-silent* ]]'
 check "  uninstall" sh -c "'$G' uninstall | grep -q '@done'"
 check "  the source is still unchanged" sources_unchanged
-
-# GW2 on Mac 0.1's: arcdps stays behind (addons aren't cleared for this engine yet), DXMT's caches too
-out=$(g install import "$O1G" 2>&1) && rc=0 || rc=$?
-check "install import (GW2 on Mac 0.1's Steam install) exits 0, cloned" eval '[ "$rc" = 0 ] && has <(echo "$out") "Cloning the game" && [ "$(st route) $(st game)" = "steam yes" ]'
-check "  arcdps, version.dll and gw2-ui-scale.ini left out; arcdps's settings came along" eval '[ ! -e "$GDI/d3d11.dll" ] && [ ! -e "$GDI/version.dll" ] && [ ! -e "$GDI/gw2-ui-scale.ini" ] && has "$GDI/addons/arcdps/arcdps.ini" session'
-check "  the summary names what stayed behind" has <(echo "$out") "^@done Guild Wars 2 is ready: its files were cloned from GW2 on Mac 0.1 (no extra space), with your game settings\..* The larger interface's version.dll stayed behind: this app has its own\. arcdps stayed behind\. Turn it on in Settings once it is cleared for this engine\. Steam may"
-check "  the game's settings in the bottle" eval 'same "$O1S/Local.dat" "$BS/Local.dat" && same "$O1S/GFXSettings.Gw2-64.exe.xml" "$BS/GFXSettings.Gw2-64.exe.xml"'
-check "  no DXMT cache came along" eval '[ -z "$(find "$CACHE" -type f -path "*dxmt*" 2>/dev/null)" ]'
-check "  0.1's folders: the same checksum" [ "$(o1sum)" = "$O1SUM" ]
-g uninstall >/dev/null 2>&1
 
 # into an earlier run's bottle, whose own settings go to a backup folder
 g install steam >/dev/null 2>&1; g stop-waiting >/dev/null
 mkdir -p "$BS" && echo "the bottle's own" >"$BS/Local.dat"
 backup_kept() { local f; for f in "$BS"/"$APP_FOLDER backup "*/Local.dat; do has "$f" "the bottle's own" && return 0; done; return 1; }
 : >"$STANDIN_LOG"
-out=$(g install import "$WRAP" 2>&1) && rc=0 || rc=$?
+out=$(gi "$WRAP" 2>&1) && rc=0 || rc=$?
 check "install import of the wrapper's (ArenaNet) into the earlier bottle exits 0" [ "$rc" = 0 ]
 check "  the phases 1-4 (engine, bottle, the files, finishing)" [ "$(echo "$out" | grep '^@phase' | tr '\n' ' ')" = "@phase 1 @phase 2 @phase 3 @phase 4 " ]
 check "  route=arenanet origin=import game=yes, in Program Files" eval '[ "$(st route) $(st origin) $(st game)" = "arenanet import yes" ] && [ "$(st game_dir)" = "$BOTTLE/drive_c/Program Files/Guild Wars 2" ]'
@@ -3505,7 +3534,7 @@ g play >/dev/null 2>&1; started
 check "  Play starts the game's own launcher" has "$STANDIN_LOG" 'wine C:\\Program Files\\Guild Wars 2\\Gw2-64.exe'
 g uninstall >/dev/null 2>&1
 
-out=$(g install import "$WHG" --no-settings 2>&1) && rc=0 || rc=$?
+out=$(gi "$WHG" --no-settings 2>&1) && rc=0 || rc=$?
 check "install import --no-settings (Whisky's) exits 0" [ "$rc" = 0 ]
 check "  no game settings brought" eval '[ ! -e "$BS/Local.dat" ] && ! has <(echo "$out") "with your game settings"'
 check "  its ReShade (d3d11.dll) stayed behind, and the summary says so" eval '[ ! -e "$BOTTLE/drive_c/Program Files/Guild Wars 2/d3d11.dll" ] && has <(echo "$out") "^@done .*ReShade stayed behind" && ! has <(echo "$out") "Addons that came along"'
@@ -3520,7 +3549,7 @@ if hdiutil create -quiet -size 200m -type SPARSE -fs APFS -volname gw2om-test "$
   OG="$VOL/Bottles/Other/drive_c/Program Files/Guild Wars 2"
   mkdir -p "$OG" && echo "stand-in game" >"$OG/Gw2-64.exe" && mkfile -n 1100m "$OG/Gw2.dat"
   check "check-game on another disk: not the same disk" eval '[ "$(g check-game "$OG" | grep "^game" | cut -f5)" = no ]'
-  out=$(g install import "$OG" 2>&1) && rc=0 || rc=$?
+  out=$(gi "$OG" 2>&1) && rc=0 || rc=$?
   check "install import from another disk exits 0: copied, with progress" eval '[ "$rc" = 0 ] && has <(echo "$out") "Copying the game" && has <(echo "$out") "^@progress Guild Wars 2 " && has <(echo "$out") "^@done .*copied from"'
   check "  the copy is complete" eval '[ "$(st game)" = yes ] && [ "$(stat -f %z "$BOTTLE/drive_c/Program Files/Guild Wars 2/Gw2.dat")" = "$(stat -f %z "$OG/Gw2.dat")" ]'
   g uninstall >/dev/null 2>&1
@@ -3528,11 +3557,11 @@ if hdiutil create -quiet -size 200m -type SPARSE -fs APFS -volname gw2om-test "$
 else
   echo "  skip the disk image (hdiutil could not attach one); the forced copy below covers the copy"
 fi
-out=$(GW2_ON_MAC_IMPORT_COPY=1 g install import "$WHG" 2>&1) && rc=0 || rc=$?
+out=$(GW2_ON_MAC_IMPORT_COPY=1 gi "$WHG" 2>&1) && rc=0 || rc=$?
 check "install import, copy forced: exits 0, copied with progress" eval '[ "$rc" = 0 ] && has <(echo "$out") "Copying the game" && has <(echo "$out") "^@progress Guild Wars 2 "'
 check "  the copy is complete, without Whisky's ReShade" eval '[ "$(st game)" = yes ] && [ "$(stat -f %z "$BOTTLE/drive_c/Program Files/Guild Wars 2/Gw2.dat")" = 1153433600 ] && [ ! -e "$BOTTLE/drive_c/Program Files/Guild Wars 2/d3d11.dll" ]'
 g uninstall >/dev/null 2>&1
-out=$(GW2_ON_MAC_IMPORT_COPY=1 GW2_ON_MAC_FREE_KB=3020000 g install import "$CXG" 2>&1) && rc=0 || rc=$?
+out=$(GW2_ON_MAC_IMPORT_COPY=1 GW2_ON_MAC_FREE_KB=3020000 gi "$CXG" 2>&1) && rc=0 || rc=$?
 check "a copy without the free space is refused" eval '[ "$rc" != 0 ] && has <(echo "$out") "@error Not enough free disk space to copy the game"'
 check "  and leaves nothing behind" eval '[ ! -e "$AD/engine" ] && [ ! -e "$AD/bottle" ] && [ ! -e "$AD/state" ] && [ ! -e "$AD/.lock" ]'
 check "the sources never changed" sources_unchanged

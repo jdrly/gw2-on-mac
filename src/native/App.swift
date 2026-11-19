@@ -445,7 +445,8 @@ final class Installer {
     }
   }
 
-  func start(_ operation: Operation) {
+  // copying: the game folder I said yes to (Game files I already have), as the alert showed it
+  func start(_ operation: Operation, copying: GameFolder? = nil) {
     guard !isOperating else { return }
     phase = .working(operation)
     self.operation = operation
@@ -459,9 +460,9 @@ final class Installer {
     var arguments = [script.path, operation == .move ? "install" : operation.rawValue]
     if operation == .move { arguments.append("move") }
     if operation == .install {
-      if route == .existing, let chosenGame {
-        arguments += ["import", chosenGame.path]
-        if !bringSettings || !chosenGame.hasSettings { arguments.append("--no-settings") }
+      if route == .existing, let game = copying {
+        arguments += ["import", game.path, "--copy", "--confirm-path", game.path, "--confirm-bytes", String(game.bytes)]
+        if !bringSettings || !game.hasSettings { arguments.append("--no-settings") }
       } else {
         arguments.append(route == .existing ? Route.steam.rawValue : route.rawValue)
         if route == .arenanet, let setupFile { arguments.append(setupFile.path) }

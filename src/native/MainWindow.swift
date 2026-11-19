@@ -20,6 +20,9 @@ struct MainView: View {
   let settings: GameSettings
   @Environment(\.openWindow) private var openWindow
   @State private var confirmUninstall = false
+  // Game files I already have: the copy only after a yes to this folder at this size (gw2om.sh
+  // install import --copy --confirm-path --confirm-bytes, with the folder the alert showed)
+  @State private var confirmCopy: Installer.GameFolder?
   @State private var showLogSheet = false
   // after Rollback: how to install GW2 on Mac 0.1.x (RollbackSheet, from RolledBackPanel)
   @State private var showRollbackSheet = false
@@ -74,9 +77,10 @@ struct MainView: View {
       showLogSheet = false
       showRollbackSheet = false
       confirmUninstall = false
+      confirmCopy = nil
       blocked = nil
     }
-    .onChange(of: showLogSheet || showRollbackSheet || confirmUninstall || blocked != nil) { _, open in
+    .onChange(of: showLogSheet || showRollbackSheet || confirmUninstall || confirmCopy != nil || blocked != nil) { _, open in
       installer.sheetOpen = open
     }
     // (a setting saved in the Settings window: the checks read it again, the Metal row's in Graphics)
@@ -95,6 +99,19 @@ struct MainView: View {
            + "game's files are in the bottle, so they go with it: Guild Wars 2 has to download again if "
            + "you install it later. Its caches go too, DXMT's shader cache with them. Your account, "
            + "characters and Steam library are not affected. The logs are kept.")
+    }
+    .alert("Copy Guild Wars 2 into \(appName)?",
+           isPresented: Binding(get: { confirmCopy != nil }, set: { if !$0 { confirmCopy = nil } }),
+           presenting: confirmCopy) { game in
+      Button("Copy \(Installer.gigabytes(game.bytes))") { installer.start(.install, copying: game) }
+      Button("Cancel", role: .cancel) {}.keyboardShortcut(.defaultAction)
+    } message: { game in
+      Text("\(game.path) goes into \(appName)'s bottle as a copy of \(Installer.gigabytes(game.bytes)). "
+           + "This Mac's disk has \(Installer.gigabytes(installer.diskFree)) free. "
+           + (game.sameDisk
+              ? "On this disk it starts as an APFS clone, which takes no space today but grows apart from the original at the game's first patch, up to its whole size. "
+              : "")
+           + "The original stays as it is.")
     }
     .alert(blocked?.title ?? "", isPresented: Binding(get: { blocked != nil }, set: { if !$0 { blocked = nil } }),
            presenting: blocked) { _ in
@@ -121,6 +138,8 @@ struct MainView: View {
         blocked = Blocked(title: "Can't install yet", message: reason)
       } else if let reason = busyReason {
         blocked = Blocked(title: "Can't install now", message: reason)
+      } else if installer.route == .existing, let game = installer.chosenGame {
+        confirmCopy = game
       } else {
         installer.start(.install)
       }
@@ -704,7 +723,7 @@ struct ChoosePanel: View {
       }
       RouteCard(selected: installer.route == .existing, icon: "hard-drive", title: "Game files I already have",
                 summary: "No download",
-                detail: "From GW2 on Mac 0.1, CrossOver, Whisky or an app wrapper. No download.") {
+                detail: "From CrossOver, Whisky or an app wrapper. No download.") {
         installer.route = .existing
       } extra: {
         ExistingGames(installer: installer)
@@ -721,7 +740,7 @@ struct ChoosePanel: View {
       HStack(alignment: .top, spacing: 7) {
         LucideIcon(name: "info", size: 13).foregroundStyle(Brand.fg3)
         Text(installer.route == .existing
-             ? "Cloned or copied into \(appName)'s bottle. The originals stay as they are."
+             ? "Cloned or copied into \(appName)'s bottle once you say yes to its size. The originals stay as they are."
              : "Every download comes from Valve or ArenaNet. \(appName) hosts nothing of the game.")
           .font(.body(12)).bodyBox(12, 1.3).foregroundStyle(Brand.fg3)
           .fixedSize(horizontal: false, vertical: true)
@@ -830,7 +849,7 @@ struct ExistingGames: View {
         HStack(alignment: .top, spacing: 6) {
           LucideIcon(name: game.sameDisk ? "zap" : "hard-drive", size: 13).foregroundStyle(Brand.gold).padding(.top, 1)
           Text(game.sameDisk
-               ? "Same disk: cloned in an instant, without taking extra space."
+               ? "Same disk: an APFS clone, no space today. It grows apart at the game's first patch, up to \(Installer.gigabytes(game.bytes))."
                : "Another disk: copied, \(Installer.gigabytes(game.bytes)) on this Mac's disk.")
             .font(.body(12)).bodyBox(12, 1.3).foregroundStyle(Brand.fg2)
             .fixedSize(horizontal: false, vertical: true)
@@ -853,7 +872,7 @@ struct ExistingGames: View {
           Text("Looking for Guild Wars 2 on this Mac…")
         } else {
           LucideIcon(name: "info", size: 14)
-          Text("None found in GW2 on Mac 0.1, CrossOver, Whisky or app wrappers. Choose its folder below.")
+          Text("None found in CrossOver, Whisky or app wrappers. Choose its folder below.")
             .fixedSize(horizontal: false, vertical: true)
         }
       }
