@@ -172,6 +172,8 @@ final class Installer {
   var sessionEnded = Date.distantPast
   // an operation has ended (a held app update may go ahead)
   var onIdle: (() -> Void)?
+  // the first status, before the window and the menus read it (GW2onMacApp starts Sparkle there)
+  var onFirstStatus: (([String: String]) -> Void)?
 
   private var process: Process?
   let script = Brand.resources.appendingPathComponent("gw2om.sh")
@@ -303,6 +305,7 @@ final class Installer {
   }
 
   private func applyStatus(_ values: [String: String]) {
+    if let first = onFirstStatus { onFirstStatus = nil; first(values) }
     status = values
     guard values["macos_ok"] != "no" else { return }
     // a session runs (the window opened while the game starts or runs, or Steam closes after it):
@@ -851,11 +854,13 @@ struct GW2onMacApp: App {
           updates.closeSheets = { [installer] in installer.closeSheets += 1 }
           installer.onIdle = { [updates] in updates.installerIdle() }
           // (Sparkle once the first status says this Mac runs the engine: below its macOS, no update
-          // check, and Check for Updates… stays disabled)
-          installer.refresh { [updates, installer] in
-            if !installer.gated { updates.start() }
+          // check, and Check for Updates… stays disabled; the settings after it, since they set its
+          // automatic checks)
+          installer.onFirstStatus = { [updates, settings] values in
+            if values["macos_ok"] != "no" { updates.start() }
+            settings.reload()
           }
-          settings.reload()
+          installer.refresh()
           NSApp.activate()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
