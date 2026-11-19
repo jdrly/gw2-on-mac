@@ -330,22 +330,30 @@ jobs:
           if scripts/stage-components.sh --fetch >"$RUNNER_TEMP/stage.txt" 2>&1; then echo "stage-components.sh took a changed archive"; exit 1; fi
           grep 'does not match the sha256 in prebuilt.lock' "$RUNNER_TEMP/stage.txt"
 
-  # The suite as three groups side by side (scripts/test-sandbox.sh, GROUP): settings is the dry
+  # The suite as four groups side by side (scripts/test-sandbox.sh, GROUP): settings is the dry
   # runs to Collect Logs on one Steam install, sessions is Steam in the background to Uninstall on
-  # an install it makes itself, and rest is what starts from nothing. On a slow runner, in the pull
-  # request run 44123244664, the suite's own seconds came to about 10, 7 and 6 minutes and the jobs
-  # to about 10, 8 and 7. I gave sessions 20 minutes and kept 15 for the other two. After #278 it
-  # took 13 min 58 s (run 44448554814), about 226 s of that in ReShade's sections. A fourth group
-  # is a later design question.
+  # an install it makes itself, rest is what starts from nothing but the move of 0.1's install, and
+  # move is that move. Each limit is about 1.7 times the group's slowest job, from the 0.2.0-rc.1
+  # dev build (run 44464935469), whose runners were slower than a pull request's:
+  #   settings: 11 min 8 s there, so 19
+  #   move: its section took 7 min 39 s there inside rest, about 8 min as a job, so 14
+  #   rest: never finished there. Its part before the move took 2 min 26 s, and dev-switches.conf
+  #     onwards ran about 3.2 times slower than the 182 s of pull request run 44462903934, so about
+  #     12 min, an estimate, and 21
+  #   sessions: 10 min there, but 13 min 58 s in pull request run 44448554814, so 24 from that one
   sandbox:
     needs: build
     runs-on: xcode-27
     name: sandbox (${{ matrix.group }})
-    timeout-minutes: ${{ matrix.group == 'sessions' && 20 || 15 }}
+    timeout-minutes: ${{ matrix.minutes }}
     strategy:
       fail-fast: false
       matrix:
-        group: [settings, sessions, rest]
+        include:
+          - { group: settings, minutes: 19 }
+          - { group: sessions, minutes: 24 }
+          - { group: rest, minutes: 21 }
+          - { group: move, minutes: 14 }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

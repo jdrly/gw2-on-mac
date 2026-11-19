@@ -16,8 +16,9 @@
 #      $GW2_ON_MAC_WORKSPACE/work/bottles, the workspace defaulting to ../gw2-on-mac)
 #      GROUP (all, the default; settings: the dry runs to Collect Logs, on one Steam install;
 #      sessions: Steam in the background to Uninstall, on an install it makes itself
-#      (fixture_install); rest: what starts from nothing. The Checks workflow runs the three as
-#      three jobs. On one Mac run one at a time: each ends every watch-session of this app)
+#      (fixture_install); rest: what starts from nothing, but the move; move: the move of GW2 on
+#      Mac 0.1's install, also from nothing. The Checks workflow runs the four as four jobs. On
+#      one Mac run one at a time: each ends every watch-session of this app)
 # Runs under macOS's /bin/bash 3.2.
 # Many variables are read only inside the strings that check() evals, which shellcheck can't see.
 # shellcheck disable=SC2034
@@ -117,7 +118,7 @@ other_dxmt_kept() { has "$OTHER_DXMT/shaders_320.db" "another setup's"; }
 
 pass=0 fail=0
 GROUP="${GROUP:-all}"
-case "$GROUP" in all|settings|sessions|rest) ;; *) echo "GROUP must be all, settings, sessions or rest" >&2; exit 1 ;; esac
+case "$GROUP" in all|settings|sessions|rest|move) ;; *) echo "GROUP must be all, settings, sessions, rest or move" >&2; exit 1 ;; esac
 in_group() { [ "$GROUP" = all ] || [ "$GROUP" = "$1" ]; }
 # Each check's commands: what gw2om.sh prints goes to checks/NNNN.txt as well, through G, a wrapper
 # that appends it there (GW2OM is the app's own gw2om.sh). checks.txt lists the results, and a
@@ -3306,6 +3307,11 @@ check "status: not installed" [ "$(st installed)/$(st engine_installed)" = no/no
 rm -rf "$AD"
 fi
 
+# GW2 on Mac 0.1's folders, which rest and move both make, and a checksum of every file in them,
+# by content
+O1="$H/Library/Application Support/GW2 on Mac"
+o1sum() { (cd "$H/Library" && find "Application Support/GW2 on Mac" "Caches/GW2 on Mac" -type f -print0 | sort -z | xargs -0 shasum -a 256) | shasum -a 256; }
+
 if in_group rest; then
 section "ArenaNet route"
 if [ -f "$SIGNED_PE" ]; then
@@ -3352,7 +3358,6 @@ section "Use existing game files (other Wine apps' installs)"
 # DXMT's caches in its cache folder), CrossOver (a Steam install, with my own addon, another
 # program's d3d11.dll, another addon and the game's settings), Whisky and a Sikarugir wrapper
 # (ArenaNet installs), a broken one (Gw2.dat too small). Gw2.dat is sparse.
-O1="$H/Library/Application Support/GW2 on Mac"
 O1C="$O1/bottle/drive_c"
 O1G="$O1C/Program Files (x86)/Steam/steamapps/common/Guild Wars 2"
 O1S="$O1C/users/$BUSER/AppData/Roaming/Guild Wars 2"
@@ -3365,8 +3370,6 @@ printf '"AppState"\n{\n\t"appid"\t\t"1284210"\n\t"installdir"\t\t"Guild Wars 2"\
 echo "stand-in steam" >"$O1C/Program Files (x86)/Steam/steam.exe"
 echo "0.1 local.dat" >"$O1S/Local.dat" && echo "<GSA_SDK 0.1/>" >"$O1S/GFXSettings.Gw2-64.exe.xml"
 echo "shaders" >"$O1X/shaders.bin"
-# a checksum of every file of 0.1's folders, by content
-o1sum() { (cd "$H/Library" && find "Application Support/GW2 on Mac" "Caches/GW2 on Mac" -type f -print0 | sort -z | xargs -0 shasum -a 256) | shasum -a 256; }
 O1SUM=$(o1sum)
 CX="$H/Library/Application Support/CrossOver/Bottles/Steam GW2/drive_c"
 CXG="$CX/Program Files (x86)/Steam/steamapps/common/Guild Wars 2"
@@ -3518,7 +3521,9 @@ check "a copy without the free space is refused" eval '[ "$rc" != 0 ] && has <(e
 check "  and leaves nothing behind" eval '[ ! -e "$AD/engine" ] && [ ! -e "$AD/bottle" ] && [ ! -e "$AD/state" ] && [ ! -e "$AD/.lock" ]'
 check "the sources never changed" sources_unchanged
 check "0.1's folders: still the same checksum" [ "$(o1sum)" = "$O1SUM" ]
+fi
 
+if in_group move; then
 section "Move GW2 on Mac 0.1's install (install move)"
 # GW2 on Mac 0.1.4's install as its folders hold it (main's gw2om.sh): a manifest, its state and
 # settings, an engine, a bottle whose Windows user is crossover with Steam (its login, config and
@@ -3787,7 +3792,9 @@ sessions_reset
 g uninstall >/dev/null 2>&1
 rm -rf "$AD" "$O1" "$OC"
 check "no 0.1 install: status offers no move" [ "$(st old_install) $(st move)" = "no no" ]
+fi
 
+if in_group rest; then
 section "A development build's switches (dev-switches.conf)"
 # Two copies of the app's Resources, each entry a link to the app's, but gw2om.sh (a copy: its
 # folder is what it reads as the app's) and app.properties: DEVR's says channel=dev, a development
