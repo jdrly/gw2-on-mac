@@ -2304,7 +2304,7 @@ proxy_enabled() {
 proxy_safe() {
   local ini="$RS/ReShade.ini"
   our_reshade "$GAME_DIR/d3d11.dll" && [ -f "$ini" ] && proxy_enabled "$ini" || return 0
-  is_arcdps "$GAME_DIR/$ARC_CHAIN" && ini_set "$ini" PROXY EnableProxyLibrary=1 "ProxyLibrary=$(proxy_path)" | cmp -s - "$ini"
+  chain_ok && is_arcdps "$GAME_DIR/$ARC_CHAIN" && ini_set "$ini" PROXY EnableProxyLibrary=1 "ProxyLibrary=$(proxy_path)" | cmp -s - "$ini"
 }
 # proxy_refusal <what stays>: the sentence for an ini that can't be written
 proxy_refusal() { echo "$APP_NAME couldn't change ReShade's settings ($RS/ReShade.ini), so $1. Try again (details in $LOGS/install.log)."; }
@@ -2392,7 +2392,8 @@ set_arcdps() {
   is_arcdps "$dir/d3d11.dll" || die "The file from $ARCDPS_URL/d3d11.dll is not arcdps. Try again later."
   # (no session can start meanwhile: this holds its lock)
   arcdps_state
-  [ "$ARC" = off ] && [ ! -e "$GAME_DIR/$n" ] && [ ! -L "$GAME_DIR/$n" ] || die "The game folder changed during the download ($ARC). Try again."
+  [ "$ARC" = off ] && [ ! -e "$GAME_DIR/$n" ] && [ ! -L "$GAME_DIR/$n" ] && { [ "$n" != "$ARC_CHAIN" ] || chain_ok; } ||
+    die "The game folder changed during the download ($ARC). Try again."
   [ -d "$(dirname "$tmp")" ] || run mkdir -p "$(dirname "$tmp")"
   run install -m 644 "$dir/d3d11.dll" "$tmp"
   run mv -f "$tmp" "$GAME_DIR/$n"
@@ -3390,7 +3391,11 @@ import_game() {
     IMPORT_HOW=copied
   fi
   echo "@progress Guild Wars 2 $total $total"
-  for n in $out; do run rm -f "$dst/$n"; done
+  # (the copy checked again: a link made on the chain path meanwhile keeps that file)
+  for n in $out; do
+    [ "$n" != "$ARC_CHAIN" ] || chain_ok "$dst" || continue
+    run rm -f "$dst/$n"
+  done
   run rm -f "$dst/gw2-ui-scale.ini" "$dst/gw2-ui-scale.log"
   for n in d3d11.dll dxgi.dll ReShade.ini; do
     if { [ "$n" = ReShade.ini ] && [ -f "$dst/$n" ]; } || is_reshade "$dst/$n"; then
