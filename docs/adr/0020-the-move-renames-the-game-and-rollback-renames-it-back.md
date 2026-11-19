@@ -22,10 +22,15 @@ double space, not even for a moment.
   its Steam or game folder and writes nothing else". Before the rename the app copies the few addon
   files 0.1.x has in the game folder (`version.dll`, `ReShade.ini`, arcdps and ReShade at either
   name, the compiler, the chain path) into `0.1-addons`.
-- **Nothing removes a folder that holds the game.** Every removal of the install's folders (a
-  failure's cleanup, recovery, Uninstall, Start fresh) first looks inside for the moved folder's
-  inode, on that volume. If it is there, or that can't be told, the folder stays and the log says
-  why. A leftover bottle can be removed later; a lost game can't be had back.
+- **Nothing removes a folder that holds a game.** Every recursive removal in `gw2om.sh` goes through
+  `safe_rm`, and a suite check finds any other. It leaves a folder with a file named `Gw2.dat` or
+  `Gw2-64.exe` in it (on that volume), one with another volume mounted inside (`rm -x` doesn't
+  cross into it), or one `find` can't look through, and the log says why. `--with-game` removes a
+  game anyway, only for an install that never came from a move (no move origin, no `move-undo`,
+  no record but Start fresh's one line), and only at Uninstall, in a failed install's own cleanup
+  and for an import's own failed clone. A leftover bottle can be removed later; a lost game can't
+  be had back. The decision is by content, not by the move's records, so a path that forgets to
+  read them can't lose the game.
 - **The game's place is the state.** A rename is atomic, so the folder is at 0.1.x's place or at
   0.2's. `move-undo`, written before the first change, names both places, the inode and what the
   move makes. The commit is the move's record, written after the rename and the addon steps;
@@ -42,7 +47,9 @@ double space, not even for a moment.
   with Wine checked again under both. Recovery also waits while the killed run's rename helper or
   another run of the backend is alive.
 - **Rollback to 0.1.4 in Troubleshooting (decision 8 replaced).** No copy is kept for 0.1.x.
-  Rollback refuses while 0.2's Wine runs, and checks that 0.1.x's place is free before it changes
+  Rollback refuses while 0.2's Wine runs, when a `Gw2.dat` isn't in the folder that would go back
+  (Steam may have moved the game to another library), or when an addon file there is a link, and
+  checks that 0.1.x's place is free before it changes
   anything. It keeps this app's addon files for an undo, puts back 0.1.x's, renames the folder back
   to where 0.1.x had it, and shows a window with a button that opens 0.1.4's DMG in the browser
   (0.1.x releases are notarized) and says to quit this app and drag 0.1.4 over it. The version and

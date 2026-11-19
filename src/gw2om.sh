@@ -347,8 +347,8 @@ MOVING="" UNINSTALL_WITH=""
 LAST_01=0.1.4
 LAST_01_DMG="https://github.com/jdrly/gw2-on-mac/releases/download/v$LAST_01/GW2-on-Mac-$LAST_01.dmg"
 # What uninstall removes in APPDIR (the folder itself goes too once empty; gamemode is what a build
-# of this line before the Mach9 engine made)
-APP_FILES="engine bottle gamemode settings.conf state install-manifest.json dxmt.conf compatdb.rules compatdb.local dev-switches.conf engine.new bottle.new session session.req .session.lock reshade-compiler 0.1-addons"
+# of this line before the Mach9 engine made). Not .session.lock: a lock file stays, held or not.
+APP_FILES="engine bottle gamemode settings.conf state install-manifest.json dxmt.conf compatdb.rules compatdb.local dev-switches.conf engine.new bottle.new session session.req reshade-compiler 0.1-addons"
 LOGFILE=/dev/null
 
 # --- Output and logging
@@ -3928,13 +3928,15 @@ move_undo() {
         [ -z "$snap" ] || addons_restore "$f${g:+/$g}" "$snap" "$f" || { log "the addon files of $f${g:+/$g} couldn't all be put back; $MOVE_UNDO stays"; return 1; }
       else
         # (a move or Move in: 0.1.x's addon files back while the folder is still in this app's
-        # bottle, then the rename)
-        [ -z "$snap" ] || addons_restore "$t${g:+/$g}" "$snap" "$t" || log "the addon files of $t${g:+/$g} couldn't all be put back"
+        # bottle, then the rename; if they can't all come back, everything stays for a retry)
+        [ -z "$snap" ] || addons_restore "$t${g:+/$g}" "$snap" "$t" || { log "the addon files of $t${g:+/$g} couldn't all be put back; $MOVE_UNDO stays"; return 1; }
         rename_dir "$t" "$f" || { log "$t couldn't be renamed back to $f; everything stays"; return 1; }
         log "renamed $t back to $f"
       fi ;;
     from)
       if [ "$kind" = rollback ] && [ -n "$snap" ]; then
+        # (no link on the way to it, checked again before every retry)
+        no_link "$f" || { log "$f is reached through a link now; $MOVE_UNDO stays"; return 1; }
         addons_restore "$f${g:+/$g}" "$snap" "$f" || { log "the addon files of $f${g:+/$g} couldn't all be put back; $MOVE_UNDO stays"; return 1; }
       fi
       log "$f was not renamed" ;;
@@ -3945,34 +3947,46 @@ move_undo() {
 # safe_rm [--with-game] [--quiet] <path>...: every recursive removal in this file goes through it. A
 # folder with a game in it (a file named Gw2.dat or Gw2-64.exe anywhere inside, on its volume) stays,
 # the log says why, and safe_rm returns 1 once it has done the rest; so does one find can't look
-# through. A leftover folder can be removed later; a game moved from 0.1.x can't be had back.
-# --with-game removes it anyway: only for an install that was never moved (never_moved), at
-# Uninstall and for what a failed install of its own made. --quiet: no log line, and done in a
-# dry run too (scratch folders).
+# through, and one with another volume mounted inside (rm -x doesn't cross into it, and find -xdev
+# doesn't look there). A leftover folder can be removed later; a game moved from 0.1.x can't be had
+# back. rm's own failure returns 1 too. --with-game removes a folder with a game anyway, only for an
+# install that was never moved (never_moved), and only by its three callers: Uninstall
+# (uninstall_files), the cleanup of a failed install of its own (on_install_exit), and an import's
+# clone that failed, before the copy takes its place (clone_tree): the app's own copy, never the
+# source. --quiet: no log line, and done in a dry run too (scratch folders).
 safe_rm() {
-  local with="" quiet="" p hit st=0
+  local with="" quiet="" p hit dev st=0
   while :; do
     case "${1:-}" in --with-game) with=yes; shift ;; --quiet) quiet=yes; shift ;; *) break ;; esac
   done
   for p in "$@"; do
     { [ -e "$p" ] || [ -L "$p" ]; } || continue
-    if [ -z "$with" ] && [ -d "$p" ] && [ ! -L "$p" ]; then
-      hit=$(find "$p" -xdev -type f \( -iname Gw2.dat -o -iname Gw2-64.exe \) -print -quit 2>/dev/null) ||
-        { log "$p stays: find couldn't look through all of it for a game"; st=1; continue; }
-      [ -z "$hit" ] || { log "$p stays: a game is in it ($hit)"; st=1; continue; }
+    if [ -d "$p" ] && [ ! -L "$p" ]; then
+      dev=$(stat -f %d "$p")
+      if find "$p" -xdev -type d -exec stat -f %d {} + 2>/dev/null | grep -qvx "$dev"; then
+        log "$p stays: another volume is mounted inside it"; st=1; continue
+      fi
+      if [ -z "$with" ]; then
+        hit=$(find "$p" -xdev -type f \( -iname Gw2.dat -o -iname Gw2-64.exe \) -print -quit 2>/dev/null) ||
+          { log "$p stays: find couldn't look through all of it for a game"; st=1; continue; }
+        [ -z "$hit" ] || { log "$p stays: a game is in it ($hit)"; st=1; continue; }
+      fi
     fi
-    if [ -n "$quiet" ]; then rm -rf "$p"; else run rm -rf "$p"; fi
+    if [ -n "$quiet" ]; then rm -rfx "$p" || st=1; else run rm -rfx "$p" || st=1; fi
   done
   return $st
 }
 
-# never_moved: this install never came from a move of 0.1.x's (state origin not move or moved), and
-# no move is recorded here, finished or not (MOVE_UNDO; a MOVE_RECORD other than Start fresh's
-# "skipped"). Only then may a removal take a game with it (safe_rm --with-game).
+# never_moved: this install never came from a move of 0.1.x's: state origin not move or moved, no
+# MOVE_UNDO, and no MOVE_RECORD in any form (a link, even a dangling one, counts) unless it is a
+# file of exactly one line, Start fresh's "skipped". Only then may a removal take a game with it
+# (safe_rm --with-game).
 never_moved() {
   case "$(state origin)" in move|moved) return 1 ;; esac
-  [ ! -e "$MOVE_UNDO" ] || return 1
-  [ ! -e "$MOVE_RECORD" ] || [ "$(head -1 "$MOVE_RECORD" 2>/dev/null || true)" = skipped ]
+  { [ ! -e "$MOVE_UNDO" ] && [ ! -L "$MOVE_UNDO" ]; } || return 1
+  { [ ! -e "$MOVE_RECORD" ] && [ ! -L "$MOVE_RECORD" ]; } && return 0
+  [ -f "$MOVE_RECORD" ] && [ ! -L "$MOVE_RECORD" ] && [ "$(cat "$MOVE_RECORD")" = skipped ] &&
+    [ "$(wc -l <"$MOVE_RECORD" | tr -d ' ')" = 1 ]
 }
 # with_game: "--with-game" for never_moved, else nothing (safe_rm's first word)
 with_game() { if never_moved; then echo --with-game; fi; }
@@ -4336,11 +4350,12 @@ rollback_game() {
   [ -f "$OLD_BOTTLE/system.reg" ] || die "$OLD_LABEL's bottle isn't there any more ($OLD_BOTTLE), so the game stays in $APP_NAME."
   move_session
   move_check "$n" "$o" "$g"
-  # (the game itself must be in the folder that goes back: Steam may have moved it to another
-  # library in this app's bottle, and then this app's bottle holds the only copy)
-  game_state
-  [ -n "$DRY" ] || { [ -n "$GAME_DIR" ] && { [ "$GAME_DIR" = "$n${g:+/$g}" ] || path_under "$GAME_DIR" "$n"; }; } ||
-    die "Guild Wars 2 isn't in the folder that came from $OLD_LABEL any more (${GAME_DIR:-not found}), so $APP_NAME doesn't give that folder back. Move the game back into $n${g:+/$g} in Steam (Properties › Installed Files › Move install folder), then try again."
+  # (the game itself must be in the folder that goes back, its resolved tree on its volume: Steam
+  # may have moved it to another library in this app's bottle, and then that holds the only copy)
+  [ -n "$DRY" ] || [ -n "$(find "$n" -xdev -type f -iname Gw2.dat -print -quit 2>/dev/null)" ] ||
+    die "Guild Wars 2 isn't in the folder that came from $OLD_LABEL any more ($n), so $APP_NAME doesn't give that folder back. Move the game back into $n${g:+/$g} in Steam (Properties › Installed Files › Move install folder), then try again."
+  # (this app's addon files are kept for an undo: none may be a link)
+  addons_links "$n${g:+/$g}"
   MOVE_MADE=""
   addons_save "$n${g:+/$g}" "$MOVE_SNAP"
   move_journal rollback "$n" "$o" "$g" "$MOVE_SNAP"
@@ -5501,8 +5516,16 @@ cmd_play() {
   # (an install that waits for Steam's download, a move's too, with no Steam running: Play starts
   # Steam on the game's install page, and the window follows the download)
   if [ "$(state stage)" = waiting_game ] && [ "$(state route)" = steam ] && [ "$GAME" != yes ]; then
-    has_kind steam "$(proc_list)" && { echo "@done Steam is running: it is bringing Guild Wars 2 up to date."; return 0; }
-    launch "$STEAM_EXE" "steam://install/$GW2_APPID"
+    # (under the session's lock, as a Rollback takes it: the stage, the game and Wine checked again
+    # there; Steam doesn't inherit the lock, which goes once Steam runs, so a Rollback sees it)
+    [ -n "$DRY" ] || registry_lock || die "$APP_NAME is moving the game or a session is starting. Try again in a few seconds."
+    game_state
+    [ "$(state stage)" = waiting_game ] && [ "$GAME" != yes ] || { registry_unlock; die "The game's state changed meanwhile. Try again."; }
+    if has_kind steam "$(proc_list)"; then registry_unlock; echo "@done Steam is running: it is bringing Guild Wars 2 up to date."; return 0; fi
+    [ "$(busy_of "$(proc_list)")" != session ] || { registry_unlock; die "$APP_NAME's Wine is still running. Try again in a few seconds."; }
+    launch "$STEAM_EXE" "steam://install/$GW2_APPID" 8>&-
+    k=0; while [ -z "$DRY" ] && ! has_kind steam "$(proc_list)" && [ $k -lt 50 ]; do sleep 0.1; k=$((k + 1)); done
+    registry_unlock
     echo "@done Steam is starting: it finishes the game's download, and this window follows it."
     return 0
   fi
@@ -5917,7 +5940,7 @@ uninstall_files() {
   # (never with the game a move renamed in it: safe_rm)
   if [ -d "$BOTTLE" ]; then
     safe_rm ${UNINSTALL_WITH:+"$UNINSTALL_WITH"} "$BOTTLE" ||
-      die "$APP_NAME kept its bottle: Guild Wars 2 is in it, and this install came from $OLD_LABEL's. Choose Rollback to $LAST_01 in Settings › Troubleshooting first, or move the game out of $BOTTLE by hand (details in $LOGS/install.log)."
+      die "$APP_NAME kept its bottle ($BOTTLE): a game is in it and this install came from $OLD_LABEL's, or another volume is mounted inside it. After a move, choose Rollback to $LAST_01 in Settings › Troubleshooting first, or move the game out by hand (details in $LOGS/install.log)."
   fi
   phase 3
   step "Removing the engine, the settings and caches"

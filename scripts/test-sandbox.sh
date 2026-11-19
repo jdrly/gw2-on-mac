@@ -206,6 +206,14 @@ compiler_rule() {
   fi
 }
 same() { cmp -s "$1" "$2"; }
+# ad_list: what the app's folder holds, sorted, one line, but the session's lock file, which stays
+# (a lock file is never removed while anyone may hold it)
+ad_list() {
+  local f
+  for f in "$AD"/* "$AD"/.[!.]*; do
+    { [ -e "$f" ] || [ -L "$f" ]; } && [ "${f##*/}" != .session.lock ] && printf '%s\n' "${f##*/}"
+  done | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'
+}
 # the session's file, and waits (up to 10 s) for its watcher to reach a stage or end
 sess() { sed -n "s/^$1=//p" "$AD/session" 2>/dev/null; }
 wait_stage() { local i=0; while [ "$(sess stage)" != "$1" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; [ "$(sess stage)" = "$1" ]; }
@@ -539,7 +547,7 @@ else
 fi
 check "  with the engine's own FEX (fex=engine by default)" has <(echo "$out") "^\[dry-run\] the engine's own FEX (athei/FEX $ENGINE_FEX) in the engine$"
 check "  with the rules file and no WINE_COMPATDB" eval 'echo "$out" | grep -qxF "[dry-run]   WINE_COMPATDB_FILE=$AD/compatdb.rules" && ! echo "$out" | grep -q "WINE_COMPATDB="'
-check "dry-run creates nothing" eval '[ ! -e "$AD" ] && [ ! -e "$CACHE" ]'
+check "dry-run creates nothing" eval '[ -z "$(ad_list)" ] && [ ! -e "$CACHE" ]'
 check "fresh status: not installed" [ "$(st installed)" = no ]
 check "fresh status: no engine" [ "$(st engine_installed)" = no ]
 check "fresh status: the engine's pins (Mach9 0.4.0: Wine, FEX, DXMT commits)" \
@@ -550,7 +558,7 @@ out=$(env -u GW2_ON_MAC_ENGINE_URL -u GW2_ON_MAC_ENGINE_SHA256 -u GW2_ON_MAC_ENG
 check "dry-run without the stand-in: the real engine, Mach9 0.4.0 from athei/mach9" \
   has <(echo "$out") "^\[dry-run\] download https://github.com/athei/mach9/releases/download/v0.4.0/wine-v0.4.0-macos-arm64.tar.xz (131698496 bytes, sha256 3b81aac9b93d5652872673b400769ec525f3bc2f1f7e2ec82c9f851d0a0db05d)"
 check "  no WINE_COMPATDB, no WINEDLLPATH" eval '! echo "$out" | grep -q -e WINE_COMPATDB= -e WINEDLLPATH'
-check "  and still nothing created" eval '[ ! -e "$AD" ] && [ ! -e "$CACHE" ]'
+check "  and still nothing created" eval '[ -z "$(ad_list)" ] && [ ! -e "$CACHE" ]'
 
 section "macOS and the engine's checks (nothing is left behind)"
 check "status: macOS 26.3 is below the engine's 26.4" [ "$(GW2_ON_MAC_MACOS=26.3 "$G" status | sed -n 's/^macos_ok=//p')/$(st macos_min)" = no/26.4 ]
@@ -571,7 +579,7 @@ out=$(GW2_ON_MAC_ENGINE_CHECKS=1 GW2_ON_MAC_ENGINE_LOADER_SHA256="$LOADER_SHA" G
 check "the expected hashes, but wine.app isn't signed by Mach9's team: refused the same way" \
   eval '[ "$rc" != 0 ] && echo "$out" | grep -qxF "@error The unpacked Wine engine does not match the expected build." && [ ! -e "$ENG" ] && [ ! -s "$STANDIN_LOG" ]'
 check "  nothing left of those installs but the verified download and the log" \
-  eval '[ -z "$(ls -A "$AD" 2>/dev/null)" ] && [ "$(ls "$CACHE/downloads")" = engine.tar.xz ]'
+  eval '[ -z "$(ad_list)" ] && [ "$(ls "$CACHE/downloads")" = engine.tar.xz ]'
 rm -rf "$CACHE"
 
 # --- Steam route
@@ -3299,7 +3307,7 @@ mkdir -p "$CACHE/downloads" && echo x >"$CACHE/downloads/x"
 out=$(g uninstall 2>&1) && rc=0 || rc=$?
 check "uninstall exits 0" [ "$rc" = 0 ]
 check "the phases 1-3" [ "$(echo "$out" | grep '^@phase' | tr '\n' ' ')" = "@phase 1 @phase 2 @phase 3 " ]
-check "the app's folder holds only the ReShade folder (engine, bottle with the game, settings, the session gone)" [ "$(ls -A "$AD")" = ReShade ]
+check "the app's folder holds only the ReShade folder (engine, bottle with the game, settings, the session gone)" [ "$(ad_list)" = ReShade ]
 check "  the ReShade folder stays with the player's preset, and uninstall names it" eval 'has "$RSF/Presets/Mine.ini" preset && echo "$out" | grep -qF "your ReShade presets and shaders in $RSF."'
 check "  the session's watcher stopped" sh -c "! kill -0 $wp 2>/dev/null"
 check "its caches are gone" eval '[ ! -e "$CACHE" ] && [ ! -e "$DXMT_CACHE" ]'
@@ -3439,7 +3447,7 @@ check "  0.1's too" eval '[ "$rc" != 0 ] && has <(echo "$out") "@error Guild War
 kill $ep 2>/dev/null || true; wait $ep 2>/dev/null || true
 
 out=$(GW2_ON_MAC_DRY_RUN=1 g install import "$CXG" 2>&1) && rc=0 || rc=$?
-check "dry-run install import: exits 0, would clone, creates nothing" eval '[ "$rc" = 0 ] && has <(echo "$out") "\[dry-run\] clone" && [ ! -e "$AD" ]'
+check "dry-run install import: exits 0, would clone, creates nothing" eval '[ "$rc" = 0 ] && has <(echo "$out") "\[dry-run\] clone" && [ -z "$(ad_list)" ]'
 
 : >"$STANDIN_LOG"
 out=$(g install import "$CXG" 2>&1) && rc=0 || rc=$?
@@ -3629,13 +3637,13 @@ unset NOCP_LOG
 # every recursive removal goes through safe_rm, which leaves a folder with a game in it
 rm_outside() {
   awk '/^safe_rm\(\) \{/ { f = 1 } f && /^}/ { f = 0; next }
-    !f && !/^[[:space:]]*#/ && /(^|[^[:alnum:]_-])rm +-[[:alpha:]]*[rR]/ { print FNR ": " $0; n++ } END { exit n > 0 }' "$1"
+    !f && !/^[[:space:]]*#/ && /(^|[^[:alnum:]_-])rm( +-[[:alpha:]]+)* +-[[:alpha:]]*[rR]/ { print FNR ": " $0; n++ } END { exit n > 0 }' "$1"
 }
 check "gw2om.sh has no recursive rm outside safe_rm" rm_outside "$APP/Contents/Resources/gw2om.sh"
-{ cat "$APP/Contents/Resources/gw2om.sh"; echo '  rm -fr "$x"'; } >"$SANDBOX/rmcheck.sh"
-check "  (the check finds one added)" eval '! rm_outside "$SANDBOX/rmcheck.sh" >/dev/null'
+{ cat "$APP/Contents/Resources/gw2om.sh"; printf '  rm -fr "$x"\n  rm -f -r "$x"\n  x && rm -R "$y"\n'; } >"$SANDBOX/rmcheck.sh"
+check "  (the check finds each of rm -fr, rm -f -r and rm -R added)" eval '[ "$(rm_outside "$SANDBOX/rmcheck.sh" | wc -l | tr -d " ")" = 3 ]'
 # (the session's lock file stays, held or not: a lock file is never removed while anyone may hold it)
-nothing_made() { [ -z "$(ls -A "$AD" 2>/dev/null | grep -vx .session.lock)" ]; }
+nothing_made() { [ -z "$(ad_list)" ]; }
 # ini_clean <file>: no line names 0.1's folders (Application Support's or Caches' GW2 on Mac)
 ini_clean() { ! grep -iqF -e "$(winp "$O1")\\" -e "$(winp "$OC")\\" "$1" && ! grep -iqE "$(winp "$O1" | sed 's/\\/\\\\/g')$" "$1"; }
 # settings_moved: this app's settings.conf as SETTINGS_FROM_01 says for the OLD_SET file, key by key
@@ -3677,7 +3685,7 @@ for p in "$O1/engine/bin/steam.exe:steam" "$O1/gamemode/GW2.app/Contents/MacOS/G
 done
 out=$(g start-fresh --before-move 2>&1) && rc=0 || rc=$?
 check "Start fresh before the move: the move no longer starts by itself, nothing else made" \
-  eval '[ "$rc" = 0 ] && [ "$(st move) $(st move_record)" = "no skipped" ] && [ "$(ls -A "$AD")" = moved-from-0.1 ]'
+  eval '[ "$rc" = 0 ] && [ "$(st move) $(st move_record)" = "no skipped" ] && [ "$(ad_list)" = moved-from-0.1 ]'
 rm -f "$AD/moved-from-0.1"
 check "  Steam's sentence names 0.1 and says to quit Steam there" \
   eval 'cp "$SANDBOX/sleeper" "$O1/engine/bin/steam.exe" && { "$O1/engine/bin/steam.exe" 30 & sp=$!; sleep 0.3; w=$(st move_wait); kill $sp; wait $sp 2>/dev/null; rm -f "$O1/engine/bin/steam.exe"; [ "$w" = "Steam is running in GW2 on Mac 0.1. Quit Steam there (Steam > Exit), and the move starts." ]; }'
@@ -3886,7 +3894,7 @@ check "  Uninstall with the record missing (origin move): refused, the game stay
 cp "$SANDBOX/record" "$AD/moved-from-0.1"
 out=$(g start-fresh --moved 2>&1) && rc=0 || rc=$?
 check "Start fresh: the game goes back first (the same inode, 0.1's addon files), this app's install goes, the move doesn't start by itself again; 0.1 as it was" \
-  eval '[ "$rc" = 0 ] && has <(echo "$out") "^@done .*Guild Wars 2 went back to GW2 on Mac 0.1.s folder first" && [ "$(st installed) $(st move) $(st move_record) $(st old_install)" = "no no skipped yes" ] && [ "$(ls -A "$AD" | LC_ALL=C sort | tr "\n" " ")" = "ReShade moved-from-0.1 " ] && [ "$(ino "$O1ST")" = "$O1INO" ] && o1_same'
+  eval '[ "$rc" = 0 ] && has <(echo "$out") "^@done .*Guild Wars 2 went back to GW2 on Mac 0.1.s folder first" && [ "$(st installed) $(st move) $(st move_record) $(st old_install)" = "no no skipped yes" ] && [ "$(ad_list)" = "ReShade moved-from-0.1" ] && [ "$(ino "$O1ST")" = "$O1INO" ] && o1_same'
 rm -rf "$AD"
 
 # a 0.1.3-age settings file (keys missing: 0.1's defaults) with Cooler job workers at 3, arcdps alone
@@ -3939,12 +3947,28 @@ check "Move in: Steam's folder renamed in again (the same inode), the game ready
   eval '[ "$rc" = 0 ] && [ ! -e "$O1ST" ] && [ "$(ino "$STEAM")" = "$O1INO" ] && [ "$(st game) $(st stage) $(st move_game) $(st arcdps_state)" = "yes finished here on" ] && same "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll" && no_cp_of "$O1ST" "$O1GAME"'
 # (the game back in 0.1 before Uninstall, which would remove it with the bottle)
 g rollback >/dev/null 2>&1
+# another volume mounted inside the bottle: Uninstall leaves the bottle (rm -x wouldn't cross into
+# it, and find -xdev doesn't look there), and what is on it
+MNT="$BOTTLE/drive_c/mnt"
+mkdir -p "$MNT"
+if hdiutil create -quiet -size 20m -type SPARSE -fs APFS -volname gw2om-mnt "$SANDBOX/mnt" >/dev/null 2>&1 &&
+  hdiutil attach -quiet -nobrowse -noautoopen -mountpoint "$MNT" "$SANDBOX/mnt.sparseimage" >/dev/null 2>&1; then
+  trap 'hdiutil detach -quiet -force "$MNT" 2>/dev/null' EXIT
+  echo "on another volume" >"$MNT/kept.txt"
+  out=$(g uninstall 2>&1) && rc=0 || rc=$?
+  check "Uninstall with another volume mounted in the bottle: refused, the bottle and the volume's file stay" \
+    eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac kept its bottle" && [ -d "$BOTTLE/drive_c" ] && has "$MNT/kept.txt" "another volume" && has "$LOGS/install.log" "another volume is mounted inside it"'
+  hdiutil detach -quiet -force "$MNT" >/dev/null 2>&1; trap - EXIT
+else
+  echo "  skip the mounted volume (hdiutil could not attach one)"
+fi
+rmdir "$MNT"
 out=$(g uninstall 2>&1)
 check "uninstall after a move keeps the move's record: no second move by itself" \
-  eval '[ "$(st installed) $(st move) $(st move_record)" = "no no moved" ] && [ "$(ls -A "$AD")" = moved-from-0.1 ]'
+  eval '[ "$(st installed) $(st move) $(st move_record)" = "no no moved" ] && [ "$(ad_list)" = moved-from-0.1 ]'
 out=$(g install move 2>&1) && rc=0 || rc=$?
 check "  install move refused with the record there, nothing else made" \
-  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac doesn.t move GW2 on Mac 0.1.s install again: it was moved here before" && [ "$(ls -A "$AD")" = moved-from-0.1 ] && o1_same'
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac doesn.t move GW2 on Mac 0.1.s install again: it was moved here before" && [ "$(ad_list)" = moved-from-0.1 ] && o1_same'
 g install steam >/dev/null 2>&1
 out=$(g start-fresh --moved 2>&1) && rc=0 || rc=$?
 check "  Start fresh over an install made after it (not the moved one): refused, the install stays" \

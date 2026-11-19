@@ -170,9 +170,10 @@ so does the next start of the app. From its first write the move keeps `move-und
 two places and its inode, and what the move makes. If the app is killed mid-move, the next start
 finds the folder by its inode at either place and, unless the record says the move was done,
 renames it back before anything else runs. It waits while Wine or the killed run's rename still
-runs. Nothing the app removes, there or anywhere else, may hold the moved folder: before each
-removal it looks for that inode inside, and if it finds it, or can't tell, it leaves the folder and
-logs why. The rename itself is the kernel's `rename`, through macOS's `perl`, which fails rather
+runs. Nothing the app removes, there or anywhere else, may hold a game: every recursive removal goes
+through one function, which leaves a folder with a `Gw2.dat` or `Gw2-64.exe` in it, one with another
+volume mounted inside, or one it can't look through, and logs why. Only an install that never came
+from a move may remove its own game, at Uninstall or when its own install fails. The rename itself is the kernel's `rename`, through macOS's `perl`, which fails rather
 than copy to another volume or move into a folder that is there, as `mv` would. The whole move
 holds the install lock, and from the rename's checks to the record the session's lock too, so no
 Play starts in between.
@@ -573,8 +574,9 @@ nothing in `/Applications` besides itself.
 |---|---|---|
 | `~/Library/Application Support/GW2 on Mac arm64/engine/` | the Wine engine as it ships, without its SDK, about 1 GB, with my DXMT fork's tree in `lib/wine/dxgi/dxmt` and my `ntdll.so` and `winemac.so` (with `win32u.so` when my driver's build has one) in `lib/wine/aarch64-unix`, and after `set fex mine` my FEX's three files, the engine's own next to each | removed |
 | `…/GW2 on Mac arm64/bottle/` | the game's Wine prefix with Steam, the game's files and the game's settings. About 75 GB, or no extra space for a clone of files on the same disk or a game moved from 0.1 | removed, with the game |
-| `…/GW2 on Mac arm64/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `compatdb.rules`, `compatdb.local`, `dev-switches.conf`, `session`, `session.req`, `.session.lock`, `reshade-compiler` | settings, install state, what was installed, DXMT's options, the game's compatdb rules and my own, a development build's switches, the current game session and its lock, the sha256 of the compiler the app put next to `Gw2-64.exe` | removed |
+| `…/GW2 on Mac arm64/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `compatdb.rules`, `compatdb.local`, `dev-switches.conf`, `session`, `session.req`, `reshade-compiler` | settings, install state, what was installed, DXMT's options, the game's compatdb rules and my own, a development build's switches, the current game session and its lock, the sha256 of the compiler the app put next to `Gw2-64.exe` | removed |
 | `…/GW2 on Mac arm64/ReShade/` | ReShade's settings, log, presets, shaders, textures and screenshots | kept |
+| `…/GW2 on Mac arm64/.session.lock` | the game session's lock (a `flock`), which Play, the move and Rollback take | kept: a lock file is never removed while anyone may hold it |
 | `…/GW2 on Mac arm64/moved-from-0.1` | `moved` once the move from GW2 on Mac 0.1 has run, with the renamed folder's two places, or `skipped` after *Start fresh*: either way the move doesn't start by itself again | kept |
 | `…/GW2 on Mac arm64/0.1-addons/` | the addon files GW2 on Mac 0.1 had in the game folder on the day of the move, which *Rollback* puts back | removed |
 | `…/GW2 on Mac arm64/move-undo` | only while the move, *Rollback* or *Move it in again* runs: what it made and renamed, so a run that is killed is undone at the next start | not there |
@@ -898,8 +900,8 @@ A move, `gw2om.sh install move`, runs the same phases from 0.1's install
 `settings.conf` from 0.1's, and on Steam's route 0.1's Steam folder, renamed, replaces the one
 Valve's installer made. It refuses while 0.1's Wine runs, and checks again before the rename,
 before each folder it clones and after the last. A failed or cancelled move also removes the ReShade folder and
-`reshade-compiler` it brought, `dxmt.conf` and `.session.lock`, so the app's folder is as empty as
-before. `gw2om.sh status` prints `old_install`, `move` (yes when the window should start it),
+`reshade-compiler` it brought and `dxmt.conf`, so the app's folder is as empty as before, but for
+`.session.lock`, which no removal takes while anyone may hold it. `gw2om.sh status` prints `old_install`, `move` (yes when the window should start it),
 `move_record`, `move_route`, `move_busy` and `move_wait`. `gw2om.sh start-fresh` is
 Troubleshooting's *Start fresh*.
 

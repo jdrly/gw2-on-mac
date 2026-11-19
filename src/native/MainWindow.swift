@@ -1070,19 +1070,7 @@ struct InstallingPanel: View {
              : "Sign in to Steam and install Guild Wars 2 there. This window follows the download.")
           .font(.body(12)).bodyBox(12).foregroundStyle(Brand.fg3).fixedSize(horizontal: false, vertical: true)
           .padding(.top, 2)
-        // (Steam isn't running, so nothing downloads: Play starts it on the game's install page)
-        if installer.installedRoute != .arenanet && installer.busy != "steam" {
-          Button { installer.resumeDownload() } label: {
-            HStack(spacing: 10) {
-              LucideIcon(name: "play", size: 18)
-              Text("Play")
-            }
-          }
-          .buttonStyle(.crimson)
-          .disabled(installer.launching)
-          .help("Starts Steam, which finishes the game's download")
-          .padding(.top, 6)
-        }
+        ResumeSteamButton(installer: installer)
       }
     }
     .padding(.vertical, 14)
@@ -1125,6 +1113,7 @@ struct MoveNote: View {
       switch installer.phase {
       case .waitingForGame:
         note("Steam brings your Guild Wars 2 up to date, and may ask you to sign in once. This window follows it.")
+        ResumeSteamButton(installer: installer)
       case .working:
         note("The game moves on this disk, so it takes no extra space. GW2 on Mac 0.1 keeps its settings, "
              + "and Rollback in Settings › Troubleshooting gives the game back to it."
@@ -1145,6 +1134,28 @@ struct MoveNote: View {
   private func note(_ text: String) -> some View {
     Text(text).font(.body(12)).bodyBox(12, 1.3).foregroundStyle(Brand.fg3)
       .fixedSize(horizontal: false, vertical: true)
+  }
+}
+
+// While Steam's download is followed but no Steam runs, nothing downloads: Play starts Steam on the
+// game's install page (gw2om.sh play, Installer.resumeDownload). The install's and the move's waiting
+// panels show it.
+struct ResumeSteamButton: View {
+  let installer: Installer
+
+  var body: some View {
+    if installer.installedRoute != .arenanet && installer.busy != "steam" {
+      Button { installer.resumeDownload() } label: {
+        HStack(spacing: 10) {
+          LucideIcon(name: "play", size: 18)
+          Text("Play")
+        }
+      }
+      .buttonStyle(.crimson)
+      .disabled(installer.launching)
+      .help("Starts Steam, which finishes the game's download")
+      .padding(.top, 6)
+    }
   }
 }
 
