@@ -19,6 +19,8 @@
 #      (fixture_install); rest: what starts from nothing, but the move; move: the move of GW2 on
 #      Mac 0.1's install, also from nothing. The Checks workflow runs the four as four jobs. On
 #      one Mac run one at a time: each ends every watch-session of this app)
+#      CALL_LIMIT (default 120: the seconds one gw2om.sh call may take before its check fails; the
+#      slowest check of a passing run took about 40 s)
 # Runs under macOS's /bin/bash 3.2.
 # Many variables are read only inside the strings that check() evals, which shellcheck can't see.
 # shellcheck disable=SC2034
@@ -126,7 +128,7 @@ in_group() { [ "$GROUP" = all ] || [ "$GROUP" = "$1" ]; }
 # failed check gets a copy of the state files next to it (NNNN.state). After a failure, the end
 # copies the folder to $FAILED with summary.md, which the Checks workflow uploads.
 CHECKS="$SANDBOX/checks"
-export GW2OM CHECK_OUT="$CHECKS/0001.txt"
+export GW2OM CHECK_OUT="$CHECKS/0001.txt" CALL_LIMIT="${CALL_LIMIT:-120}"
 G="$SANDBOX/bin/gw2om"
 mkdir -p "$CHECKS" "$SANDBOX/bin"
 cat >"$G" <<'EOF'
@@ -135,9 +137,22 @@ cat >"$G" <<'EOF'
 # and stderr through a tee each, by FIFOs the tees remove once open. gw2om.sh gets them as fds 1
 # and 2 and nothing else, so its detached processes, which redirect those, hold no tee open. This
 # exits with gw2om.sh's status once both tees are done, so its output is all there when it ends.
-f="$CHECK_OUT.$$"
+# A call that hasn't ended after CALL_LIMIT seconds (gw2om.sh itself, or a tee whose FIFO a process
+# still holds open) is ended by a watchdog: it writes the processes and the open FIFOs to the
+# check's file, names the call in checks/timeout.new, which fails the check, and ends this
+# script's children (gw2om.sh, the tees and itself). It holds none of the call's pipes and ends
+# within a second of the call.
+f="$CHECK_OUT.$$" w=$$
 mkfifo "$f.1" "$f.2" || exec "$GW2OM" "$@"
 echo "\$ gw2om.sh $*" >>"$CHECK_OUT"
+( i=0
+  while [ "$i" -lt "$CALL_LIMIT" ]; do sleep 1; kill -0 "$w" 2>/dev/null || exit 0; i=$((i + 1)); done
+  { echo "gw2om.sh $* had not ended after $CALL_LIMIT s (the wrapper is pid $w). The processes:"
+    ps -axww -o pid,ppid,pgid,stat,etime,command
+    echo "The open FIFOs (a tee ends once no process has its FIFO open for writing):"
+    lsof -n -u "$(id -u)" 2>/dev/null | awk 'NR == 1 || $5 == "FIFO"'; } >>"$CHECK_OUT" 2>&1
+  echo "gw2om.sh $* had not ended after $CALL_LIMIT s" >>"${CHECK_OUT%/*}/timeout.new"
+  pkill -TERM -P "$w" ) </dev/null >/dev/null 2>&1 &
 { rm -f "$f.1"; exec tee -a "$CHECK_OUT"; } <"$f.1" & t1=$!
 { rm -f "$f.2"; exec tee -a "$CHECK_OUT" >&2; } <"$f.2" & t2=$!
 "$GW2OM" "$@" >"$f.1" 2>"$f.2"; rc=$?
@@ -160,8 +175,18 @@ end_check() {
   fi
   CHECK_OUT="$CHECKS/$(printf %04d $((pass + fail + 1))).txt"
 }
-ok() { pass=$((pass + 1)); echo "  ok   $*"; end_check ok "$*"; }
-bad() { fail=$((fail + 1)); echo "  FAIL $*"; end_check FAIL "$*"; }
+# A gw2om.sh call that ran out of CALL_LIMIT (the wrapper's line in checks/timeout.new) fails the
+# check it ran in, or the next one for a call outside a check, whatever its commands said, and the
+# FAIL line names the call and the file with the watchdog's process list
+ok() { if [ -e "$CHECKS/timeout.new" ]; then bad "$*"; return; fi; pass=$((pass + 1)); echo "  ok   $*"; end_check ok "$*"; }
+bad() {
+  local why=""
+  if [ -e "$CHECKS/timeout.new" ]; then
+    why=" ($(tr '\n' ';' <"$CHECKS/timeout.new" | sed 's/;$//; s/;/; /g'): checks/${CHECK_OUT##*/})"
+    rm -f "$CHECKS/timeout.new"
+  fi
+  fail=$((fail + 1)); echo "  FAIL $*$why"; end_check FAIL "$*$why"
+}
 check() { local what=$1; shift; if "$@"; then ok "$what"; else bad "$what"; fi; }
 # section <name>: its heading; the seconds the one before it took are kept for the end
 SEC_NAME="" SEC_T0=0 SEC_TIMES=""
@@ -308,6 +333,27 @@ fixture_install() {
 
 # --- The stand-in engine: the real engine's layout (Mach9's: the loader in an app bundle, bin/wine
 # and lib/wine/aarch64-unix/wine links to it, the dxmt tree for arm64), files that only pretend
+section "A gw2om.sh call that doesn't end fails its check by name (CALL_LIMIT)"
+# (two stand-ins for gw2om.sh, through the wrapper with a limit of 2 s, each in a checks folder of
+# its own: one never ends, and one ends but leaves a process holding its stdout and stderr, so the
+# tees wait)
+cp /bin/sleep "$SANDBOX/bin/holder"
+printf '#!/bin/bash\nexec "%s" 600\n' "$SANDBOX/bin/holder" >"$SANDBOX/bin/hangs"
+printf '#!/bin/bash\necho game=yes\n"%s" 600 &\n' "$SANDBOX/bin/holder" >"$SANDBOX/bin/leaves"
+chmod 755 "$SANDBOX/bin/hangs" "$SANDBOX/bin/leaves"
+limited() { # <stand-in>: the output of a check that calls it, and the seconds it took
+  local t0=$SECONDS
+  ( CHECKS="$SANDBOX/limit/$1" CHECK_OUT="$SANDBOX/limit/$1/0001.txt" GW2OM="$SANDBOX/bin/$1" CALL_LIMIT=2 pass=0 fail=0
+    mkdir -p "$CHECKS"; check "a check that calls $1" [ "$(st game)" = yes ] )
+  echo "took $((SECONDS - t0))"
+}
+for s in hangs leaves; do
+  out=$(limited "$s")
+  check "  $s: the check fails within 10 s, naming the call and its file" eval 'echo "$out" | grep -qx "  FAIL a check that calls $s (gw2om.sh status had not ended after 2 s: checks/0001.txt)" && [ "${out##*took }" -le 10 ]'
+  check "  the file has the processes, the holder among them" has "$SANDBOX/limit/$s/0001.txt" "$SANDBOX/bin/holder 600"
+  pkill -f "^$SANDBOX/bin/holder" 2>/dev/null || true
+done
+
 section "Stand-in engine and downloads"
 S="$SANDBOX/standin/wine"
 LOADER=lib/wine/aarch64-unix/wine.app/Contents/MacOS/wine
@@ -4878,6 +4924,8 @@ for k in ntdll macdrv fex; do [ ! -f "$DEVKEEP/$k" ] || cp "$DEVKEEP/$k" "$COMP/
 rm -rf "$DROOT" "$RROOT" "$DEVR" "$RELR"
 fi
 
+# (a call after the last check that ran out of its limit)
+[ ! -e "$CHECKS/timeout.new" ] || bad "after the last check"
 section_end
 echo
 echo "Seconds per section (GROUP=$GROUP, $SECONDS s in all):"
