@@ -3500,6 +3500,9 @@ i=0; until [ -e "$IP.at" ] || [ $i -ge 100 ]; do sleep 0.1; i=$((i + 1)); done
 echo "patched" >"$WHG/patch.txt"; rm -f "$IP"; wait "$ip"; rc=$?; rm -f "$IP.at" "$WHG/patch.txt"
 check "the folder changed after the yes: refused under the lock before the copy, nothing left" \
   eval '[ "$rc" != 0 ] && has "$SANDBOX/import-changed.txt" "^@error $WHG isn.t the folder you said yes to, or it changed since" && [ ! -e "$AD/engine" ] && [ ! -e "$BOTTLE" ]'
+# (a failed first install leaves the small files it doesn't count as made, such as dxmt.conf: this
+# app's folder emptied for the checks below, which expect nothing in it)
+rm -rf "$AD"
 snap >"$SANDBOX/sources-before.txt"
 
 # a Guild Wars 2 that runs (in another app): its files may change, so nothing is copied
