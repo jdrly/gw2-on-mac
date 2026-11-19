@@ -38,8 +38,8 @@
 #                  dumps are in the zip, the GPU error count
 #   gpu-errors.txt  the GPU errors of the game and Wine in macOS's unified log of the last 2 hours
 #   crash-reports/  macOS's crash, hang and spin reports of the last 7 days for the game, Wine,
-#                  Steam's Windows processes (by the file's name, or by the process an .ips names;
-#                  the newest 10 of those) and the app
+#                  Steam's Windows processes (an .ips when this app started the process, the newest
+#                  10; the other kinds by the file's name) and the app
 # Every file is redacted on the way in, as SWTOR on Mac's: home folder (also as Wine writes it,
 # Z:\Users\...) → ~, user and full name →
 # USER and NAME, Steam account and persona names (read from the bottle's Steam loginusers.vdf, only
@@ -54,6 +54,8 @@ set -u
 # (as gw2om.sh's)
 APP_NAME="GW2 on Mac"
 APP_FOLDER="GW2 on Mac arm64"
+# The app's bundle ID (build.sh's APP_ID): its processes' crash reports name it (own_report)
+APP_ID=cz.jandrly.gw2onmac
 RES="$(cd "$(dirname "$0")" && pwd)"
 # release or dev (build.sh's app.properties, as gw2om.sh reads it)
 CHANNEL="$(sed -n 's/^channel=//p' "$RES/app.properties" 2>/dev/null || true)"
@@ -122,11 +124,14 @@ awk 'length($0) < 4' "$work/names" >"$literals_short"
 
 # (SOM_ANYWHERE=1: the user, full and account names also inside words, as file names hold them:
 # jd_boss.zevtc)
-# jsonform <path>: the path as an .ips writes it, \/ for /
+# jsonform <path>: the path as an .ips writes it, \/ for /; jsonwin <path>: winform's in JSON, \\
+# for \
 jsonform() { printf '%s' "$1" | sed 's|/|\\/|g'; }
+jsonwin() { winform "$1" | sed 's/\\/\\\\/g'; }
 redact() {  # [game] stdin → stdout (game: also game_rules)
   SOM_HOME_PATH="$HOME" SOM_ROOT_HOME="$H" SOM_WHOME="$(winform "$HOME")" SOM_WROOT_HOME="$(winform "$H")" \
   SOM_JHOME="$(jsonform "$HOME")" SOM_JROOT_HOME="$(jsonform "$H")" \
+  SOM_JWHOME="$(jsonwin "$HOME")" SOM_JWROOT_HOME="$(jsonwin "$H")" \
   SOM_USER="$(id -un)" SOM_NAME="$(id -F 2>/dev/null)" SOM_ACCOUNTS="$accounts" \
   LC_ALL=C awk -v litfile="$literals" -v shortfile="$literals_short" -v gamelog="${1:+1}" '
     # Replace w with r in s, ignoring case; only where w is a whole word if whole is set.
@@ -239,6 +244,7 @@ redact() {  # [game] stdin → stdout (game: also game_rules)
       home = ENVIRON["SOM_HOME_PATH"]; rhome = ENVIRON["SOM_ROOT_HOME"]
       whome = ENVIRON["SOM_WHOME"]; wrhome = ENVIRON["SOM_WROOT_HOME"]
       jhome = ENVIRON["SOM_JHOME"]; jrhome = ENVIRON["SOM_JROOT_HOME"]
+      jwhome = ENVIRON["SOM_JWHOME"]; jwrhome = ENVIRON["SOM_JWROOT_HOME"]
       user = ENVIRON["SOM_USER"]; fullname = ENVIRON["SOM_NAME"]; wordonly = ENVIRON["SOM_ANYWHERE"] == ""
       # A user name that is a common word is only replaced in paths, not everywhere.
       split("admin user users mac test game wine guest root home apple steam shared crossover", w, " ")
@@ -253,11 +259,16 @@ redact() {  # [game] stdin → stdout (game: also game_rules)
       s = $0
       # (the home folder as Wine writes it only after Z:, where Wine puts the root of the Mac.
       # C:\users\<name> is the bottle user, named after the Mac user on this line: USER below; and
-      # as an .ips writes it, \/Users\/<name>)
-      if (rhome != home) { s = rep(s, rhome, "~", 0); s = rep(s, "Z:" wrhome, "Z:~", 0); s = rep(s, jrhome, "~", 0) }
-      s = rep(s, home, "~", 0); s = rep(s, "Z:" whome, "Z:~", 0); s = rep(s, jhome, "~", 0)
+      # in JSON, \/Users\/<name> and Z:\\Users\\<name>)
+      if (rhome != home) {
+        s = rep(s, rhome, "~", 0); s = rep(s, "Z:" wrhome, "Z:~", 0)
+        s = rep(s, jrhome, "~", 0); s = rep(s, "Z:" jwrhome, "Z:~", 0)
+      }
+      s = rep(s, home, "~", 0); s = rep(s, "Z:" whome, "Z:~", 0)
+      s = rep(s, jhome, "~", 0); s = rep(s, "Z:" jwhome, "Z:~", 0)
       s = rep(s, "/Users/" user, "/Users/USER", 1)
       s = rep(s, "\\/Users\\/" user, "\\/Users\\/USER", 1)
+      s = rep(s, "\\\\users\\\\" user, "\\\\users\\\\USER", 1)
       s = rep(s, "\\users\\" user, "\\users\\USER", 1)
       # (the Windows user the app passes to Wine, USER= in session.env and install.log: the Mac
       # login in a bottle an earlier version made, whatever word it is; crossover names nobody)
@@ -307,15 +318,16 @@ add_log() {  # file max-bytes [folder in the zip [game]]: the end of a log
 }
 
 # Crash reports: macOS's reports in ~/Library/Logs/DiagnosticReports (crashes .ips/.crash, hangs
-# .hang, spins .spin, .diag) of the last 7 days, of the game and Wine (wine, wineserver, Gw2-64.exe),
-# Steam's Windows processes (wine_report; the newest WINE_MAX of them), this app and Metal's shader
-# compiler when it worked for the game or Wine. The newest first, at most CRASH_MAX of them,
-# CRASH_MAX_BYTES together and CRASH_FILE_MAX each. Prints "add <path>" or "skip <name> (<why>)"
-# per report.
+# .hang, spins .spin, .diag) of the last 7 days: this app's, the .ips of the processes it started
+# (own_report: the game, Steam, Wine; the newest OWN_MAX of them), the other kinds of the game and
+# Wine (wine, wineserver, Gw2-64.exe) and Steam's Windows processes by their names, and Metal's
+# shader compiler's when it worked for the game or Wine. The newest first, at most CRASH_MAX of
+# them, CRASH_MAX_BYTES together and CRASH_FILE_MAX each. Prints "add <path>" or
+# "skip <name> (<why>)" per report.
 CRASH_MAX=20
 CRASH_MAX_BYTES=10000000
 CRASH_FILE_MAX=3000000
-WINE_MAX=10
+OWN_MAX=10
 # cap <count> <bytes together> <bytes each> <what>: of "<mtime> <size> <path>" lines, newest
 # first, "add <size> <path>" for each that fits, else "skip <name> (<why>)"; a "skip" line goes
 # through as it is
@@ -332,21 +344,18 @@ cap() {
     fi
   done
 }
-# wine_report <file>: a report of the game, Steam or Wine: its name has wine, or starts with Gw2 or
-# steam, in any case; or it is an .ips whose header names the process wine, wine64-preloader,
-# wineserver, Gw2-64.exe or steam.exe, or whose process path is in this app's folder (as Mach9's
-# loader can be named after its bundle, with a name of its own)
-wine_report() {
-  case "$(printf '%s' "${1##*/}" | tr '[:upper:]' '[:lower:]')" in *wine*|gw2*|steam*) return 0 ;; esac
-  case "$1" in *.ips) ;; *) return 1 ;; esac
-  # (an .ips: a line of JSON, then the report's JSON, pretty-printed, whose procName and procPath
-  # come before its threads; paths with \/)
-  head -c 65536 "$1" | SOM_JDIR="$(jsonform "/Library/Application Support/$APP_FOLDER/")" LC_ALL=C awk '
-    BEGIN { jdir = ENVIRON["SOM_JDIR"] }
-    { l = tolower($0) }
-    l ~ /"(app_name|name|procname)" *: *"(wine|wine64-preloader|wineserver|gw2-64\.exe|steam\.exe)"/ ||
-      (/^ *"procPath" *:/ && index($0, jdir)) { found = 1; exit }
-    END { exit !found }'
+# own_report <file.ips>: the report of a process this app started. An .ips is a line of JSON, then
+# the report's JSON; plutil reads its coalitionName, the bundle ID of the app whose processes it
+# ran with (the game, Steam and Wine run in this app's), or its procPath in the engine's folder.
+# (Never the names: another Wine's game has the same ones. Nor the path alone: macOS writes a path
+# in the home folder as /Users/USER/*/<name>.)
+own_report() {
+  sed 1d "$1" >"$work/report.json" 2>/dev/null || return 1
+  [ "$(plutil -extract coalitionName raw -o - "$work/report.json" 2>/dev/null)" != "$APP_ID" ] || return 0
+  case "$(plutil -extract procPath raw -o - "$work/report.json" 2>/dev/null)" in
+    "$APPDIR/engine/"*) return 0 ;;
+  esac
+  return 1
 }
 crash_reports() {
   local m size f n=0
@@ -356,10 +365,12 @@ crash_reports() {
       case "${f##*/}" in
         "$APP_FOLDER"*|GW2onMac*) ;;
         MTLCompilerService*) LC_ALL=C grep -q -i -E '"responsibleProc" : "(gw2|wine)' "$f" || continue ;;
-        *)
-          wine_report "$f" || continue
+        *.ips)
+          own_report "$f" || continue
           n=$((n + 1))
-          [ "$n" -le "$WINE_MAX" ] || { echo "skip ${f##*/} (more than $WINE_MAX of the game, Steam and Wine)"; continue; } ;;
+          [ "$n" -le "$OWN_MAX" ] || { echo "skip ${f##*/} (more than $OWN_MAX of the game, Steam and Wine)"; continue; } ;;
+        *)
+          case "$(printf '%s' "${f##*/}" | tr '[:upper:]' '[:lower:]')" in *wine*|gw2*|steam*) ;; *) continue ;; esac ;;
       esac
       echo "$m $size $f"
     done | cap "$CRASH_MAX" "$CRASH_MAX_BYTES" "$CRASH_FILE_MAX" reports
@@ -755,7 +766,8 @@ full_name="$(id -F 2>/dev/null)"
      { [ -s "$literals_short" ] && "$names" "$c" -i -w -F -f "$literals_short"; } ||
      found -F -e "$HOME/" -e "$H/" -e "/Users/$(id -un)/" \
        -e "$(winform "$HOME")\\" -e "$(winform "$H")\\" -e "\\Users\\$(id -un)\\" \
-       -e "$(jsonform "$HOME")\\/" -e "$(jsonform "$H")\\/" -e "\\/Users\\/$(id -un)\\/" "$c" ||
+       -e "$(jsonform "$HOME")\\/" -e "$(jsonform "$H")\\/" -e "\\/Users\\/$(id -un)\\/" \
+       -e "$(jsonwin "$HOME")\\\\" -e "$(jsonwin "$H")\\\\" -e "\\\\Users\\\\$(id -un)\\\\" "$c" ||
      found -E -f "$work/leak-patterns" "$c" ||
      { [ "$c" != "$f" ] && { found -i -F -f "$work/dump-names" "$c" ||
        found -E -e '[A-Za-z][A-Za-z0-9_ ]*[.][0-9]{4}([^0-9.]|$)' "$c"; }; }; then
