@@ -704,14 +704,17 @@ apply_registry() {
 # fex (mine: my FEX; engine: the engine's own, the default), and jobwakes, launcherframes and
 # eventpool (rows of HEAT_SWITCHES, as fastlocks is), and metal (3 or 4: the Metal my DXMT fork
 # draws with, DXMT_METAL4 in the game's rule; 4 by default, and in a file without the key, with its
-# frames presented through a Metal 3 command buffer, metal_present). A file that has metal= keeps
-# it: Install and Repair wrote metal=3 into every file while 3 was the default, and that reads as
-# my choice, so no reset. dxmt, wine, macdrv and fex have no row in the
+# frames presented through a Metal 3 command buffer, metal_present), and vsync (on: my DXMT fork's
+# display sync, its default; off: DXMT_DISPLAY_SYNC=0 in the game's rule). A file that has metal=
+# keeps it: Install and Repair wrote metal=3 into every file while 3 was the default, and that reads
+# as my choice, so no reset. gamemode left the keys in #269: nothing read it on this line, where
+# the engine's loader is the Game Mode app, and a file's gamemode= line goes at its next write, as
+# coolworkers' did. dxmt, wine, macdrv and fex have no row in the
 # Settings window: they are for my comparisons from Terminal (gw2om.sh set …). On this engine some
 # of the keys need pieces of mine that come in later steps: setting_state says so, the Settings
 # window greys them with the reason, set refuses them, and they keep what settings.conf says without
 # an effect.
-SETTING_KEYS="retina fpscap metal metalfx hud warm fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam dxmt wine jobwakes macdrv launcherframes eventpool fex reshade"
+SETTING_KEYS="retina fpscap vsync metal metalfx hud warm fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema launchopts rawmouse mousespeed updates debug steambg quitsteam dxmt wine jobwakes macdrv launcherframes eventpool fex reshade"
 # settings.conf's version, its line settings_version=. Install and Repair write every key with its
 # value, so a file holds the defaults it was written with, as if I had chosen them. A default that
 # changes for the files that exist gets a row here, "<version> <keys>": in a file older than
@@ -772,7 +775,7 @@ CPU_MAX="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 8)"
 UI_SCALES="1.5 1.75 1.8 2.0"
 setting_default() {
   case "$1" in
-    retina|warm|uiscale_sans|gamemode|rawmouse|updates|steambg|quitsteam|jobwakes|eventpool) echo on ;;
+    retina|vsync|warm|uiscale_sans|rawmouse|updates|steambg|quitsteam|jobwakes|eventpool) echo on ;;
     metalfx|hud|uiscale|uiscale_cinema|launcherframes|fastlocks|reshade) echo off ;;
     mousespeed) echo 1 ;;
     debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
@@ -788,7 +791,7 @@ setting_default() {
 }
 setting_valid() { # <key> <value>
   case "$1" in
-    retina|metalfx|hud|warm|fastlocks|uiscale|uiscale_sans|uiscale_cinema|gamemode|rawmouse|updates|debug|steambg|quitsteam|jobwakes|launcherframes|eventpool|reshade)
+    retina|vsync|metalfx|hud|warm|fastlocks|uiscale|uiscale_sans|uiscale_cinema|rawmouse|updates|debug|steambg|quitsteam|jobwakes|launcherframes|eventpool|reshade)
       [ "$2" = on ] || [ "$2" = off ] ;;
     mousespeed) in_list "$2" "$MOUSE_SPEEDS" ;;
     fpscap) in_list "$2" "$FPS_CAPS" ;;
@@ -827,8 +830,7 @@ setting_state() {
   local e l n
   if [ "$1" = mousespeed ] && [ "$(setting rawmouse)" != on ]; then echo "off:Needs Raw mouse-look, which is off."; return; fi
   case "$1" in
-    metal|metalfx|warm) if [ "$(setting dxmt)" = fork ]; then echo ok; else echo "off:Needs my DXMT fork, and the engine's own DXMT is chosen."; fi ;;
-    gamemode) echo "off:The engine's loader is a Game Mode app. Nothing to switch." ;;
+    metal|metalfx|warm|vsync) if [ "$(setting dxmt)" = fork ]; then echo ok; else echo "off:Needs my DXMT fork, and the engine's own DXMT is chosen."; fi ;;
     wine) if lib_bundled wine; then echo ok; else echo "off:This build of the app has no Wine build of mine."; fi ;;
     macdrv) if lib_bundled macdrv; then echo ok; else echo "off:This build of the app has no Mac driver of mine."; fi ;;
     fex) if fex_bundled; then echo ok; else echo "off:This build carries no FEX of mine."; fi ;;
@@ -875,7 +877,7 @@ write_dxmt_conf() {
   {
     echo "# DXMT options for Guild Wars 2, written by $APP_NAME from its settings (DXMT_CONFIG_FILE)."
     if [ "$cap" != off ]; then
-      echo "# Frame cap: Metal-paced, a divisor of the display's refresh (use it with the game's vsync)"
+      echo "# Frame cap: paced by Metal. While display sync paces the game (Vsync and the game's vsync on), only a cap below the refresh acts"
       echo "d3d11.preferredMaxFrameRate = $cap"
     fi
   } | put "$DXMT_CONF" 644
@@ -959,7 +961,8 @@ cdb_value() {
 #   env                DXMT's shader cache in the app's cache folder (dxmt_cache: my fork's, or
 #                      the engine's DXMT's own), with my fork in place the Metal it draws with
 #                      (DXMT_METAL4=0 for Metal 3, =1 for Metal 4: the Metal row; the engine's
-#                      DXMT doesn't read it) and at Metal 4 its present (metal_present), then the
+#                      DXMT doesn't read it) and at Metal 4 its present (metal_present), with Vsync
+#                      off DXMT_DISPLAY_SYNC=0 (my fork's display sync is on without it), then the
 #                      switches of my ntdll.so and my Mac
 #                      driver (heat_entries), then FEX's (fex_entries), then, in a development
 #                      build, the lines of dev-switches.conf (dev_entries)
@@ -974,7 +977,7 @@ cdb_value() {
 # #209). A line of compatdb.local comes after the rules (write_rules), so its DXMT_METAL4 wins
 # over the row's.
 rules_text() {
-  local game="exe=Gw2-64.exe" cef="exe=CefHost.exe" rundll="" entries="" removed="" e metal="" present=""
+  local game="exe=Gw2-64.exe" cef="exe=CefHost.exe" rundll="" entries="" removed="" e metal="" present="" sync=""
   [ "$(setting rawmouse)" = on ] || game="$game;gcmouse=false"
   if [ "$(setting hud)" = on ]; then game="$game;metal_hud=true" cef="$cef;metal_hud=false"; fi
   arcdps_state
@@ -990,12 +993,14 @@ rules_text() {
   if [ "$(dxmt_in_use)" = fork ]; then
     if [ "$(setting metal)" = 4 ]; then metal=DXMT_METAL4=1; else metal=DXMT_METAL4=0; fi
     present=$(metal_present | sed -n 's/^in //p')
+    [ "$(setting vsync)" = on ] || sync=DXMT_DISPLAY_SYNC=0
   fi
   while IFS= read -r e; do
     if [ -n "$e" ]; then entries="$entries;env=$e" removed="$removed;env=${e%%=*}="; fi
   done <<EOF
 $metal
 $present
+$sync
 $(heat_entries)
 $(fex_entries)
 $(dev_entries)
@@ -4630,15 +4635,16 @@ etime_seconds() {
 }
 
 # The game's own Frame Limiter at a value together with vsync: under Wine it lands just under the
-# display's rate (58 instead of 60); Unlimited with vsync keeps a steady 60. Sets LIMIT (the
-# Frame Limiter's value, or empty) and LIMIT_HINT (yes|no). The game's settings file is only read.
+# display's rate (58 instead of 60); Unlimited with vsync keeps a steady 60. That steady 60 is my
+# DXMT fork's display sync, so no hint while the Vsync row is off. Sets LIMIT (the Frame Limiter's
+# value, or empty) and LIMIT_HINT (yes|no). The game's settings file is only read.
 limiter_state() {
   local gfx vsync
   gfx="$BOTTLE/drive_c/users/$(bottle_user)/AppData/Roaming/Guild Wars 2/GFXSettings.Gw2-64.exe.xml"
   LIMIT=$(sed -n 's/.*<OPTION Name="frameLimit"[^>]*Value="\([^"]*\)".*/\1/p' "$gfx" 2>/dev/null | head -1 || true)
   vsync=$(sed -n 's/.*<OPTION Name="verticalSync"[^>]*Value="\([^"]*\)".*/\1/p' "$gfx" 2>/dev/null | head -1 || true)
   LIMIT_HINT=no
-  if [ -n "$LIMIT" ] && [ "$LIMIT" != unlimited ] && [ "$vsync" = true ]; then LIMIT_HINT=yes; fi
+  if [ -n "$LIMIT" ] && [ "$LIMIT" != unlimited ] && [ "$vsync" = true ] && [ "$(setting vsync)" = on ]; then LIMIT_HINT=yes; fi
 }
 
 # Steam updating or verifying itself (logs/bootstrap_log.txt since <stamp>): sets UPD (no, update

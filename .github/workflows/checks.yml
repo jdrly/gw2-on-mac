@@ -334,12 +334,14 @@ jobs:
   # runs to Collect Logs on one Steam install, sessions is Steam in the background to Uninstall on
   # an install it makes itself, and rest is what starts from nothing. On a slow runner, in the pull
   # request run 44123244664, the suite's own seconds came to about 10, 7 and 6 minutes and the jobs
-  # to about 10, 8 and 7.
+  # to about 10, 8 and 7. I gave sessions 20 minutes and kept 15 for the other two. After #278 it
+  # took 13 min 58 s (run 44448554814), about 226 s of that in ReShade's sections. A fourth group
+  # is a later design question.
   sandbox:
     needs: build
     runs-on: xcode-27
     name: sandbox (${{ matrix.group }})
-    timeout-minutes: 15
+    timeout-minutes: ${{ matrix.group == 'sessions' && 20 || 15 }}
     strategy:
       fail-fast: false
       matrix:

@@ -236,7 +236,8 @@ final class GameSettings {
     }
   }
 
-  // Frame cap: DXMT's Metal-paced d3d11.preferredMaxFrameRate, a divisor of the display's refresh
+  // Frame cap: DXMT's Metal-paced d3d11.preferredMaxFrameRate (with display sync, a cap that isn't
+  // a whole number of refreshes is kept by its frame limiter)
   static let frameCaps: [(String, String)] = [
     ("off", "Off"), ("30", "30 fps"), ("40", "40 fps"), ("60", "60 fps"), ("120", "120 fps"),
   ]
@@ -448,8 +449,12 @@ struct SettingsView: View {
         SettingRow("Retina", "Draws the game at your display's full resolution (Wine's High Resolution Mode). Sharper, at some cost in frame rate.") {
           InkSwitch(isOn: settings.toggle("retina"))
         }
-        SettingRow("Frame cap", "A steady cap paced by Metal, at a divisor of your display's refresh. Use it with the game's own vsync.") {
+        SettingRow("Frame cap", "A steady cap paced by Metal, for a display above 60 Hz or for a lower steady rate. With Vsync and the game's own Vertical Sync on, a cap at or above your display's refresh does nothing.") {
           InkPopup(selection: settings.choice("fpscap", "off"), options: GameSettings.frameCaps)
+        }
+        // (my DXMT fork's display sync: DXMT_DISPLAY_SYNC=0 in the game's rule when off)
+        SettingRow("Vsync", "Metal shows each frame on one of your display's refreshes (display sync). Off, DXMT asks Metal for a minimum time between frames instead: one refresh, or the frame cap's interval. Acts only while the game's own Vertical Sync is on.", off: off("vsync")) {
+          InkSwitch(isOn: settings.toggle("vsync"))
         }
       }
       SettingsGroup {
@@ -463,14 +468,14 @@ struct SettingsView: View {
           InkSwitch(isOn: settings.toggle("hud"))
         }
         // (a switch of my Mac driver)
-        SettingRow("Launcher frames", "The launcher's window gets a copy of each frame, and a frame equal to the last is skipped. Against a launcher that flickers.", off: off("launcherframes")) {
+        SettingRow("Launcher frames", "The launcher's window gets a copy of each frame, and a frame equal to the last is skipped. Against a launcher that flickers. Experimental.", off: off("launcherframes")) {
           InkSwitch(isOn: settings.toggle("launcherframes"))
         }
       }
 
     case .performance:
       SettingsGroup {
-        SettingRow("Shader warming", "Builds the pipelines your last sessions used before the game asks for them: fewer hitches on busy maps. Up to 8,192, about 300 MB.", off: off("warm")) {
+        SettingRow("Shader warming", "Builds the pipelines your last sessions used before the game asks for them: fewer hitches on busy maps. Up to 8,192, about 300 MB. Experimental.", off: off("warm")) {
           InkSwitch(isOn: settings.toggle("warm"))
         }
         SettingRow("CPUs the game sees", "The game starts one job worker per CPU, minus one.") {
@@ -485,7 +490,7 @@ struct SettingsView: View {
         SettingRow("Event pool", "The game creates and closes about 2,500 events a second. The pool reuses closed ones instead of asking the Wine server for each.", off: off("eventpool")) {
           InkSwitch(isOn: settings.toggle("eventpool"))
         }
-        SettingRow("Faster locks", "Short waits before the game thread sleeps on a busy lock or job group.", off: off("fastlocks")) {
+        SettingRow("Faster locks", "Short waits before the game thread sleeps on a busy lock or job group. Experimental.", off: off("fastlocks")) {
           InkSwitch(isOn: settings.toggle("fastlocks"))
         }
       }
@@ -566,10 +571,6 @@ struct SettingsView: View {
           SettingRow("Quit Steam when the game quits", "When Play started Steam in the background, Steam quits by itself once Guild Wars 2 has quit. A Steam that was already running, or whose window showed, stays open.") {
             InkSwitch(isOn: settings.toggle("quitsteam"))
           }
-        }
-        // (on this line always on: every Wine process runs as the engine's loader, a Game Mode app)
-        SettingRow("Game Mode", "While the game is in full screen, macOS gives it priority on the CPU and GPU and lowers the latency of Bluetooth controllers and headphones.", off: off("gamemode")) {
-          InkSwitch(isOn: off("gamemode") == nil ? settings.toggle("gamemode") : .constant(true))
         }
       }
       SettingsGroup {

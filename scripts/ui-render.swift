@@ -274,9 +274,9 @@ func session(_ state: String) -> Installer.LaunchSession {
 @MainActor
 func settings(_ extra: [String: String] = [:]) -> GameSettings {
   let s = GameSettings()
-  s.preview(["installed": "yes", "running": "no", "retina": "on", "fpscap": "off", "metal": "4", "metalfx": "off", "hud": "off",
+  s.preview(["installed": "yes", "running": "no", "retina": "on", "fpscap": "off", "vsync": "on", "metal": "4", "metalfx": "off", "hud": "off",
              "warm": "on", "fastlocks": "off", "ncpu": "8", "uiscale": "off", "uiscale_addon": "off",
-             "uiscale_size": "1.75", "uiscale_sans": "on", "uiscale_cinema": "off", "gamemode": "on", "launchopts": "",
+             "uiscale_size": "1.75", "uiscale_sans": "on", "uiscale_cinema": "off", "launchopts": "",
              "route": "steam", "updates": "off", "debug": "off", "steambg": "on", "quitsteam": "on", "cpus": "12",
              "steam_login": "no", "rawmouse": "on", "mousespeed": "1", "dxmt": "fork", "wine": "mine", "jobwakes": "on",
              "eventpool": "on", "macdrv": "mine", "launcherframes": "off",
@@ -290,7 +290,6 @@ func settings(_ extra: [String: String] = [:]) -> GameSettings {
 // there): the greyed rows with their reasons
 let engineStates: [String: String] = [
   "mousespeed_state": "off:My Mac driver in this app (jdrly/wine d831f808236) doesn't have this switch.",
-  "gamemode_state": "off:The engine's loader is a Game Mode app. Nothing to switch.",
 ]
 
 @MainActor
