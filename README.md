@@ -190,9 +190,9 @@ through macOS's `perl`, which fails rather than copy to another volume or move i
 holds the install lock, and from the rename's checks to the record the session's lock too, so no
 Play starts in between.
 
-Steam may ask you to sign in once in the new bottle. I haven't tested yet whether its remembered
-login survives the move, so the first Play after it shows Steam's window, even with *Start Steam in
-the background* on.
+On the first start after the move, Steam may show "steamwebhelper is not responding". *Restart
+Steam with GPU Acceleration disabled* gets past it, and Steam starts logged in. A fix is coming
+(#264).
 
 *Start fresh* in Settings › Troubleshooting installs anew instead. While the move waits or after it
 failed, it stops the move. After a move it first gives the game back to 0.1, as *Rollback* does,
@@ -642,12 +642,11 @@ Storage, stays where it is.
 - Raw mouse-look comes from SWTOR on Mac, where people have used it for a long time. In Guild
   Wars 2 this Mac driver build has had one in-game test so far, on 2026-11-08.
 - I've played with arcdps on this engine, and it works. I haven't tested the Nexus loader.
-- ReShade came over from 0.1.4, and I haven't run it in the game on this engine yet. Its
-  `ReShade64.dll` is an x86_64 DLL, so it runs through FEX like the game. What I've tested is the
-  app's side: the switch, the ReShade folder, the import, arcdps's renaming and Collect Logs, in a
-  sandbox with stand-in files. The pins are the sha256 of the files reshade.me and mozilla/fxc2
-  served when I checked them. Whether ReShade loads and draws on DXMT here, and whether arcdps
-  loads next to it, is still open.
+- ReShade came over from 0.1.4. I've played on this engine with ReShade and arcdps on together
+  (0.2.0-rc.3, 2026-11-19). Its `ReShade64.dll` is an x86_64 DLL, so it runs through FEX like the
+  game. The sandbox tests the app's side with stand-in files: the switch, the ReShade folder, the
+  import, arcdps's renaming and Collect Logs. The pins are the sha256 of the files reshade.me and
+  mozilla/fxc2 served when I checked them.
 - While Steam verifies the game's files, *Checking game files* shows no percentage, because Steam's
   logs don't give one. A game update shows its progress.
 - There's no Keyboard pane. SWTOR on Mac's game keys by keyboard position are in the Mac driver,
