@@ -479,6 +479,7 @@ private struct UpdateHeader: View {
         if let subtitle {
           Text(subtitle)
             .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)  // wraps; a long line was cut off after one line
         }
       }
       Spacer(minLength: 0)

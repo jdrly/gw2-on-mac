@@ -528,8 +528,20 @@ func renderAll(_ dir: URL, exports: URL?) async {
     model.phase = .upToDate(shown.message)
     model.upToDateTitle = shown.title
     model.onAcknowledge = {}
-    let view = UpdateView(model: model)
-    write(await render(view, size: NSHostingView(rootView: view).fittingSize, dark: dark),
-          dir.appendingPathComponent(name + ".png"))
+    // ImageRenderer, not render(): cacheDisplay leaves out the glass button, and the text too on a
+    // view without a background of its own
+    NSApp.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+    let renderer = ImageRenderer(content: UpdateView(model: model)
+      .background(Color(nsColor: .windowBackgroundColor))
+      .environment(\.colorScheme, dark ? .dark : .light))
+    renderer.scale = 2
+    guard let tiff = renderer.nsImage?.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else {
+      print("FAIL the update window \(name) did not render")
+      exit(1)
+    }
+    let size = CGSize(width: rep.pixelsWide / 2, height: rep.pixelsHigh / 2)
+    rep.size = size
+    write(windowChrome(rep, size: size, dark: dark), dir.appendingPathComponent(name + ".png"))
   }
+  NSApp.appearance = nil
 }
