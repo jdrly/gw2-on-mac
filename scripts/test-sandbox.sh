@@ -137,15 +137,15 @@ cat >"$G" <<'EOF'
 # and stderr through a tee each, by FIFOs the tees remove once open. gw2om.sh gets them as fds 1
 # and 2 and nothing else, so its detached processes, which redirect those, hold no tee open. This
 # exits with gw2om.sh's status once both tees are done, so its output is all there when it ends.
-# A call that hasn't ended after CALL_LIMIT seconds (gw2om.sh itself, or a tee whose FIFO a process
-# still holds open) is ended by a watchdog. It writes the call's record, takes the process list and
-# the open FIFOs (5 s at most: a ps or lsof that hangs is ended) into the check's file, then sends
-# TERM to every process under this script in that list but itself, and KILL 2 s later to the same
-# pids, so a child that ignores TERM ends even once its parent has gone. Without a list it ends the
-# tees. A process that had left the tree before (a detached one) stays. This script waits for the
-# watchdog, adds the record to checks/timeout.new, which fails the check it ran in, and exits 124.
-# While that file is there, a call doesn't run, so a check spends one limit at most. The watchdog
-# holds none of the call's pipes and ends within a second of a call that ends in time.
+# gw2om.sh runs in a process group of its own (PGRUN, which writes its pid first), with every
+# process it starts that doesn't leave the group. A call that hasn't ended after CALL_LIMIT seconds
+# (gw2om.sh itself, or a tee whose FIFO a process still holds open) is ended by a watchdog. It writes
+# the call's record, takes the process list and the open FIFOs (5 s at most: a ps or lsof that hangs
+# is ended) into the check's file, then sends TERM to the group and the tees, and KILL 2 s later.
+# This script waits for the watchdog, adds the record to checks/timeout.new, which fails the check
+# it ran in, and exits 124. While that file is there, a call doesn't run, so a check spends one
+# limit at most. The watchdog holds none of the call's pipes and ends within a second of a call
+# that ends in time.
 f="$CHECK_OUT.$$" w=$$ to="${CHECK_OUT%/*}/timeout.new"
 if [ -e "$to" ]; then echo "\$ gw2om.sh $* (not run: a call before it ran out of its limit)" >>"$CHECK_OUT"; exit 124; fi
 mkfifo "$f.1" "$f.2" || exec "$GW2OM" "$@"
@@ -155,29 +155,32 @@ echo "\$ gw2om.sh $*" >>"$CHECK_OUT"
 ( i=0
   while [ "$i" -lt "$CALL_LIMIT" ]; do sleep 1; kill -0 "$w" 2>/dev/null || exit 0; i=$((i + 1)); done
   echo "gw2om.sh $* had not ended after $CALL_LIMIT s: checks/${CHECK_OUT##*/}" >"$f.rec" && mv "$f.rec" "$f.timeout"
-  ( ps -axww -o pid=,ppid=,pgid=,stat=,etime=,command= >"$f.ps"
-    lsof -n -u "$(id -u)" 2>/dev/null | awk '$5 == "FIFO"' >"$f.lsof" ) &
+  ( { echo "gw2om.sh $* had not ended after $CALL_LIMIT s (the wrapper is pid $w, gw2om.sh's group $(cat "$f.pid" 2>/dev/null)). The processes:"
+      ps -axww -o pid,ppid,pgid,stat,etime,command
+      echo "The open FIFOs (a tee ends once no process has its FIFO open for writing):"
+      lsof -n -u "$(id -u)" 2>/dev/null | awk 'NR == 1 || $5 == "FIFO"'; } >>"$CHECK_OUT" 2>&1 ) &
   d=$! i=0
   while kill -0 "$d" 2>/dev/null && [ "$i" -lt 25 ]; do sleep 0.2; i=$((i + 1)); done
   pkill -KILL -P "$d" 2>/dev/null; kill -KILL "$d" 2>/dev/null
-  { echo "gw2om.sh $* had not ended after $CALL_LIMIT s (the wrapper is pid $w). The processes (pid, ppid, pgid, stat, etime, command):"
-    cat "$f.ps"
-    echo "The open FIFOs (a tee ends once no process has its FIFO open for writing):"
-    cat "$f.lsof"; } >>"$CHECK_OUT" 2>&1
-  me=$(exec sh -c 'echo $PPID')
-  l=$(awk -v r="$w" -v x="$me" '{ up[$1] = $2 }
-    END { for (k in up) { q = k; while (q in up && q != x) { if (up[q] == r) { print k; break } q = up[q] } } }' "$f.ps" 2>/dev/null)
-  rm -f "$f.ps" "$f.lsof"
-  [ -n "$l" ] || l="$t1 $t2"
-  kill -0 "$w" 2>/dev/null || exit 0
-  kill -TERM $l 2>/dev/null; sleep 2; kill -KILL $l 2>/dev/null ) </dev/null >/dev/null 2>&1 &
+  g=$(cat "$f.pid" 2>/dev/null)
+  for sig in TERM KILL; do
+    [ -z "$g" ] || kill -"$sig" -- "-$g" 2>/dev/null
+    kill -"$sig" "$t1" "$t2" 2>/dev/null
+    [ "$sig" = KILL ] || sleep 2
+  done ) </dev/null >/dev/null 2>&1 &
 wd=$!
-"$GW2OM" "$@" >"$f.1" 2>"$f.2"; rc=$?
+"$PGRUN" "$f.pid" "$GW2OM" "$@" >"$f.1" 2>"$f.2"; rc=$?
 wait "$t1" "$t2"
 if [ -e "$f.timeout" ]; then wait "$wd"; cat "$f.timeout" >>"$to"; rm -f "$f.timeout"; rc=124; fi
+rm -f "$f.pid"
 exit "$rc"
 EOF
 chmod 755 "$G"
+# PGRUN <pidfile> <program> [<argument>...]: the program in a process group of its own, its pid in
+# <pidfile>
+export PGRUN="$SANDBOX/bin/pgrun"
+printf '#include <stdio.h>\n#include <unistd.h>\nint main(int c, char **v) { FILE *f; if (c < 3) return 2; setpgid(0, 0); if ((f = fopen(v[1], "w"))) { fprintf(f, "%%d\\n", (int)getpid()); fclose(f); } execvp(v[2], v + 2); perror(v[2]); return 127; }\n' >"$SANDBOX/pgrun.c"
+clang -O2 -o "$PGRUN" "$SANDBOX/pgrun.c" || exit 1
 # end_check <ok|FAIL> <what>: its line in checks.txt, the state files after a failure, and the next
 # check's file
 end_check() {
@@ -601,32 +604,38 @@ section "A gw2om.sh call that doesn't end fails its check by name (CALL_LIMIT)"
 # (stand-ins for gw2om.sh, through the wrapper with a limit of 2 s, each in a checks folder of its
 # own: one never ends; one waits for its child with a TERM trap, which bash runs only once the child
 # has ended; one whose child ignores TERM and outlives it; one ends but leaves a detached process
-# holding its stdout and stderr, so the tees wait)
+# holding its stdout and stderr, so the tees wait; and one that never ends while the watchdog's ps
+# hangs too)
 cp "$SANDBOX/sleeper" "$SANDBOX/bin/holder"
 printf '#!/bin/bash\nexec "%s" 600\n' "$SANDBOX/bin/holder" >"$SANDBOX/bin/hangs"
 printf '#!/bin/bash\ntrap "exit 143" TERM\n"%s" 601\n' "$SANDBOX/bin/holder" >"$SANDBOX/bin/traps"
 printf '#!/bin/bash\n( trap "" TERM; exec "%s" 603 ) &\nwait\n' "$SANDBOX/bin/holder" >"$SANDBOX/bin/resists"
 printf '#!/bin/bash\necho game=yes\n"%s" 602 &\n' "$SANDBOX/bin/holder" >"$SANDBOX/bin/leaves"
-chmod 755 "$SANDBOX/bin/hangs" "$SANDBOX/bin/traps" "$SANDBOX/bin/resists" "$SANDBOX/bin/leaves"
+printf '#!/bin/bash\nexec "%s" 604\n' "$SANDBOX/bin/holder" >"$SANDBOX/bin/stalls"
+mkdir -p "$SANDBOX/stall-bin"
+printf '#!/bin/bash\nexec "%s" 605\n' "$SANDBOX/bin/holder" >"$SANDBOX/stall-bin/ps"
+chmod 755 "$SANDBOX/bin/hangs" "$SANDBOX/bin/traps" "$SANDBOX/bin/resists" "$SANDBOX/bin/leaves" "$SANDBOX/bin/stalls" "$SANDBOX/stall-bin/ps"
 limited() { # <stand-in>: the output of a check that calls it twice (without bash's lines about the
   # processes the watchdog ended), and the seconds it took
-  local t0=$SECONDS
-  ( CHECKS="$SANDBOX/limit/$1" CHECK_OUT="$SANDBOX/limit/$1/0001.txt" GW2OM="$SANDBOX/bin/$1" CALL_LIMIT=2 pass=0 fail=0
+  local t0=$SECONDS p=$PATH
+  [ "$1" != stalls ] || p="$SANDBOX/stall-bin:$PATH"
+  ( CHECKS="$SANDBOX/limit/$1" CHECK_OUT="$SANDBOX/limit/$1/0001.txt" GW2OM="$SANDBOX/bin/$1" CALL_LIMIT=2 pass=0 fail=0 PATH=$p
     mkdir -p "$CHECKS"; check "a check that calls $1" [ "$(st game)/$(st game)" = yes/yes ] ) 2>/dev/null
   echo "took $((SECONDS - t0))"
 }
-for stub in hangs:600 traps:601 resists:603 leaves:602; do
+for stub in hangs:600 traps:601 resists:603 leaves:602 stalls:604; do
   out=$(limited "${stub%:*}")
   # (12 s: the limit, a second until the watchdog looks, the process list, which takes 5 s at most,
   # and the 2 s from TERM to KILL)
   check "  ${stub%:*}: the check fails within 12 s, naming the call and its file, and its second call doesn't run" \
     eval 'echo "$out" | grep -qx "  FAIL a check that calls ${stub%:*} (gw2om.sh status had not ended after 2 s: checks/0001.txt)" && [ "${out##*took }" -le 12 ] && has "$SANDBOX/limit/${stub%:*}/0001.txt" "gw2om.sh status (not run: a call before it"'
-  check "  the file has the processes, the holder among them" has "$SANDBOX/limit/${stub%:*}/0001.txt" "$SANDBOX/bin/holder ${stub#*:}"
-  if [ "${stub%:*}" = leaves ]; then
-    check "  the detached holder outlives the call (the suite's own ends end it)" eval 'pgrep -f "^$SANDBOX/bin/holder 602" >/dev/null'
+  if [ "${stub%:*}" = stalls ]; then
+    check "  the file says so, without the processes (its ps hung)" eval 'has "$SANDBOX/limit/stalls/0001.txt" "had not ended after 2 s (the wrapper is pid" && ! has "$SANDBOX/limit/stalls/0001.txt" "$SANDBOX/bin/holder 604"'
   else
-    check "  the stand-in and its holder are gone when the check ends" eval '! pgrep -f "^$SANDBOX/bin/holder ${stub#*:}" >/dev/null && ! pgrep -f "^/bin/bash $SANDBOX/bin/${stub%:*} status" >/dev/null'
+    check "  the file has the processes, the holder among them" has "$SANDBOX/limit/${stub%:*}/0001.txt" "$SANDBOX/bin/holder ${stub#*:}"
   fi
+  check "  the stand-in and its holders are gone when the check ends" \
+    eval '! pgrep -f "^$SANDBOX/bin/holder ${stub#*:}" >/dev/null && ! pgrep -f "^$SANDBOX/bin/holder 605" >/dev/null && ! pgrep -f "^/bin/bash $SANDBOX/bin/${stub%:*} status" >/dev/null'
   pkill -f "^$SANDBOX/bin/holder" 2>/dev/null || true
 done
 fi
