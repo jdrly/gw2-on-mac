@@ -3506,21 +3506,34 @@ game_at() {
   done
   return 1
 }
-# in_old <path>: <path> is 0.1.x's folder or its cache folder or inside one, by their own paths or
-# resolved
+# in_old <path>: <path> is in 0.1.x's folders: its app and cache folders and every folder on the
+# way to where its game may be (GAME_RELS in its bottle, and the game folder its state names), each
+# by its own path and resolved, so a link there to a folder elsewhere counts too
 in_old() {
-  local d r
-  for d in "$OLD_APPDIR" "$OLD_CACHE"; do
-    { [ "$1" = "$d" ] || path_under "$1" "$d"; } && return 0
-    r=$(cd "$d" 2>/dev/null && pwd -P) || continue
-    { [ "$1" = "$r" ] || path_under "$1" "$r"; } && return 0
+  local p rel
+  old_install >/dev/null 2>&1 || true
+  for p in "$OLD_APPDIR" "$OLD_CACHE" ${OLD_GAME:+"$OLD_GAME"}; do old_under "$1" "$p" && return 0; done
+  for rel in "${GAME_RELS[@]}"; do
+    p="$OLD_BOTTLE/drive_c/$rel"
+    while path_under "$p" "$OLD_APPDIR"; do
+      old_under "$1" "$p" && return 0
+      p=${p%/*}
+    done
   done
   return 1
 }
+# old_under <path> <folder>: <path> is <folder> or inside it, by <folder>'s own path or resolved
+old_under() {
+  local r
+  { [ "$1" = "$2" ] || path_under "$1" "$2"; } && return 0
+  r=$(cd "$2" 2>/dev/null && pwd -P) || return 1
+  [ "$1" = "$r" ] || path_under "$1" "$r"
+}
 # import_refused <game dir as found> <resolved>: the import doesn't take it, and IMPORT_WHY says why:
 # anything in 0.1.x's folders by either path (the move renames its game, and a copy would take the
-# space twice), a folder that is a link, or one with a link in it that leads out (links_out: the
-# copy keeps a link, and what this app writes there would reach the other app's files)
+# space twice); a folder that is a link or reached through one (its path isn't its resolved path);
+# one with a link anywhere in it (the copy keeps a link, which can lead back to the original's
+# files), or that find can't look through
 import_refused() {
   local l
   if in_old "$1" || in_old "$2"; then
@@ -3534,10 +3547,10 @@ import_refused() {
     fi
     return 0
   fi
-  if [ -L "$1" ]; then IMPORT_WHY="$1 is a link, so $APP_NAME doesn't copy it. Choose the folder it leads to."; return 0; fi
-  l=$(links_out "$2" "$2") || true
+  if [ "$1" != "$2" ]; then IMPORT_WHY="$1 is a link or reached through one, so $APP_NAME doesn't copy it. Choose the folder it leads to."; return 0; fi
+  l=$(find "$2" -type l -print -quit 2>/dev/null) || { IMPORT_WHY="$APP_NAME couldn't look through all of $2 for links, so it doesn't copy it."; return 0; }
   [ -n "$l" ] || return 1
-  IMPORT_WHY="$l is a link that leads out of the game folder, so $APP_NAME doesn't copy it: the copy would keep the link, and what this app writes there would reach the other app's files."
+  IMPORT_WHY="$l is a link, so $APP_NAME doesn't copy the game folder it is in: the copy would keep the link, which can lead to the original's files."
 }
 # game_line <game dir> [<as found>]: what the window lists, tab-separated (not a folder the import
 # refuses, import_refused):
@@ -3659,10 +3672,15 @@ import_game() {
     IMPORT_HOW=cloned ADDONS=""
     return
   fi
+  # (checked again under the lock, right before the transfer: the folder I said yes to, at that size,
+  # still neither 0.1.x's nor a link; and room for all of it, since a clone may become a copy)
+  if import_refused "$src" "$(cd "$src" 2>/dev/null && pwd -P || true)"; then die "$IMPORT_WHY"; fi
+  [ "$src" = "$IMPORT_YES_PATH" ] && [ "$(folder_bytes "$src")" = "$IMPORT_YES_BYTES" ] ||
+    die "$src isn't the folder you said yes to, or it changed since. Choose it again, and confirm the copy."
+  total=$IMPORT_YES_BYTES n=$(free_kb)
+  [ "$(( ${n:-0} * 1024 ))" -ge "$((total + 1000000000))" ] ||
+    die "Not enough free disk space to copy the game's files: they may take up to $(( (total + 999999999) / 1000000000 )) GB (and 1 GB to spare), $(( ${n:-0} / 1000000 )) GB are free."
   run mkdir -p "$(dirname "$dst")"
-  # (checked again under the lock: a link that leads out, made since, isn't copied either)
-  n=$(links_out "$src" "$src") || true
-  [ -z "$n" ] || die "$n is a link that leads out of the game folder, so $APP_NAME doesn't copy it (details in $LOGS/install.log)."
   IMPORT_DST=$dst
   clone_tree "$src" "$dst" "the game's files" "Guild Wars 2" "$total"
   IMPORT_HOW=$CLONE_HOW
@@ -3754,7 +3772,7 @@ install_imported() {
   fi
   write_manifest
   game_state
-  how="cloned from $label (no space today; it grows apart from the original as the game patches)"
+  how="cloned from $label"
   [ "$IMPORT_HOW" != copied ] || how="copied from $label"
   if [ "$GAME" = yes ] || [ -n "$DRY" ]; then
     if [ "$route" = steam ]; then phase 5; else phase 4; fi
@@ -4235,26 +4253,18 @@ path_under() { case "$1" in "$2/"?*) return 0 ;; esac; return 1; }
 # out wherever it leads (what is in that folder isn't looked through), and so does one that leads
 # nowhere.
 move_links() {
-  local ap bad
+  local d l p ap bad
   [ -z "$DRY" ] || return 0
   ap=$(cd "$APPDIR" && pwd -P)
-  bad=$(links_out "$ap" "$@") || true
+  bad=$(for d in "$@"; do
+      { [ -e "$d" ] || [ -L "$d" ]; } || continue
+      find "$d" -type l 2>/dev/null | while IFS= read -r l; do
+        p=$(realpath "$l" 2>/dev/null) || p=""
+        [ -n "$p" ] && [ -f "$p" ] && path_under "$p" "$ap" || echo "$l"
+      done
+    done | head -1) || true
   [ -z "$bad" ] ||
     die "$bad is a link to a folder or out of the files the move brought, so $APP_NAME doesn't move this install: what it writes there would reach $OLD_LABEL's files. Start fresh in Settings › Troubleshooting installs anew."
-}
-
-# links_out <base> <folder>...: the first link in the folders that doesn't lead to a file inside <base>
-# (a resolved path) once resolved; a link to a folder, or to nothing, counts as leading out
-links_out() {
-  local b=$1 d l p
-  shift
-  for d in "$@"; do
-    { [ -e "$d" ] || [ -L "$d" ]; } || continue
-    find "$d" -type l 2>/dev/null | while IFS= read -r l; do
-      p=$(realpath "$l" 2>/dev/null) || p=""
-      [ -n "$p" ] && [ -f "$p" ] && path_under "$p" "$b" || echo "$l"
-    done
-  done | head -1
 }
 
 # move_paths <ini>: 0.1.x's folders in it (or in the file it links to), as ReShade's ini spells them (Z:\...\GW2 on Mac, a
@@ -5409,13 +5419,14 @@ cmd_install() {
     # size, the path and bytes the window showed)
     bytes=$(folder_bytes "$src")
     if [ -z "$copy" ] || [ -z "$cpath" ] || [ -z "$cbytes" ]; then
-      echo "@error $APP_NAME copies $src only after you say yes to it: it takes $(( (bytes + 999999999) / 1000000000 )) GB of this Mac's disk. Nothing changed."
+      echo "@error $APP_NAME copies $src only after you say yes to it: it may take up to $(( (bytes + 999999999) / 1000000000 )) GB on this disk. Nothing changed."
       exit 1
     fi
     if [ "$cpath" != "$src" ] || [ "$cbytes" != "$bytes" ]; then
       echo "@error The folder isn't the one you said yes to, or it changed since ($cpath, $cbytes bytes; now $src, $bytes bytes). Choose it again. Nothing changed."
       exit 1
     fi
+    IMPORT_YES_PATH=$cpath IMPORT_YES_BYTES=$cbytes
     route=$(game_route_of "$src")
     if game_runs_anywhere; then echo "@error Guild Wars 2 is running. Quit it first (in every app), so its files don't change while they are copied."; exit 1; fi
   fi

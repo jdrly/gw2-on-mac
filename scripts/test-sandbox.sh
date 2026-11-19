@@ -3459,6 +3459,9 @@ mkgame "$SANDBOX/o1-out/Guild Wars 2" && mkdir "$O1C/Program Files" && ln -s "$S
 check "  and a link in 0.1's bottle to a game outside it" sh -c "'$G' check-game '$O1C/Program Files/Guild Wars 2' | grep -q '^@error That is GW2 on Mac 0.1.s game'"
 out=$(g install import "$O1C/Program Files/Guild Wars 2" --copy --confirm-path "$SANDBOX/o1-out/Guild Wars 2" --confirm-bytes 1153433614 2>&1) && rc=0 || rc=$?
 check "    install import refuses it, even with a yes passed, and creates nothing" eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error That is GW2 on Mac 0.1.s game.* Nothing changed\.$" && [ -z "$(ad_list)" ]'
+check "    and the folder outside itself, where the link leads" sh -c "'$G' check-game '$SANDBOX/o1-out/Guild Wars 2' | grep -q '^@error That is GW2 on Mac 0.1.s game'"
+out=$(g install import "$SANDBOX/o1-out/Guild Wars 2" --copy --confirm-path "$SANDBOX/o1-out/Guild Wars 2" --confirm-bytes 1153433614 2>&1) && rc=0 || rc=$?
+check "    install import refuses that one too, and creates nothing" eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error That is GW2 on Mac 0.1.s game" && [ -z "$(ad_list)" ]'
 rm -f "$O1C/Program Files/Guild Wars 2"; rmdir "$O1C/Program Files"; rm -rf "$SANDBOX/o1-out"
 out=$(g install import "$O1G" --copy --confirm-path "$O1G" --confirm-bytes 1153433614 2>&1) && rc=0 || rc=$?
 check "install import of 0.1's game, a yes passed: refused, nothing created, 0.1's folders as they were" eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error That is GW2 on Mac 0.1.s game.* Nothing changed\.$" && [ -z "$(ad_list)" ] && [ "$(o1sum)" = "$O1SUM" ]'
@@ -3467,10 +3470,13 @@ check "  after Start fresh, it says to install the game anew" sh -c "'$G' check-
 rm -f "$AD/moved-from-0.1"
 # a folder that is a link, and one with a link that leads out of it: refused
 ln -s "$WHG" "$SANDBOX/to-whisky"
-check "check-game refuses a game folder that is a link" sh -c "'$G' check-game '$SANDBOX/to-whisky' | grep -q '^@error $SANDBOX/to-whisky is a link'"
+check "check-game refuses a game folder that is a link" sh -c "'$G' check-game '$SANDBOX/to-whisky' | grep -q '^@error $SANDBOX/to-whisky is a link or reached through one'"
 rm -f "$SANDBOX/to-whisky"
+ln -s "$WHG/Gw2.dat" "$WHG/Gw2.dat.link"
+check "check-game refuses a game folder with a link in it, even one to a file inside" sh -c "'$G' check-game '$WHG' | grep -q '^@error $WHG/Gw2.dat.link is a link, so GW2 on Mac doesn.t copy the game folder it is in'"
+rm -f "$WHG/Gw2.dat.link"
 ln -s "$SANDBOX/shared-addons" "$CXG/addons"
-check "check-game refuses a game folder with a link that leads out of it" sh -c "'$G' check-game '$CXG' | grep -q '^@error $CXG/addons is a link that leads out of the game folder'"
+check "check-game refuses a game folder with a link to a folder outside it" sh -c "'$G' check-game '$CXG' | grep -q '^@error $CXG/addons is a link, so'"
 out=$(g install import "$CXG" --copy --confirm-path "$CXG" --confirm-bytes 1 2>&1) && rc=0 || rc=$?
 check "  install import too, nothing created; the file it leads to is still there" eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error $CXG/addons is a link" && [ -z "$(ad_list)" ] && same "$SANDBOX/pe/arcdps.dll" "$SANDBOX/shared-addons/arcdps/chain/d3d11.dll"'
 check "  the scan leaves it out" eval '! g scan | grep -qF "$CXG"'
@@ -3480,11 +3486,21 @@ snap >"$SANDBOX/sources-before.txt"
 # no copy without my yes to this folder at this size
 CXB=$(g check-game "$CXG" | grep '^game' | cut -f4)
 out=$(g install import "$CXG" 2>&1) && rc=0 || rc=$?
-check "install import without a yes: refused with the size, nothing created" eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac copies $CXG only after you say yes to it: it takes 3 GB of this Mac.s disk\. Nothing changed\.$" && [ -z "$(ad_list)" ]'
+check "install import without a yes: refused with the size, nothing created" eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac copies $CXG only after you say yes to it: it may take up to 3 GB on this disk\. Nothing changed\.$" && [ -z "$(ad_list)" ]'
 out=$(g install import "$CXG" --copy --confirm-path "$CXG" --confirm-bytes "$((CXB - 1))" 2>&1) && rc=0 || rc=$?
 check "  with a yes to another size (the folder changed since): refused, nothing created" eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error The folder isn.t the one you said yes to, or it changed since" && [ -z "$(ad_list)" ]'
 out=$(g install import "$CXG" --copy --confirm-path "$WHG" --confirm-bytes "$CXB" 2>&1) && rc=0 || rc=$?
 check "  with a yes to another folder: refused, nothing created" eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error The folder isn.t the one you said yes to" && [ -z "$(ad_list)" ]'
+# the folder changes after the yes, while the install takes its first steps: checked again under the
+# install lock right before the transfer, refused, and the failed install leaves nothing
+IP="$SANDBOX/pause-import"
+touch "$IP"
+GW2_ON_MAC_TEST_PAUSE="$IP" GW2_ON_MAC_TEST_PAUSE_AT=locked gi "$WHG" >"$SANDBOX/import-changed.txt" 2>&1 & ip=$!
+i=0; until [ -e "$IP.at" ] || [ $i -ge 100 ]; do sleep 0.1; i=$((i + 1)); done
+echo "patched" >"$WHG/patch.txt"; rm -f "$IP"; wait "$ip"; rc=$?; rm -f "$IP.at" "$WHG/patch.txt"
+check "the folder changed after the yes: refused under the lock before the copy, nothing left" \
+  eval '[ "$rc" != 0 ] && has "$SANDBOX/import-changed.txt" "^@error $WHG isn.t the folder you said yes to, or it changed since" && [ ! -e "$AD/engine" ] && [ ! -e "$BOTTLE" ]'
+snap >"$SANDBOX/sources-before.txt"
 
 # a Guild Wars 2 that runs (in another app): its files may change, so nothing is copied
 mkdir -p "$SANDBOX/elsewhere" && cp "$SANDBOX/sleeper" "$SANDBOX/elsewhere/Gw2-64.exe"

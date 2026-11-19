@@ -75,7 +75,7 @@ double space, not even for a moment.
   folders, by its own path or resolved. It still clones or copies another app's game, since that
   is the player's choice: only after a yes to that folder at that size, which the window asks with
   the space it takes, and the backend refuses a yes to another path or size. A folder that is a
-  link, or has one leading out, is refused.
+  link, sits behind one or has any link in it is refused.
 - After Rollback, Repair doesn't reinstall Steam into the bottle on Steam's route, so the place
   stays free for Move in.
 - A move that 0.1.x's player rolls back and moves in again saves 0.1.x's addon files anew each time

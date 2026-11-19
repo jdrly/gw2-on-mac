@@ -106,12 +106,8 @@ struct MainView: View {
       Button("Copy \(Installer.gigabytes(game.bytes))") { installer.start(.install, copying: game) }
       Button("Cancel", role: .cancel) {}.keyboardShortcut(.defaultAction)
     } message: { game in
-      Text("\(game.path) goes into \(appName)'s bottle as a copy of \(Installer.gigabytes(game.bytes)). "
-           + "This Mac's disk has \(Installer.gigabytes(installer.diskFree)) free. "
-           + (game.sameDisk
-              ? "On this disk it starts as an APFS clone, which takes no space today but grows apart from the original at the game's first patch, up to its whole size. "
-              : "")
-           + "The original stays as it is.")
+      Text("\(game.path) is copied into \(appName)'s bottle. This may take up to \(Installer.gigabytes(game.bytes)) "
+           + "on this disk (\(Installer.gigabytes(installer.diskFree)) free). The original stays as it is.")
     }
     .alert(blocked?.title ?? "", isPresented: Binding(get: { blocked != nil }, set: { if !$0 { blocked = nil } }),
            presenting: blocked) { _ in
@@ -848,9 +844,8 @@ struct ExistingGames: View {
       if let game = installer.chosenGame {
         HStack(alignment: .top, spacing: 6) {
           LucideIcon(name: game.sameDisk ? "zap" : "hard-drive", size: 13).foregroundStyle(Brand.gold).padding(.top, 1)
-          Text(game.sameDisk
-               ? "Same disk: an APFS clone, no space today. It grows apart at the game's first patch, up to \(Installer.gigabytes(game.bytes))."
-               : "Another disk: copied, \(Installer.gigabytes(game.bytes)) on this Mac's disk.")
+          Text("\(game.sameDisk ? "Same disk: cloned with APFS." : "Another disk: copied.") "
+               + "This may take up to \(Installer.gigabytes(game.bytes)) on this disk.")
             .font(.body(12)).bodyBox(12, 1.3).foregroundStyle(Brand.fg2)
             .fixedSize(horizontal: false, vertical: true)
         }
