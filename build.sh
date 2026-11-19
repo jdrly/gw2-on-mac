@@ -69,6 +69,9 @@ case "$APP_VERSION" in *-*) CHANNEL=dev ;; *) CHANNEL=release ;; esac
 APP_AUTHOR="Jan Drlý"
 GITHUB_URL=https://github.com/jdrly
 REPO_URL=https://github.com/jdrly/gw2-on-mac
+# The macOS the app and its helpers are built for (swiftc's -target, clang's -mmacosx-version-min).
+# Info.plist's LSMinimumSystemVersion is the macOS the app opens on, and src/gw2om.sh's MACOS_MIN
+# the one the engine needs, which the update feed's item names (scripts/release.sh).
 MACOS_MIN=26.4
 CACHE="$ROOT/.cache"
 # The app's name (gw2om.sh has the one definition), which is also its file name, and its bundle id:

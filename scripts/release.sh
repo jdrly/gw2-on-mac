@@ -56,6 +56,9 @@
 #                                    and FEX_COMMIT, if set, the commit my bundled
 #                                    FEX's VERSION names, with its DLL's sha256.
 #   scripts/release.sh --adhoc --no-release the same without the pre-release
+#   scripts/release.sh --feed-min <appcast.xml>  only what the feed's build does to its item's
+#                                    minimum macOS, on that file (the Checks workflow runs it on
+#                                    fixture feeds)
 #
 # Releases from GitHub Actions (SWTOR on Mac's .github/workflows/release.yml; this repository has no
 # workflow yet) come in two halves, so
@@ -88,6 +91,7 @@ if { [ "$MODE" = --dev ] || [ "$MODE" = --adhoc ]; } && [ "${2:-}" = --no-releas
 case "$MODE" in
   ""|--sign-only|--no-notarize|--no-release|--ci|--ci-dry-run|--dev|--adhoc) ;;
   --feed) [ -n "${2:-}" ] || { echo "usage: $0 --feed <version>" >&2; exit 2; } ;;
+  --feed-min) [ -n "${2:-}" ] || { echo "usage: $0 --feed-min <appcast.xml>" >&2; exit 2; } ;;
   *) echo "unknown option: $MODE" >&2; exit 2 ;;
 esac
 IDENTITY="${IDENTITY:-Developer ID Application: Jan Drly (3JT82CY6ZK)}"
@@ -97,6 +101,28 @@ REPO=jdrly/gw2-on-mac
 # 0.1.x's, so the DMG and the deltas go on from GW2-on-Mac-<version>.dmg (ADR 0018).
 APP_NAME="$(sed -n 's/^APP_NAME="\(.*\)"$/\1/p' src/gw2om.sh)"
 [ -n "$APP_NAME" ] || { echo "No APP_NAME=\"…\" line in src/gw2om.sh" >&2; exit 1; }
+# The macOS the engine needs (src/gw2om.sh's MACOS_MIN). The feed's item names it, so Sparkle on an
+# older macOS doesn't offer the update. It isn't the app's LSMinimumSystemVersion, the macOS the app
+# opens on, which generate_appcast writes into the item: 0.2 is to open on macOS 26.0 and say there
+# why it can't run (#295).
+MACOS_MIN="$(sed -n 's/^MACOS_MIN=\([0-9][0-9.]*\)$/\1/p' src/gw2om.sh)"
+[ -n "$MACOS_MIN" ] || { echo "No MACOS_MIN=… line in src/gw2om.sh" >&2; exit 1; }
+feed_min() { # <appcast.xml>: its one item gets sparkle:minimumSystemVersion $MACOS_MIN, or the release
+  # stops. A feed that already says it is left as it is, byte for byte. (The appcast is not signed.)
+  local f=$1 min="/rss/channel/item/*[local-name()='minimumSystemVersion']"
+  [ "$(xmllint --xpath 'count(/rss/channel/item)' "$f")" = 1 ] || { echo "$f doesn't have exactly one item" >&2; exit 1; }
+  if [ "$(xmllint --xpath "string($min)" "$f")" != "$MACOS_MIN" ]; then
+    sed "s|<sparkle:minimumSystemVersion>[^<]*</sparkle:minimumSystemVersion>|<sparkle:minimumSystemVersion>$MACOS_MIN</sparkle:minimumSystemVersion>|" "$f" >"$f.tmp"
+    mv "$f.tmp" "$f"
+  fi
+  [ "$(xmllint --xpath "string($min)" "$f")" = "$MACOS_MIN" ] ||
+    { echo "$f's item doesn't say sparkle:minimumSystemVersion $MACOS_MIN (src/gw2om.sh's MACOS_MIN)" >&2; exit 1; }
+}
+if [ "$MODE" = --feed-min ]; then
+  feed_min "$2"
+  echo "[release] $2's item says sparkle:minimumSystemVersion $MACOS_MIN"
+  exit 0
+fi
 DASHED="${APP_NAME// /-}"
 SRC="dist/$APP_NAME.app"
 ENT="$PWD/src/entitlements"
@@ -462,12 +488,9 @@ done
 rm -rf "$feed"
 xmllint --noout "$OUT/appcast.xml"
 ! grep -q "${APP_NAME// /%20}" "$OUT/appcast.xml" || { echo "appcast.xml still names unrenamed deltas" >&2; exit 1; }
-# One item, and it names the macOS the app needs (its LSMinimumSystemVersion), so Sparkle on an
-# older macOS doesn't offer it: 0.1.x runs on 26.0, 0.2 needs 26.4
-min="$(plutil -extract LSMinimumSystemVersion raw "$APP/Contents/Info.plist")"
-[ "$(xmllint --xpath 'count(/rss/channel/item)' "$OUT/appcast.xml")" = 1 ] || { echo "appcast.xml has more than one item" >&2; exit 1; }
-[ "$(xmllint --xpath "string(/rss/channel/item/*[local-name()='minimumSystemVersion'])" "$OUT/appcast.xml")" = "$min" ] ||
-  { echo "appcast.xml's item doesn't say sparkle:minimumSystemVersion $min (the app's LSMinimumSystemVersion)" >&2; exit 1; }
+# One item, and it names the macOS the engine needs, not the app's LSMinimumSystemVersion
+# (feed_min): 0.1.x runs on 26.0, 0.2 needs 26.4
+feed_min "$OUT/appcast.xml"
 echo "  $OUT/appcast.xml, ${#deltas[@]} delta(s)"
 # generate_appcast skips a delta it couldn't make or that isn't smaller than the DMG, without a word
 # in its summary: name each older DMG it made none from (the update from it downloads the DMG)
