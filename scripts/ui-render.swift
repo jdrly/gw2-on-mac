@@ -514,7 +514,8 @@ func renderAll(_ dir: URL, exports: URL?) async {
         fallbacks.allSatisfy({ $0 == usual }),
         tooOld.title == "The update needs a newer macOS",
         tooOld.message == "GW2 on Mac 0.2.0 needs macOS 26.4 or later, and this Mac has macOS 26.3. "
-          + "Version 0.1.5 keeps working here.",
+          + "Version 0.1.5 keeps working here. "
+          + "Update macOS in System Settings › General › Software Update to get it.",
         patch.message.contains("this Mac has macOS 26.3.1.") else {
     print("FAIL the update window's no-update line: \(usual), \(tooOld), \(fallbacks), \(patch)")
     exit(1)
