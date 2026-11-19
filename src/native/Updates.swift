@@ -187,7 +187,28 @@ final class UserDriver: NSObject, SPUUserDriver {
 
   func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) {
     let version = host.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
-    window.showUpToDate("GW2 on Mac \(version) is the latest version.", acknowledge: acknowledgement)
+    let info = (error as NSError).userInfo
+    let reason = (info[SPUNoUpdateFoundReasonKey] as? NSNumber).flatMap { SPUNoUpdateFoundReason(rawValue: $0.int32Value) }
+    let latest = info[SPULatestAppcastItemFoundKey] as? SUAppcastItem
+    let shown = UserDriver.notFound(version: version, reason: reason, latest: latest?.displayVersionString,
+                                    minimum: latest?.minimumSystemVersion, macOS: ProcessInfo.processInfo.operatingSystemVersion)
+    window.showUpToDate(shown.message, title: shown.title, acknowledge: acknowledgement)
+  }
+
+  // The window's title and line when Sparkle finds no update. When the newest version needs a newer
+  // macOS than this Mac has (Sparkle's reason "system is too old", with the feed's item), it says
+  // which version and which macOS. Every other reason keeps "is the latest version" and the usual
+  // title (nil). The renders' model check calls it.
+  static func notFound(version: String, reason: SPUNoUpdateFoundReason?, latest: String?, minimum: String?,
+                       macOS: OperatingSystemVersion) -> (title: String?, message: String) {
+    guard reason == .systemIsTooOld, let latest, let minimum, !minimum.isEmpty else {
+      return (nil, "GW2 on Mac \(version) is the latest version.")
+    }
+    var system = "\(macOS.majorVersion).\(macOS.minorVersion)"
+    if macOS.patchVersion > 0 { system += ".\(macOS.patchVersion)" }
+    return ("The update needs a newer macOS",
+            "GW2 on Mac \(latest) needs macOS \(minimum) or later, and this Mac has macOS \(system). "
+              + "Version \(version) keeps working here.")
   }
 
   func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) {
@@ -266,6 +287,8 @@ final class UpdateModel {
   let icon: NSImage
   var phase: Phase = .checking
   var update: Update?
+  // the heading of .upToDate when it isn't "You're up to date" (a newer version needs a newer macOS)
+  var upToDateTitle: String?
 
   // The pending Sparkle reply or acknowledgement for the buttons on screen.
   var onInstall: (() -> Void)?
@@ -364,8 +387,9 @@ final class UpdateWindow: NSObject, NSWindowDelegate {
     show(.installing)
   }
 
-  func showUpToDate(_ message: String, acknowledge: @escaping () -> Void) {
+  func showUpToDate(_ message: String, title: String? = nil, acknowledge: @escaping () -> Void) {
     model.clearActions()
+    model.upToDateTitle = title
     model.onAcknowledge = { [weak self] in acknowledge(); self?.close() }
     show(.upToDate(message))
   }
@@ -464,7 +488,7 @@ private struct UpdateHeader: View {
   private var title: String {
     switch model.phase {
     case .checking: "Checking for updates…"
-    case .upToDate: "You're up to date"
+    case .upToDate: model.upToDateTitle ?? "You're up to date"
     case .failed: "Couldn't update GW2 on Mac"
     default: "A new version of GW2 on Mac is available"
     }
