@@ -1533,9 +1533,22 @@ delta updates and checks it with `scripts/check-appcast.swift`.
 - The appcast's item names the app's `LSMinimumSystemVersion` as `sparkle:minimumSystemVersion`,
   26.4 on this branch, or the script stops. Sparkle on an older macOS then offers nothing.
 
-**The update from 0.1.x, a test still to run on my Mac.** `release.sh` builds a feed only for a plain version,
-never for `X.Y.Z-dev.N`, so the test build is 0.2.0 itself, with the feed and key 0.1.x has, its
-feed served from `127.0.0.1` and never uploaded. With 0.1.4's DMG in
+- `--dev` makes `GW2-on-Mac-<version>.dmg` with `GW2 on Mac.app` in it and publishes
+  it as a GitHub pre-release with no feed, so `releases/latest` stays on 0.1.x. A release
+  candidate goes out the same way, titled "(release candidate)" where a development build's says
+  "(development build)".
+- `--adhoc` does the same without my Developer ID, for the Dev build workflow. It keeps
+  `build.sh`'s ad hoc signatures and only verifies them, makes an unsigned DMG, and doesn't
+  notarize. It refuses a version below `build.sh`'s, a tag that exists and the stand-in DXMT,
+  `ntdll.so` or `winemac.so`. It
+  mounts the DMG and checks that its app matches `dist/<name>.files` file for file, with a valid
+  signature, this app's bundle id, the dev channel and no feed. The pre-release gets the DMG and
+  the record `GW2-on-Mac-<version>.build.txt`, and the notes get a section on installing a
+  build that isn't notarized.
+
+**The update from 0.1.x, a test still to run on my Mac.** `release.sh` builds a feed only for a
+plain version, never for `X.Y.Z-dev.N` or `X.Y.Z-rc.N`, so the test build is 0.2.0 itself, with the
+feed and key 0.1.x has, its feed served from `127.0.0.1` and never uploaded. With 0.1.4's DMG in
 `release/updates/`, the feed gets a delta from it, or the script says it made none:
 
 ```sh
@@ -1551,18 +1564,6 @@ defaults write cz.jandrly.gw2onmac GW2UpdateFeedURL http://127.0.0.1:8000/appcas
 `work/0.2.0-test.md` is the notes the update window shows. Then I quit 0.1.4, open it again so it
 reads the test feed, and click *Check for Updates…*. Afterwards `defaults delete cz.jandrly.gw2onmac
 GW2UpdateFeedURL`, because 0.2 reads the same domain.
-- `--dev` makes `GW2-on-Mac-<version>.dmg` with `GW2 on Mac.app` in it and publishes
-  it as a GitHub pre-release with no feed, so `releases/latest` stays on 0.1.x. A release
-  candidate goes out the same way, titled "(release candidate)" where a development build's says
-  "(development build)".
-- `--adhoc` does the same without my Developer ID, for the Dev build workflow. It keeps
-  `build.sh`'s ad hoc signatures and only verifies them, makes an unsigned DMG, and doesn't
-  notarize. It refuses a version below `build.sh`'s, a tag that exists and the stand-in DXMT,
-  `ntdll.so` or `winemac.so`. It
-  mounts the DMG and checks that its app matches `dist/<name>.files` file for file, with a valid
-  signature, this app's bundle id, the dev channel and no feed. The pre-release gets the DMG and
-  the record `GW2-on-Mac-<version>.build.txt`, and the notes get a section on installing a
-  build that isn't notarized.
 
 **Dev builds come from GitHub's runners.** The Dev build workflow
 ([`.github/workflows/devbuild.yml`](.github/workflows/devbuild.yml)) builds one from `arm64` and
