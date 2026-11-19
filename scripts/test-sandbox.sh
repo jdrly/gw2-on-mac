@@ -3071,7 +3071,8 @@ g set arcdps off >/dev/null 2>&1; g set reshade off >/dev/null 2>&1
 
 check "  then the switches work as usual" switches arcdps on arcdps - reshade on reshade arcdps reshade off arcdps -
 touch "$PAUSE"; rm -f "$PAUSE.at"
-GW2_ON_MAC_TEST_PAUSE="$PAUSE" GW2_ON_MAC_TEST_PAUSE_AT=arcdps-moved "$G" set reshade on >"$SANDBOX/rs.txt" 2>&1 & ra=$!
+# (the app's gw2om.sh itself: killing G would end only the wrapper)
+GW2_ON_MAC_TEST_PAUSE="$PAUSE" GW2_ON_MAC_TEST_PAUSE_AT=arcdps-moved "$GW2OM" set reshade on >"$SANDBOX/rs.txt" 2>&1 & ra=$!
 wait_at; kill -9 $ra 2>/dev/null; wait $ra 2>/dev/null; rm -f "$PAUSE" "$PAUSE.at"
 check "killed after the rename: arcdps at the chain path, ReShade off, keys off" eval '[ "$(lay)" = "- arcdps" ] && [ "$(arcst)/$(rsst)/$(sett reshade)" = on/off/off ] && keys_ok'
 g set rawmouse on >/dev/null
@@ -3106,8 +3107,9 @@ done_is() { [ "$(sed -n 's/^@done //p' "$SANDBOX/imp.txt")" = "$1" ] || { cat "$
 err_has() { grep -q "^@error .*$1" "$SANDBOX/imp.txt" || { cat "$SANDBOX/imp.txt"; false; }; }
 presets_are() { [ "$(sed -n 's/^@preset //p' "$SANDBOX/imp.txt")" = "$1" ]; }
 rssnap() { (cd "$RSF" 2>/dev/null && find . \( -type f -o -type l \) -exec shasum {} + | LC_ALL=C sort); }
-# files and links outside the ReShade folder and the logs that changed after the marker
-outside_changed() { find "$SANDBOX" -newer "$SANDBOX/marker" \( -type f -o -type l \) ! -path "$RSF/*" ! -path "$LOGS/*" ! -path "$SANDBOX/imp.txt"; }
+# files and links outside the ReShade folder, the logs and the checks' own files that changed after
+# the marker
+outside_changed() { find "$SANDBOX" -newer "$SANDBOX/marker" \( -type f -o -type l \) ! -path "$RSF/*" ! -path "$LOGS/*" ! -path "$CHECKS/*" ! -path "$SANDBOX/imp.txt"; }
 DEPTH="off in online games with this build of ReShade."
 printf '%s\n' 'PreprocessorDefinitions=' 'Techniques=MXAO@qUINT_mxao.fx,Vibrance@Vibrance.fx,Clarity@Clarity.fx' \
   'TechniqueSorting=MXAO@qUINT_mxao.fx,Vibrance@Vibrance.fx,Clarity@Clarity.fx' '' '[Vibrance.fx]' 'Vibrance=0.150000' >"$IM/Lumen.ini"
@@ -3347,7 +3349,8 @@ mkdir -p "$CXG/bin64" "$CXS"
 echo "stand-in game" >"$CXG/Gw2-64.exe" && mkfile -n 2g "$CXG/Gw2.dat" && echo "bin" >"$CXG/bin64/CoherentUI64.dll"
 cp "$COMP/ui-scale/version.dll" "$CXG/version.dll" && echo "scale=1.75" >"$CXG/gw2-ui-scale.ini" && echo "arcdps" >"$CXG/d3d11.dll"
 cp "$SANDBOX/pe/nexus.dll" "$CXG/dxgi.dll"
-# (its addons folder a link to one outside the game folder, with arcdps at ReShade's chain path)
+# (its addons folder a link to one outside the game folder, with arcdps at ReShade's chain path:
+# neither the import nor the install's addon syncs may touch that file)
 mkdir -p "$SANDBOX/shared-addons/arcdps/chain" && cp "$SANDBOX/pe/arcdps.dll" "$SANDBOX/shared-addons/arcdps/chain/d3d11.dll"
 ln -s "$SANDBOX/shared-addons" "$CXG/addons"
 printf '"AppState"\n{\n\t"appid"\t\t"1284210"\n\t"installdir"\t\t"Guild Wars 2"\n\t"StateFlags"\t\t"4"\n}\n' >"$CX/Program Files (x86)/Steam/steamapps/appmanifest_1284210.acf"

@@ -2116,6 +2116,10 @@ ARCDPS_URL=https://www.deltaconnected.com/arcdps/x64
 [ -z "$ROOT" ] || ARCDPS_URL="${GW2_ON_MAC_ARCDPS_URL:-$ARCDPS_URL}"
 ARC_CHAIN=addons/arcdps/chain/d3d11.dll
 ARCDPS_DLLS="d3d11.dll dxgi.dll $ARC_CHAIN"
+# chain_ok [<game folder>]: ARC_CHAIN's folders are real folders. Through a link (an addons folder
+# shared with another install, which the import keeps as a link) the app neither counts arcdps
+# there nor puts, moves or removes a file there: the file would be the other folder's.
+chain_ok() { local d="${1:-$GAME_DIR}"; [ ! -L "$d/addons" ] && [ ! -L "$d/addons/arcdps" ] && [ ! -L "$d/addons/arcdps/chain" ]; }
 # arcdps and the app's ReShade in one game folder. ADDONS_LAYOUT=together (addon_dll): alone, each
 # is d3d11.dll; with both in, ReShade is d3d11.dll and arcdps is ARC_CHAIN, which ReShade loads
 # itself through the [PROXY] keys of the ReShade folder's ReShade.ini (proxy_sync). Next to
@@ -2177,6 +2181,7 @@ arcdps_state() {
   [ -n "$GAME_DIR" ] || { ARC=nogame; return 0; }
   for n in $ARCDPS_DLLS; do
     [ -f "$GAME_DIR/$n" ] || continue
+    [ "$n" != "$ARC_CHAIN" ] || chain_ok || continue
     if is_arcdps "$GAME_DIR/$n"; then ARC=on ARC_DLL=${ARC_DLL:+$ARC_DLL }$n
     elif [ "$ADDONS_LAYOUT" = together ] && [ "$n" != "$ARC_CHAIN" ] && our_reshade "$GAME_DIR/$n"; then :
     else ARC_FOREIGN=${ARC_FOREIGN:+$ARC_FOREIGN }$n
@@ -2191,6 +2196,7 @@ arcdps_state() {
 # other whenever the script stops. ARC_MOVED: the new name.
 arcdps_move() {
   local from="$GAME_DIR/$1" to="$GAME_DIR/$2"
+  case " $1 $2 " in *" $ARC_CHAIN "*) chain_ok || { log "arcdps: not renamed from $1 to $2 (a folder of $ARC_CHAIN is a link)"; return 1; } ;; esac
   if ! is_arcdps "$from" || [ -e "$to" ] || [ -L "$to" ]; then
     log "arcdps: not renamed from $1 to $2 (not arcdps, or $2 is taken)"
     return 1
@@ -2241,7 +2247,7 @@ arcdps_tidy() {
 proxy_sync() {
   local want=0 ini="$RS/ReShade.ini"
   if [ "${1:-}" != off ] && [ "$ADDONS_LAYOUT" = together ] && our_reshade "$GAME_DIR/d3d11.dll" &&
-    is_arcdps "$GAME_DIR/$ARC_CHAIN"; then want=1; fi
+    chain_ok && is_arcdps "$GAME_DIR/$ARC_CHAIN"; then want=1; fi
   PROXY_ON=0
   if [ "$want" = 1 ]; then
     rs_safe "$ini" || return 1
@@ -2332,6 +2338,7 @@ set_arcdps() {
     # (ReShade's keys off first: they never point at a file that is gone)
     proxy_sync off || die "$(proxy_refusal "arcdps stays in")"
     for n in $ARCDPS_DLLS; do
+      [ "$n" != "$ARC_CHAIN" ] || chain_ok || continue
       if is_arcdps "$GAME_DIR/$n"; then run rm -f "$GAME_DIR/$n"; gone=${gone:+$gone and }$n; fi
     done
     registry_unlock
@@ -2360,6 +2367,8 @@ set_arcdps() {
   # (its place: ARC_CHAIN next to the app's ReShade in the together layout)
   reshade_state
   n=$(addon_dll arcdps "$([ "$RSH" = on ] && echo on || echo off)")
+  [ "$n" != "$ARC_CHAIN" ] || chain_ok ||
+    die "Next to ReShade, arcdps goes into addons/arcdps/chain in the game folder, and a folder on that path is a link to another folder. $APP_NAME doesn't put files there: make addons/arcdps a folder of its own, then try again."
   tmp="$GAME_DIR/$(dirname "$n")/.$(basename "$n").gw2om-new"
   if [ -n "$DRY" ]; then
     echo "[dry-run] download $ARCDPS_URL/d3d11.dll, check it against $ARCDPS_URL/d3d11.dll.md5sum, put it into $GAME_DIR/$n"
@@ -3332,7 +3341,7 @@ import_game() {
     # (arcdps at ReShade's chain path only through real folders: a link there leads to the source's
     # or another folder, and the copy keeps the link, so a removal would reach that file)
     case "$n" in
-      "$ARC_CHAIN") [ ! -L "$src/addons" ] && [ ! -L "$src/addons/arcdps" ] && [ ! -L "$src/addons/arcdps/chain" ] || continue ;;
+      "$ARC_CHAIN") chain_ok "$src" || continue ;;
     esac
     if is_arcdps "$src/$n"; then out="$out $n" arc=yes
     elif is_reshade "$src/$n"; then :
