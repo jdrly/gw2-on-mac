@@ -1489,7 +1489,7 @@ What still needs my Mac is signing with my Developer ID, notarizing and publishi
 real arcdps's checks, and playing.
 
 `scripts/test-sandbox.sh` tests the backend of a built app end to end in `work/app-sandbox/test`,
-with 975 checks on a Mac without my workspace. It uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and
+with 1049 checks on a Mac without my workspace. It uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and
 ArenaNet's downloads itself, and uses a clone of the game's own ArenaNet-signed `Gw2-64.exe` as the
 installer to check. That's `SIGNED_PE`, by default the copy in my development workspace's bottle.
 Without one, those checks are skipped. It covers:
@@ -1547,6 +1547,13 @@ Without one, those checks are skipped. It covers:
   process's install lock, and one wins. A fresh contender arrives while another holds the claim
   after reading a live owner, and gets refused. A missing piece refuses Play, and this version's
   pieces under 0.1.0's manifest count as set up.
+- the move from GW2 on Mac 0.1, from a stand-in 0.1.4 install on both routes, with arcdps alone and
+  with ReShade (its ini once as a link): each file in its place, both inis free of 0.1's folders,
+  `USER=crossover` on every Wine start, the settings key by key as `SETTINGS_FROM_01` says and the
+  summary's changes, Start fresh before, after and over another install, and Uninstall keeping the
+  record. 0.1's folders are checksummed and listed before and after a finished move, a cancel, a
+  failure at each step (`GW2_ON_MAC_MOVE_FAIL`), each kind of 0.1 process, a short copy path, and
+  links out of the clone.
 - play, the busy checks, repair, reset-shaders, reinstall-engine and the lock
 - Collect Logs' redaction, arcdps's logs and the crash dumps (recent ones in, older ones, one
   too large, one with the user's folder in UTF-16 and `.dmp` files elsewhere out), ReShade's files
