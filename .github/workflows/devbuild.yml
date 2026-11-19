@@ -1,5 +1,5 @@
-# Dev build: a development build (X.Y.Z-dev.N) or release candidate (X.Y.Z-rc.N) of GW2 on Mac arm64
-# made on GitHub's runners and published as a pre-release v<version>, signed ad hoc and not
+# Dev build: a development build (X.Y.Z-dev.N) or release candidate (X.Y.Z-rc.N) of GW2 on Mac 0.2
+# (arm64) made on GitHub's runners and published as a pre-release v<version>, signed ad hoc and not
 # notarized (no secret, no Developer ID). A release candidate is built and published exactly as a
 # development build is; only its name differs (docs/adr/0017). I download it with
 # `gh release download`, which sets no quarantine attribute.
@@ -33,7 +33,7 @@
 #               components and that version
 #   package     scripts/release.sh --adhoc on the app the build job made (it never builds again):
 #               the DMG, its app compared with build.sh's file list, the record
-#               GW2-on-Mac-arm64-<version>.build.txt, and with publish the pre-release. Only this
+#               GW2-on-Mac-<version>.build.txt, and with publish the pre-release. Only this
 #               job may write to the repository. Its refusals are proved on copies first.
 #
 # Run by hand on arm64: gh workflow run devbuild.yml --ref arm64 [-f dxmt_commit=<sha>]
@@ -484,8 +484,8 @@ jobs:
         run: |
           tar -xf "$RUNNER_TEMP/app.tar"
           tar -xf "$RUNNER_TEMP/components/prebuilt.tar"
-          # (the app's name on disk, the .app's file name, which the release and its DMG keep)
-          name="$(sed -n 's/^APP_FOLDER="\(.*\)"$/\1/p' src/gw2om.sh)"
+          # (the app's name, its .app's file name, which the release and its DMG take)
+          name="$(sed -n 's/^APP_NAME="\(.*\)"$/\1/p' src/gw2om.sh)"
           echo "APP_NAME=$name" >>"$GITHUB_ENV"
           [ "$(plutil -extract CFBundleShortVersionString raw "dist/$name.app/Contents/Info.plist")" = "$VERSION" ] ||
             { echo "::error::The build job's app is not version $VERSION"; exit 1; }

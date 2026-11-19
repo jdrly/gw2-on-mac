@@ -151,11 +151,10 @@
 # else is plain log text.
 # Runs under macOS's /bin/bash 3.2.
 set -euo pipefail
-# The app's name in its texts, and its name on disk: the .app's file name and its three folders in
-# ~/Library (Application Support, Logs, Caches). The 0.2 development build shows the same name as
-# 0.1.x but keeps its own on disk, so it installs next to 0.1.x and shares nothing with it. A text
-# that names a folder uses the folder's name. build.sh and the scripts in scripts/ read both from
-# here.
+# The app's name in its texts and the .app's file name, as 0.1.x's, and the name of its three
+# folders in ~/Library (Application Support, Logs, Caches), which stay 0.2's own: 0.2 replaces the
+# 0.1.x app and only ever reads 0.1.x's folders (ADR 0018). A text that names a folder uses the
+# folder's name. build.sh and the scripts in scripts/ read both from here.
 APP_NAME="GW2 on Mac"
 APP_FOLDER="GW2 on Mac arm64"
 RES="$(cd "$(dirname "$0")" && pwd)"
@@ -734,8 +733,10 @@ SETTINGS_VERSION=$(printf '%s\n' "$SETTINGS_RESETS" | awk 'NF { v = $1 } END { p
 # that value in a file older than <version> (or without the line), and the next write of the file
 # (dev_update, set, Install, Repair) keeps it and writes this version, so a row I turn off
 # afterwards stays off. fex=mine takes effect only in a build that carries my FEX (fex_want). A
-# release build reads none of it, and keeps the line as it is. The switches without a row are
-# in dev-switches.conf (DEV_SWITCHES).
+# development build and the release share the app's folders, so a release build that finds a
+# dev_version= line reads the keys of DEV_ROWS as their defaults, and its next write drops the line
+# with those values (dev_dropped). A development build after it turns them on again. The switches
+# without a row are in dev-switches.conf (DEV_SWITCHES).
 DEV_ROWS="
 1 jobwakes=on eventpool=on fastlocks=on launcherframes=on warm=on metalfx=on rawmouse=on fex=mine
 "
@@ -752,6 +753,9 @@ dev_version() {
   v=$(sed -n 's/^dev_version=//p' "$SETTINGS" 2>/dev/null | tail -1)
   case "$v" in ''|*[!0-9]*) echo 0 ;; *) echo "$v" ;; esac
 }
+# dev_dropped <key>: a release build, and <key> a row of DEV_ROWS that a development build set
+# (settings.conf has a dev_version= line)
+dev_dropped() { [ "$CHANNEL" != dev ] && in_list "$1" "$DEV_ROW_KEYS" && [ "$(dev_version)" != 0 ]; }
 # dev_row <key>: the value DEV_ROWS gives <key> while settings.conf is older than its row, or
 # nothing
 dev_row() {
@@ -811,7 +815,7 @@ setting() { # <key>: its value, or the default
   local v
   v=$(dev_row "$1")
   if [ -n "$v" ]; then echo "$v"; return; fi
-  if [ -f "$SETTINGS" ] && grep -q "^$1=" "$SETTINGS" && ! setting_reset "$1"; then
+  if [ -f "$SETTINGS" ] && grep -q "^$1=" "$SETTINGS" && ! setting_reset "$1" && ! dev_dropped "$1"; then
     v=$(sed -n "s/^$1=//p" "$SETTINGS" | tail -1)
     if setting_valid "$1" "$v"; then echo "$v"; return; fi
   fi
@@ -851,6 +855,7 @@ write_settings() { # [<key> <value>]: settings.conf with every key, one of them 
   local k v d
   d=$(dev_version)
   [ -z "$DEV_ON" ] || d=$DEV_ROWS_VERSION
+  [ "$CHANNEL" = dev ] || d=0
   for k in $SETTING_KEYS; do
     v=$(setting "$k")
     if [ "$k" = "${1:-}" ]; then v=$2; fi

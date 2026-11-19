@@ -24,13 +24,13 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 ROOT="$PWD"
-# The name the app shows, from gw2om.sh, and its name on disk, written out here: the folders of
-# every install before, which a new build must find where they are
+# The name the app shows and its file name, from gw2om.sh, and its folders' name, written out
+# here: the folders of every install before, which a new build must find where they are
 APP_NAME="$(sed -n 's/^APP_NAME="\(.*\)"$/\1/p' src/gw2om.sh)"
 [ -n "$APP_NAME" ] || { echo "No APP_NAME=\"…\" line in src/gw2om.sh" >&2; exit 1; }
 APP_FOLDER="GW2 on Mac arm64"
 WS="${GW2_ON_MAC_WORKSPACE:-$ROOT/../gw2-on-mac}"
-APP="$(cd "${1:-dist/$APP_FOLDER.app}" && pwd)"
+APP="$(cd "${1:-dist/$APP_NAME.app}" && pwd)"
 G="$APP/Contents/Resources/gw2om.sh"
 [ -f "$G" ] || { echo "no $G; run ./build.sh" >&2; exit 1; }
 GW2OM="$G"
@@ -632,6 +632,10 @@ check "  without WINEDLLPATH" sh -c "! grep -q WINEDLLPATH '$STANDIN_LOG'"
 check "logs/session.env written" has "$LOGS/session.env" "SETTING_warm=on"
 check "the manifest" has "$AD/install-manifest.json" '"route": "steam"'
 check "install.log" has "$LOGS/install.log" "install steam"
+# (0.1.x's file name and bundle id, so a 0.1.x install takes 0.2 as its update, and the id the
+# app starts Sparkle for: with another one updates stay off, silently; ADR 0018)
+check "the app is $APP_NAME.app with id cz.jandrly.gw2onmac, the one Updates.swift starts Sparkle for" \
+  eval '[ "${APP##*/}" = "$APP_NAME.app" ] && [ "$(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")" = cz.jandrly.gw2onmac ] && grep -qxF "  static let appBundleID = \"cz.jandrly.gw2onmac\"" "$ROOT/src/native/Updates.swift"'
 # (the app's own three folders and nothing else in Library, so it never shares one with another
 # build of the app, such as 0.1.x)
 check "only the app's folders in Library: $APP_FOLDER" eval '[ "$(cd "$H/Library" && ls -d */* | tr "\n" "|")" = "Application Support/$APP_FOLDER|Caches/$APP_FOLDER|Logs/$APP_FOLDER|" ]'
@@ -4167,6 +4171,17 @@ check "  a second start changes nothing" eval 'same "$RDEVF" "$SANDBOX/rdevf.kee
 dgr set rawmouse off >/dev/null
 dgr repair >/dev/null 2>&1
 check "  raw mouse-look off afterwards stays off" eval 'grep -qx rawmouse=off "$RAD/settings.conf"'
+# A release build over it (a development build and the release share the folders, ADR 0018): the
+# rows read as their defaults while the dev_version= line is there, and its next write drops the
+# line and writes those defaults
+rsett() { rg settings | sed -n "s/^$1=//p"; }
+check "a release build over it reads the rows at their defaults: fex engine, fast locks off, raw mouse-look on" \
+  eval 'grep -qx dev_version=1 "$RAD/settings.conf" && grep -qx fex=mine "$RAD/settings.conf" && [ "$(rsett fex)" = engine ] && [ "$(rsett fastlocks)" = off ] && [ "$(rsett rawmouse)" = on ] && grep -qx dev_version=1 "$RAD/settings.conf"'
+rg set quitsteam off >/dev/null
+check "  its next write: no dev_version line, the rows at their defaults, my change in" \
+  eval '! grep -q "^dev_version=" "$RAD/settings.conf" && grep -qx fex=engine "$RAD/settings.conf" && grep -qx fastlocks=off "$RAD/settings.conf" && grep -qx rawmouse=on "$RAD/settings.conf" && grep -qx quitsteam=off "$RAD/settings.conf"'
+dgr repair >/dev/null 2>&1
+check "  a development build after it turns the rows on again" rows_on "$RAD/settings.conf"
 mkdir -p "$SANDBOX/relzip"
 zip=$(GW2_ON_MAC_ROOT="$RROOT" "$RELR/collect-logs.sh" "$SANDBOX/relzip" 2>/dev/null | tail -1)
 unzip -l "$zip" >"$SANDBOX/relzip.txt" 2>&1
