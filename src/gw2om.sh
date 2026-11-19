@@ -3783,6 +3783,7 @@ install_imported() {
     echo "@done Guild Wars 2 is ready: its files were $how$([ "$SETTINGS_IMPORTED" = yes ] && echo ", with your game settings").$([ -z "$ADDONS" ] || echo " Addons that came along: $ADDONS; $APP_NAME leaves them as they are.")$LEFT$([ -z "$RESHADE_LEFT" ] || echo " ReShade stayed behind: turn it on in Settings › Interface.")$([ "$route" = steam ] && echo " Steam may check the files at the first Play.") Press Play."
   else
     step "Steam opens: sign in, and it brings Guild Wars 2 up to date"
+    own_rules
     launch "$STEAM_EXE" "steam://install/$GW2_APPID"
     set_state stage waiting_game
     IMPORT_DST="" IMPORT_ACF=""
@@ -4998,6 +4999,10 @@ rotate_logs() {
   done
 }
 
+# own_rules: the game's rules count as made by this install (CREATED) if none are there right
+# before its launch writes them, so a failure or Cancel after it takes them back
+own_rules() { [ -e "$RULES" ] || [ -L "$RULES" ] || CREATED="$CREATED compatdb.rules"; }
+
 # launch <program> <args...>: a program in the bottle with the game's environment and its compatdb
 # rules (written first), detached; the session's environment and rules go to logs/session.env
 # (Collect Logs, the session report), with ReShade's keys (reshade_lines), arcdps (on, off) and the
@@ -5387,8 +5392,6 @@ cmd_install() {
   CREATED="" FETCH_PID="" IMPORT_DST="" IMPORT_ACF="" MOVE_MADE="" MOVING=""
   # a first install's state and manifest go too if it fails
   [ -f "$MANIFEST" ] || CREATED="state install-manifest.json"
-  # (and the game's rules, which launch writes at Steam's or ArenaNet's start, if none were there)
-  [ -e "$RULES" ] || [ -L "$RULES" ] || CREATED="$CREATED compatdb.rules"
   case "$route" in steam|arenanet|import|move) ;; *) echo "@error Usage: gw2om.sh install steam | install arenanet <Gw2Setup-64.exe> | install import <game folder> --copy --confirm-path <path> --confirm-bytes <n> [--no-settings] | install move"; exit 2 ;; esac
   if [ "$route" = move ]; then
     old_install || { echo "@error There is no $OLD_LABEL install to move: $OLD_APPDIR has no bottle with a complete Guild Wars 2 in it."; exit 2; }
@@ -5515,6 +5518,7 @@ cmd_install() {
   [ -n "$DRY" ] || { set_state route "$route"; set_state origin download; }
   write_manifest
   phase 4
+  own_rules
   if [ "$route" = steam ]; then
     step "Steam opens: sign in, then install Guild Wars 2"
     launch "$STEAM_EXE" "steam://install/$GW2_APPID"
