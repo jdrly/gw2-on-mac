@@ -82,6 +82,20 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 MODE="${1:-}"
+# Only the argument lists the header names, before the publish guard, so an extra argument can't
+# take a publishing mode past it (#300)
+case "$MODE" in
+  "") if [ $# != 0 ]; then echo "unknown option: ''" >&2; exit 2; fi ;;
+  --sign-only|--no-notarize|--no-release|--ci|--ci-dry-run)
+    if [ $# -gt 1 ]; then echo "unknown option: $2" >&2; exit 2; fi ;;
+  --dev|--adhoc)
+    if [ $# -gt 2 ] || { [ $# = 2 ] && [ "$2" != --no-release ]; }; then
+      echo "usage: $0 $MODE [--no-release]" >&2; exit 2
+    fi ;;
+  --feed) if [ $# != 2 ] || [ -z "$2" ]; then echo "usage: $0 --feed <version>" >&2; exit 2; fi ;;
+  --feed-min) if [ $# != 2 ] || [ -z "$2" ]; then echo "usage: $0 --feed-min <appcast.xml>" >&2; exit 2; fi ;;
+  *) echo "unknown option: $MODE" >&2; exit 2 ;;
+esac
 # (see the header: these modes need GW2_ON_MAC_PUBLISH=1)
 case "$MODE:${2:-}" in
   :|--ci:|--dev:|--adhoc:|--feed:*)
@@ -91,12 +105,6 @@ case "$MODE:${2:-}" in
 esac
 DEV_NO_RELEASE=""
 if { [ "$MODE" = --dev ] || [ "$MODE" = --adhoc ]; } && [ "${2:-}" = --no-release ]; then DEV_NO_RELEASE=1; fi
-case "$MODE" in
-  ""|--sign-only|--no-notarize|--no-release|--ci|--ci-dry-run|--dev|--adhoc) ;;
-  --feed) [ -n "${2:-}" ] || { echo "usage: $0 --feed <version>" >&2; exit 2; } ;;
-  --feed-min) [ -n "${2:-}" ] || { echo "usage: $0 --feed-min <appcast.xml>" >&2; exit 2; } ;;
-  *) echo "unknown option: $MODE" >&2; exit 2 ;;
-esac
 IDENTITY="${IDENTITY:-Developer ID Application: Jan Drly (3JT82CY6ZK)}"
 PROFILE="${NOTARY_PROFILE:-swgl-notary}"
 REPO=jdrly/gw2-on-mac

@@ -182,6 +182,37 @@ jobs:
           if scripts/release.sh --feed-min "$d/none.xml" >"$d/release.txt" 2>&1; then echo "release.sh took an item without a minimum macOS"; exit 1; fi
           grep -F "item doesn't say sparkle:minimumSystemVersion $min (src/gw2om.sh's MACOS_MIN)" "$d/release.txt"
 
+      # A publishing mode with an extra argument stops at release.sh's argument check, before the
+      # publish guard and any gh call, with or without GW2_ON_MAC_PUBLISH. The mode alone still
+      # stops at the guard.
+      - name: release.sh refuses an extra argument before it calls gh
+        run: |
+          d="$RUNNER_TEMP/release-args"
+          mkdir -p "$d/bin"
+          for t in gh plutil; do
+            printf '#!/bin/sh\necho "%s $*" >>"%s/called"\nexit 1\n' "$t" "$d" >"$d/bin/$t"
+            chmod +x "$d/bin/$t"
+          done
+          run() { # <GW2_ON_MAC_PUBLISH> <args...>: release.sh's exit status
+            local s=0
+            GW2_ON_MAC_PUBLISH="$1" PATH="$d/bin:$PATH" scripts/release.sh "${@:2}" >"$d/release.txt" 2>&1 || s=$?
+            echo "$s"
+          }
+          for publish in "" 1; do
+            for args in "''" "'' x" "--ci x" "--dev x" "--adhoc x" "--dev --no-release x" "--feed 0.2.0 x"; do
+              eval "set -- $args"
+              s=$(run "$publish" "$@")
+              if [ "$s" != 2 ] || ! grep -Eq '^(unknown option|usage): ' "$d/release.txt" || [ -e "$d/called" ]; then
+                cat "$d/release.txt" "$d/called" 2>/dev/null || true
+                echo "::error::release.sh $args with GW2_ON_MAC_PUBLISH=$publish exited $s"; exit 1
+              fi
+            done
+          done
+          s=$(run "" --ci)
+          [ "$s" = 1 ]
+          grep -F "Set GW2_ON_MAC_PUBLISH=1 to publish" "$d/release.txt"
+          [ ! -e "$d/called" ]
+
       - name: Fetch the components
         if: inputs.components == ''
         run: scripts/stage-components.sh --fetch
