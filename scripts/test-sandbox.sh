@@ -671,13 +671,12 @@ check "settings: a state for each of the 27 keys" [ "$(g settings | grep -cE '^[
 # SETTING_KEYS' order)
 OFF=""
 mine || OFF="${OFF}fastlocks "
-OFF="${OFF}gamemode "
 scale || OFF="${OFF}mousespeed "
 mine || OFF="${OFF}wine jobwakes "
 drv || OFF="${OFF}macdrv launcherframes "
 mine || OFF="${OFF}eventpool "
 fexb || OFF="${OFF}fex "
-check "  off: gamemode$(mine || echo ", wine and its switches")$(drv || echo ", macdrv and launcherframes")$(scale || echo ", mousespeed")$(fexb || echo ", fex")" \
+check "  off: ${OFF:-none}" \
   [ "$(g settings | sed -n 's/^\([a-z_]*\)_state=off:.*/\1/p' | tr '\n' ' ')" = "$OFF" ]
 if mine; then
   check "  wine=mine, jobwakes and eventpool on and fastlocks off by default, all ok" \
@@ -700,16 +699,17 @@ else
 fi
 # settings.conf's version (SETTINGS_RESETS): a file from before version 1 holds the fastlocks=on
 # and coolworkers=3 the arm64 line wrote while both rows were greyed; fastlocks reads off, and
-# coolworkers, no longer a key, is read by nothing
+# coolworkers, no longer a key, is read by nothing. gamemode=on, which every file had until the key
+# left in #269, the same
 cp "$AD/settings.conf" "$SANDBOX/settings.fresh"
 sed -i '' -e '/^settings_version=/d' -e 's/^fastlocks=.*/fastlocks=on/' "$AD/settings.conf"
-echo coolworkers=3 >>"$AD/settings.conf"
+printf 'coolworkers=3\ngamemode=on\n' >>"$AD/settings.conf"
 out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
-check "a settings.conf without settings_version, fastlocks=on and coolworkers=3: fastlocks reads off" \
-  eval '[ "$(sett fastlocks)" = off ] && ! g settings | grep -q coolworkers && ! g rules | grep -q WINE_HEAT_SPIN && ! echo "$out" | grep -q WINE_HEAT_SPIN'
+check "a settings.conf without settings_version, fastlocks=on, coolworkers=3 and gamemode=on: fastlocks reads off" \
+  eval '[ "$(sett fastlocks)" = off ] && ! g settings | grep -q -e coolworkers -e "^gamemode" && ! g rules | grep -q WINE_HEAT_SPIN && ! echo "$out" | grep -q WINE_HEAT_SPIN'
 g set hud on >/dev/null; g set hud off >/dev/null
-check "  the next write keeps that, writes settings_version=2 and leaves coolworkers out" \
-  eval 'grep -qx settings_version=2 "$AD/settings.conf" && grep -qx fastlocks=off "$AD/settings.conf" && ! grep -q coolworkers "$AD/settings.conf"'
+check "  the next write keeps that, writes settings_version=2 and leaves coolworkers and gamemode out" \
+  eval 'grep -qx settings_version=2 "$AD/settings.conf" && grep -qx fastlocks=off "$AD/settings.conf" && ! grep -q -e coolworkers -e gamemode "$AD/settings.conf"'
 sed -i '' -e 's/^settings_version=.*/settings_version=0/' -e 's/^fastlocks=.*/fastlocks=on/' "$AD/settings.conf"
 check "  settings_version=0 and fastlocks=on: reads off" [ "$(sett fastlocks)" = off ]
 # a file at version 1 with the engine's own DXMT, ntdll.so and winemac.so chosen, from the rows
@@ -738,8 +738,8 @@ g set rawmouse off >/dev/null
 check "  rawmouse off: mousespeed greyed, saying so first; set mousespeed 1.5 refused" \
   eval '[ "$(sett mousespeed_state)" = "off:Needs Raw mouse-look, which is off." ] && ! "$G" set mousespeed 1.5 >/dev/null 2>&1'
 g set rawmouse on >/dev/null
-check "  ok for the ones my DXMT fork brings back: metal, metalfx, warm; dxmt=fork by default" \
-  [ "$(sett metal_state)/$(sett metalfx_state)/$(sett warm_state)/$(sett dxmt)/$(sett dxmt_state)" = ok/ok/ok/fork/ok ]
+check "  ok for the ones my DXMT fork brings back: metal, metalfx, warm, vsync; dxmt=fork and vsync on by default" \
+  [ "$(sett metal_state)/$(sett metalfx_state)/$(sett warm_state)/$(sett vsync_state)/$(sett dxmt)/$(sett vsync)" = ok/ok/ok/ok/fork/on ]
 check "  metal: 4 by default, in settings.conf and status; set metal 5 refused" \
   eval '[ "$(sett metal)/$(st metal)" = 4/4 ] && grep -qx metal=4 "$AD/settings.conf" && ! "$G" set metal 5 >/dev/null 2>&1'
 # (a settings.conf from before the row: no metal= line)
@@ -757,11 +757,16 @@ g set hud on >/dev/null; g set hud off >/dev/null
 check "  and stays 3 through later writes" eval '[ "$(sett metal)" = 3 ] && grep -qx metal=3 "$AD/settings.conf" && grep -qx settings_version=2 "$AD/settings.conf"'
 out=$(g set coolworkers 5 2>&1) && rc=0 || rc=$?
 check "set coolworkers 5: refused as an unknown setting" eval '[ "$rc" = 2 ] && [ "$out" = "@error Unknown setting: coolworkers=5" ]'
-check "set gamemode off: refused" sh -c "! '$G' set gamemode off >/dev/null"
-sed -i '' 's/^gamemode=on$/gamemode=off/' "$AD/settings.conf"
+out=$(g set gamemode off 2>&1) && rc=0 || rc=$?
+check "set gamemode off: refused as an unknown setting (the key left in #269)" eval '[ "$rc" = 2 ] && [ "$out" = "@error Unknown setting: gamemode=off" ]'
+# (a greyed key: mousespeed while Raw mouse-look is off)
+g set rawmouse off >/dev/null
+sed -i '' 's/^mousespeed=.*/mousespeed=1.5/' "$AD/settings.conf"
 g set hud on >/dev/null; g set hud off >/dev/null
-check "  a greyed key keeps what settings.conf says (gamemode=off by hand), and does nothing" eval '[ "$(sett gamemode)" = off ] && grep -qx gamemode=off "$AD/settings.conf"'
-sed -i '' 's/^gamemode=off$/gamemode=on/' "$AD/settings.conf"
+check "  a greyed key keeps what settings.conf says (mousespeed=1.5 by hand while Raw mouse-look is off)" \
+  eval '[ "$(sett mousespeed)" = 1.5 ] && grep -qx mousespeed=1.5 "$AD/settings.conf" && [ "$(sett mousespeed_state)" = "off:Needs Raw mouse-look, which is off." ]'
+sed -i '' 's/^mousespeed=.*/mousespeed=1/' "$AD/settings.conf"
+g set rawmouse on >/dev/null
 check "warm on: DXMT_WARM=all; off: none" sh -c "'$G' env | grep -qx DXMT_WARM=all && '$G' set warm off >/dev/null && ! '$G' env | grep -q DXMT_WARM && '$G' set warm on >/dev/null"
 check "set metalfx on: DXMT_SUBSAMPLE_METALFX=1" sh -c "'$G' set metalfx on >/dev/null && '$G' env | grep -qx DXMT_SUBSAMPLE_METALFX=1 && '$G' set metalfx off >/dev/null && ! '$G' env | grep -q DXMT_SUBSAMPLE"
 # the engine's own DXMT, and back (nothing runs: the tree swaps at once)
@@ -769,8 +774,8 @@ out=$(g set dxmt engine 2>&1) && rc=0 || rc=$?
 check "set dxmt engine: the engine's own tree is the active one, mine waits next to it" \
   eval '[ "$rc" = 0 ] && dxgi_is engine && [ -f "$ENG/lib/wine/dxgi/dxmt.fork/.gw2om-dxmt" ] && [ "$(st graphics)/$(st dxmt_tree)" = yes/engine ] && ! echo "$out" | grep -q Repair'
 check "  it says which" has <(echo "$out") "^DXMT: the engine's own DXMT (athei/dxmt 10e27aed3f5) draws the game"
-check "  warming, MetalFX and Metal greyed with the reason; set warm and set metal refused" \
-  eval '[ "$(sett warm_state)" = "off:Needs my DXMT fork, and the engine'"'"'s own DXMT is chosen." ] && [ "$(sett metalfx_state)" = "$(sett warm_state)" ] && [ "$(sett metal_state)" = "$(sett warm_state)" ] && ! "$G" set warm off >/dev/null 2>&1 && ! "$G" set metal 4 >/dev/null 2>&1'
+check "  warming, MetalFX, Metal and Vsync greyed with the reason; set warm, set metal and set vsync refused" \
+  eval '[ "$(sett warm_state)" = "off:Needs my DXMT fork, and the engine'"'"'s own DXMT is chosen." ] && [ "$(sett metalfx_state)" = "$(sett warm_state)" ] && [ "$(sett metal_state)" = "$(sett warm_state)" ] && [ "$(sett vsync_state)" = "$(sett warm_state)" ] && ! "$G" set warm off >/dev/null 2>&1 && ! "$G" set metal 4 >/dev/null 2>&1 && ! "$G" set vsync off >/dev/null 2>&1'
 check "  none of the fork's variables in the environment" sh -c "! '$G' env | grep -qE 'DXMT_(CACHE_DIR|WARM|DEPENDENCY_COMPRESSION|SUBSAMPLE|STATS)'"
 # (after the heat entries exactly FEX's that Debug logging adds: FEX_PROFILESTATS only with my
 # ntdll.so in place, FEX_SILENTLOG with either, neither with Debug logging off)
@@ -1192,6 +1197,14 @@ check "  the engine's own DXMT: no DXMT_METAL4 in the rules or in a dry run of P
 g set dxmt fork >/dev/null; g set metal 3 >/dev/null
 out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
 check "Metal 3 again: a dry run of Play prints the rule with DXMT_METAL4=0" eval 'rules_are off && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=[^;]*;env=DXMT_METAL4=0$"'
+g set vsync off >/dev/null
+out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
+check "Vsync off: DXMT_DISPLAY_SYNC=0 for the game after DXMT_METAL4, unset for CefHost.exe; a dry run of Play prints it" \
+  eval 'rules_are vsync-off && echo "$out" | grep -qxF "[dry-run] rule $(g rules | head -1)" && ! g env | grep -q DXMT_DISPLAY_SYNC'
+g set dxmt engine >/dev/null
+check "  with the engine's own DXMT: none, the row greyed" eval 'rules_are engine-dxmt && [ "$(sett vsync_state)" = "off:Needs my DXMT fork, and the engine'"'"'s own DXMT is chosen." ]'
+g set dxmt fork >/dev/null; g set vsync on >/dev/null
+check "  Vsync on again: the rules as before" rules_are off
 g set hud on >/dev/null
 check "the HUD on: metal_hud=true for the game, false for CefHost.exe" rules_are hud
 g set hud off >/dev/null; g set uiscale on >/dev/null

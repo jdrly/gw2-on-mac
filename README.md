@@ -189,7 +189,8 @@ that reads the key as its new default until the next write keeps it. Version 1 r
 greyed, so no file held a choice of mine. Version 2 resets `dxmt`, `wine` and `macdrv` to `fork`,
 `mine` and `mine`, because their rows left Settings with it, and a bottle on the engine's own
 files would have had no row to show it. A key `settings.conf` still has but the app no longer
-knows, such as `coolworkers`, is read by nothing and gone at the next write.
+knows, such as `coolworkers` or `gamemode` (whose row left in #269), is read by nothing and gone
+at the next write.
 
 A development build starts with every switch on, since I debug from everything on backwards. Once,
 by a line `dev_version=` in `settings.conf` (`DEV_ROWS` in `gw2om.sh`, read the way
@@ -210,24 +211,24 @@ chosen, and the main window's *Engine* and *Graphics* checks name the files in p
 | Pane | Setting | Key | Default | What it does |
 |---|---|---|---|---|
 | Graphics | Retina | `retina` | on | draws at your display's full resolution, at some cost in frame rate |
-| | Frame cap | `fpscap` | off | a steady cap paced by Metal at 30, 40, 60 or 120. Use it with the game's own vsync |
+| | Frame cap | `fpscap` | off | a steady cap paced by Metal at 30, 40, 60 or 120, for a display above 60 Hz or for a lower steady rate. With *Vsync* on, a cap at or above the display's refresh does nothing |
+| | Vsync | `vsync` | on | my DXMT fork's display sync (`CAMetalLayer`'s vsync). With the game's own Vertical Sync on, each frame waits for the display's next refresh. Off, the game's rule gets `DXMT_DISPLAY_SYNC=0` and DXMT spaces the frames itself, one refresh apart or the frame cap's interval, see [The game's environment](#the-games-environment). Greyed while the engine's own DXMT is chosen |
 | | Metal | `metal` | 4 | Metal 3 or Metal 4 for my DXMT fork (`DXMT_METAL4=0` or `=1` in the game's rule; at Metal 4 with `DXMT_MTL4_PRESENT=mtl3` too, see [The game's environment](#the-games-environment)). Metal 4 is the newer path. Switch to Metal 3 for better backwards compatibility. A `settings.conf` without the key reads 4, and one with `metal=3` keeps it: Install and Repair wrote the key into every file while Metal 3 was the default. Greyed while the engine's own DXMT is chosen |
 | | MetalFX for Subsample | `metalfx` | off | MetalFX upscales the 3D scene and the interface stays sharp. It works only with the game's Render Sampling set to Subsample, and does nothing at Native. Greyed while the engine's own DXMT is chosen |
 | | Metal HUD | `hud` | off | Apple's overlay with frame rate and frame times, over the game only and not over Steam's windows |
-| | Launcher frames | `launcherframes` | off | the launcher's window gets a copy of each frame, and a frame equal to the last is skipped (`WINE_MACDRV_SURFACE=copy,skip`). Against a launcher that flickers. Greyed while the engine's own `winemac.so` is chosen |
-| Performance | Shader warming | `warm` | on | builds the pipelines the last sessions used before the game asks for them. Greyed while the engine's own DXMT is chosen |
+| | Launcher frames | `launcherframes` | off | the launcher's window gets a copy of each frame, and a frame equal to the last is skipped (`WINE_MACDRV_SURFACE=copy,skip`). Against a launcher that flickers. Experimental: off until I've looked at the launcher on three starts (#105). Greyed while the engine's own `winemac.so` is chosen |
+| Performance | Shader warming | `warm` | on | builds the pipelines the last sessions used before the game asks for them. Experimental, as my DXMT fork's table calls `DXMT_WARM`. Greyed while the engine's own DXMT is chosen |
 | | CPUs the game sees | `ncpu` | 8 | from 2 up to your Mac's logical CPUs, or all. The game starts one job worker per CPU, minus one |
 | | Job wakes | `jobwakes` | on | a job the game hands out wakes one sleeping worker, and none when no worker sleeps (`WINE_HEAT_WAKE=one,skip`). Greyed while the engine's own `ntdll.so` is chosen |
 | | Event pool | `eventpool` | on | closed events are kept and handed out again, without a request to the Wine server (`WINE_HEAT_EVPOOL=1`). Greyed while the engine's own `ntdll.so` is chosen |
-| | Faster locks | `fastlocks` | off | short spins before the game thread sleeps on a busy lock, a job group or an event (`WINE_HEAT_SPIN=lock=20:game,event=30:game`). Greyed while the engine's own `ntdll.so` is chosen |
+| | Faster locks | `fastlocks` | off | short spins before the game thread sleeps on a busy lock, a job group or an event (`WINE_HEAT_SPIN=lock=20:game,event=30:game`). Experimental: off until a session of mine shows more hits than misses (#105). Greyed while the engine's own `ntdll.so` is chosen |
 | Interface | Larger interface | `uiscale` | off | my interface addon, see below |
 | | Interface Size "Larger" | `uiscale_size` | 1.75 | the addon's scale: 1.5, 1.75, 1.8 or 2.0 |
 | | Small text in Cronos | `uiscale_sans` | on | chat, the tracker and labels have no larger font, so the addon draws them in Cronos at the larger size |
 | | Cinematic dialogue | `uiscale_cinema` | off | story cinematics size their dialogue apart from the interface. This draws it at the same size, with a small code patch |
 | | arcdps | `arcdps` | off | downloads or removes arcdps, see below |
 | | ReShade | `reshade` | off | downloads or removes ReShade, see below |
-| Game | Game Mode | `gamemode` | on | greyed and shown on: the engine's loader is a Game Mode app, see [Game Mode](#game-mode) |
-| | Start Steam in the background | `steambg` | on | Steam starts without a window once it remembers your login |
+| Game | Start Steam in the background | `steambg` | on | Steam starts without a window once it remembers your login |
 | | Quit Steam when the game quits | `quitsteam` | on | shown while the previous setting is on |
 | | Launch options | `launchopts` | none | arguments for `Gw2-64.exe`, using letters, digits and `-_.:=,/+` |
 | | Quit GW2 on Mac after launching | | off | the app quits once Play has started Steam or the game |
@@ -819,6 +820,14 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   goes in only while my fork's tree in the engine names the switch, read from its DLLs as for
   `dev-switches.conf`'s DXMT lines below. Otherwise `status` prints the entry and why it stays out
   as `metal_present_out=`, and `metal_present=` when it's in. `CefHost.exe` gets it removed.
+- `DXMT_DISPLAY_SYNC=0` follows while my fork is active and *Vsync* is off. My fork reads it in the
+  game's process, once per swap chain (`d3d11_swapchain.cpp`), and its display sync is on without
+  it. Display sync acts only on a present with a sync interval, which the game asks for while its
+  own Vertical Sync is on. Then, with display sync on, a frame cap at or above the refresh rate
+  does nothing, a cap that is a whole number of refreshes keeps a minimum duration, and any other
+  is kept by a frame limiter (`DXMT_CAP_LIMITER`). With it off, every present waits at least one
+  refresh, or the cap's interval when there is a cap, even above the refresh rate, without
+  `CAMetalLayer`'s vsync. `CefHost.exe` gets it removed.
 - The `WINE_HEAT_*` entries are my `ntdll.so`'s switches, which it acts on in `Gw2-64.exe` only.
   They follow the cache path, one `env=` field each, and only while my file is in place. The table
   `HEAT_SWITCHES` in `gw2om.sh` has one row per setting, `<key> <entry>`: *Job wakes* writes
@@ -1057,9 +1066,9 @@ and never writes the file.
 macOS turns Game Mode on only for a process whose executable sits in a bundle with
 `LSSupportsGameMode`. On this engine every Wine process runs as the loader in `wine.app`, whose
 `Info.plist` carries `LSSupportsGameMode`, `GCSupportsGameMode` and the games category, so the app
-builds nothing and has nothing to switch. `status` prints `gamemode=engine`, and Settings shows
-*Game Mode* greyed and on. Whether the game gets Game Mode when Steam starts it, rather than Launch
-Services, is still to be seen in play.
+builds nothing and has nothing to switch. `status` prints `gamemode=engine`, and the main window's
+*Game Mode* check says so. Settings has no row for it since #269. Whether the game gets Game Mode
+when Steam starts it, rather than Launch Services, is still to be seen in play.
 
 ## Raw mouse-look in the driver
 

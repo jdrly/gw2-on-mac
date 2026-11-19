@@ -33,6 +33,9 @@ build dry run of the same commit the three groups took 254, 270 and 411 s.
   full run's.
 - The dev build calls the same jobs through `checks.yml`, and its `package` job waits for all
   three.
+- On 2026-11-19 `sessions` got 20 minutes (#269). After #278 brought ReShade's sections from
+  `main` it took 13 min 58 s (Checks run 44448554814), about 226 s of that in ReShade's sections.
+  `settings` and `rest` keep 15. Whether a fourth group is better is a later decision.
 - 0012's rule for a new section still holds: it goes into the group whose install it uses, and a
   section that starts from nothing goes into `rest`, or into a group of its own once `rest` passes
   8 minutes.
