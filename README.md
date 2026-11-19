@@ -125,8 +125,8 @@ download step and Steam continues from the files. Otherwise Steam may still veri
 first Play.
 
 If the first install fails or you cancel it, it removes the engine, the bottle, the settings,
-DXMT's options and the install state it created, and any game files it copied. Other files it
-made on the way can stay, such as cached downloads and logs. You can quit
+DXMT's options, the game's rules and the install state it created, and any game files it
+copied. Other files it made on the way can stay, such as cached downloads and logs. You can quit
 the app during a Steam or ArenaNet download. The window picks the download up again when you open
 it, and *Stop waiting* stops following it but keeps the engine and the bottle.
 
@@ -871,9 +871,9 @@ build carries no FEX of mine", and the engine's files are never touched.
 ## Installing, step by step
 
 `gw2om.sh install <route>` runs five phases. A failed or cancelled first install removes what that
-run tracked as created: the engine, the bottle, `settings.conf`, `dxmt.conf`, `state`,
-`install-manifest.json`, and an import's copied game folder with Steam's record. Other files it
-made can stay, such as cached downloads and logs.
+run tracked as created: the engine, the bottle, `settings.conf`, `dxmt.conf`, `compatdb.rules`,
+`state`, `install-manifest.json`, and an import's copied game folder with Steam's record. Other
+files it made can stay, such as cached downloads and logs.
 
 1. **The engine.** Check macOS, download, unpack, take the quarantine off, remove the SDK, check
    the build, then put my DXMT fork into its DXMT tree and my `ntdll.so` and `winemac.so` in

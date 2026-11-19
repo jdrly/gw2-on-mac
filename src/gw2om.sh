@@ -4946,6 +4946,10 @@ preflight() {
 
 # The bottle: created once (wineboot), then its settings (registry, dxmt.conf)
 install_bottle() {
+  # (a folder or a link where dxmt.conf goes isn't mine: the write would go into it or replace it)
+  if [ -d "$DXMT_CONF" ] || [ -L "$DXMT_CONF" ]; then
+    die "$DXMT_CONF is a folder or a link, where $APP_NAME writes DXMT's options as a file. Move it away, then try again."
+  fi
   if [ ! -f "$BOTTLE/system.reg" ]; then
     say "Creating the game's bottle (wineboot, about a minute)"
     safe_rm "$BOTTLE" || die "The game's bottle has no system.reg, and a game is in it ($BOTTLE), so $APP_NAME doesn't make it anew. Move the game out of it first (details in $LOGS/install.log)."
@@ -5382,6 +5386,8 @@ cmd_install() {
   CREATED="" FETCH_PID="" IMPORT_DST="" IMPORT_ACF="" MOVE_MADE="" MOVING=""
   # a first install's state and manifest go too if it fails
   [ -f "$MANIFEST" ] || CREATED="state install-manifest.json"
+  # (and the game's rules, which launch writes at Steam's or ArenaNet's start, if none were there)
+  [ -e "$RULES" ] || [ -L "$RULES" ] || CREATED="$CREATED compatdb.rules"
   case "$route" in steam|arenanet|import|move) ;; *) echo "@error Usage: gw2om.sh install steam | install arenanet <Gw2Setup-64.exe> | install import <game folder> --copy --confirm-path <path> --confirm-bytes <n> [--no-settings] | install move"; exit 2 ;; esac
   if [ "$route" = move ]; then
     old_install || { echo "@error There is no $OLD_LABEL install to move: $OLD_APPDIR has no bottle with a complete Guild Wars 2 in it."; exit 2; }
