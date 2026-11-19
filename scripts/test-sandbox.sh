@@ -1635,6 +1635,20 @@ printf 'MDMP\0\0\0\0self Zz Arc Acct.1234\0' >"$STEAM/dumps/assert_account.dmp"
 printf 'MDMP\0\0\0\0Gw2-64.exe\0' >"$GD/Crash.dmp"
 printf 'MDMP\0\0\0\0Gw2-64.exe appdata\0' >"$GW2A/Crash.dmp"
 for f in "$H/decoy.dmp" "$BOTTLE/drive_c/decoy.dmp" "$H/Library/Logs/DiagnosticReports/Gw2-64.exe.dmp"; do printf 'MDMP\0decoy\0' >"$f"; done
+# (macOS's crash reports as .ips, with paths as \/: one of the engine's loader under a name of its
+# own, Mach9, that no file name rule takes, with the home folder in its image paths; one of an
+# unrelated app; and 10 of the game, Gw2-64.exe in their header, the oldest 2 days old, one more
+# than the 10 Collect Logs takes)
+DR="$H/Library/Logs/DiagnosticReports"
+ips() {  # <file> <process name> <process path>
+  printf '{"app_name":"%s","timestamp":"2026-11-19 19:22:18.00 +0000","name":"%s","bug_type":"309"}\n{\n  "procName" : "%s",\n  "procPath" : "%s",\n  "usedImages" : [{"path" : "%s"}, {"path" : "%s"}]\n}\n' \
+    "$2" "$2" "$2" "$(jsonp "$3")" "$(jsonp "$H/Library/x.dylib")" "$(jsonp "$HOME/Library/y.dylib")" >"$DR/$1"
+}
+jsonp() { printf '%s' "$1" | sed 's|/|\\/|g'; }
+ips Mach9-2026-11-19-192219.ips Mach9 "$ENG/lib/wine/aarch64-unix/wine.app/Contents/MacOS/wine"
+ips Safari-2026-11-19-192219.ips Safari /Applications/Safari.app/Contents/MacOS/Safari
+for n in 0 1 2 3 4 5 6 7 8 9; do ips "Mach9-2026-11-18-00000$n.ips" Gw2-64.exe /Applications/Other.app/Contents/MacOS/wine-preloader; done
+touch -t "$(date -v-2d +%Y%m%d%H%M)" "$DR/Mach9-2026-11-18-000000.ips"
 cp "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll"
 # (the heat counters of 4 games in the logs folder, whose name has spaces, each with its server
 # requests, older than session.env so the session report leaves them alone, and a profile)
@@ -1942,6 +1956,10 @@ for f in userpath persona marker account; do
   check "  the dump with $f left out by the leak check" \
     eval '[ ! -e "$Z/crash-dumps/steam/assert_$f.dmp" ] && has "$Z/left-out.txt" "crash-dumps/steam/assert_$f.dmp"'
 done
+check "  the crash report of the engine's loader, by its process path, the home folder ~ (also as \\/)" \
+  eval 'f="$Z/crash-reports/Mach9-2026-11-19-192219.ips"; grep -qF "\"procPath\" : \"~\\/Library\\/Application Support\\/$APP_FOLDER\\/engine\\/" "$f" && grep -qF "\"path\" : \"~\\/Library\\/x.dylib\"" "$f" && grep -qF "\"path\" : \"~\\/Library\\/y.dylib\"" "$f" && ! grep -qiF -e "$(jsonp "$H")" -e "$(jsonp "$HOME")" -e "\\/Users\\/$(id -un)\\/" "$f" && no_home "$f"'
+check "  not the unrelated app's, nor the oldest of 11 of the game's, and system-info says so" \
+  eval '[ ! -e "$Z/crash-reports/Safari-2026-11-19-192219.ips" ] && [ ! -e "$Z/crash-reports/Mach9-2026-11-18-000000.ips" ] && [ -f "$Z/crash-reports/Mach9-2026-11-18-000009.ips" ] && [ "$(ls "$Z/crash-reports" | grep -c "^Mach9-")" = 10 ] && has "$Z/system-info.txt" "^  left out: Mach9-2026-11-18-000000.ips (more than 10 of the game, Steam and Wine)$"'
 # (the crash line from session-report.sh itself: a hardware exception with its code, a crash log
 # without an intercepted line, and one from before the session)
 SR="$APP/Contents/Resources/session-report.sh"
@@ -1985,7 +2003,8 @@ mv -f "$SANDBOX/state.keep" "$AD/state"
 mv -f "$SANDBOX/loginusers.keep" "$STEAM/config/loginusers.vdf"
 rm -rf "$GD/addons" "$GD/d3d11.dll" "$AD/compatdb.local" "$STEAM/dumps" "$GD/Crash.dmp" "$GW2A/Crash.dmp" "$RELC" \
   "$BOTTLE/drive_c/library" "$SANDBOX/outside" \
-  "$H/decoy.dmp" "$BOTTLE/drive_c/decoy.dmp" "$H/Library/Logs/DiagnosticReports/Gw2-64.exe.dmp"
+  "$H/decoy.dmp" "$BOTTLE/drive_c/decoy.dmp" "$H/Library/Logs/DiagnosticReports/Gw2-64.exe.dmp" \
+  "$DR"/Mach9-*.ips "$DR"/Safari-*.ips
 collect
 check "no ReShade folder and nothing in the game folder: Collect Logs works and says ReShade is off" \
   eval '[ ! -e "$AD/ReShade" ] && [ -f "$Z/system-info.txt" ] && grep -qxF "ReShade: off; arcdps off" "$Z/system-info.txt" && grep -qxF "  ReShade folder: none" "$Z/system-info.txt" && [ ! -e "$Z/reshade" ] && [ ! -e "$Z/game-logs/addon-files.txt" ]'
