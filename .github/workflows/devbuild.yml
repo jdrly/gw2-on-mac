@@ -41,8 +41,8 @@
 # [-f wine_commit=<sha>] [-f macdrv_commit=<sha>] [-f fex_commit=<sha>] [-f version=X.Y.Z-dev.N|X.Y.Z-rc.N]
 # [-f publish=false]. A pull request that changes the build's scripts or workflows runs it with
 # publish false and no wine_commit, macdrv_commit or fex_commit; a dry run keeps the DMG and the
-# record as an artifact for 7 days. Checks runs every group and renders on the same commit, so the
-# dry run proves what Checks can't (docs/adr/0022): the plan, my real DXMT staged with its
+# record as an artifact for 7 days. Checks runs every group on the same commit, and renders when
+# the change can reach them (docs/adr/0013), so the dry run proves what Checks can't (docs/adr/0022): the plan, my real DXMT staged with its
 # refusals, the build from it, settings on an app without my ntdll.so, winemac.so and FEX, and the
 # package. A run by hand, with publish false or not, runs every group and renders.
 name: Dev build
