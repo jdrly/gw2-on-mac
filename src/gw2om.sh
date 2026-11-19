@@ -789,37 +789,37 @@ SETTINGS_RESETS="
 "
 SETTINGS_VERSION=$(printf '%s\n' "$SETTINGS_RESETS" | awk 'NF { v = $1 } END { print v + 0 }')
 # What a move from 0.1.x (install move, move_settings) does with each of 0.1.x's settings, one row
-# a key: "<key> <what> [<0.1.x's default>]". kept: 0.1.x's value, which means the same here (a key
-# 0.1.x's file doesn't have reads as 0.1.x's default; a value this version doesn't take, as this
-# version's default). default: this version's default. dropped: no such setting here. 0.1.x's
-# settings.conf has no version line and every key in it, chosen or not (main's write_settings), so
-# a kept value is what 0.1.x ran with. Keys of this version that 0.1.x doesn't have start at their
-# defaults. fastlocks: 0.1.x's default was on, a spin in CrossOver's msync; here it is another port,
-# off by default (#45, #105). gamemode: always on here, the engine's loader is a Game Mode app.
-# coolworkers: none here (docs/adr/0006). mousespeed is a factor on GameController's counts here,
-# on the pointer's speed there: the same choice in Settings.
+# a key: "<key> <what> <0.1.x's default, - for none> <its name in Settings>". kept: 0.1.x's value,
+# which means the same here (a key 0.1.x's file doesn't have reads as 0.1.x's default; a value this
+# version doesn't take, as this version's default). default: this version's default. dropped: no
+# such setting here. 0.1.x's settings.conf has no version line and every key in it, chosen or not
+# (main's write_settings), so a kept value is what 0.1.x ran with. Keys of this version that 0.1.x
+# doesn't have start at their defaults (vsync, #269). fastlocks: 0.1.x's default was on, a spin in CrossOver's
+# msync; here it is another port, off by default (#45, #105). gamemode: always on here, the
+# engine's loader is a Game Mode app. coolworkers: none here (docs/adr/0006). mousespeed is a factor
+# on GameController's counts here, on the pointer's speed there: the same choice in Settings.
 SETTINGS_FROM_01="
-retina kept on
-fpscap kept off
-metalfx kept off
-hud kept off
-warm kept on
-coolworkers dropped off
-fastlocks default on
-ncpu kept 8
-uiscale kept off
-uiscale_size kept 1.75
-uiscale_sans kept on
-uiscale_cinema kept on
-gamemode dropped on
-launchopts kept
-rawmouse kept on
-mousespeed kept 1
-updates kept on
-debug kept off
-steambg kept on
-quitsteam kept on
-reshade kept off
+retina kept on Retina
+fpscap kept off Frame cap
+metalfx kept off MetalFX for Subsample
+hud kept off Metal HUD
+warm kept on Shader warming
+coolworkers dropped off Cooler job workers
+fastlocks default on Faster locks
+ncpu kept 8 CPUs the game sees
+uiscale kept off Larger interface
+uiscale_size kept 1.75 Interface Size Larger
+uiscale_sans kept on Small text in Cronos
+uiscale_cinema kept on Cinematic dialogue
+gamemode dropped on Game Mode
+launchopts kept - Launch options
+rawmouse kept on Raw mouse-look
+mousespeed kept 1 Mouse-look speed
+updates kept on Check for updates automatically
+debug kept off Debug logging
+steambg kept on Start Steam in the background
+quitsteam kept on Quit Steam when the game quits
+reshade kept off ReShade
 "
 # A development build (CHANNEL=dev) starts with every switch on: I debug from everything on
 # backwards. Its rows that are switches go on once, by settings.conf's line dev_version=, as
@@ -963,15 +963,17 @@ write_settings() { # [<key> <value>]: settings.conf with every key, one of them 
 
 # move_settings: this app's settings.conf from 0.1.x's, through SETTINGS_FROM_01, at this version
 # (settings_version: no reset of SETTINGS_RESETS applies to it); the keys left out read as this
-# version's defaults, and write_settings (install_bottle) writes them all. MOVE_LOST: the sentence
-# for what didn't come along that 0.1.x had chosen or ran with (a dropped or reset key whose value
-# doesn't match what this version does).
+# version's defaults, and write_settings (install_bottle) writes them all. MOVE_OLD: each key's
+# value as 0.1.x ran with it, for move_changes.
 move_settings() {
-  local old="$OLD_APPDIR/settings.conf" k how def v lines="" gone=""
-  MOVE_LOST=""
-  while read -r k how def; do
+  local old="$OLD_APPDIR/settings.conf" k how def v lines=""
+  MOVE_OLD=""
+  while read -r k how def _; do
     [ -n "$k" ] || continue
-    if grep -q "^$k=" "$old" 2>/dev/null; then v=$(sed -n "s/^$k=//p" "$old" | tail -1); else v=${def:-}; fi
+    [ "$def" != - ] || def=""
+    if grep -q "^$k=" "$old" 2>/dev/null; then v=$(sed -n "s/^$k=//p" "$old" | tail -1); else v=$def; fi
+    MOVE_OLD="$MOVE_OLD$k=$v
+"
     case "$how" in
       kept)
         if setting_valid "$k" "$v"; then lines="$lines$k=$v
@@ -980,20 +982,42 @@ move_settings() {
         fi ;;
       default|dropped) log "settings from $OLD_LABEL: $k=$v $how" ;;
     esac
-    case "$k=$v" in
-      fastlocks=on) gone="${gone:+$gone; }Fast locks is off, this version's default" ;;
-      gamemode=off) gone="${gone:+$gone; }Game Mode is always on here" ;;
-      coolworkers=off|coolworkers=) ;;
-      coolworkers=*) gone="${gone:+$gone; }Cooler job workers don't exist on this engine" ;;
+  done <<EOF
+$SETTINGS_FROM_01
+EOF
+  { echo "# $APP_NAME settings (change them in the app: $APP_NAME > Settings…)"
+    echo "settings_version=$SETTINGS_VERSION"
+    printf '%s' "$lines"
+  } | put "$SETTINGS" 644
+}
+
+# move_changes: MOVE_LOST, the move's sentence for each setting that doesn't run as 0.1.x ran it,
+# in SETTINGS_FROM_01's order: a dropped one 0.1.x had off its default, one at this version's
+# default, a value this Mac or this version doesn't take, a development build's switch
+move_changes() {
+  local k how def label old new gone=""
+  MOVE_LOST=""
+  while read -r k how def label; do
+    [ -n "$k" ] || continue
+    [ "$def" != - ] || def=""
+    old=$(printf '%s' "$MOVE_OLD" | sed -n "s/^$k=//p" | tail -1)
+    case "$how" in
+      dropped)
+        [ "$old" != "$def" ] || continue
+        if [ "$k" = gamemode ]; then gone="${gone:+$gone; }$label is always on here"
+        else gone="${gone:+$gone; }$label doesn't exist on this engine"
+        fi ;;
+      *)
+        new=$(setting "$k")
+        [ "$new" != "$old" ] || continue
+        if [ "$how" = default ]; then gone="${gone:+$gone; }$label is ${new:-none}, this version's default"
+        else gone="${gone:+$gone; }$label is ${new:-none}, not ${old:-none}"
+        fi ;;
     esac
   done <<EOF
 $SETTINGS_FROM_01
 EOF
   [ -z "$gone" ] || MOVE_LOST="Changed from $OLD_LABEL: $gone."
-  { echo "# $APP_NAME settings (change them in the app: $APP_NAME > Settings…)"
-    echo "settings_version=$SETTINGS_VERSION"
-    printf '%s' "$lines"
-  } | put "$SETTINGS" 644
 }
 
 # dxmt.conf: DXMT's options for the game (DXMT_CONFIG_FILE)
@@ -3891,6 +3915,7 @@ install_moved() {
   [ "$RSH" != on ] || what="${what:+$what, }ReShade$([ "$MOVE_RS" != moved ] || echo " with your presets")"
   [ "$(uiscale_state)" != on ] || what="${what:+$what, }the larger interface"
   lost="" files="Guild Wars 2" how="cloned, no extra space" steamline=""
+  move_changes
   [ -z "$MOVE_LOST" ] || lost=" $MOVE_LOST"
   [ "$MOVE_HOW" != copied ] || how=copied
   if [ "$route" = steam ]; then files="Steam with Guild Wars 2 in its library" steamline=" Steam may ask you to sign in once."; fi

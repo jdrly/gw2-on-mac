@@ -3694,10 +3694,11 @@ check "  the ReShade folder with the preset and shaders; its ini names this app'
 check "  no line of either ini names a folder of 0.1's" eval 'ini_clean "$GM/ReShade.ini" && ini_clean "$AD/ReShade/ReShade.ini"'
 check "  the larger interface: this app's version.dll, its ini from the settings" \
   eval 'same "$COMP/ui-scale/version.dll" "$GM/version.dll" && has "$GM/gw2-ui-scale.ini" "^scale=2.0\$"'
-check "  the settings, key by key as SETTINGS_FROM_01 says, at this version" eval 'settings_moved && grep -q "^settings_version=" "$AD/settings.conf" && ! grep -q "^coolworkers=" "$AD/settings.conf"'
+check "  the settings, key by key as SETTINGS_FROM_01 says, at this version; Vsync, which 0.1 doesn't have, at its default" \
+  eval 'settings_moved && grep -q "^settings_version=" "$AD/settings.conf" && ! grep -q -e "^coolworkers=" -e "^gamemode=" "$AD/settings.conf" && [ "$(sett vsync)" = on ]'
 check "  no DXMT or ReShade cache of 0.1's came along" eval '[ -z "$(find "$CACHE" -type f \( -name shaders.bin -o -name effect.bin \) 2>/dev/null)" ]'
 check "  the summary: what came along, what changed, Steam's login, 0.1 as it was" \
-  eval 'has <(mv_done) "^Your install moved from GW2 on Mac 0.1: Steam with Guild Wars 2 in its library (cloned, no extra space), your game settings, your addons as they were (arcdps, ReShade with your presets, the larger interface) and your settings\. Changed from GW2 on Mac 0\.1: Cooler job workers don.t exist on this engine; Fast locks is off, this version.s default; Game Mode is always on here\. Steam may ask you to sign in once\. GW2 on Mac 0\.1 stays as it was\. Press Play\.$" || { mv_done; false; }'
+  eval 'has <(mv_done) "^Your install moved from GW2 on Mac 0.1: Steam with Guild Wars 2 in its library (cloned, no extra space), your game settings, your addons as they were (arcdps, ReShade with your presets, the larger interface) and your settings\. Changed from GW2 on Mac 0\.1: Cooler job workers don.t exist on this engine; Faster locks is off, this version.s default; Game Mode is always on here\. Steam may ask you to sign in once\. GW2 on Mac 0\.1 stays as it was\. Press Play\.$" || { mv_done; false; }'
 check "  0.1's folders as they were" o1_same
 c=$(play_cmd)
 check "  Play: Steam as crossover" eval 'every_wine_as crossover && [[ "$c" == *"steam.exe -applaunch 1284210"* ]]'
@@ -3708,16 +3709,16 @@ check "Start fresh: this app's install goes, the move doesn't start by itself ag
 rm -rf "$AD"
 
 # a 0.1.3-age settings file (keys missing: 0.1's defaults) with Cooler job workers at 3, arcdps alone
-old01 steam arcdps "$(printf 'fpscap=60\ncoolworkers=3\n')"
+old01 steam arcdps "$(printf 'fpscap=60\ncoolworkers=3\nncpu=99\n')"
 O1SNAP=$(o1snap)
 out=$(g install move 2>&1) && rc=0 || rc=$?
-check "install move (Steam, arcdps alone, an older settings file with coolworkers=3) exits 0" [ "$rc" = 0 ]
+check "install move (Steam, arcdps alone, an older settings file with coolworkers=3 and ncpu=99) exits 0" [ "$rc" = 0 ]
 check "  arcdps as d3d11.dll, no ReShade, no ReShade folder made" \
   eval 'same "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll" && [ "$(st arcdps_state) $(st reshade_state)" = "on off" ] && [ ! -e "$AD/ReShade" ]'
-check "  the keys the file lacks read as 0.1's defaults (uiscale_cinema on), the rest as kept; coolworkers dropped" \
+check "  the keys the file lacks read as 0.1's defaults (uiscale_cinema on), the rest as kept, ncpu=99 as this Mac's 8; coolworkers dropped" \
   eval '[ "$(sett fpscap) $(sett uiscale_cinema) $(sett steambg) $(sett fastlocks) $(sett ncpu)" = "60 on on off 8" ] && ! grep -q "^coolworkers=" "$AD/settings.conf"'
-check "  the summary names Fast locks and Cooler job workers" \
-  has <(mv_done) "Changed from GW2 on Mac 0.1: Cooler job workers don.t exist on this engine; Fast locks is off, this version.s default\."
+check "  the summary names Cooler job workers, Faster locks and the CPUs" \
+  has <(mv_done) "Changed from GW2 on Mac 0.1: Cooler job workers don.t exist on this engine; Faster locks is off, this version.s default; CPUs the game sees is 8, not 99\."
 c=$(play_cmd)
 check "  the first Play shows Steam's window though Steam remembers a login" \
   eval '[[ "$c" == *"steam.exe -applaunch 1284210"* && "$c" != *-silent* ]] && [ "$(st origin)" = moved ]'

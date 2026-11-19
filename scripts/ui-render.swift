@@ -244,7 +244,7 @@ func installer(_ state: String) -> Installer {
     st = st.merging(["origin": "move", "old_install": "yes", "move": "no", "move_record": "moved"]) { $1 }
     i.phase = .succeeded(.move, "Your install moved from GW2 on Mac 0.1: Steam with Guild Wars 2 in its library (cloned, no extra space), "
                          + "your game settings, your addons as they were (arcdps, ReShade with your presets) and your settings. "
-                         + "Changed from GW2 on Mac 0.1: Fast locks is off, this version's default. Steam may ask you to sign in once. "
+                         + "Changed from GW2 on Mac 0.1: Faster locks is off, this version's default. Steam may ask you to sign in once. "
                          + "GW2 on Mac 0.1 stays as it was. Press Play.")
   case let s where s.hasPrefix("session-"):
     // after Play: the start's stages, Playing, Steam closing after the game (Session.swift)
