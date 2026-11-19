@@ -7,7 +7,8 @@
 # archive pinned in prebuilt.lock and checks its sha256 (README.md, Building).
 #
 # The Dev build workflow (devbuild.yml) calls the same jobs with the components it staged
-# (components: the name of an artifact of its run with prebuilt.tar) and the version to build.
+# (components: the name of an artifact of its run with prebuilt.tar) and the version to build. A
+# pull request's dry run also passes groups ["settings"] and renders false (docs/adr/0022).
 name: Checks
 
 on:
@@ -24,6 +25,14 @@ on:
         description: GW2_ON_MAC_VERSION for build.sh; empty is build.sh's own
         type: string
         default: ""
+      groups:
+        description: The sandbox groups to run as a JSON array, such as ["settings"]; empty is all four
+        type: string
+        default: ""
+      renders:
+        description: Run renders when the change can reach them; false skips them
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -81,6 +90,7 @@ jobs:
   # addon: run only when the pull request touches addon/, scripts/build-addon.sh or this file. In a
   #   dev build the components job has run build-addon.sh on the same commit.
   # Anything else (a push, a list that can't be read) runs both.
+  # A caller's renders false skips renders whatever changed (a pull request's dry run, ADR 0022).
   # The token has only contents: read. devbuild.yml calls this file with no more, and a called
   # job can't ask for more than its caller. The repository is public, so that reads the list.
   changes:
@@ -94,6 +104,8 @@ jobs:
       GH_REPO: ${{ github.repository }}
       PR: ${{ github.event.pull_request.number }}
       DEV_BUILD: ${{ inputs.components != '' }}
+      # (empty when Checks isn't called; compared as text, since null == false in an expression)
+      RENDERS: ${{ inputs.renders }}
     steps:
       - name: Which jobs this change can reach
         id: look
@@ -119,6 +131,7 @@ jobs:
               echo "::warning::Couldn't read pull request #$PR's files, so renders and addon run"
             fi
           fi
+          if [[ $RENDERS == false ]]; then renders=0 read="$read, renders false"; fi
           echo "renders=$renders addon=$addon ($read)" | tee -a "$GITHUB_STEP_SUMMARY"
           { echo "renders=$renders"; echo "addon=$addon"; } >>"$GITHUB_OUTPUT"
 
@@ -415,19 +428,16 @@ jobs:
   #     onwards ran about 3.2 times slower than the 182 s of pull request run 44462903934, so about
   #     12 min, an estimate, and 21
   #   sessions: 10 min there, but 13 min 58 s in pull request run 44448554814, so 24 from that one
+  # A caller's groups names fewer: a pull request's dry run runs settings alone (ADR 0022).
   sandbox:
     needs: build
     runs-on: xcode-27
     name: sandbox (${{ matrix.group }})
-    timeout-minutes: ${{ matrix.minutes }}
+    timeout-minutes: ${{ fromJSON('{"settings":19,"sessions":24,"rest":21,"move":20}')[matrix.group] }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { group: settings, minutes: 19 }
-          - { group: sessions, minutes: 24 }
-          - { group: rest, minutes: 21 }
-          - { group: move, minutes: 20 }
+        group: ${{ fromJSON(inputs.groups || '["settings","sessions","rest","move"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

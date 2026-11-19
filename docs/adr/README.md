@@ -4,7 +4,7 @@ One decision per file. The files go by number, not by date. 0001 to 0011 record 
 wrote them down on 2026-11-17, after 0012 and 0013 had landed, and kept their numbers below
 those two. Their dates don't follow their numbers. A new decision takes the next free number.
 
-0001, 0002 and 0014 are about 0.1.x and live on `main`. 0003 to 0010, 0012, 0013 and 0015 to 0021
+0001, 0002 and 0014 are about 0.1.x and live on `main`. 0003 to 0010, 0012, 0013 and 0015 to 0022
 are about the 0.2 line on this branch, `arm64`. 0011 is on both. The two branches share one set of
 numbers, so a number taken on one is not used on the other.
 
@@ -31,3 +31,4 @@ numbers, so a number taken on one is not used on the other.
 | [0019](0019-0.1.x-moves-into-a-new-bottle-at-the-first-start.md) | 2026-11-19, its clones and read-only part superseded by 0020 | 0.1.x's install moves into a new bottle by itself at the first start, waits while 0.1.x runs, brings the addons as they were, and every new bottle's Windows user is `crossover`. |
 | [0020](0020-the-move-renames-the-game-and-rollback-renames-it-back.md) | 2026-11-19 | The move renames 0.1.x's Steam or game folder into 0.2, never copies it, and refuses another disk. A failure renames it back. *Rollback to 0.1.4* renames it back on request and offers 0.1.4's DMG. Supersedes decision 8 of the update plan. |
 | [0021](0021-0.2-opens-on-macos-26.0-and-gates-itself.md) | 2026-11-19 | 0.2 opens on macOS 26.0. Below the engine's 26.4 it shows one popup that downloads the last 0.1.x's DMG, writes nothing, and starts no Sparkle. |
+| [0022](0022-a-pull-requests-dry-run-runs-settings-alone.md) | 2026-11-19 | A pull request's Dev build dry run runs the sandbox's `settings` group alone and no `renders`. Checks runs the rest on the same commit, and a dev build I dispatch runs everything. |
