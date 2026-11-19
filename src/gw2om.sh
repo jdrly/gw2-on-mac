@@ -52,12 +52,44 @@
 #                              DXMT's log and the watcher's session file; the window polls it
 #   gw2om.sh show-steam        brings Steam's window up (steam.exe steam://open/main in the bottle)
 #   gw2om.sh settings          KEY=VALUE lines: the settings (Settings window), and for each
-#                              <key>_state=ok or off:<reason> (setting_state)
+#                              <key>_state=ok or off:<reason> (setting_state; reshade_state is
+#                              the addon's, as arcdps_state)
 #   gw2om.sh set K V           change one setting (see setting_valid); refuses one that is off
 #   gw2om.sh set arcdps on|off arcdps into the game folder (downloaded from deltaconnected.com,
 #                              checked against its published md5) or out of it (only arcdps; its
 #                              addons/arcdps settings stay), while no session runs; status and
-#                              settings print arcdps, arcdps_state (on|off|foreign|nogame)
+#                              settings print arcdps, arcdps_state (on|off|foreign|nogame),
+#                              arcdps_dll. With ReShade in, ReShade loads arcdps from
+#                              addons/arcdps/chain/d3d11.dll (ADDONS_LAYOUT)
+#   gw2om.sh set reshade on|off
+#                              ReShade 6.8.0 into the game folder as d3d11.dll (from reshade.me's
+#                              installer, pinned by sha256), with Microsoft's d3dcompiler_47.dll
+#                              (the game's bin64/cef copy, else mozilla/fxc2's) and a ReShade.ini
+#                              that points ReShade at the ReShade folder in the app's folder
+#                              (its ini, presets, shaders, textures, screenshots; the standard
+#                              effects while Shaders has no ReShade.fxh, SweetFX at the first On),
+#                              or out of it (only what the app placed; the ReShade folder
+#                              stays), while no session runs;
+#                              remembered as reshade= in the settings, so Play, Install and Repair
+#                              put missing files back; status and settings print reshade,
+#                              reshade_state (on|off|foreign|blocked|nogame), reshade_version,
+#                              reshade_dll, reshade_blocker, reshade_folder, addons_layout
+#                              (together|exclusive, ADDONS_LAYOUT). ReShade's menu opens
+#                              in the game with Home (fn + Left Arrow on a MacBook).
+#   gw2om.sh reshade import <path>...
+#                              presets (.ini with a Techniques line), zips and folders into the
+#                              ReShade folder, whether ReShade is on or off and while the game runs
+#                              (never into the game folder): presets into Presets (one of the same
+#                              name stays unless it came from a source of the same name), the
+#                              contents of Shaders and Textures folders at any depth and loose .fx,
+#                              .fxh and images into Shaders/<name> and Textures/<name>; nothing
+#                              else. "@preset <name>" for each preset that came in, and a report
+#                              as @done: what went where, the effects the presets use that aren't
+#                              in Shaders, those that read the depth buffer
+#   gw2om.sh reshade use <preset>
+#                              that preset in Presets as ReShade's current one (PresetPath in the
+#                              ReShade folder's ReShade.ini, nothing else of it), while no session
+#                              runs
 #   gw2om.sh check-setup FILE  is FILE ArenaNet's Gw2Setup-64.exe: a PE x86_64 executable with a
 #                              valid Authenticode signature by ArenaNet ("@done <what>")
 #   gw2om.sh reset-shaders     deletes DXMT's caches (shaders, pipelines, recipes; my fork's and
@@ -92,8 +124,17 @@
 #   GW2_ON_MAC_SIGNER          the signer check-setup accepts (default ArenaNet)
 #   GW2_ON_MAC_ARCDPS_URL      another place for arcdps's d3d11.dll and d3d11.dll.md5sum (a
 #                              fixture: file://...)
+#   GW2_ON_MAC_RESHADE_URL, GW2_ON_MAC_RESHADE_SIZE, GW2_ON_MAC_RESHADE_SHA256,
+#   GW2_ON_MAC_RESHADE_DLL_SHA256   another ReShade installer, and its ReShade64.dll's sha256
+#   GW2_ON_MAC_COMPILER_URL, GW2_ON_MAC_COMPILER_SIZE, GW2_ON_MAC_COMPILER_SHA256   another
+#                              d3dcompiler_47.dll to download
+#   GW2_ON_MAC_RESHADE_SHADERS_URL, GW2_ON_MAC_SWEETFX_URL   other effect pack zips
+#   GW2_ON_MAC_PACK_LIMIT, GW2_ON_MAC_PACK_MAX_FILES   the most bytes one effect pack (or one
+#                              zip, folder or preset of reshade import) may unpack to, and the
+#                              most files it may have
+#   GW2_ON_MAC_ADDONS_LAYOUT   exclusive: arcdps and ReShade refuse each other (ADDONS_LAYOUT)
 #   GW2_ON_MAC_TEST_PAUSE, GW2_ON_MAC_TEST_PAUSE_AT   wait at a point while that file is there
-#                              (test_pause: locked, lock-owner-read, lock-stale-checked)
+#                              (test_pause: locked, lock-owner-read, lock-stale-checked, arcdps-moved)
 #   GW2_ON_MAC_LOCK_WAIT      how long a contender waits for the install lock's claim (5 s)
 #   GW2_ON_MAC_ALLOW_WINE=1    let the real engine's Wine run in a sandbox (never in the tests)
 #   GW2_ON_MAC_IMPORT_COPY=1   install import copies even on the same disk (the other-disk path)
@@ -106,7 +147,8 @@
 # 3 Steam or ArenaNet's installer, 4 the game's download, 5 finishing touches; install import
 # 1 engine, 2 bottle, then Steam's route 3 Steam, 4 the files, 5 finishing touches, or ArenaNet's
 # 3 the files, 4 finishing touches; uninstall 1 stop, 2 bottle, 3 the rest), "@step <text>", "@progress <label> <bytes> <total>", "@warn <text>",
-# "@notice <text>", "@error <text>", "@done <text>". Everything else is plain log text.
+# "@notice <text>", "@error <text>", "@done <text>", "@preset <name>" (reshade import). Everything
+# else is plain log text.
 # Runs under macOS's /bin/bash 3.2.
 set -euo pipefail
 # The app's name in its texts, and its name on disk: the .app's file name and its three folders in
@@ -253,7 +295,7 @@ STEAM_DIR="$BOTTLE/drive_c/Program Files (x86)/Steam"
 STEAM_EXE='C:\Program Files (x86)\Steam\steam.exe'
 # What uninstall removes in APPDIR (the folder itself goes too once empty; gamemode is what a build
 # of this line before the Mach9 engine made)
-APP_FILES="engine bottle gamemode settings.conf state install-manifest.json dxmt.conf compatdb.rules compatdb.local dev-switches.conf engine.new bottle.new session session.req .session.lock"
+APP_FILES="engine bottle gamemode settings.conf state install-manifest.json dxmt.conf compatdb.rules compatdb.local dev-switches.conf engine.new bottle.new session session.req .session.lock reshade-compiler"
 LOGFILE=/dev/null
 
 # --- Output and logging
@@ -498,15 +540,16 @@ fetch() {
   esac
 }
 
-# download <url> <file> <label>: an unpinned file (SteamSetup.exe), with progress
+# download <url> <file> <label> [<most bytes>]: a file with progress, unpinned (SteamSetup.exe) or
+# checked by the caller
 download() {
-  local url=$1 out=$2 label=$3 total pid rc=0
+  local url=$1 out=$2 label=$3 max=${4:-} total pid rc=0
   if [ -n "$DRY" ]; then echo "[dry-run] download $url to $out"; return; fi
   mkdir -p "$(dirname "$out")"
   # (its size for the progress, if the server says; unknown is fine)
   total=$( { curl -fsIL --connect-timeout 20 "$url" 2>/dev/null || true; } | tr -d '\r' | awk 'tolower($1) == "content-length:" { n = $2 } END { print n + 0 }')
   rm -f "$out.part"
-  curl -fsSL --connect-timeout 20 --retry 2 -o "$out.part" "$url" 2>>"$LOGFILE" &
+  curl -fsSL --connect-timeout 20 --retry 2 ${max:+--max-filesize "$max"} -o "$out.part" "$url" 2>>"$LOGFILE" &
   pid=$!
   FETCH_PID=$pid
   while kill -0 "$pid" 2>/dev/null; do
@@ -515,6 +558,8 @@ download() {
   done
   wait "$pid" || rc=$?
   FETCH_PID=
+  # (63: larger than the most it may be)
+  [ "$rc" != 63 ] || { rm -f "$out.part"; die "The download of $label is not the file $APP_NAME expects: it is larger than that file. Something on the way changes it (a proxy, VPN, antivirus or content filter). Try again."; }
   [ "$rc" -eq 0 ] && [ -s "$out.part" ] || { rm -f "$out.part"; die "The download of $label from $url failed (curl status $rc). Check your internet connection and try again."; }
   echo "@progress $label $(stat -f %z "$out.part") $(stat -f %z "$out.part")"
   mv -f "$out.part" "$out"
@@ -667,7 +712,7 @@ apply_registry() {
 # of the keys need pieces of mine that come in later steps: setting_state says so, the Settings
 # window greys them with the reason, set refuses them, and they keep what settings.conf says without
 # an effect.
-SETTING_KEYS="retina fpscap metal metalfx hud warm fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam dxmt wine jobwakes macdrv launcherframes eventpool fex"
+SETTING_KEYS="retina fpscap metal metalfx hud warm fastlocks ncpu uiscale uiscale_size uiscale_sans uiscale_cinema gamemode launchopts rawmouse mousespeed updates debug steambg quitsteam dxmt wine jobwakes macdrv launcherframes eventpool fex reshade"
 # settings.conf's version, its line settings_version=. Install and Repair write every key with its
 # value, so a file holds the defaults it was written with, as if I had chosen them. A default that
 # changes for the files that exist gets a row here, "<version> <keys>": in a file older than
@@ -724,7 +769,7 @@ UI_SCALES="1.5 1.75 1.8 2.0"
 setting_default() {
   case "$1" in
     retina|warm|uiscale_sans|gamemode|rawmouse|updates|steambg|quitsteam|jobwakes|eventpool) echo on ;;
-    metalfx|hud|uiscale|uiscale_cinema|launcherframes|fastlocks) echo off ;;
+    metalfx|hud|uiscale|uiscale_cinema|launcherframes|fastlocks|reshade) echo off ;;
     mousespeed) echo 1 ;;
     debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
     fpscap) echo off ;;
@@ -739,7 +784,7 @@ setting_default() {
 }
 setting_valid() { # <key> <value>
   case "$1" in
-    retina|metalfx|hud|warm|fastlocks|uiscale|uiscale_sans|uiscale_cinema|gamemode|rawmouse|updates|debug|steambg|quitsteam|jobwakes|launcherframes|eventpool)
+    retina|metalfx|hud|warm|fastlocks|uiscale|uiscale_sans|uiscale_cinema|gamemode|rawmouse|updates|debug|steambg|quitsteam|jobwakes|launcherframes|eventpool|reshade)
       [ "$2" = on ] || [ "$2" = off ] ;;
     mousespeed) in_list "$2" "$MOUSE_SPEEDS" ;;
     fpscap) in_list "$2" "$FPS_CAPS" ;;
@@ -902,8 +947,10 @@ cdb_value() {
 #                      it, not GameController's counts
 #   metal_hud=true     the Metal HUD (Settings › Graphics), in the game only
 #   dll_overrides      native first, for an addon in the game folder: d3d11 and dxgi while one is
-#                      there (arcdps, Nexus), version while the larger interface is on. With no
-#                      such file Wine loads its own (n,b).
+#                      there (arcdps, a ReShade, Nexus), d3dcompiler_47 while a ReShade is
+#                      (Microsoft's compiler next to Gw2-64.exe: ReShade loads it by name, and
+#                      Wine's own can't compile ReShade's effects), version while the larger
+#                      interface is on. With no such file Wine loads its own (n,b).
 #   env                DXMT's shader cache in the app's cache folder (dxmt_cache: my fork's, or
 #                      the engine's DXMT's own), with my fork in place the Metal it draws with
 #                      (DXMT_METAL4=0 for Metal 3, =1 for Metal 4: the Metal row; the engine's
@@ -914,20 +961,24 @@ cdb_value() {
 # CefHost.exe, which the game starts for its launcher and the Trading Post, inherits the game's
 # variables: the rule takes the cache path and the switches away from it again (an empty value
 # unsets a variable), and the HUD while it is on. rundll32.exe gets the game's d3d11 and dxgi
-# order while an addon is there. arcdps's crash handler shows its crash window through rundll32,
-# with the game folder's d3d11.dll and the entry point c_exceptionerrormsg. In Wine's default
-# order rundll32 loads Wine's own d3d11 in place of that file, since arcdps's version block names
-# no company (version_heuristics in Wine's loadorder.c), and that d3d11 has no such entry point
-# (#155). A line of compatdb.local comes after the rules (write_rules), so its DXMT_METAL4 wins
+# order while an addon is there, arcdps also at ReShade's chain path (ARC_CHAIN). arcdps does part
+# of its work in rundll32 with its own DLL: its crash window, with the entry point
+# c_exceptionerrormsg, and very likely its update (c_closeandupdate). In Wine's default order
+# rundll32 loads Wine's own d3d11 in place of that file, since arcdps's version block names no
+# company (version_heuristics in Wine's loadorder.c), and that d3d11 has no such entry point (#155,
+# #209). A line of compatdb.local comes after the rules (write_rules), so its DXMT_METAL4 wins
 # over the row's.
 rules_text() {
   local game="exe=Gw2-64.exe" cef="exe=CefHost.exe" rundll="" entries="" removed="" e metal="" present=""
   [ "$(setting rawmouse)" = on ] || game="$game;gcmouse=false"
   if [ "$(setting hud)" = on ]; then game="$game;metal_hud=true" cef="$cef;metal_hud=false"; fi
   arcdps_state
-  case "$ARC" in
-    on|foreign) game="$game;dll_overrides=d3d11,dxgi=n,b" rundll="exe=rundll32.exe;dll_overrides=d3d11,dxgi=n,b" ;;
+  reshade_state
+  case "$ARC $RSH" in
+    on\ *|foreign\ *|*\ on|*\ foreign)
+      game="$game;dll_overrides=d3d11,dxgi=n,b" rundll="exe=rundll32.exe;dll_overrides=d3d11,dxgi=n,b" ;;
   esac
+  case "$RSH" in on|foreign) game="$game;dll_overrides=d3dcompiler_47=n,b" ;; esac
   [ "$(setting uiscale)" != on ] || game="$game;dll_overrides=version=n,b"
   # (the tree read once for this run: dxmt_cache asks again)
   dxmt_look "$DXGI/dxmt"
@@ -2072,11 +2123,30 @@ sync_uiscale() {
 # one is there, rules_text) and passes the game's Direct3D 11 on to DXMT. It updates itself, so it
 # is recognised by what it is, not by a hash: a PE
 # whose export table has arcdps's extension API (addextension2) and that names arcdps. As dxgi.dll
-# it counts too. Its settings (addons/arcdps/) stay when it goes. Another d3d11.dll or dxgi.dll
-# (Nexus, ReShade...) is never touched: state foreign.
+# it counts too, and at the chain path (below). Its settings (addons/arcdps/) stay when it goes.
+# Another file at those places (Nexus, a ReShade the app didn't place...) is never touched: state
+# foreign.
 ARCDPS_URL=https://www.deltaconnected.com/arcdps/x64
 [ -z "$ROOT" ] || ARCDPS_URL="${GW2_ON_MAC_ARCDPS_URL:-$ARCDPS_URL}"
-ARCDPS_DLLS="d3d11.dll dxgi.dll"
+ARC_CHAIN=addons/arcdps/chain/d3d11.dll
+ARCDPS_DLLS="d3d11.dll dxgi.dll $ARC_CHAIN"
+# chain_ok [<game folder>]: ARC_CHAIN's folders are real folders. Through a link (an addons folder
+# shared with another install, which the import keeps as a link) the app neither counts arcdps
+# there nor puts, moves or removes a file there: the file would be the other folder's.
+chain_ok() { local d="${1:-$GAME_DIR}"; [ ! -L "$d/addons" ] && [ ! -L "$d/addons/arcdps" ] && [ ! -L "$d/addons/arcdps/chain" ]; }
+# arcdps and the app's ReShade in one game folder. ADDONS_LAYOUT=together (addon_dll): alone, each
+# is d3d11.dll; with both in, ReShade is d3d11.dll and arcdps is ARC_CHAIN, which ReShade loads
+# itself through the [PROXY] keys of the ReShade folder's ReShade.ini (proxy_sync). Next to
+# ReShade, arcdps as dxgi.dll didn't load in my sessions (#205, #208), so an arcdps that 0.1.4's
+# development builds left as dxgi.dll moves to ARC_CHAIN too. ADDONS_LAYOUT=exclusive: each counts the other as a file in its
+# way, and its switch refuses until the other is off.
+ADDONS_LAYOUT=together
+[ -z "$ROOT" ] || ADDONS_LAYOUT="${GW2_ON_MAC_ADDONS_LAYOUT:-$ADDONS_LAYOUT}"
+PROXY_ON=0
+# addon_dll <arcdps|reshade> <the other one in: on|off>: the addon's path in the game folder
+addon_dll() { case "$1 $2 $ADDONS_LAYOUT" in "arcdps on together") echo "$ARC_CHAIN" ;; *) echo d3d11.dll ;; esac; }
+# our_reshade <file>: the app's ReShade (the pinned file)
+our_reshade() { [ -f "$1" ] && [ "$(sha256 "$1")" = "$RESHADE_DLL_SHA256" ]; }
 
 pe32() { od -An -tu4 -j "$2" -N4 "$1" 2>/dev/null | tr -d ' ' || true; }   # <file> <offset>
 pe16() { od -An -tu2 -j "$2" -N2 "$1" 2>/dev/null | tr -d ' ' || true; }
@@ -2116,7 +2186,8 @@ is_arcdps() {
   LC_ALL=C grep -aq arcdps "$1"
 }
 # arcdps_state: ARC (on: arcdps is in the game folder, as d3d11.dll or dxgi.dll; off; foreign:
-# another program's d3d11.dll or dxgi.dll, ARC_FOREIGN its names; nogame), ARC_DLL (arcdps's file)
+# another program's d3d11.dll or dxgi.dll, ARC_FOREIGN its names, the app's ReShade too in the
+# exclusive layout; nogame), ARC_DLL (arcdps's files)
 arcdps_state() {
   local n
   ARC=off ARC_FOREIGN="" ARC_DLL=""
@@ -2124,22 +2195,164 @@ arcdps_state() {
   [ -n "$GAME_DIR" ] || { ARC=nogame; return 0; }
   for n in $ARCDPS_DLLS; do
     [ -f "$GAME_DIR/$n" ] || continue
-    if is_arcdps "$GAME_DIR/$n"; then ARC=on ARC_DLL=${ARC_DLL:+$ARC_DLL }$n; else ARC_FOREIGN=${ARC_FOREIGN:+$ARC_FOREIGN }$n; fi
+    [ "$n" != "$ARC_CHAIN" ] || chain_ok || continue
+    if is_arcdps "$GAME_DIR/$n"; then ARC=on ARC_DLL=${ARC_DLL:+$ARC_DLL }$n
+    elif [ "$ADDONS_LAYOUT" = together ] && [ "$n" != "$ARC_CHAIN" ] && our_reshade "$GAME_DIR/$n"; then :
+    else ARC_FOREIGN=${ARC_FOREIGN:+$ARC_FOREIGN }$n
+    fi
   done
   [ "$ARC" = on ] || [ -z "$ARC_FOREIGN" ] || ARC=foreign
   return 0
 }
 
+# arcdps_move <from> <to>: arcdps renamed in the game folder, checked first (the file is arcdps,
+# <to> is free; else nothing changes, status 1). One rename, so arcdps is under one name or the
+# other whenever the script stops. ARC_MOVED: the new name.
+arcdps_move() {
+  local from="$GAME_DIR/$1" to="$GAME_DIR/$2"
+  case " $1 $2 " in *" $ARC_CHAIN "*) chain_ok || { log "arcdps: not renamed from $1 to $2 (a folder of $ARC_CHAIN is a link)"; return 1; } ;; esac
+  if ! is_arcdps "$from" || [ -e "$to" ] || [ -L "$to" ]; then
+    log "arcdps: not renamed from $1 to $2 (not arcdps, or $2 is taken)"
+    return 1
+  fi
+  [ -d "$(dirname "$to")" ] || run mkdir -p "$(dirname "$to")" || return 1
+  run mv -n "$from" "$to" || return 1
+  if [ -z "$DRY" ] && { [ -e "$from" ] || ! is_arcdps "$to"; }; then
+    log "arcdps: the rename from $1 to $2 didn't happen"
+    return 1
+  fi
+  ARC_MOVED=$2
+  log "arcdps: $1 renamed to $2"
+}
+
+# arcdps_tidy <ReShade in: on|off>: arcdps under the name addon_dll gives (the caller holds the
+# session's lock, and no session runs). arcdps updates itself and may write a new d3d11.dll while
+# ReShade loads it from ARC_CHAIN: under two or three names, the newest file stays and the others
+# go (all are arcdps; the name addon_dll gives wins a tie). A name that is taken leaves arcdps where
+# it is. ARC_MOVED: the name arcdps was renamed to, if any.
+arcdps_tidy() {
+  local want newer n
+  ARC_MOVED=""
+  arcdps_state
+  [ "$ARC" = on ] || return 0
+  want=$(addon_dll arcdps "$1")
+  case "$ARC_DLL" in
+    *" "*)
+      case " $ARC_DLL " in *" $want "*) newer=$want ;; *) newer=${ARC_DLL%% *} ;; esac
+      for n in $ARC_DLL; do [ ! "$GAME_DIR/$n" -nt "$GAME_DIR/$newer" ] || newer=$n; done
+      log "arcdps: in the game folder as ${ARC_DLL// / and } (it updated itself); keeping the newer $newer (sha256 $(sha256 "$GAME_DIR/$newer"))"
+      for n in $ARC_DLL; do
+        [ "$n" = "$newer" ] || { log "arcdps: removing $n (sha256 $(sha256 "$GAME_DIR/$n"))"; run rm -f "$GAME_DIR/$n"; }
+      done
+      ARC_DLL=$newer ;;
+  esac
+  [ "$ARC_DLL" = "$want" ] || arcdps_move "$ARC_DLL" "$want" || true
+}
+
+# proxy_sync [off]: ReShade's [PROXY] keys in the ReShade folder's ReShade.ini (ReShade reads them
+# from its own ini at its start, source/dll_main.cpp at v6.8.0), on exactly when the app's ReShade
+# is d3d11.dll and arcdps is ARC_CHAIN in the together layout: EnableProxyLibrary=1 and
+# ProxyLibrary=ARC_CHAIN's Windows path, so ReShade loads arcdps in place of system32's d3d11.dll.
+# Else EnableProxyLibrary=0 where the file has the key (with off: always, before a step takes
+# either file away). The keys on with no arcdps there would leave the game without Direct3D 11, so
+# the files go in before the keys go on, and the keys go off before a file goes. Only those keys
+# change (ini_set); the caller holds the session's lock. PROXY_ON: 1 when on. Status 1 when the
+# ini can't be written.
+proxy_sync() {
+  local want=0 ini="$RS/ReShade.ini"
+  if [ "${1:-}" != off ] && [ "$ADDONS_LAYOUT" = together ] && our_reshade "$GAME_DIR/d3d11.dll" &&
+    chain_ok && is_arcdps "$GAME_DIR/$ARC_CHAIN"; then want=1; fi
+  PROXY_ON=0
+  if [ "$want" = 1 ]; then
+    rs_safe "$ini" || return 1
+    reshade_folder
+    set -- EnableProxyLibrary=1 "ProxyLibrary=$(proxy_path)"
+  else
+    [ -f "$ini" ] && grep -q EnableProxyLibrary "$ini" || return 0
+    rs_safe "$ini" || return 1
+    set -- EnableProxyLibrary=0
+  fi
+  if [ ! -f "$ini" ]; then
+    [ -n "$DRY" ] || return 1
+    echo "[dry-run] $* in $ini"
+  elif ! ini_set "$ini" PROXY "$@" | cmp -s - "$ini"; then
+    ini_set "$ini" PROXY "$@" | put "$ini" 644 || return 1
+    log "ReShade.ini: [PROXY] $*"
+  fi
+  PROXY_ON=$want
+}
+# proxy_path: ARC_CHAIN as the game sees it (C:\ in the bottle, else Z:\; a comma doubled, as
+# ReShade's ini reads it)
+proxy_path() {
+  case "$GAME_DIR" in
+    "$BOTTLE/drive_c/"*) printf 'C:\\%s' "${GAME_DIR#"$BOTTLE/drive_c/"}/$ARC_CHAIN" | tr '/' '\\' | sed 's/,/,,/g' ;;
+    *) winpath "$GAME_DIR/$ARC_CHAIN" ;;
+  esac
+}
+# proxy_enabled <ini>: [PROXY] EnableProxyLibrary is on in it, as ReShade 6.8.0 reads it
+# (source/ini_file.cpp, ini_file.hpp): a repeated key appends its values and ReShade takes the
+# first, a value splits at a single comma, an empty value adds nothing, and a bool is on when
+# strtol gives a number other than 0 or the value is true, True or TRUE
+proxy_enabled() {
+  LC_ALL=C awk '
+    function strip(s, c) {
+      while (s != "" && index(c, substr(s, 1, 1))) s = substr(s, 2)
+      while (s != "" && index(c, substr(s, length(s), 1))) s = substr(s, 1, length(s) - 1)
+      return s }
+    { t = strip($0, " \t\r"); if (NR == 1 && substr(t, 1, 3) == "\357\273\277") t = substr(t, 4)
+      if (substr(t, 1, 1) == "[") { i = index(t, "]"); sec = strip(i ? substr(t, 1, i - 1) : t, " \t[]"); next }
+      i = index(t, "=")
+      if (found || sec != "PROXY" || !i || strip(substr(t, 1, i - 1), " \t") != "EnableProxyLibrary") next
+      v = strip(substr(t, i + 1), " \t")
+      if (v == "") next
+      j = index(v, ","); if (j) v = substr(v, 1, j - 1)
+      found = 1 }
+    END {
+      on = v == "true" || v == "True" || v == "TRUE"
+      if (!on && match(v, /^[+-]?[0-9]+/)) { d = substr(v, 1, RLENGTH); gsub(/[^0-9]/, "", d); on = d ~ /[1-9]/ }
+      exit !on }' "$1"
+}
+# proxy_safe: ReShade won't look for arcdps where it isn't: the app's ReShade isn't d3d11.dll, or its
+# keys are off, or they are on with arcdps at their path. Only reads; Play checks it before the
+# start, since a game whose ReShade loads a missing file has no Direct3D 11.
+proxy_safe() {
+  local ini="$RS/ReShade.ini"
+  our_reshade "$GAME_DIR/d3d11.dll" && [ -f "$ini" ] && proxy_enabled "$ini" || return 0
+  chain_ok && is_arcdps "$GAME_DIR/$ARC_CHAIN" && ini_set "$ini" PROXY EnableProxyLibrary=1 "ProxyLibrary=$(proxy_path)" | cmp -s - "$ini"
+}
+# proxy_refusal <what stays>: the sentence for an ini that can't be written
+proxy_refusal() { echo "$APP_NAME couldn't change ReShade's settings ($RS/ReShade.ini), so $1. Try again (details in $LOGS/install.log)."; }
+
+# sync_arcdps: arcdps under the name addon_dll gives, and ReShade's [PROXY] keys to match the files
+# (proxy_sync), before Play, at Install and at Repair; never while a session runs or starts. Keys
+# that stay on with no arcdps at their path stop the start.
+sync_arcdps() {
+  [ -n "$DRY" ] || [ -x "$LOCKER" ] || return 0
+  registry_lock || return 0
+  if session_running; then registry_unlock; return 0; fi
+  reshade_state
+  arcdps_tidy "$([ "$RSH" = on ] && echo on || echo off)"
+  if ! proxy_sync; then
+    proxy_safe || die "$(proxy_refusal "ReShade would look for arcdps where it isn't, and the game would have no Direct3D 11")"
+    warn "$(proxy_refusal "ReShade doesn't load arcdps this time")"
+  fi
+  registry_unlock
+}
+
 # set arcdps on|off (cmd_set): only while no session runs or starts (the session's lock, as the
 # registry writes take it)
 set_arcdps() {
-  local dir="$CACHE/downloads/arcdps" sum want got n gone=""
+  local dir="$CACHE/downloads/arcdps" sum want got n tmp gone=""
+
   arcdps_state
   [ "$ARC" != nogame ] || die "Guild Wars 2 is not installed yet: arcdps goes into its folder once it is."
   ! session_running || die "Quit Guild Wars 2 and Steam first: arcdps goes into or out of the game folder only while they are closed."
   registry_lock || die "A game session is starting. Try again once Guild Wars 2 and Steam have quit."
   if [ "$1" = off ]; then
+    # (ReShade's keys off first: they never point at a file that is gone)
+    proxy_sync off || die "$(proxy_refusal "arcdps stays in")"
     for n in $ARCDPS_DLLS; do
+      [ "$n" != "$ARC_CHAIN" ] || chain_ok || continue
       if is_arcdps "$GAME_DIR/$n"; then run rm -f "$GAME_DIR/$n"; gone=${gone:+$gone and }$n; fi
     done
     registry_unlock
@@ -2154,11 +2367,25 @@ set_arcdps() {
     return 0
   fi
   case "$ARC" in
-    on) registry_unlock; echo "@done arcdps is already in the game folder ($ARC_DLL)."; return 0 ;;
-    foreign) die "The game folder has another $ARC_FOREIGN (Nexus or another addon?). $APP_NAME leaves it alone, so it can't add arcdps: remove that file, or add arcdps through that addon." ;;
+    on)
+      proxy_sync || die "$(proxy_refusal "ReShade doesn't load arcdps")"
+      registry_unlock; echo "@done arcdps is already in the game folder ($ARC_DLL)."; return 0 ;;
+    foreign)
+      reshade_state
+      case "$RSH" in
+        on) [ "$ADDONS_LAYOUT" != exclusive ] || die "ReShade is in the game folder as $RSH_DLL. Turn ReShade off first, then turn arcdps on." ;;
+        foreign) die "The game folder has a ReShade that $APP_NAME didn't put there ($RSH_DLL). $APP_NAME leaves it alone, so it can't add arcdps: remove that file first." ;;
+      esac
+      die "The game folder has another $ARC_FOREIGN (Nexus or another addon?). $APP_NAME leaves it alone, so it can't add arcdps: remove that file, or add arcdps through that addon." ;;
   esac
+  # (its place: ARC_CHAIN next to the app's ReShade in the together layout)
+  reshade_state
+  n=$(addon_dll arcdps "$([ "$RSH" = on ] && echo on || echo off)")
+  [ "$n" != "$ARC_CHAIN" ] || chain_ok ||
+    die "Next to ReShade, arcdps goes into addons/arcdps/chain in the game folder, and a folder on that path is a link to another folder. $APP_NAME doesn't put files there: make addons/arcdps a folder of its own, then try again."
+  tmp="$GAME_DIR/$(dirname "$n")/.$(basename "$n").gw2om-new"
   if [ -n "$DRY" ]; then
-    echo "[dry-run] download $ARCDPS_URL/d3d11.dll, check it against $ARCDPS_URL/d3d11.dll.md5sum, put it into $GAME_DIR/d3d11.dll"
+    echo "[dry-run] download $ARCDPS_URL/d3d11.dll, check it against $ARCDPS_URL/d3d11.dll.md5sum, put it into $GAME_DIR/$n"
     echo "@done arcdps would be in the game folder."
     return 0
   fi
@@ -2179,12 +2406,810 @@ set_arcdps() {
   is_arcdps "$dir/d3d11.dll" || die "The file from $ARCDPS_URL/d3d11.dll is not arcdps. Try again later."
   # (no session can start meanwhile: this holds its lock)
   arcdps_state
-  [ "$ARC" = off ] || die "The game folder changed during the download ($ARC). Try again."
-  run install -m 644 "$dir/d3d11.dll" "$GAME_DIR/.d3d11.dll.gw2om-new"
-  run mv -f "$GAME_DIR/.d3d11.dll.gw2om-new" "$GAME_DIR/d3d11.dll"
+  [ "$ARC" = off ] && [ ! -e "$GAME_DIR/$n" ] && [ ! -L "$GAME_DIR/$n" ] && { [ "$n" != "$ARC_CHAIN" ] || chain_ok; } ||
+    die "The game folder changed during the download ($ARC). Try again."
+  [ -d "$(dirname "$tmp")" ] || run mkdir -p "$(dirname "$tmp")"
+  run install -m 644 "$dir/d3d11.dll" "$tmp"
+  run mv -f "$tmp" "$GAME_DIR/$n"
+  log "arcdps: $ARCDPS_URL/d3d11.dll into $GAME_DIR/$n (md5 $got, sha256 $(sha256 "$GAME_DIR/$n"))"
+  # (the file is in: now ReShade's keys; if they can't go on, arcdps goes out again)
+  if ! proxy_sync; then
+    run rm -f "$GAME_DIR/$n"
+    die "$(proxy_refusal "arcdps stays out")"
+  fi
   registry_unlock
-  log "arcdps: $ARCDPS_URL/d3d11.dll into $GAME_DIR/d3d11.dll (md5 $got, sha256 $(sha256 "$GAME_DIR/d3d11.dll"))"
-  echo "@done arcdps is in the game folder (d3d11.dll from deltaconnected.com). It loads the next time the game starts, and from then on it updates itself."
+  echo "@done arcdps is in the game folder ($n from deltaconnected.com). It loads the next time the game starts, and from then on it updates itself.$([ "$PROXY_ON" = 0 ] || echo " ReShade loads arcdps itself now, so both load.")"
+}
+
+# --- ReShade (crosire's post-processing; Settings › Interface): downloaded on request, never hosted
+# or changed by the app. Three files go into the game folder: ReShade64.dll as d3d11.dll, where
+# it loads first (the d3d11/dxgi order, rules_text) and passes the game's Direct3D 11 on to
+# DXMT; Microsoft's d3dcompiler_47.dll, because Wine's own compiler can't compile ReShade's effects
+# (under Wine ReShade loads it by name, so the game folder's copy wins with the native-first
+# override, rules_text); and a ReShade.ini with only [INSTALL] BasePath, which ReShade reads
+# next to the game's exe before anything else (get_base_path, source/dll_main.cpp at v6.8.0). It
+# points at the ReShade folder in the app's folder, so ReShade's own ini, log, presets, shaders,
+# textures and screenshots live outside the bottle: a new bottle, Repair or Steam's file check
+# costs the player nothing, and Uninstall leaves them. One pinned version per app release: the
+# ReShade in the game folder is the app's when it is that exact file, and any other DLL exporting
+# ReShadeRegisterAddon is a ReShade the app didn't place (foreign), never touched.
+RESHADE_VERSION=6.8.0
+RESHADE_URL=https://reshade.me/downloads/ReShade_Setup_6.8.0.exe
+RESHADE_SIZE=4075064
+RESHADE_SHA256=207aea16205fbf952bc8fe1879966672454cf04002e7ad34237c7990a5b3c0b4
+RESHADE_DLL_SHA256=b2945c29e7095491a901746b400e58db9b1592ab092bacf2a888ce37f02d08da
+# Microsoft's compiler (10.0.17134.12, Microsoft-signed), when the game has no copy in bin64/cef
+COMPILER_URL=https://raw.githubusercontent.com/mozilla/fxc2/9aba9b11079303d5577e0e3eb455f4d00f3b5946/dll/d3dcompiler_47.dll
+COMPILER_SIZE=4346120
+COMPILER_SHA256=4432bbd1a390874f3f0a503d45cc48d346abc3a8c0213c289f4b615bf0ee84f3
+# The two packs ReShade's installer picks by default, at fixed commits: crosire's standard effects
+# (the slim branch: ReShade.fxh and ReShadeUI.fxh, which almost every effect includes) and SweetFX
+RESHADE_SHADERS_URL=https://github.com/crosire/reshade-shaders/archive/fd0022170615ce0d8162d219bff07232fa6dd84f.zip
+SWEETFX_URL=https://github.com/CeeJayDK/SweetFX/archive/93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361.zip
+PACK_DOWNLOAD_MAX=$((64 * 1048576))
+PACK_LIMIT=$((256 * 1048576))
+PACK_MAX_FILES=10000
+if [ -n "$ROOT" ]; then
+  RESHADE_URL="${GW2_ON_MAC_RESHADE_URL:-$RESHADE_URL}" RESHADE_SIZE="${GW2_ON_MAC_RESHADE_SIZE:-$RESHADE_SIZE}"
+  RESHADE_SHA256="${GW2_ON_MAC_RESHADE_SHA256:-$RESHADE_SHA256}" RESHADE_DLL_SHA256="${GW2_ON_MAC_RESHADE_DLL_SHA256:-$RESHADE_DLL_SHA256}"
+  COMPILER_URL="${GW2_ON_MAC_COMPILER_URL:-$COMPILER_URL}" COMPILER_SIZE="${GW2_ON_MAC_COMPILER_SIZE:-$COMPILER_SIZE}"
+  COMPILER_SHA256="${GW2_ON_MAC_COMPILER_SHA256:-$COMPILER_SHA256}"
+  RESHADE_SHADERS_URL="${GW2_ON_MAC_RESHADE_SHADERS_URL:-$RESHADE_SHADERS_URL}" SWEETFX_URL="${GW2_ON_MAC_SWEETFX_URL:-$SWEETFX_URL}"
+  PACK_LIMIT="${GW2_ON_MAC_PACK_LIMIT:-$PACK_LIMIT}" PACK_MAX_FILES="${GW2_ON_MAC_PACK_MAX_FILES:-$PACK_MAX_FILES}"
+fi
+RS="$APPDIR/ReShade"                  # ReShade's folder (its BasePath)
+RS_CACHE="$CACHE/reshade"             # its compiled effects (IntermediateCachePath)
+RS_DOWNLOADS="$CACHE/downloads/reshade"   # the checked ReShade64.dll (and fxc2's compiler) for Play and Repair
+RS_PACKS="$RS/.packs"                 # "SweetFX" once an On has brought it: not again after a player deleted it
+# the sha256 of the d3dcompiler_47.dll the app put next to Gw2-64.exe (Off removes only that one)
+RS_COMPILER_RECORD="$APPDIR/reshade-compiler"
+
+pe_has_export() {   # <file> <name>
+  local nl='
+'
+  case "$nl$(pe_export_names "$1")$nl" in *"$nl$2$nl"*) return 0 ;; esac
+  return 1
+}
+pe_is64() {   # <file>: an x86_64 PE (PE32+)
+  local pe
+  [ "$(head -c 2 "$1" 2>/dev/null || true)" = MZ ] || return 1
+  pe=$(pe32 "$1" 60)
+  [ "$(bytes "$1" "${pe:-0}" 4 | od -An -tx1 | tr -d ' \n' || true)" = 50450000 ] &&
+    [ "$(pe16 "$1" $((pe + 4)))" = 34404 ] && [ "$(pe16 "$1" $((pe + 24)))" = 523 ]
+}
+is_reshade() { [ -f "$1" ] && pe_has_export "$1" ReShadeRegisterAddon; }
+# winpath <path>: the path as Wine sees it through Z: (a comma doubled, as ReShade's ini reads it)
+winpath() { printf 'Z:%s' "$1" | tr '/' '\\' | sed 's/,/,,/g'; }
+reshade_game_ini() { printf '[INSTALL]\nBasePath=%s\n' "$(winpath "$RS")"; }
+# the game folder's ReShade.ini is the app's: the two lines it writes and nothing else
+our_game_ini() {
+  awk 'NR == 1 && $0 == "[INSTALL]" { a = 1 } NR == 2 && /^BasePath=/ { b = 1 } END { exit !(a && b && NR == 2) }' "$GAME_DIR/ReShade.ini" 2>/dev/null
+}
+
+# reshade_state: RSH (on: the app's ReShade is in the game folder, as d3d11.dll or dxgi.dll;
+# foreign: another ReShade is; blocked: another program's d3d11.dll or dxgi.dll is in the way, arcdps
+# too in the exclusive layout; off; nogame), RSH_DLL (the ReShade's file), RSH_BLOCKER (the other
+# files' names)
+reshade_state() {
+  local n foreign=""
+  RSH=off RSH_DLL="" RSH_BLOCKER=""
+  game_state
+  [ -n "$GAME_DIR" ] || { RSH=nogame; return 0; }
+  for n in $ARCDPS_DLLS; do
+    [ -f "$GAME_DIR/$n" ] || continue
+    if [ "$n" != "$ARC_CHAIN" ] && our_reshade "$GAME_DIR/$n"; then RSH_DLL=${RSH_DLL:+$RSH_DLL }$n
+    elif [ "$n" != "$ARC_CHAIN" ] && is_reshade "$GAME_DIR/$n"; then foreign=${foreign:+$foreign }$n
+    elif [ "$ADDONS_LAYOUT" = together ] && is_arcdps "$GAME_DIR/$n"; then :
+    else RSH_BLOCKER=${RSH_BLOCKER:+$RSH_BLOCKER }$n
+    fi
+  done
+  if [ -n "$RSH_DLL" ]; then RSH=on
+  elif [ -n "$foreign" ]; then RSH=foreign RSH_DLL=$foreign
+  elif [ -n "$RSH_BLOCKER" ]; then RSH=blocked
+  fi
+  return 0
+}
+# reshade_refusal: why ReShade can't go in (foreign, blocked)
+reshade_refusal() {
+  case "$RSH" in
+    foreign) echo "The game folder has a ReShade that $APP_NAME didn't put there ($RSH_DLL). $APP_NAME leaves it alone: remove that file to turn ReShade on here." ;;
+    blocked)
+      arcdps_state
+      if [ "$ADDONS_LAYOUT" = exclusive ] && [ "$ARC" = on ]; then
+        echo "arcdps is in the game folder as $ARC_DLL. Turn arcdps off first, then turn ReShade on."
+      else
+        echo "The game folder has another ${RSH_BLOCKER// / and } (Nexus or another addon?). $APP_NAME leaves it alone, so it can't add ReShade: remove that file first."
+      fi ;;
+  esac
+}
+reshade_lines() {   # (status, settings)
+  reshade_state
+  echo "reshade_state=$RSH"
+  echo "reshade_version=$RESHADE_VERSION"
+  echo "reshade_dll=$RSH_DLL"
+  echo "reshade_blocker=$RSH_BLOCKER"
+  echo "reshade_folder=$RS"
+  echo "addons_layout=$ADDONS_LAYOUT"
+}
+
+# check_download <file> <label> <magic, hex> [<size> <sha256>]: a download is the file: not a web
+# page or something else, and a pinned one is that exact file (else it is removed and the player
+# told what failed)
+check_download() {
+  local f=$1 label=$2 magic=$3 size=${4:-} sha=${5:-} got start actual
+  got=$(stat -f %z "$f")
+  if [ "$(head -c $((${#magic} / 2)) "$f" | od -An -tx1 | tr -d ' \n')" != "$magic" ]; then
+    start=$(head -c 200 "$f" | LC_ALL=C tr -c '[:print:]' ' ' | tr -s ' ')
+    log "not the file: $got bytes starting with: $start"
+    rm -f "$f"
+    case "$start" in
+      *[Hh][Tt][Mm][Ll]*|*'<?xml'*) die "The download of $label brought a web page instead of the file. A captive portal (hotel or public Wi-Fi), a proxy, a VPN or a content filter is in the way: log in to the network or turn it off, then try again." ;;
+    esac
+    die "The download of $label brought something else than the file. A proxy, VPN or content filter may be in the way. Try again."
+  fi
+  [ -n "$sha" ] || return 0
+  actual=$(sha256 "$f")
+  if [ "$got" != "$size" ] || [ "$actual" != "$sha" ]; then
+    log "not the expected file: $got bytes (expected $size), sha256 $actual (expected $sha)"
+    rm -f "$f"
+    die "The download of $label is not the file $APP_NAME expects: $(thousands "$got") bytes with a sha256 starting ${actual:0:12}, instead of $(thousands "$size") bytes starting ${sha:0:12}. Something on the way changes it (a proxy, VPN, antivirus or content filter). Try again."
+  fi
+}
+
+# unpack_pack <zip or folder> <pack> <into> [import]: a pack of ReShade effects into
+# <into>/Shaders/<pack>/ and <into>/Textures/<pack>/, which must not exist yet (a staging folder of
+# the caller's, moved into the ReShade folder afterwards): the contents of each folder named Shaders
+# or Textures in it, at any depth, which is the layout of every pack on ReShade's list. Only regular
+# files, and of those only .fx and .fxh from Shaders and images from Textures; at most PACK_LIMIT
+# bytes, from a pack of at most PACK_MAX_FILES files. A path that climbs out (..), an absolute path
+# or a link in a zip refuses the whole pack (what was written by then stays in <into>). Nothing is
+# extracted by its own path: each file is read on its own (unzip -p) into a path made here.
+# With import (reshade import), also the files outside those folders: .fx and .fxh into
+# Shaders/<pack>/ and images into Textures/<pack>/ by their names, every .ini into <into>/Presets/
+# by its name (for the caller to check), and no refusal of a pack without effects.
+# PACK_FILES, PACK_IMAGES, PACK_PRESETS: the effect files, images and .ini files unpacked.
+unpack_pack() {
+  local src=$1 pack=$2 into=$3 mode=${4:-} list plan line kind rel name dest n rc left tab nl
+  tab=$(printf '\t') nl='
+'
+  case "$pack" in ""|.*|*[!A-Za-z0-9._\ -]*) die "\"$pack\" can't be the name of a pack of effects: use letters, digits, spaces, dots, dashes and underscores." ;; esac
+  # (made here, so no link in them leads elsewhere)
+  for n in Shaders Textures; do
+    [ ! -e "$into/$n/$pack" ] && [ ! -L "$into/$n/$pack" ] || die "$APP_NAME unpacks $pack only into a new folder, and $into/$n/$pack is there already."
+  done
+  # "<kind> <bytes> <path>" lines (kind f: a file, d: a folder, l: a link; "+" alone: more than
+  # PACK_MAX_FILES files)
+  if [ -d "$src" ] && [ ! -L "$src" ]; then
+    # (find doesn't follow links, so a linked folder's files aren't in it; a name with a line break
+    # would break the lines. Unreadable folders are left out.)
+    list=$(cd "$src" && find . -type f ! -path "*$nl*" 2>>"$LOGFILE" |
+      LC_ALL=C awk -v max="$PACK_MAX_FILES" 'NR > max { print "+"; exit } { sub(/^\.\//, ""); print "f 0 " $0 }') || true
+  else
+    n=$(unzip -Zt "$src" 2>>"$LOGFILE" | sed -n 's/^\([0-9][0-9]*\) files*,.*/\1/p') || true
+    [ -n "$n" ] || die "$pack is not a zip archive $APP_NAME can read. Try again."
+    if [ "$n" -gt "$PACK_MAX_FILES" ]; then list="+"
+    else
+      list=$(unzip -Z "$src" 2>>"$LOGFILE" | LC_ALL=C awk '$2 ~ /^[0-9]+\.[0-9]+$/ && NF >= 9 {
+          name = $0; sub(/^[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ /, "", name)
+          k = substr($1, 1, 1)
+          print (k == "l" ? "l" : (k == "d" || name ~ /\/$/) ? "d" : "f"), $4, name }') ||
+        die "$pack is not a zip archive $APP_NAME can read. Try again."
+    fi
+  fi
+  # what goes where: "<S|T|P> <bytes> <path in the pack's folder><tab><path>", after a "= <bytes>"
+  # line; "x"/"l" and the path alone, or "+", for a refusal
+  plan=$(printf '%s\n' "$list" | LC_ALL=C awk -v imp="$mode" '
+    { k = $1; name = $0; sub(/^[^ ]+ [^ ]+ /, "", name)
+      if (k == "") next
+      if (k == "+") { refused = "+"; exit }
+      if (substr(name, 1, 1) == "/" || index("/" name "/", "/../")) { refused = "x " name; exit }
+      if (k == "l") { refused = "l " name; exit }
+      if (k != "f") next
+      # (unzip may take a backslash for an escape; control characters would break the lines)
+      if (index(name, "\\") || name ~ /[[:cntrl:]]/) next
+      n = split(name, p, "/"); d = ""
+      for (i = 1; i <= n; i++) if (p[i] == "" || p[i] == ".") next
+      if (index(p[n], ".") == 0) next
+      e = tolower(p[n]); sub(/^.*\./, "", e)
+      if (imp != "" && e == "ini") { total += $2; out = out "P " $2 " " p[n] "\t" name "\n"; next }
+      for (i = 1; i < n; i++) { q = tolower(p[i]); if (q == "shaders" || q == "textures") { d = q; break } }
+      if (d != "") { rel = p[i + 1]; for (j = i + 2; j <= n; j++) rel = rel "/" p[j] }
+      else if (imp != "") { rel = p[n]; d = (e == "fx" || e == "fxh") ? "shaders" : "textures" }
+      else next
+      if (d == "shaders" && e != "fx" && e != "fxh") next
+      if (d == "textures" && e !~ /^(png|jpg|jpeg|bmp|tga|dds|hdr)$/) next
+      total += $2; out = out (d == "shaders" ? "S" : "T") " " $2 " " rel "\t" name "\n" }
+    END { if (refused != "") print refused; else printf "= %.0f\n%s", total, out }')
+  case "$plan" in
+    +) die "$pack has more than $PACK_MAX_FILES files in it, so $APP_NAME doesn't unpack it." ;;
+    x\ *) die "$pack has a file whose path leaves its folder (${plan#x }), so $APP_NAME doesn't unpack it." ;;
+    l\ *) die "$pack has a link in it (${plan#l }), so $APP_NAME doesn't unpack it." ;;
+  esac
+  left=$PACK_LIMIT
+  n=$(printf '%s\n' "$plan" | sed -n '1s/^= //p')
+  [ "${n:-0}" -le "$left" ] || die "$pack unpacks to more than $(mb "$PACK_LIMIT") MB, so $APP_NAME doesn't unpack it."
+  PACK_FILES=0 PACK_IMAGES=0 PACK_PRESETS=0
+  while IFS= read -r line; do
+    kind=${line%% *}
+    case "$kind" in S) dest="$into/Shaders/$pack" ;; T) dest="$into/Textures/$pack" ;; P) dest="$into/Presets" ;; *) continue ;; esac
+    line=${line#* }; line=${line#* }
+    rel=${line%%"$tab"*} name=${line#*"$tab"}
+    dest="$dest/$rel"
+    mkdir -p "$(dirname "$dest")" 2>/dev/null || die "$pack has files $APP_NAME can't unpack ($name)."
+    rc=0
+    if [ -d "$src" ]; then
+      head -c $((left + 1)) <"$src/$name" >"$dest" 2>>"$LOGFILE" || rc=$?
+    else
+      # (unzip takes the name for a pattern, and a leading dash for an option: each of those
+      # characters in brackets matches only itself)
+      unzip -p "$src" "$(printf '%s' "$name" | sed 's/[[*?]/[&]/g; s/^-/[-]/')" 2>>"$LOGFILE" | head -c $((left + 1)) >"$dest" || rc=$?
+    fi
+    n=$(stat -f %z "$dest")
+    [ "$n" -le "$left" ] || die "$pack unpacks to more than $(mb "$PACK_LIMIT") MB, so $APP_NAME doesn't unpack it."
+    [ "$rc" = 0 ] || die "$pack is damaged: $name could not be read. Try again."
+    left=$((left - n))
+    case "$kind" in S) PACK_FILES=$((PACK_FILES + 1)) ;; T) PACK_IMAGES=$((PACK_IMAGES + 1)) ;; P) PACK_PRESETS=$((PACK_PRESETS + 1)) ;; esac
+  done <<EOF
+$plan
+EOF
+  [ "$PACK_FILES" -gt 0 ] || [ -n "$mode" ] || die "$pack has no ReShade effects in it (no .fx or .fxh files in a Shaders folder)."
+  log "unpacked $pack from $src: $PACK_FILES effect files, $PACK_IMAGES images, $PACK_PRESETS .ini files, $((PACK_LIMIT - left)) bytes in all"
+}
+
+# reshade_fetch: the checked ReShade64.dll in the cache, downloaded (the installer, checked, then the
+# DLL out of the zip appended to it) unless it is there
+reshade_dll_cached() { [ -f "$RS_DOWNLOADS/ReShade64.dll" ] && [ "$(sha256 "$RS_DOWNLOADS/ReShade64.dll")" = "$RESHADE_DLL_SHA256" ]; }
+reshade_fetch() {
+  local exe dll="$RS_DOWNLOADS/ReShade64.dll" rc=0
+  exe="$RS_DOWNLOADS/$(basename "$RESHADE_URL")"
+  if reshade_dll_cached; then say "ReShade: using the checked ReShade64.dll in the cache"; return 0; fi
+  step "Downloading ReShade $RESHADE_VERSION from reshade.me"
+  download "$RESHADE_URL" "$exe" ReShade "$RESHADE_SIZE"
+  check_download "$exe" ReShade 4d5a "$RESHADE_SIZE" "$RESHADE_SHA256"
+  # (unzip warns about the installer's own bytes in front of the zip: status 1)
+  unzip -p "$exe" ReShade64.dll 2>>"$LOGFILE" | head -c 67108864 >"$dll.part" || rc=$?
+  log "unzip ReShade64.dll: status $rc, $(stat -f %z "$dll.part") bytes"
+  rm -f "$exe"
+  [ -s "$dll.part" ] || { rm -f "$dll.part"; die "The ReShade installer from reshade.me has no ReShade64.dll in it. Try again later."; }
+  if [ "$(sha256 "$dll.part")" != "$RESHADE_DLL_SHA256" ] || ! is_reshade "$dll.part"; then
+    log "ReShade64.dll is not the expected one: sha256 $(sha256 "$dll.part")"
+    rm -f "$dll.part"
+    die "The ReShade64.dll in the installer from reshade.me is not the ReShade $RESHADE_VERSION $APP_NAME expects. Try again later."
+  fi
+  mv -f "$dll.part" "$dll"
+  log "ReShade: $dll checked (sha256 $RESHADE_DLL_SHA256)"
+}
+
+# reshade_compiler [download]: COMPILER_SRC, the d3dcompiler_47.dll to put next to Gw2-64.exe: the
+# game's own (bin64/cef, which comes with the game's Chromium) if it is an x86_64 DLL that exports
+# D3DCompile, else mozilla/fxc2's in the cache, downloaded with "download"; empty without one
+reshade_compiler() {
+  local cef="$GAME_DIR/bin64/cef/d3dcompiler_47.dll" f="$RS_DOWNLOADS/d3dcompiler_47.dll"
+  COMPILER_SRC=""
+  if [ -f "$cef" ] && pe_is64 "$cef" && pe_has_export "$cef" D3DCompile; then COMPILER_SRC=$cef; return 0; fi
+  if [ -f "$f" ] && [ "$(sha256 "$f")" = "$COMPILER_SHA256" ]; then COMPILER_SRC=$f; return 0; fi
+  [ "${1:-}" = download ] || return 0
+  step "Downloading Microsoft's shader compiler from github.com/mozilla/fxc2"
+  download "$COMPILER_URL" "$f" "Microsoft's shader compiler" "$COMPILER_SIZE"
+  check_download "$f" "Microsoft's shader compiler" 4d5a "$COMPILER_SIZE" "$COMPILER_SHA256"
+  COMPILER_SRC=$f
+}
+
+# The ReShade folder, its compiled effects' folder (ReShade uses %TEMP% when that one is missing)
+# and, if it has none, a starting ReShade.ini (ReShade's and the player's from then on; keys as
+# ReShade 6.8.0 reads them, source/runtime.cpp and runtime_gui.cpp). Relative paths start at the
+# folder. The overlay key is Home (fn + Left Arrow on a MacBook).
+reshade_folder() {
+  local d
+  for d in "$RS" "$RS/Presets" "$RS/Shaders" "$RS/Textures" "$RS/Screenshots" "$RS_CACHE"; do
+    [ -d "$d" ] || run mkdir -p "$d"
+  done
+  [ ! -e "$RS/ReShade.ini" ] || return 0
+  {
+    printf '[GENERAL]\n'
+    printf '%s\n' 'EffectSearchPaths=.\Shaders\**' 'TextureSearchPaths=.\Textures\**' 'PresetPath=.\Presets\ReShadePreset.ini'
+    printf 'IntermediateCachePath=%s\n' "$(winpath "$RS_CACHE")"
+    printf '\n[INPUT]\nKeyOverlay=36,0,0,0\n\n[SCREENSHOT]\n'
+    printf '%s\n' 'SavePath=.\Screenshots'
+  } | put "$RS/ReShade.ini" 644
+}
+
+# reshade_place: what is missing of the three into the game folder, the DLL last (RSH, COMPILER_SRC
+# set). A d3dcompiler_47.dll there stays as it is, the player's or the app's. The last steps move
+# arcdps to its place next to ReShade (ARC_CHAIN), put ReShade's DLL in, and turn ReShade's
+# [PROXY] keys on (proxy_sync); if a step fails, the ones before are undone.
+reshade_place() {
+  local n tmp
+  if [ ! -e "$GAME_DIR/d3dcompiler_47.dll" ] && [ -n "$COMPILER_SRC" ]; then
+    run install -m 644 "$COMPILER_SRC" "$GAME_DIR/.d3dcompiler_47.dll.gw2om-new"
+    run mv -f "$GAME_DIR/.d3dcompiler_47.dll.gw2om-new" "$GAME_DIR/d3dcompiler_47.dll"
+    [ -n "$DRY" ] || sha256 "$GAME_DIR/d3dcompiler_47.dll" >"$RS_COMPILER_RECORD"
+    log "ReShade: $COMPILER_SRC into $GAME_DIR/d3dcompiler_47.dll"
+  fi
+  [ -e "$GAME_DIR/ReShade.ini" ] || reshade_game_ini | put "$GAME_DIR/ReShade.ini" 644
+  [ "$RSH" = off ] || return 0
+  n=$(addon_dll reshade on)
+  tmp="$GAME_DIR/.$n.gw2om-new"
+  arcdps_tidy on
+  test_pause arcdps-moved
+  # (checked one by one: errexit doesn't stop a failing step inside a condition)
+  if { [ -z "$DRY" ] && { [ -e "$GAME_DIR/$n" ] || [ -L "$GAME_DIR/$n" ]; }; } ||
+    ! run install -m 644 "$RS_DOWNLOADS/ReShade64.dll" "$tmp" || ! run mv -f "$tmp" "$GAME_DIR/$n"; then
+    rm -f "$tmp"
+    [ -z "$ARC_MOVED" ] || arcdps_move "$ARC_MOVED" "$(addon_dll arcdps off)" || true
+    die "$APP_NAME couldn't put ReShade into the game folder as $n. Try again (details in $LOGS/install.log)."
+  fi
+  log "ReShade: ReShade64.dll $RESHADE_VERSION into $GAME_DIR/$n"
+  if ! proxy_sync; then
+    run rm -f "$GAME_DIR/$n"
+    [ -z "$ARC_MOVED" ] || arcdps_move "$ARC_MOVED" "$(addon_dll arcdps off)" || true
+    die "$(proxy_refusal "ReShade stays out of the game folder")"
+  fi
+}
+
+# set reshade on|off (cmd_set): only while no session runs or starts (the session's lock, as set
+# arcdps). On downloads and checks everything first, then makes the ReShade folder, and touches the
+# game folder last.
+set_reshade() {
+  local stage="$RS_DOWNLOADS/packs" d p gone="" std sfx
+  reshade_state
+  [ "$RSH" != nogame ] || die "Guild Wars 2 is not installed yet: ReShade goes into its folder once it is."
+  ! session_running || die "Quit Guild Wars 2 and Steam first: ReShade goes into or out of the game folder only while they are closed."
+  registry_lock || die "A game session is starting. Try again once Guild Wars 2 and Steam have quit."
+  if [ "$1" = off ]; then
+    # (ReShade's keys off first: they never point at a file that is gone)
+    proxy_sync off || die "$(proxy_refusal "ReShade stays in")"
+    if [ "$RSH" = on ]; then
+      for p in $RSH_DLL; do run rm -f "$GAME_DIR/$p"; gone=${gone:+$gone and }$p; done
+    fi
+    ! our_game_ini || run rm -f "$GAME_DIR/ReShade.ini"
+    if [ -f "$RS_COMPILER_RECORD" ]; then
+      if [ -f "$GAME_DIR/d3dcompiler_47.dll" ] && [ "$(sha256 "$GAME_DIR/d3dcompiler_47.dll")" = "$(cat "$RS_COMPILER_RECORD")" ]; then
+        run rm -f "$GAME_DIR/d3dcompiler_47.dll"
+      fi
+      run rm -f "$RS_COMPILER_RECORD"
+    fi
+    write_settings reshade off
+    # (last: arcdps back to the name it has alone)
+    ARC_MOVED=""
+    [ -z "$gone" ] || arcdps_tidy off
+    registry_unlock
+    if [ -n "$gone" ]; then
+      say "ReShade removed from the game folder ($gone); its folder stays: $RS"
+      echo "@done ReShade is off: its $gone is out of the game folder.$([ -z "$ARC_MOVED" ] || echo " arcdps is $ARC_MOVED again.") Your presets and shaders stay in $RS."
+    elif [ "$RSH" = foreign ]; then
+      echo "@done $APP_NAME didn't put the ReShade in the game folder ($RSH_DLL), so it stays as it is."
+    elif [ "$RSH" = blocked ]; then
+      echo "@done ReShade isn't in the game folder. The other ${RSH_BLOCKER// / and } there stays as it is."
+    else
+      echo "@done ReShade isn't in the game folder."
+    fi
+    return 0
+  fi
+  case "$RSH" in foreign|blocked) die "$(reshade_refusal)" ;; esac
+  [ ! -e "$GAME_DIR/ReShade.ini" ] || our_game_ini ||
+    die "The game folder has a ReShade.ini of its own. $APP_NAME leaves it alone, so it can't add ReShade: move that file away first (ReShade's settings go into $RS)."
+  if [ "$RSH" = on ] && [ -e "$GAME_DIR/d3dcompiler_47.dll" ] && [ -e "$GAME_DIR/ReShade.ini" ]; then
+    reshade_folder
+    proxy_sync || die "$(proxy_refusal "ReShade doesn't load arcdps")"
+    write_settings reshade on
+    registry_unlock
+    echo "@done ReShade is already in the game folder ($RSH_DLL)."
+    return 0
+  fi
+  if [ -n "$DRY" ]; then
+    echo "[dry-run] download $RESHADE_URL, check it, put its ReShade64.dll into $GAME_DIR/d3d11.dll with d3dcompiler_47.dll and ReShade.ini; the ReShade folder $RS"
+    echo "@done ReShade would be in the game folder."
+    return 0
+  fi
+  trap 'rm -rf "$RS_DOWNLOADS/packs"; rm -f "$RS_DOWNLOADS"/*.part "$RS_DOWNLOADS"/*.zip "$RS_DOWNLOADS"/*.exe; unlock' EXIT
+  mkdir -p "$RS_DOWNLOADS"
+  rm -rf "$stage"
+  [ "$RSH" = on ] || reshade_fetch
+  COMPILER_SRC=""
+  [ -e "$GAME_DIR/d3dcompiler_47.dll" ] || reshade_compiler download
+  # The standard effects whenever Shaders has no ReShade.fxh, which almost every effect includes
+  # (an import may have filled Shaders before the first On); SweetFX only until an On has brought
+  # it (RS_PACKS), so one a player deleted stays deleted. A pack's folder that is there stays as it is.
+  std="" sfx=""
+  [ -n "$(find "$RS/Shaders" -type f -iname ReShade.fxh 2>/dev/null | head -1)" ] || [ -e "$RS/Shaders/Standard" ] || std=1
+  grep -qx SweetFX "$RS_PACKS" 2>/dev/null || [ -e "$RS/Shaders/SweetFX" ] || sfx=1
+  case "$std$sfx" in
+    11) p="ReShade's standard effects and SweetFX" ;;
+    1) if [ -n "$std" ]; then p="ReShade's standard effects"; else p=SweetFX; fi ;;
+    *) p="" ;;
+  esac
+  if [ -n "$p" ]; then
+    mkdir -p "$stage"
+    step "Downloading $p from github.com"
+  fi
+  if [ -n "$std" ]; then
+    download "$RESHADE_SHADERS_URL" "$RS_DOWNLOADS/Standard.zip" "ReShade's standard effects" "$PACK_DOWNLOAD_MAX"
+    check_download "$RS_DOWNLOADS/Standard.zip" "ReShade's standard effects" 504b0304
+    unpack_pack "$RS_DOWNLOADS/Standard.zip" Standard "$stage"
+  fi
+  if [ -n "$sfx" ]; then
+    download "$SWEETFX_URL" "$RS_DOWNLOADS/SweetFX.zip" SweetFX "$PACK_DOWNLOAD_MAX"
+    check_download "$RS_DOWNLOADS/SweetFX.zip" SweetFX 504b0304
+    unpack_pack "$RS_DOWNLOADS/SweetFX.zip" SweetFX "$stage"
+  fi
+  # Everything is here and checked: the ReShade folder, then the game folder (no session can start
+  # meanwhile: this holds its lock)
+  reshade_folder
+  for d in Shaders Textures; do
+    for p in "$stage/$d"/*; do
+      [ -d "$p" ] || continue
+      [ -e "$RS/$d/$(basename "$p")" ] || [ -L "$RS/$d/$(basename "$p")" ] || mv "$p" "$RS/$d/"
+    done
+  done
+  reshade_state
+  case "$RSH" in on|off) ;; *) die "The game folder changed during the download ($RSH). Try again." ;; esac
+  ARC_MOVED=""
+  reshade_place
+  if ! grep -qx SweetFX "$RS_PACKS" 2>/dev/null && rs_safe "$RS_PACKS"; then
+    { if [ -f "$RS_PACKS" ]; then cat "$RS_PACKS"; fi; echo SweetFX; } | put "$RS_PACKS" 644
+  fi
+  write_settings reshade on
+  registry_unlock
+  echo "@done ReShade $RESHADE_VERSION is in the game folder as d3d11.dll. It loads the next time the game starts.$([ "$PROXY_ON" = 0 ] || echo " ReShade loads arcdps itself now, so both load.")"
+}
+
+# sync_reshade [download]: with the setting on, puts ReShade's missing files back into the game
+# folder (after Steam's file check or in a new bottle) from the cache, before Play, at Install and
+# at Repair; only Repair ("download") downloads what the cache lacks. Never while a session runs
+# or starts. A ReShade or another DLL the app didn't place keeps it out.
+sync_reshade() {
+  [ "$(setting reshade)" = on ] || return 0
+  reshade_state
+  case "$RSH" in
+    nogame) return 0 ;;
+    foreign|blocked) warn "ReShade stays out of the game folder. $(reshade_refusal)"; return 0 ;;
+  esac
+  if [ -e "$GAME_DIR/ReShade.ini" ] && ! our_game_ini; then
+    warn "ReShade stays out of the game folder: it has a ReShade.ini of its own. Move that file away, then click Repair."
+    return 0
+  fi
+  [ -n "$DRY" ] || [ -x "$LOCKER" ] || return 0
+  registry_lock || { log "ReShade's files wait for the next start without a running session"; return 0; }
+  if session_running; then registry_unlock; return 0; fi
+  reshade_folder
+  if [ "$RSH" = on ] && [ -e "$GAME_DIR/d3dcompiler_47.dll" ] && [ -e "$GAME_DIR/ReShade.ini" ]; then registry_unlock; return 0; fi
+  reshade_compiler
+  if { [ "$RSH" = off ] && ! reshade_dll_cached; } || { [ ! -e "$GAME_DIR/d3dcompiler_47.dll" ] && [ -z "$COMPILER_SRC" ]; }; then
+    if [ "${1:-}" != download ]; then
+      registry_unlock
+      warn "ReShade's files are not in the cache any more, so the game starts without ReShade this time. Click Repair to download them again."
+      return 0
+    fi
+    if [ -n "$DRY" ]; then echo "[dry-run] download ReShade and its compiler again"; registry_unlock; return 0; fi
+    mkdir -p "$RS_DOWNLOADS"
+    [ "$RSH" != off ] || reshade_fetch
+    [ -e "$GAME_DIR/d3dcompiler_47.dll" ] || reshade_compiler download
+  fi
+  say "ReShade: its files back into the game folder"
+  reshade_place
+  registry_unlock
+}
+
+# --- ReShade's presets and shaders (reshade import; Settings › Interface: a drop on the Settings
+# window or Add preset or shaders…): presets, zips and folders into the ReShade folder, whether
+# ReShade is on, off or was never on, and while the game runs (it only adds files there, and never
+# touches the game folder). Each source is unpacked into a staging folder in the cache first
+# (unpack_pack and its rules: only effects, images and presets, no link, no path out, the size and
+# file limits), then moved in, through real folders only. Shaders and textures go into
+# Shaders/<name>/ and Textures/<name>/, named after the source; presets into Presets/, where a
+# preset of the same name is replaced only by one from a source of the same name (RS_IMPORTS
+# records where each came from), else kept. reshade use makes one ReShade's current preset.
+RS_IMPORTS="$RS/.imports"   # "<preset><tab><source's name>" lines; the last one for a preset counts
+RS_REPORT_NAMES=5           # the file names a sentence of the report lists before "and N more"
+
+# import_name <file name>: a source's name for its folders: without .zip or .ini; letters, digits,
+# spaces, dots, dashes and underscores (anything else becomes _); no dot or space at either end
+# (Windows drops a trailing one); at most 64 characters
+import_name() {
+  local n=$1
+  case "$n" in *.[Zz][Ii][Pp]|*.[Ii][Nn][Ii]) n=${n%.*} ;; esac
+  n=$(printf '%s' "$n" | LC_ALL=C tr -c 'A-Za-z0-9._ -' '_' | LC_ALL=C cut -c 1-64 | sed 's/^[. ]*//; s/[. ]*$//')
+  printf '%s\n' "${n:-Import}"
+}
+# preset_name <file name>: a preset's name in Presets: control characters and the characters
+# Windows doesn't allow in a file name (<>:"\|?*) become _, and .INI .ini (ReShade takes a
+# preset's extension only in lower case, resolve_preset_path)
+preset_name() {
+  local n
+  n=$(printf '%s' "$1" | LC_ALL=C tr '\001-\037\177<>:"\\|?*' '_')
+  case "$n" in *.[Ii][Nn][Ii]) n="${n%.*}.ini" ;; esac
+  printf '%s\n' "$n"
+}
+
+# preset_effects <file>: the effect files (File.fx) its Techniques list names, once each; fails
+# when the file is no preset, as ReShade tells (a Techniques key before any section,
+# resolve_preset_path in source/runtime.cpp at v6.8.0; ini_file.cpp reads ",," as a comma)
+preset_effects() {
+  LC_ALL=C awk '
+    function strip(s, c) {
+      while (s != "" && index(c, substr(s, 1, 1))) s = substr(s, 2)
+      while (s != "" && index(c, substr(s, length(s), 1))) s = substr(s, 1, length(s) - 1)
+      return s }
+    { line = $0; if (NR == 1 && substr(line, 1, 3) == "\357\273\277") line = substr(line, 4)
+      line = strip(line, " \t\r"); c = substr(line, 1, 1)
+      if (line == "" || c == ";" || c == "/" || c == "#") next
+      if (c == "[") { i = index(line, "]"); sec = strip(i ? substr(line, 1, i - 1) : line, " \t[]"); next }
+      i = index(line, "=")
+      if (sec != "" || i == 0 || strip(substr(line, 1, i - 1), " \t") != "Techniques") next
+      found = 1; v = strip(substr(line, i + 1), " \t")
+      gsub(/,,/, "\001", v); n = split(v, t, ",")
+      for (j = 1; j <= n; j++) {
+        a = index(t[j], "@"); if (!a) continue
+        f = substr(t[j], a + 1); gsub(/\001/, ",", f)
+        if (f != "" && !(f in seen)) { seen[f] = 1; print f } } }
+    END { exit !found }' "$1"
+}
+
+# imported_from <preset>: the name of the source a preset in Presets came from, or nothing
+imported_from() {
+  [ -f "$RS_IMPORTS" ] && [ ! -L "$RS_IMPORTS" ] || return 0
+  N=$1 LC_ALL=C awk 'BEGIN { FS = "\t"; n = ENVIRON["N"] } $1 == n { s = $2 } END { print s }' "$RS_IMPORTS"
+}
+
+# rs_safe <path in the ReShade folder>: the ReShade folder and each folder on the way to it is a
+# real folder (no link, no file), and it isn't a folder itself, nor a link to one (mv would move
+# into it); RS_BAD: the first that isn't. rs_refuse: the sentence for it.
+rs_safe() {
+  local rest=${1#"$RS"/} at="$RS"
+  RS_BAD_FILE=""
+  if [ -L "$RS" ] || { [ -e "$RS" ] && [ ! -d "$RS" ]; }; then RS_BAD=$RS; return 1; fi
+  while :; do
+    case "$rest" in */*) at="$at/${rest%%/*}" rest=${rest#*/} ;; *) break ;; esac
+    if [ -L "$at" ] || { [ -e "$at" ] && [ ! -d "$at" ]; }; then RS_BAD=$at; return 1; fi
+  done
+  if [ -d "$1" ]; then RS_BAD=$1 RS_BAD_FILE=1; return 1; fi
+}
+rs_refuse() {
+  [ "$RS_BAD" != "$RS" ] || die "The ReShade folder is a link or a file ($RS), so $APP_NAME adds nothing to it. Put a folder in its place, then try again."
+  [ -z "$RS_BAD_FILE" ] || die "${RS_BAD#"$RS"/} in the ReShade folder is a folder or a link to one, where $APP_NAME puts a file. Move it out of $RS, then try again."
+  die "${RS_BAD#"$RS"/} in the ReShade folder is a link or a file where $APP_NAME puts a folder, so it adds nothing. Move it out of $RS, then try again."
+}
+
+# For the report: <lines> counted; listed ("a, b and c"; past <max> names, RS_REPORT_NAMES
+# without one, "a, b, c, d, e and 3 more"); <count> <word> with an s unless 1
+lines_count() { printf '%s' "$1" | LC_ALL=C awk '$0 != "" { n++ } END { print n + 0 }'; }
+names_list() {
+  printf '%s\n' "$1" | LC_ALL=C awk -v max="${2:-$RS_REPORT_NAMES}" '$0 != "" { a[++n] = $0 }
+    END { m = n > max ? max : n
+      for (i = 1; i <= m; i++) s = s (i == 1 ? "" : i == n ? " and " : ", ") a[i]
+      if (n > max) s = s " and " (n - max) " more"
+      print s }'
+}
+counted() { if [ "$1" = 1 ]; then echo "1 $2"; else echo "$1 $2s"; fi; }
+
+# reshade import <path>...: each a preset (.ini), a zip or a folder. Refused as a whole when one
+# can't be read or has nothing to add, or when a place in the ReShade folder is a link or a file.
+# Prints "@preset <name>" for each preset that came in, and the report as @done.
+reshade_import() {
+  local p i=0 n kind base name stage="$RS_DOWNLOADS/import" d f pn rel files line from dest tab nl
+  local parts="" moves="" presets="" kept="" records="" used have missing depth report s
+  local -a names
+  tab=$(printf '\t') nl='
+'
+  [ $# -gt 0 ] || die "Name the presets, zips or folders to add."
+  open_log
+  log "---- reshade import $*"
+  if [ -n "$DRY" ]; then
+    for p in "$@"; do echo "[dry-run] add $p to $RS"; done
+    echo "@done Nothing was added (a dry run)."
+    return 0
+  fi
+  lock
+  trap 'rm -rf "$RS_DOWNLOADS/import"; unlock' EXIT
+  rm -rf "$stage"
+  mkdir -p "$stage"
+  # Each source into its own staging folder, with only what it may bring
+  for p in "$@"; do
+    i=$((i + 1))
+    # (a relative path with a leading dash isn't an option to unzip; the name in sentences without
+    # control characters)
+    while :; do case "$p" in ?*/) p=${p%/} ;; ?*/.) p=${p%/.} ;; *) break ;; esac; done
+    case "$p" in -*) p="./$p" ;; esac
+    base=$(printf '%s' "${p##*/}" | LC_ALL=C tr '\001-\037\177' '_')
+    [ ! -L "$p" ] || die "$base is a link. Add the file or folder it leads to instead."
+    [ -e "$p" ] || die "$base is not there any more."
+    name=$(import_name "$base")
+    names[i]=$name
+    mkdir "$stage/$i"
+    kind=other
+    if [ -d "$p" ]; then kind=folder
+    elif [ -f "$p" ]; then case "$base" in *.[Zz][Ii][Pp]) kind=zip ;; *.[Ii][Nn][Ii]) kind=preset ;; esac
+    fi
+    case "$kind" in
+      folder|zip) unpack_pack "$p" "$name" "$stage/$i" import ;;
+      preset)
+        mkdir "$stage/$i/Presets"
+        # (staged by its name in Presets: the moves are lines)
+        f="$stage/$i/Presets/$(preset_name "$base")"
+        head -c $((PACK_LIMIT + 1)) <"$p" >"$f" 2>>"$LOGFILE" || die "$base could not be read."
+        [ "$(stat -f %z "$f")" -le "$PACK_LIMIT" ] || die "$base is larger than $(mb "$PACK_LIMIT") MB, which no ReShade preset is."
+        preset_effects "$f" >/dev/null ||
+          die "$base is not a ReShade preset: it has no Techniques line, which every preset has. $APP_NAME adds presets, and zips and folders of shaders."
+        PACK_FILES=0 PACK_IMAGES=0 ;;
+      *) die "$base is not a preset (.ini), a zip or a folder, so $APP_NAME doesn't add it." ;;
+    esac
+    # (an .ini that isn't a preset stays out)
+    n=0
+    for f in "$stage/$i/Presets"/*; do
+      [ -f "$f" ] || continue
+      if preset_effects "$f" >/dev/null; then n=$((n + 1)); else rm -f "$f"; fi
+    done
+    [ $((PACK_FILES + PACK_IMAGES + n)) -gt 0 ] || die "$base has no ReShade presets, shaders or textures in it."
+  done
+  # Where each staged file goes ("<staged file><tab><place>" lines), and what the report says
+  n=$i i=0
+  while [ "$i" -lt "$n" ]; do
+    i=$((i + 1)) name=${names[i]}
+    for d in Shaders Textures; do
+      [ -d "$stage/$i/$d/$name" ] || continue
+      files=$(cd "$stage/$i/$d/$name" && find . -type f | sed 's|^\./||')
+      while IFS= read -r rel; do
+        [ -z "$rel" ] || moves="$moves$stage/$i/$d/$name/$rel$tab$RS/$d/$name/$rel$nl"
+      done <<EOF
+$files
+EOF
+      if [ "$d" = Shaders ]; then s="shader file"; else s=image; fi
+      parts="$parts$(counted "$(lines_count "$files")" "$s") to $d/$name$nl"
+    done
+    for f in "$stage/$i/Presets"/*; do
+      [ -f "$f" ] || continue
+      pn=$(preset_name "${f##*/}")
+      # (one of that name came in from an earlier source of this import)
+      case "$nl$presets$kept" in *"$nl$pn$nl"*) continue ;; esac
+      dest="$RS/Presets/$pn"
+      if { [ -e "$dest" ] || [ -L "$dest" ]; } && [ "$(imported_from "$pn")" != "$name" ]; then
+        kept="$kept$pn$nl"
+        continue
+      fi
+      moves="$moves$f$tab$dest$nl" presets="$presets$pn$nl" records="$records$pn$tab$name$nl"
+    done
+  done
+  # Nothing moves before every place is checked: no link and no file where a folder belongs
+  while IFS= read -r line; do
+    [ -z "$line" ] || rs_safe "${line#*"$tab"}" || rs_refuse
+  done <<EOF
+$moves
+EOF
+  [ -z "$records" ] || rs_safe "$RS_IMPORTS" || rs_refuse
+  for d in Presets Shaders Textures Screenshots; do
+    rs_safe "$RS/$d/-" || rs_refuse
+  done
+  reshade_folder
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    from=${line%%"$tab"*} dest=${line#*"$tab"}
+    mkdir -p "$(dirname "$dest")"
+    # (a link there is replaced, never written through)
+    if [ -L "$dest" ]; then rm -f "$dest"; fi
+    mv -f "$from" "$dest"
+  done <<EOF
+$moves
+EOF
+  if [ -n "$records" ]; then
+    { if [ -f "$RS_IMPORTS" ] && [ ! -L "$RS_IMPORTS" ]; then cat "$RS_IMPORTS"; fi; printf '%s' "$records"; } | put "$RS_IMPORTS" 644
+  fi
+  # The report: what went where, what of Presets stayed, and what the presets need
+  [ -z "$presets" ] || parts="$(counted "$(lines_count "$presets")" preset) to Presets$nl$parts"
+  [ -z "$parts" ] || report="Added $(names_list "$parts" 100000)."
+  if [ -n "$kept" ]; then
+    if [ "$(lines_count "$kept")" = 1 ]; then s="kept it, not the new one"; else s="kept them, not the new ones"; fi
+    report="${report:+$report }Presets already had $(names_list "$kept") from elsewhere, so $APP_NAME $s."
+  fi
+  if [ -n "$presets" ]; then
+    used=""
+    while IFS= read -r pn; do
+      [ -z "$pn" ] || used="$used$(preset_effects "$RS/Presets/$pn" || true)$nl"
+    done <<EOF
+$presets
+EOF
+    used=$(printf '%s' "$used" | LC_ALL=C awk '$0 != "" && !seen[$0]++')
+    have=$(cd "$RS/Shaders" && find . -type f 2>>"$LOGFILE" | sed 's|.*/||') || true
+    missing=$(HAVE="$have" USED="$used" LC_ALL=C awk 'BEGIN { n = split(ENVIRON["HAVE"], h, "\n"); for (i = 1; i <= n; i++) got[h[i]] = 1
+      n = split(ENVIRON["USED"], u, "\n"); for (i = 1; i <= n; i++) if (u[i] != "" && !(u[i] in got)) print u[i] }')
+    n=$(lines_count "$presets")
+    if [ "$n" = 1 ]; then s="This preset uses"; else s="These $n presets use"; fi
+    n=$(lines_count "$used")
+    if [ "$n" = 0 ]; then s="$s no effects."
+    elif [ -z "$missing" ]; then
+      if [ "$n" = 1 ]; then s="$s 1 effect, which is in Shaders."; else s="$s $n effects, all of them in Shaders."; fi
+    else
+      n=$(lines_count "$missing")
+      if [ "$n" = 1 ]; then s="$s $(counted "$(lines_count "$used")" effect). 1 is missing: $(names_list "$missing")."
+      else s="$s $(counted "$(lines_count "$used")" effect). $n are missing: $(names_list "$missing")."; fi
+      say "Effects missing from $RS/Shaders: $(names_list "$missing" 100000)"
+    fi
+    report="$report $s"
+    depth=$(printf '%s\n' "$used" | LC_ALL=C awk '{ l = tolower($0) } l ~ /mxao|dof|rtgi/ || l == "displaydepth.fx"')
+    if [ -n "$depth" ]; then
+      if [ "$(lines_count "$depth")" = 1 ]; then s="reads the depth buffer: it stays"; else s="read the depth buffer: they stay"; fi
+      report="$report $(names_list "$depth") $s off in online games with this build of ReShade."
+    fi
+    if session_running; then report="$report Guild Wars 2 is running: pick the preset in ReShade's menu (Home key)."; fi
+    while IFS= read -r pn; do [ -z "$pn" ] || echo "@preset $pn"; done <<EOF
+$presets
+EOF
+  fi
+  log "report: $report"
+  echo "@done $report"
+}
+
+# ini_set <ini> <section> <key=value>...: the ini on stdout with those keys set in that section and
+# nothing else changed (its other lines and line ends byte for byte). Keys and sections as
+# ReShade's ini_file.cpp reads them: trimmed, ; / # start a comment. A missing key goes under the
+# section's first header, and a missing section goes at the end, with the file's line ends.
+ini_set() {
+  local ini=$1 sec=$2 nl=0
+  shift 2
+  [ "$(tail -c 1 "$ini" | od -An -tx1 | tr -d ' \n')" != 0a ] || nl=1
+  S=$sec KV="$(printf '%s\n' "$@")" NL=$nl LC_ALL=C awk '
+    function strip(s, c) {
+      while (s != "" && index(c, substr(s, 1, 1))) s = substr(s, 2)
+      while (s != "" && index(c, substr(s, length(s), 1))) s = substr(s, 1, length(s) - 1)
+      return s }
+    BEGIN { s = ENVIRON["S"]; nl = ENVIRON["NL"]; n = split(ENVIRON["KV"], kv, "\n")
+      for (k = 1; k <= n; k++) key[k] = substr(kv[k], 1, index(kv[k], "=") - 1) }
+    { line = $0; cr = ""; out[NR] = $0
+      if (substr(line, length(line), 1) == "\r") { cr = "\r"; line = substr(line, 1, length(line) - 1) }
+      if (NR == 1) { firstcr = cr; if (substr(line, 1, 3) == "\357\273\277") line = substr(line, 4) }
+      t = strip(line, " \t"); c = substr(t, 1, 1)
+      if (c == "[") {
+        i = index(t, "]"); sec = strip(i ? substr(t, 1, i - 1) : t, " \t[]")
+        if (sec == s && !g) { g = NR; gcr = cr }
+        next }
+      if (sec != s || c == ";" || c == "/" || c == "#") next
+      i = index(t, "=")
+      if (!i) next
+      name = strip(substr(t, 1, i - 1), " \t")
+      for (k = 1; k <= n; k++) if (name == key[k]) { out[NR] = kv[k] cr; set[k] = 1 } }
+    END {
+      for (j = 1; j <= NR; j++) {
+        printf "%s", out[j]
+        if (j == g) for (k = 1; k <= n; k++) if (!set[k]) printf "\n%s%s", kv[k], gcr
+        if (j < NR || nl) printf "\n" }
+      if (!g) {
+        if (NR && !nl) printf "\n"
+        printf "[%s]%s\n", s, firstcr
+        for (k = 1; k <= n; k++) printf "%s%s\n", kv[k], firstcr } }' "$ini"
+}
+
+# reshade use <preset>: PresetPath in the ReShade folder's ReShade.ini, the one key and nothing else
+# of the file (ini_set); only while no session runs or starts, since ReShade writes its ini while it
+# runs (the session's lock, as set reshade)
+reshade_use() {
+  local name=${1:-} f ini="$RS/ReShade.ini" value
+  case "$name" in ""|*/*|.|..|*[[:cntrl:]]*) die "Name a preset in $RS/Presets." ;; esac
+  f="$RS/Presets/$name"
+  [ -f "$f" ] || die "$name is not in $RS/Presets."
+  preset_effects "$f" >/dev/null || die "$name is not a ReShade preset: it has no Techniques line."
+  # (relative to the ReShade folder, as ReShade writes it; a comma doubled)
+  value=$(printf '.\\Presets\\%s' "$name" | sed 's/,/,,/g')
+  open_log
+  log "---- reshade use $name"
+  if [ -n "$DRY" ]; then echo "[dry-run] PresetPath=$value in $ini"; echo "@done ReShade would start with $name."; return 0; fi
+  lock
+  trap 'unlock' EXIT
+  ! session_running || die "Guild Wars 2 is running, and ReShade rewrites its settings while it runs. Pick $name in ReShade's menu (Home key) instead."
+  registry_lock || die "A game session is starting. Pick $name in ReShade's menu (Home key) once the game runs."
+  rs_safe "$ini" || rs_refuse
+  reshade_folder
+  ini_set "$ini" GENERAL "PresetPath=$value" | put "$ini" 644
+  registry_unlock
+  log "ReShade.ini: PresetPath=$value"
+  echo "@done ReShade starts with $name the next time the game starts."
+}
+
+cmd_reshade() {
+  case "${1:-}" in
+    import) shift; reshade_import "$@" ;;
+    use) shift; reshade_use "$@" ;;
+    *) echo "@error Unknown command: reshade ${1:-}"; exit 2 ;;
+  esac
 }
 
 # --- Existing game files (install import): another Wine app's Guild Wars 2, cloned into the bottle
@@ -2315,10 +3340,12 @@ game_runs_anywhere() {
 # import_game <source dir> <bottle's game dir>: the folder cloned (same disk) or copied (with a
 # free-space check and progress). Left out, and named in LEFT: my own addon's files (version.dll
 # with its mark, gw2-ui-scale.*), arcdps (d3d11.dll or dxgi.dll; addons are not cleared for this
-# engine yet) and another program's d3d11.dll. Any other addon comes along as it is (ADDONS names
-# them).
+# engine yet) and another program's d3d11.dll. A ReShade (its d3d11.dll or dxgi.dll, and the
+# ReShade.ini next to Gw2-64.exe, which points into the other install) stays behind too, named in
+# RESHADE_LEFT. Any other addon comes along as it is (ADDONS names them).
 import_game() {
   local src=$1 dst=$2 total pid n out="" arc="" other=""
+  RESHADE_LEFT=""
   total=$(folder_bytes "$src")
   LEFT=""
   if [ -f "$src/version.dll" ] && grep -aq "$UI_MARK" "$src/version.dll"; then
@@ -2326,7 +3353,13 @@ import_game() {
   fi
   for n in $ARCDPS_DLLS; do
     [ -f "$src/$n" ] || continue
+    # (arcdps at ReShade's chain path only through real folders: a link there leads to the source's
+    # or another folder, and the copy keeps the link, so a removal would reach that file)
+    case "$n" in
+      "$ARC_CHAIN") chain_ok "$src" || continue ;;
+    esac
     if is_arcdps "$src/$n"; then out="$out $n" arc=yes
+    elif is_reshade "$src/$n"; then :
     elif [ "$n" = d3d11.dll ]; then out="$out $n" other=yes
     fi
   done
@@ -2372,8 +3405,19 @@ import_game() {
     IMPORT_HOW=copied
   fi
   echo "@progress Guild Wars 2 $total $total"
-  for n in $out; do run rm -f "$dst/$n"; done
+  # (the copy checked again: a link made on the chain path meanwhile keeps that file)
+  for n in $out; do
+    [ "$n" != "$ARC_CHAIN" ] || chain_ok "$dst" || continue
+    run rm -f "$dst/$n"
+  done
   run rm -f "$dst/gw2-ui-scale.ini" "$dst/gw2-ui-scale.log"
+  for n in d3d11.dll dxgi.dll ReShade.ini; do
+    if { [ "$n" = ReShade.ini ] && [ -f "$dst/$n" ]; } || is_reshade "$dst/$n"; then
+      run rm -f "$dst/$n"
+      RESHADE_LEFT=${RESHADE_LEFT:+$RESHADE_LEFT, }$n
+    fi
+  done
+  [ -z "$RESHADE_LEFT" ] || say "ReShade stayed behind in $src ($RESHADE_LEFT): $APP_NAME puts in its own when you turn ReShade on in Settings › Interface"
   chmod -R u+w "$dst"
   ADDONS=$( (cd "$dst" && ls -d ./*.dll addons bin64/d3d9.dll 2>/dev/null || true) | sed 's|^\./||' | tr '\n' ',' | sed 's/,$//; s/,/, /g')
   [ -z "$ADDONS" ] || say "Addons that came along with the game's files: $ADDONS ($APP_NAME leaves them as they are)"
@@ -2453,7 +3497,7 @@ install_imported() {
     finish_touches
     IMPORT_DST="" IMPORT_ACF=""
     log "install import complete"
-    echo "@done Guild Wars 2 is ready: its files were $how$([ "$SETTINGS_IMPORTED" = yes ] && echo ", with your game settings").$([ -z "$ADDONS" ] || echo " Addons that came along: $ADDONS; $APP_NAME leaves them as they are.")$LEFT$([ "$route" = steam ] && echo " Steam may check the files at the first Play.") Press Play."
+    echo "@done Guild Wars 2 is ready: its files were $how$([ "$SETTINGS_IMPORTED" = yes ] && echo ", with your game settings").$([ -z "$ADDONS" ] || echo " Addons that came along: $ADDONS; $APP_NAME leaves them as they are.")$LEFT$([ -z "$RESHADE_LEFT" ] || echo " ReShade stayed behind: turn it on in Settings › Interface.")$([ "$route" = steam ] && echo " Steam may check the files at the first Play.") Press Play."
   else
     step "Steam opens: sign in, and it brings Guild Wars 2 up to date"
     launch "$STEAM_EXE" "steam://install/$GW2_APPID"
@@ -2640,6 +3684,9 @@ status() {
   echo "arcdps=$([ "$ARC" = on ] && echo on || echo off)"
   echo "arcdps_state=$ARC"
   echo "arcdps_foreign=$ARC_FOREIGN"
+  echo "arcdps_dll=$ARC_DLL"
+  echo "reshade=$(setting reshade)"
+  reshade_lines
   echo "session=$(session_live)"
 }
 
@@ -2648,22 +3695,26 @@ settings() {
   echo "installed=$([ -f "$MANIFEST" ] && echo yes || echo no)"
   if session_running; then echo "running=yes"; else echo "running=no"; fi
   echo "route=$(state route)"
+  # (reshade_state is the addon's, as for arcdps: reshade_lines)
   for k in $SETTING_KEYS; do
     echo "$k=$(setting "$k")"
-    echo "${k}_state=$(setting_state "$k")"
+    [ "$k" = reshade ] || echo "${k}_state=$(setting_state "$k")"
   done
   echo "uiscale_addon=$(uiscale_state)"
   arcdps_state
   echo "arcdps=$([ "$ARC" = on ] && echo on || echo off)"
   echo "arcdps_state=$ARC"
   echo "arcdps_foreign=$ARC_FOREIGN"
+  echo "arcdps_dll=$ARC_DLL"
+  reshade_lines
   echo "cpus=$CPU_MAX"
   echo "steam_login=$(steam_remembers_login && echo yes || echo no)"
 }
 
 cmd_set() {
   local key="${1:-}" value="${2:-}"
-  # (arcdps: not kept in settings.conf; the game folder says whether it is on, arcdps_state)
+  # (arcdps: not kept in settings.conf; the game folder says whether it is on, arcdps_state.
+  # reshade: the player's wish is kept there, set_reshade writes it)
   { [ "$key" = arcdps ] && { [ "$value" = on ] || [ "$value" = off ]; }; } || setting_valid "$key" "$value" ||
     { echo "@error Unknown setting: $key=$value"; exit 2; }
   case "$(setting_state "$key")" in off:*) echo "@error $(setting_state "$key" | cut -c5-)"; exit 1 ;; esac
@@ -2673,6 +3724,7 @@ cmd_set() {
   lock
   trap 'unlock' EXIT
   if [ "$key" = arcdps ]; then set_arcdps "$value"; return; fi
+  if [ "$key" = reshade ]; then set_reshade "$value"; return; fi
   write_settings "$key" "$value"
   case "$key" in
     fpscap) write_dxmt_conf ;;
@@ -2870,8 +3922,9 @@ rotate_logs() {
 
 # launch <program> <args...>: a program in the bottle with the game's environment and its compatdb
 # rules (written first), detached; the session's environment and rules go to logs/session.env
-# (Collect Logs, the session report), and each later game start in the session (Play with Steam
-# still open, not Show Steam) updates the rules there
+# (Collect Logs, the session report), with ReShade's keys (reshade_lines), arcdps (on, off) and the
+# sha256 of the d3dcompiler_47.dll next to Gw2-64.exe, and each later game start in the session
+# (Play with Steam still open, not Show Steam) updates the rules there
 launch() {
   local e k f dev
   game_env
@@ -2914,6 +3967,10 @@ launch() {
         echo "LIB_fex=$(fex_in_place)"
       fi
       for k in $SETTING_KEYS; do echo "SETTING_$k=$(setting "$k")"; done
+      # (ReShade and arcdps as the session starts with them: the session report's ReShade line)
+      reshade_lines; arcdps_state; echo "arcdps=$([ "$ARC" = on ] && echo on || echo off)"; echo "arcdps_dll=$ARC_DLL"
+
+      echo "d3dcompiler_47=$([ -z "$GAME_DIR" ] || [ ! -f "$GAME_DIR/d3dcompiler_47.dll" ] || sha256 "$GAME_DIR/d3dcompiler_47.dll")"
       printf '%s\n' "${E[@]}"
       dev_session_line "$dev"
       sed 's/^/RULE=/' "$RULES"; } >"$LOGS/session.env"
@@ -3310,6 +4367,8 @@ finish_touches() {
   say "The shader cache: $(dxmt_cache) (DXMT fills it while you play)"
   run mkdir -p "$(dxmt_cache)"
   sync_uiscale
+  sync_reshade
+  sync_arcdps
   apply_registry
   [ -n "$DRY" ] || { set_state stage finished; set_state game_dir "$GAME_DIR"; }
   write_manifest
@@ -3370,6 +4429,9 @@ cmd_repair() {
   sync_uiscale
   apply_registry
   write_manifest
+  # (last: what it can't download fails the repair after the rest is done)
+  sync_reshade download
+  sync_arcdps
   log "repair complete"
   echo "@done Repaired: the engine and the bottle's settings are set up again. The game draws with $(dxmt_label "$(dxmt_in_use)")$(for k in $UNIX_LIBS; do printf ', with %s' "$(lib_label "$k" "$(lib_in_use "$k")")"; done), and runs on $(fex_label "$(fex_in_use)")."
 }
@@ -3401,6 +4463,13 @@ cmd_reset_shaders() {
   if [ -d "$DXMT_CACHE_ROOT" ] || [ -d "$FORK_CACHE_BASE" ]; then
     run rm -rf "$DXMT_CACHE_ROOT" "$FORK_CACHE_BASE"
     run mkdir -p "$(dxmt_cache)"
+  fi
+  # (ReShade's compiled effects: emptied, the folder kept, since ReShade uses %TEMP% without it)
+  if [ -d "$RS_CACHE" ]; then
+    run rm -rf "$RS_CACHE"
+    run mkdir -p "$RS_CACHE"
+    echo "@done DXMT's and ReShade's caches for the game are empty. The next sessions build them again."
+    return 0
   fi
   echo "@done DXMT's caches for the game are empty. The next sessions build them again."
 }
@@ -3454,19 +4523,24 @@ cmd_play() {
   fi
   # This Play's own session (it holds the session's lock: no other Play, session or registry write
   # until its watcher takes over), with no Wine of the bottle running: the manifest follows this
-  # version, a development build's switches (dev_update), then the registry, the DXMT tree, my unix
-  # libraries and DXMT's options. A Play that joined a session changes nothing; without the session
+  # version, a development build's switches (dev_update), ReShade's and arcdps's files
+  # (sync_reshade, sync_arcdps), then the registry, the DXMT tree, my unix libraries and DXMT's
+  # options. A Play that joined a session changes nothing; without the session
   # helper the registry and the engine's files wait.
   if [ "$fresh" = yes ] && [ -z "$DRY" ]; then SESSION_LOCKED=yes; fi
   if { [ "$fresh" = yes ] || [ -n "$DRY" ] || [ ! -x "$LOCKER" ]; } && ! session_running; then
     [ "$(json_get "$MANIFEST" version)" = "$VERSION" ] || [ -n "$DRY" ] || write_manifest
     dev_update
+    sync_reshade
+    sync_arcdps
     apply_registry
     apply_engine_files
     write_dxmt_conf
   fi
   dxmt_look "$DXGI/dxmt"
   if [ -z "$DRY" ]; then
+    # (whatever the syncs above did or skipped: ReShade never starts looking for a missing arcdps)
+    proxy_safe || die "ReShade's settings ($RS/ReShade.ini) point it at arcdps where arcdps isn't, and the game would have no Direct3D 11. Click Repair (with the game and Steam closed)."
     case "$(graphics_state)" in
       yes) ;;
       switch) echo "@notice Steam is still running with $(dxmt_label "$(dxmt_in_use)"); quit Steam to switch to $(dxmt_label "$(setting dxmt)")." ;;
@@ -3809,6 +4883,12 @@ cmd_uninstall() {
   # (DXMT's caches are in it: $CACHE/dxmt)
   if [ -d "$CACHE" ]; then run rm -rf "$CACHE"; say "Removed the caches, DXMT's with them ($CACHE)"; fi
   log "uninstall complete"
+  # (the ReShade folder holds the player's presets: it stays)
+  if [ -d "$RS" ]; then
+    say "The ReShade folder stays: $RS"
+    echo "@done $APP_NAME is removed, with the bottle and the game in it. Logs stay in $LOGS, and your ReShade presets and shaders in $RS."
+    return 0
+  fi
   echo "@done $APP_NAME is removed, with the bottle and the game in it. Logs stay in $LOGS."
 }
 
@@ -3914,6 +4994,7 @@ case "${1:-}" in
   end-leftovers) cmd_end_leftovers ;;
   fetch-engine) cmd_fetch_engine ;;
   env) cmd_env ;;
+  reshade) shift; cmd_reshade "$@" ;;
   rules) rules_text; [ ! -f "$RULES_LOCAL" ] || cat "$RULES_LOCAL" ;;
   vmmap) cmd_vmmap ;;
   *) sed -n '2,/^# Environment/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 2 ;;

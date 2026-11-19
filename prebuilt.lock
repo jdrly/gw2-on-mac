@@ -6,6 +6,6 @@
 # and its sha256. My winemac.so the same with macdrv_url= and macdrv_sha256=, the asset
 # macdrv-arm64-<commit>.tar.xz. Without them the checks add a stand-in for each
 # (scripts/stage-components.sh --standin).
-tag=components-2026-11-11
-file=gw2-on-mac-components-2026-11-11.tar.xz
-sha256=1efff2530176f6e24bc77a06eb416c6fcfebfccce7cafc54c9a2c76fda59fa6d
+tag=components-2026-11-16
+file=gw2-on-mac-components-2026-11-16.tar.xz
+sha256=f89e06724e26ac886e6ac634e99f1aad2f5c87b50872a4d48d403b303cd9709f

@@ -134,6 +134,20 @@ DXMT_VERSION="$(head -1 "$P/dxmt/VERSION")"
 DXMT_COMMIT="$(printf '%s\n' "$DXMT_VERSION" | grep -oE '[0-9a-f]{7,40}' | tail -1 || true)"
 [ -n "$DXMT_COMMIT" ] || { echo "$P/dxmt/VERSION names no commit on its first line ($DXMT_VERSION)" >&2; exit 1; }
 grep -aq 'gw2-on-mac ui-scale' "$P/ui-scale/version.dll" || { echo "$P/ui-scale/version.dll is not the addon" >&2; exit 1; }
+# The addon isn't older than addon/ui-scale: each setting in its ini is a string in version.dll (the
+# key the DLL reads, between NULs) and a key=value line in the bundled ini
+src_ini=addon/ui-scale/gw2-ui-scale.ini
+[ -f "$src_ini" ] || { echo "Missing $src_ini" >&2; exit 1; }
+keys="$(sed -n 's/^\([A-Za-z][A-Za-z0-9_-]*\)=.*/\1/p' "$src_ini")"
+[ -n "$keys" ] || { echo "$src_ini has no settings" >&2; exit 1; }
+mkdir -p "$CACHE"
+LC_ALL=C tr '\0' '\n' <"$P/ui-scale/version.dll" >"$CACHE/ui-scale-strings.txt"
+for k in $keys; do
+  LC_ALL=C grep -aqxF -- "$k" "$CACHE/ui-scale-strings.txt" ||
+    { echo "$P/ui-scale/version.dll has no $k setting: it is older than addon/ui-scale; rebuild it and restage" >&2; exit 1; }
+  grep -q "^$k=" "$P/ui-scale/gw2-ui-scale.ini" ||
+    { echo "$P/ui-scale/gw2-ui-scale.ini has no $k=: it is older than addon/ui-scale; restage it" >&2; exit 1; }
+done
 # My Wine builds, each optional: its VERSION names the fork's commit ("commit: <full sha>").
 # wine_build <dir> <file>: "<commit> <the file's sha256>", or nothing without <dir>
 wine_build() {
@@ -313,6 +327,9 @@ and used as it ships, but for its DXMT tree, its ntdll.so, its winemac.so and it
 components/dxmt, components/ntdll and components/macdrv go there, and components/fex once I choose
 it, the engine's own next to each. Its sources and that list: https://github.com/athei/mach9/releases.
 Steam comes from Valve, Guild Wars 2 from Valve (Steam) or ArenaNet.
+ReShade (by crosire, BSD-3-Clause), two effect packs and, when the game has none, Microsoft's
+d3dcompiler_47.dll are downloaded from their publishers only when the ReShade switch is turned on:
+see THIRD_PARTY_NOTICES.md.
 EOF
 
 # channel: release, or dev (development build; gw2om.sh and the app read it)
