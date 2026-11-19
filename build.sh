@@ -47,11 +47,13 @@ APP_VERSION=${GW2_ON_MAC_VERSION:-0.2.0-dev.5}
 # 1000 in both. CFBundleShortVersionString is the version as is; CFBundleVersion (what Sparkle
 # compares) is numeric and sorts above the previous release and below X.Y.Z, each rc above every
 # dev build: 0.1.1-dev.N -> 0.1.0.(1000+N), 0.2.0-dev.N -> 0.1.9999.(1000+N), 0.2.0-rc.N ->
-# 0.1.9999.(2000+N). Releases: CFBundleVersion = the version.
+# 0.1.9999.(2000+N). Releases: CFBundleVersion = the version. Y and Z stay below 10000 and the
+# numbers have no leading zeros, so no two versions get the same CFBundleVersion.
 bundle_version() {
   local v=$1 x y z n
-  [[ $v =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-(dev|rc)\.(0|[1-9][0-9]?[0-9]?))?$ ]] ||
-    { echo "Unsupported version $v (X.Y.Z, X.Y.Z-dev.N or X.Y.Z-rc.N, N below 1000)" >&2; return 1; }
+  [[ $v =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]?[0-9]?[0-9]?)\.(0|[1-9][0-9]?[0-9]?[0-9]?)(-(dev|rc)\.(0|[1-9][0-9]?[0-9]?))?$ ]] &&
+    [[ $v != 0.0.0-* ]] ||
+    { echo "Unsupported version $v (X.Y.Z, X.Y.Z-dev.N or X.Y.Z-rc.N, above 0.0.0, no leading zeros, Y and Z below 10000, N below 1000)" >&2; return 1; }
   x=${BASH_REMATCH[1]} y=${BASH_REMATCH[2]} z=${BASH_REMATCH[3]}
   case "${BASH_REMATCH[5]}" in
     dev) n=$((1000 + ${BASH_REMATCH[6]})) ;;

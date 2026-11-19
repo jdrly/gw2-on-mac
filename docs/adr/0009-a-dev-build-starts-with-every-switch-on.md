@@ -40,8 +40,9 @@ from one file I can take lines out of.
   `FEX_ENTRYHEADERLOOKUP=1` left the same way (#267), after my FEX fork made both its defaults
   (#266). Their off value is `0`.
 - `FEX_ENTRYHEADERLOOKUP` is off while the rule can start my Wine fork's sampler (#170). Until #267
-  the app left the table's line out; since my FEX has it on by default, the game's rule says
-  `FEX_ENTRYHEADERLOOKUP=0`, in a release too.
+  the app left the table's line out. Since my FEX has it on by default, the game's rule says
+  `FEX_ENTRYHEADERLOOKUP=0` while my FEX, whose `VERSION` names the switch, is in the engine, in a
+  release too.
 
 ## Alternatives I rejected
 

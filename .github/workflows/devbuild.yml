@@ -63,7 +63,7 @@ on:
         type: string
         default: ""
       version:
-        description: X.Y.Z-dev.N or X.Y.Z-rc.N (N below 1000), not lower than build.sh's; empty is build.sh's
+        description: X.Y.Z-dev.N or X.Y.Z-rc.N (N below 1000, as build.sh takes them), not lower than build.sh's; empty is build.sh's
         type: string
         default: ""
       publish:
@@ -163,9 +163,10 @@ jobs:
           [ -z "$FEX_COMMIT" ] || on_branch fex_commit "$FEX_REPO" "$FEX_BRANCH" "$FEX_COMMIT"
           # shellcheck disable=SC2016 # (build.sh's line, literally)
           [ -n "$VERSION" ] || VERSION="$(sed -n 's/^APP_VERSION=${GW2_ON_MAC_VERSION:-\(.*\)}$/\1/p' build.sh)"
-          # (build.sh's bundle_version takes the same forms)
-          [[ $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+-(dev|rc)\.(0|[1-9][0-9]?[0-9]?)$ ]] ||
-            fail "version is not X.Y.Z-dev.N or X.Y.Z-rc.N (N below 1000): $VERSION"
+          # (the forms build.sh's bundle_version takes, but for a plain X.Y.Z)
+          v="(0|[1-9][0-9]?[0-9]?[0-9]?)"
+          [[ $VERSION =~ ^(0|[1-9][0-9]*)\.$v\.$v-(dev|rc)\.(0|[1-9][0-9]?[0-9]?)$ ]] && [[ $VERSION != 0.0.0-* ]] ||
+            fail "version is not X.Y.Z-dev.N or X.Y.Z-rc.N above 0.0.0, with no leading zeros, Y and Z below 10000 and N below 1000: $VERSION"
           if [ "$PUBLISH" = true ] && [ "$GITHUB_REF" != refs/heads/arm64 ]; then
             fail "Dev builds are published from arm64 only, not $GITHUB_REF; run it with publish false"
           fi

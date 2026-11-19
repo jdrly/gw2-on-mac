@@ -1321,11 +1321,15 @@ dxmt_names() {
 }
 # heat_prof_on: the game's rule can start my ntdll.so's sampler: WINE_HEAT_PROF=on or =1, or
 # WINE_HEAT_CONTROL, whose file can say prof=on during a session, in a line of dev-switches.conf (a
-# development build's) or an env= entry of compatdb.local. (awk reads all of it: nothing ends the
-# pipe early under pipefail.)
+# development build's) or an env= entry of a compatdb.local rule for Gw2-64.exe (matched without
+# case, as compatdb does; local_hostfeatures). (awk reads all of it: nothing ends the pipe early
+# under pipefail.)
 heat_prof_on() {
   { if [ -n "$DEV_ON" ] && [ -f "$DEV_FILE" ]; then cat "$DEV_FILE"; fi
-    if [ -f "$RULES_LOCAL" ]; then tr ';' '\n' <"$RULES_LOCAL" | sed -n 's/^env=//p'; fi; } |
+    if [ -f "$RULES_LOCAL" ]; then
+      awk -F';' '{ exe = 0; for (i = 1; i <= NF; i++) if (tolower($i) == "exe=gw2-64.exe") exe = 1
+        if (exe) for (i = 1; i <= NF; i++) if (index($i, "env=") == 1) print substr($i, 5) }' "$RULES_LOCAL"
+    fi; } |
     awk '/^WINE_HEAT_PROF=(on|1)$/ || /^WINE_HEAT_CONTROL=./ { f = 1 } END { exit !f }'
 }
 # sampler_fex: FEX_ENTRYHEADERLOOKUP=0 for the game's rule while the rule can start my ntdll.so's
@@ -1334,7 +1338,7 @@ heat_prof_on() {
 # (jdrly/FEX's GW2Contract.h), and my FEX has it on by default (#266). It comes after the file's
 # lines in the rule, so it wins over them. A release too: compatdb.local can start the sampler there.
 sampler_fex() {
-  [ "$(fex_in_use)" = mine ] && fex_in_version FEX_ENTRYHEADERLOOKUP && heat_prof_on || return 0
+  heat_prof_on && [ "$(fex_in_use)" = mine ] && fex_in_version FEX_ENTRYHEADERLOOKUP || return 0
   echo FEX_ENTRYHEADERLOOKUP=0
 }
 # dev_lines: dev-switches.conf's switch lines in a development build, one a line: "in NAME=value"

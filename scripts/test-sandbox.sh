@@ -2908,17 +2908,17 @@ check "  and the install said both" eval 'echo "$out" | grep -q "^Development bu
 eval "$(sed -n '/^bundle_version() {/,/^}/p' "$ROOT/build.sh")"
 rc_order() {
   [ "$(bundle_version 0.2.0-dev.23)" = 0.1.9999.1023 ] && [ "$(bundle_version 0.2.0-rc.1)" = 0.1.9999.2001 ] || return 1
-  [ "$(printf '%s\n' 0.2.0 0.2.0-rc.1 0.2.0-dev.999 0.2.0-rc.999 0.2.0-dev.23 | while read -r v; do echo "$(bundle_version "$v") $v"; done |
-    sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | cut -d' ' -f2 | tr '\n' ' ')" = "0.2.0-dev.23 0.2.0-dev.999 0.2.0-rc.1 0.2.0-rc.999 0.2.0 " ]
+  [ "$(printf '%s\n' 1.0.0 0.2.0 0.2.0-rc.1 1.0.0-rc.1 0.2.0-dev.999 0.1.9999 0.2.0-rc.999 0.1.9999-rc.1 0.2.0-dev.23 | while read -r v; do echo "$(bundle_version "$v") $v"; done |
+    sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | cut -d' ' -f2 | tr '\n' ' ')" = "0.1.9999-rc.1 0.1.9999 0.2.0-dev.23 0.2.0-dev.999 0.2.0-rc.1 0.2.0-rc.999 0.2.0 1.0.0-rc.1 1.0.0 " ]
 }
-check "build.sh's versions: 0.2.0-rc.1 is 0.1.9999.2001, above every dev build of 0.2.0 and below 0.2.0" rc_order
+check "build.sh's versions: 0.2.0-rc.1 is 0.1.9999.2001, above every dev build of 0.2.0 and below 0.2.0, and in order across the patch and major steps" rc_order
 rc_refused() {
   local v
-  for v in 0.2.0-rc 0.2.0-rc.01 0.2.0-rc.1000 0.2.0-beta.1 0.2.0-rc.1-dev.2 0.2.0-dev.rc.1 0.2-rc.1; do
-    ! bundle_version "$v" >/dev/null 2>"$SANDBOX/bv.txt" && grep -qxF "Unsupported version $v (X.Y.Z, X.Y.Z-dev.N or X.Y.Z-rc.N, N below 1000)" "$SANDBOX/bv.txt" || return 1
+  for v in 0.2.0-rc 0.2.0-rc.01 0.2.0-rc.1000 0.2.0-beta.1 0.2.0-rc.1-dev.2 0.2.0-dev.rc.1 0.2-rc.1 0.1.08-rc.1 0.0.0-rc.1 0.10000.0-rc.1 0.2.10000-dev.1; do
+    ! bundle_version "$v" >/dev/null 2>"$SANDBOX/bv.txt" && grep -qxF "Unsupported version $v (X.Y.Z, X.Y.Z-dev.N or X.Y.Z-rc.N, above 0.0.0, no leading zeros, Y and Z below 10000, N below 1000)" "$SANDBOX/bv.txt" || return 1
   done
 }
-check "  and refuses a malformed one (0.2.0-rc, rc.01, rc.1000, beta.1, rc.1-dev.2, dev.rc.1, 0.2-rc.1), saying which forms it takes" rc_refused
+check "  and refuses a malformed one (0.2.0-rc, rc.01, rc.1000, beta.1, rc.1-dev.2, dev.rc.1, 0.2-rc.1, 0.1.08-rc.1, 0.0.0-rc.1, 0.10000.0-rc.1, 0.2.10000-dev.1), saying which forms it takes" rc_refused
 RCR="$SANDBOX/res-rc"
 res_copy "$RCR" channel=dev
 sed -i '' 's/^version=.*/version=0.2.0-rc.1/' "$RCR/app.properties"
@@ -3017,6 +3017,10 @@ if fexb; then
   printf 'exe=Gw2-64.exe;env=WINE_HEAT_PROF=on\n' >"$DAD/compatdb.local"
   dev_files
   check "  with WINE_HEAT_PROF=on in compatdb.local: FEX_ENTRYHEADERLOOKUP=0 last in the game's rule" sampler_off
+  printf 'exe=CefHost.exe;env=WINE_HEAT_PROF=on\n' >"$SANDBOX/cef.local" && cp "$DAD/compatdb.local" "$SANDBOX/game.local" && cp "$SANDBOX/cef.local" "$DAD/compatdb.local"
+  dev_files
+  check "  with that line in a rule for CefHost.exe instead: none (the sampler runs in the game)" no_lookup
+  cp "$SANDBOX/game.local" "$DAD/compatdb.local"
   echo FEX_ENTRYHEADERLOOKUP=1 >>"$DEVF"
   dev_files
   check "  and a FEX_ENTRYHEADERLOOKUP=1 line of mine: out of the rule and status, saying why, and FEX_ENTRYHEADERLOOKUP=0 still last" \
