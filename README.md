@@ -173,8 +173,9 @@ renames it back before anything else runs. It waits while Wine or the killed run
 runs. Nothing the app removes, there or anywhere else, may hold a game: every recursive removal goes
 through one function, which leaves a folder with a `Gw2.dat` or `Gw2-64.exe` in it, one with another
 volume mounted inside, or one it can't look through, and logs why. Only an install that never came
-from a move may remove its own game, at Uninstall or when its own install fails. The rename itself is the kernel's `rename`, through macOS's `perl`, which fails rather
-than copy to another volume or move into a folder that is there, as `mv` would. The whole move
+from a move may remove its own game: at Uninstall, when its own install fails, and an import's own
+clone that failed before the copy takes its place. The rename itself is the kernel's `rename`,
+through macOS's `perl`, which fails rather than copy to another volume or move into a folder that is there, as `mv` would. The whole move
 holds the install lock, and from the rename's checks to the record the session's lock too, so no
 Play starts in between.
 

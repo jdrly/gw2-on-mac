@@ -3637,11 +3637,11 @@ unset NOCP_LOG
 # every recursive removal goes through safe_rm, which leaves a folder with a game in it
 rm_outside() {
   awk '/^safe_rm\(\) \{/ { f = 1 } f && /^}/ { f = 0; next }
-    !f && !/^[[:space:]]*#/ && /(^|[^[:alnum:]_-])rm( +-[[:alpha:]]+)* +-[[:alpha:]]*[rR]/ { print FNR ": " $0; n++ } END { exit n > 0 }' "$1"
+    !f && !/^[[:space:]]*#/ && /(^|[^[:alnum:]_-])rm([[:space:]]+-[[:alpha:]]+)*[[:space:]]+-[[:alpha:]]*[rR]/ { print FNR ": " $0; n++ } END { exit n > 0 }' "$1"
 }
 check "gw2om.sh has no recursive rm outside safe_rm" rm_outside "$APP/Contents/Resources/gw2om.sh"
-{ cat "$APP/Contents/Resources/gw2om.sh"; printf '  rm -fr "$x"\n  rm -f -r "$x"\n  x && rm -R "$y"\n'; } >"$SANDBOX/rmcheck.sh"
-check "  (the check finds each of rm -fr, rm -f -r and rm -R added)" eval '[ "$(rm_outside "$SANDBOX/rmcheck.sh" | wc -l | tr -d " ")" = 3 ]'
+{ cat "$APP/Contents/Resources/gw2om.sh"; printf '  rm -fr "$x"\n  rm -f -r "$x"\n  x && rm -R "$y"\n  rm\t-f\t-r "$x"\n'; } >"$SANDBOX/rmcheck.sh"
+check "  (the check finds each of rm -fr, rm -f -r, rm -R and a tab-separated one added)" eval '[ "$(rm_outside "$SANDBOX/rmcheck.sh" | wc -l | tr -d " ")" = 4 ]'
 # (the session's lock file stays, held or not: a lock file is never removed while anyone may hold it)
 nothing_made() { [ -z "$(ad_list)" ]; }
 # ini_clean <file>: no line names 0.1's folders (Application Support's or Caches' GW2 on Mac)
@@ -3924,6 +3924,14 @@ out=$(g rollback 2>&1) && rc=0 || rc=$?
 kill "$sp" 2>/dev/null; wait "$sp" 2>/dev/null; mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
 check "Rollback while this app's Wine runs: refused, the game stays here" \
   eval '[ "$rc" != 0 ] && [ "$(st move_game)" = here ] && [ ! -e "$O1ST" ] && [ "$(ino "$STEAM")" = "$O1INO" ]'
+# (a file 0.1's addon list names, missing from what was kept: refused, nothing changed, the
+# snapshot of this app's put back by the undo)
+GSNAP0=$(find "$GD" -path "$GD/Gw2.dat" -prune -o -type f -exec shasum -a 256 {} + | LC_ALL=C sort)
+mv "$AD/0.1-addons/files/d3d11.dll" "$SANDBOX/kept-d3d11"
+out=$(g rollback 2>&1) && rc=0 || rc=$?
+check "Rollback with one of 0.1's kept addon files missing: refused, the game here, its addon files as they were" \
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac couldn.t put back GW2 on Mac 0.1.s addon files" && [ "$(ino "$STEAM")" = "$O1INO" ] && [ ! -e "$AD/move-undo" ] && [ "$(find "$GD" -path "$GD/Gw2.dat" -prune -o -type f -exec shasum -a 256 {} + | LC_ALL=C sort)" = "$GSNAP0" ]'
+mv "$SANDBOX/kept-d3d11" "$AD/0.1-addons/files/d3d11.dll"
 # (0.1's place taken: refused before anything changes, this app's addon files as they were)
 gsnap() { find "$GD" -path "$GD/Gw2.dat" -prune -o -type f -exec shasum -a 256 {} + | LC_ALL=C sort; }
 GSNAP=$(gsnap)
@@ -3954,10 +3962,10 @@ mkdir -p "$MNT"
 if hdiutil create -quiet -size 20m -type SPARSE -fs APFS -volname gw2om-mnt "$SANDBOX/mnt" >/dev/null 2>&1 &&
   hdiutil attach -quiet -nobrowse -noautoopen -mountpoint "$MNT" "$SANDBOX/mnt.sparseimage" >/dev/null 2>&1; then
   trap 'hdiutil detach -quiet -force "$MNT" 2>/dev/null' EXIT
-  echo "on another volume" >"$MNT/kept.txt"
+  echo "on another volume" >"$MNT/kept.txt" && echo "beside it" >"$BOTTLE/drive_c/sentinel.txt"
   out=$(g uninstall 2>&1) && rc=0 || rc=$?
-  check "Uninstall with another volume mounted in the bottle: refused, the bottle and the volume's file stay" \
-    eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac kept its bottle" && [ -d "$BOTTLE/drive_c" ] && has "$MNT/kept.txt" "another volume" && has "$LOGS/install.log" "another volume is mounted inside it"'
+  check "Uninstall with another volume mounted in the bottle: refused, the bottle (a file beside the mount too) and the volume's file stay" \
+    eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac kept its bottle" && has "$BOTTLE/drive_c/sentinel.txt" beside && has "$MNT/kept.txt" "another volume" && has "$LOGS/install.log" "another volume is mounted inside it"'
   hdiutil detach -quiet -force "$MNT" >/dev/null 2>&1; trap - EXIT
 else
   echo "  skip the mounted volume (hdiutil could not attach one)"
@@ -4010,6 +4018,18 @@ mv "$BOTTLE/drive_c/users/$(id -un)x" "$BOTTLE/drive_c/users/crossover"
 g rollback >/dev/null 2>&1; g uninstall >/dev/null 2>&1
 rm -rf "$AD" "$O1" "$OC"
 check "no 0.1 install: status offers no move" [ "$(st old_install) $(st move)" = "no no" ]
+# Uninstall takes a game with the bottle only when no move is recorded: Start fresh's record counts
+# as none only as exactly the one line "skipped" (a NUL in it, say, makes it a move's)
+g install steam >/dev/null 2>&1
+mkdir -p "$BOTTLE/drive_c/games" && echo "a game" >"$BOTTLE/drive_c/games/Gw2.dat"
+printf 'skipped\0\n' >"$AD/moved-from-0.1"
+out=$(g uninstall 2>&1) && rc=0 || rc=$?
+check "Uninstall with a record that isn't exactly \"skipped\": the bottle with the game stays" \
+  eval '[ "$rc" != 0 ] && [ -f "$BOTTLE/drive_c/games/Gw2.dat" ]'
+printf 'skipped\n' >"$AD/moved-from-0.1"
+out=$(g uninstall 2>&1) && rc=0 || rc=$?
+check "  with exactly \"skipped\": Uninstall removes it, the game with it" eval '[ "$rc" = 0 ] && [ ! -e "$BOTTLE" ]'
+rm -rf "$AD"
 fi
 
 if in_group rest; then

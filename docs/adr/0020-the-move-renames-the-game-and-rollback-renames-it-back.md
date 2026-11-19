@@ -85,8 +85,9 @@ double space, not even for a moment.
   while the moved game is in the bottle and names Rollback, which is one click and says what it
   does.
 - **Proving ownership of every file a move made, with a journal state for each step.** Each review
-  round found a new window. Finding the game by its inode before any removal covers every one of
-  them with one check.
+  round found a new window. Looking for a game's files in every folder before it is removed covers
+  every one of them with one check. A check by the move's records missed the paths that don't read
+  them (round 3), so the check is by content.
 
 ## Evidence
 

@@ -3955,15 +3955,18 @@ move_undo() {
 # clone that failed, before the copy takes its place (clone_tree): the app's own copy, never the
 # source. --quiet: no log line, and done in a dry run too (scratch folders).
 safe_rm() {
-  local with="" quiet="" p hit dev st=0
+  local with="" quiet="" p hit dev devs st=0
   while :; do
     case "${1:-}" in --with-game) with=yes; shift ;; --quiet) quiet=yes; shift ;; *) break ;; esac
   done
   for p in "$@"; do
     { [ -e "$p" ] || [ -L "$p" ]; } || continue
     if [ -d "$p" ] && [ ! -L "$p" ]; then
+      # (every folder's device read to the end, a failure to read refused, then compared)
       dev=$(stat -f %d "$p")
-      if find "$p" -xdev -type d -exec stat -f %d {} + 2>/dev/null | grep -qvx "$dev"; then
+      devs=$(find "$p" -xdev -type d -exec stat -f %d {} + 2>/dev/null) ||
+        { log "$p stays: find couldn't look through all of it"; st=1; continue; }
+      if printf '%s\n' "$devs" | awk -v d="$dev" '$0 != d { f = 1 } END { exit !f }'; then
         log "$p stays: another volume is mounted inside it"; st=1; continue
       fi
       if [ -z "$with" ]; then
@@ -3985,8 +3988,8 @@ never_moved() {
   case "$(state origin)" in move|moved) return 1 ;; esac
   { [ ! -e "$MOVE_UNDO" ] && [ ! -L "$MOVE_UNDO" ]; } || return 1
   { [ ! -e "$MOVE_RECORD" ] && [ ! -L "$MOVE_RECORD" ]; } && return 0
-  [ -f "$MOVE_RECORD" ] && [ ! -L "$MOVE_RECORD" ] && [ "$(cat "$MOVE_RECORD")" = skipped ] &&
-    [ "$(wc -l <"$MOVE_RECORD" | tr -d ' ')" = 1 ]
+  # (byte for byte: a shell's $(cat) would drop a NUL)
+  [ -f "$MOVE_RECORD" ] && [ ! -L "$MOVE_RECORD" ] && printf 'skipped\n' | cmp -s - "$MOVE_RECORD"
 }
 # with_game: "--with-game" for never_moved, else nothing (safe_rm's first word)
 with_game() { if never_moved; then echo --with-game; fi; }
@@ -4359,8 +4362,9 @@ rollback_game() {
   MOVE_MADE=""
   addons_save "$n${g:+/$g}" "$MOVE_SNAP"
   move_journal rollback "$n" "$o" "$g" "$MOVE_SNAP"
+  # (if they can't all go back, nothing goes: the undo puts this app's back from its snapshot)
   if [ -f "$MOVE_ADDONS/list" ]; then
-    addons_restore "$n${g:+/$g}" "$MOVE_ADDONS" "$n" || warn "$APP_NAME couldn't put back all of $OLD_LABEL's addon files (details in $LOGS/install.log). $OLD_LABEL puts arcdps and ReShade in order at its next Play."
+    addons_restore "$n${g:+/$g}" "$MOVE_ADDONS" "$n" || die "$APP_NAME couldn't put back $OLD_LABEL's addon files, so the game stays here (details in $LOGS/install.log)."
   fi
   move_rename "$n" "$o"
   test_pause rollback-renamed
@@ -5515,16 +5519,26 @@ cmd_play() {
   game_state
   # (an install that waits for Steam's download, a move's too, with no Steam running: Play starts
   # Steam on the game's install page, and the window follows the download)
-  if [ "$(state stage)" = waiting_game ] && [ "$(state route)" = steam ] && [ "$GAME" != yes ]; then
-    # (under the session's lock, as a Rollback takes it: the stage, the game and Wine checked again
-    # there; Steam doesn't inherit the lock, which goes once Steam runs, so a Rollback sees it)
+  if [ "$(state stage)" = waiting_game ] && [ "$(state route)" = steam ] && [ "$GAME" != yes ] && [ "$(move_game)" != 01 ]; then
+    # (under the session's lock, as a Rollback takes it: the stage, the route, Steam in this
+    # bottle, the game and Wine checked again there. Steam doesn't inherit the lock, which goes once
+    # this engine's Wine shows, so a Rollback after it sees Steam running)
     [ -n "$DRY" ] || registry_lock || die "$APP_NAME is moving the game or a session is starting. Try again in a few seconds."
     game_state
-    [ "$(state stage)" = waiting_game ] && [ "$GAME" != yes ] || { registry_unlock; die "The game's state changed meanwhile. Try again."; }
-    if has_kind steam "$(proc_list)"; then registry_unlock; echo "@done Steam is running: it is bringing Guild Wars 2 up to date."; return 0; fi
-    [ "$(busy_of "$(proc_list)")" != session ] || { registry_unlock; die "$APP_NAME's Wine is still running. Try again in a few seconds."; }
+    { [ "$(state stage)" = waiting_game ] && [ "$(state route)" = steam ] && [ "$GAME" != yes ] &&
+      [ "$(move_game)" != 01 ] && [ -f "$STEAM_DIR/steam.exe" ]; } ||
+      { registry_unlock; die "Steam or the game isn't where it was a moment ago (Rollback?). Nothing started."; }
+    k=$(busy_of "$(proc_list)")
+    case "$k" in
+      steam) registry_unlock; echo "@done Steam is running: it is bringing Guild Wars 2 up to date."; return 0 ;;
+      game|installer|session) registry_unlock; die "$(busy_message "$k" "$(proc_list)")" ;;
+    esac
     launch "$STEAM_EXE" "steam://install/$GW2_APPID" 8>&-
-    k=0; while [ -z "$DRY" ] && ! has_kind steam "$(proc_list)" && [ $k -lt 50 ]; do sleep 0.1; k=$((k + 1)); done
+    k=0
+    while [ -z "$DRY" ] && [ $k -lt 100 ]; do
+      case "$(busy_of "$(proc_list)")" in steam|session) break ;; esac
+      sleep 0.1; k=$((k + 1))
+    done
     registry_unlock
     echo "@done Steam is starting: it finishes the game's download, and this window follows it."
     return 0
