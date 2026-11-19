@@ -6161,7 +6161,7 @@ cmd_fetch_engine() {
 # only the commands that just read run: nothing of this app's folders or of 0.1.x's is written, not
 # even a log, and status's recover is refused too.
 case "${1:-}" in
-  status|session-status|settings|check-setup|scan|check-game|env|rules) ;;
+  status|session-status|settings|scan|check-game|env|rules) ;;
   *) macos_gate ;;
 esac
 

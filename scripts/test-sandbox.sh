@@ -3690,6 +3690,7 @@ install steam
 install move
 install arenanet $SANDBOX/gate-preset.ini
 install import $SANDBOX
+check-setup $SANDBOX/gate-preset.ini
 finish
 stop-waiting
 repair

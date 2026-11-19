@@ -86,17 +86,6 @@ case "$MODE:${2:-}" in
       echo "This mode creates or changes a GitHub release. Set GW2_ON_MAC_PUBLISH=1 to publish, or use --sign-only, --no-notarize or --no-release." >&2
       exit 1; } ;;
 esac
-# The same modes: below the engine's macOS the app's popup downloads the last 0.1.x's DMG
-# (gw2om.sh's LAST_01_DMG), so that DMG has to be a published release asset (docs/adr/0021)
-case "$MODE:${2:-}" in
-  :|--ci:|--dev:|--adhoc:|--feed:*)
-    last01="$(sed -n 's/^LAST_01=//p' src/gw2om.sh)"
-    last01_dmg="$(sed -n 's/^LAST_01_DMG="\(.*\)"$/\1/p' src/gw2om.sh)"
-    last01_dmg="${last01_dmg//\$LAST_01/$last01}"
-    [ -n "$last01" ] && [ -n "$last01_dmg" ] && curl -fsIL --retry 2 -o /dev/null "$last01_dmg" || {
-      echo "The DMG of the last 0.1.x, ${last01:-?} ($last01_dmg), isn't a published release asset. The app below the engine's macOS sends players there: publish it, or set LAST_01 in src/gw2om.sh." >&2
-      exit 1; } ;;
-esac
 DEV_NO_RELEASE=""
 if { [ "$MODE" = --dev ] || [ "$MODE" = --adhoc ]; } && [ "${2:-}" = --no-release ]; then DEV_NO_RELEASE=1; fi
 case "$MODE" in
@@ -207,6 +196,19 @@ case "$MODE$DEV_NO_RELEASE" in
   --feed)
     [ "$(gh release view "v$VERSION" --repo "$REPO" --json isDraft --jq .isDraft 2>/dev/null)" = true ] ||
       { echo "No draft release v$VERSION (the CI workflow creates it)" >&2; exit 1; } ;;
+esac
+# Below the engine's macOS the app's popup downloads the last 0.1.x's DMG (its gw2om.sh's
+# LAST_01_DMG), so that DMG has to be a published release asset (docs/adr/0021). (--feed publishes
+# the DMG that --ci checked.)
+case "$MODE$DEV_NO_RELEASE" in
+  ""|--ci|--dev|--adhoc)
+    g="$SRC/Contents/Resources/gw2om.sh"
+    last01="$(sed -n 's/^LAST_01=//p' "$g" 2>/dev/null)"
+    last01_dmg="$(sed -n 's/^LAST_01_DMG="\(.*\)"$/\1/p' "$g" 2>/dev/null)"
+    last01_dmg="${last01_dmg//\$LAST_01/$last01}"
+    [ -n "$last01" ] && [ -n "$last01_dmg" ] && curl -fsIL --retry 2 -o /dev/null "$last01_dmg" || {
+      echo "The DMG of the last 0.1.x, ${last01:-?} (${last01_dmg:-no LAST_01_DMG in $g}), isn't a published release asset. The app below the engine's macOS sends players there: publish it, or set LAST_01 in src/gw2om.sh and build again." >&2
+      exit 1; } ;;
 esac
 
 sign() { codesign --force --timestamp --options runtime --sign "$IDENTITY" "$@"; }

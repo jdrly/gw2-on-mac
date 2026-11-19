@@ -173,7 +173,8 @@ final class Installer {
   // an operation has ended (a held app update may go ahead)
   var onIdle: (() -> Void)?
   // the first status, before the window and the menus read it (GW2onMacApp starts Sparkle there)
-  var onFirstStatus: (([String: String]) -> Void)?
+  // (with whether this Mac runs the engine, status macos_ok=yes)
+  var onFirstStatus: ((Bool) -> Void)?
 
   private var process: Process?
   let script = Brand.resources.appendingPathComponent("gw2om.sh")
@@ -305,7 +306,8 @@ final class Installer {
   }
 
   private func applyStatus(_ values: [String: String]) {
-    if let first = onFirstStatus { onFirstStatus = nil; first(values) }
+    // (a status without macos_ok, from a backend that failed, waits for the next one)
+    if let first = onFirstStatus, let ok = values["macos_ok"] { onFirstStatus = nil; first(ok == "yes") }
     status = values
     guard values["macos_ok"] != "no" else { return }
     // a session runs (the window opened while the game starts or runs, or Steam closes after it):
@@ -798,7 +800,7 @@ struct AppCommands: Commands {
       // engine's macOS)
       .disabled(installer.gated || !installer.installed && installer.status["old_install"] != "yes")
       Button(logs.busy ? "Collecting Logs…" : "Collect Logs…") { logs.collect() }
-        .disabled(logs.busy)
+        .disabled(logs.busy || installer.gated)
     }
     CommandGroup(replacing: .newItem) {}
     CommandGroup(replacing: .help) {
@@ -856,8 +858,8 @@ struct GW2onMacApp: App {
           // (Sparkle once the first status says this Mac runs the engine: below its macOS, no update
           // check, and Check for Updates… stays disabled; the settings after it, since they set its
           // automatic checks)
-          installer.onFirstStatus = { [updates, settings] values in
-            if values["macos_ok"] != "no" { updates.start() }
+          installer.onFirstStatus = { [updates, settings] runs in
+            if runs { updates.start() }
             settings.reload()
           }
           installer.refresh()
