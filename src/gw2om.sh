@@ -3776,6 +3776,10 @@ move_inside() {
   die "$1 leads outside $2 (a link in $OLD_LABEL's folder?), so $APP_NAME doesn't move this install. Start fresh in Settings › Troubleshooting installs anew."
 }
 
+# path_under <path> <folder>: <path> is inside <folder> (a case of its own: bash 3.2 can't parse a
+# case pattern's parenthesis inside a $(...))
+path_under() { case "$1" in "$2/"?*) return 0 ;; esac; return 1; }
+
 # move_links <folder>...: every link in what the move cloned or kept leads to a file inside this
 # app's folder, its whole chain resolved (realpath). cp -R copies a link as a link, and what writes
 # after the clone (ReShade's ini, arcdps's renames, the addons, then Steam, the game and ReShade
@@ -3791,7 +3795,7 @@ move_links() {
       { [ -e "$d" ] || [ -L "$d" ]; } || continue
       find "$d" -type l 2>/dev/null | while IFS= read -r l; do
         p=$(realpath "$l" 2>/dev/null) || p=""
-        [ -n "$p" ] && [ -f "$p" ] && case "$p/" in "$ap/"?*) true ;; *) false ;; esac || echo "$l"
+        [ -n "$p" ] && [ -f "$p" ] && path_under "$p" "$ap" || echo "$l"
       done
     done | head -1) || true
   [ -z "$bad" ] ||
@@ -3809,7 +3813,7 @@ move_paths() {
   # again here, since this is the one write the move makes in a file it didn't create)
   if [ -L "$f" ]; then
     f=$(realpath "$f") || return 1
-    case "$f" in "$(cd "$APPDIR" && pwd -P)/"?*) ;; *) return 1 ;; esac
+    path_under "$f" "$(cd "$APPDIR" && pwd -P)" || return 1
   fi
   if [ -n "$DRY" ]; then echo "[dry-run] $OLD_LABEL's folders in $f renamed to this app's"; return 0; fi
   tmp="$f.gw2om-new.$$"
