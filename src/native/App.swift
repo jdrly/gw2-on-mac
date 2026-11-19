@@ -113,7 +113,7 @@ final class Installer {
     let finishingDetail = interface ? "Your addons, the sharper interface and the shader cache" : "Your addons and the shader cache"
     let common = [
       Step(id: 1, title: "The Wine engine", detail: "athei's Mach9 0.4.0 · as it ships"),
-      Step(id: 2, title: "The game's own bottle", detail: "With 0.1's Windows user"),
+      Step(id: 2, title: "The game's own bottle", detail: "With 0.1's Windows user and your settings"),
     ]
     let files = Step(id: route == .arenanet ? 3 : 4, title: "Your install, from GW2 on Mac 0.1",
                      detail: route == .arenanet ? "The game, its settings and ReShade, cloned" : "Steam with your login, the game, its settings and ReShade, cloned")

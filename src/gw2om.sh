@@ -27,7 +27,7 @@
 #                              whose Windows user is crossover as 0.1.x's, Steam from Valve, then
 #                              0.1.x's Steam folder (its login and the game), the profile's Steam
 #                              files, the game's settings, the addons as they were, the ReShade
-#                              folder cloned or copied in;
+#                              folder and the app's settings (SETTINGS_FROM_01) cloned or copied in;
 #                              refused while 0.1.x's Wine runs (the window waits for it); 0.1.x's
 #                              folders are only read
 #   gw2om.sh scan              the Guild Wars 2 installs of other Wine apps on this Mac (GW2 on Mac
@@ -150,8 +150,8 @@
 #   GW2_ON_MAC_ALLOW_WINE=1    let the real engine's Wine run in a sandbox (never in the tests)
 #   GW2_ON_MAC_IMPORT_COPY=1   install import copies even on the same disk (the other-disk path)
 #   GW2_ON_MAC_FREE_KB=<n>     the free space the app's disk reports (KB)
-#   GW2_ON_MAC_MOVE_FAIL=<step>  install move fails at that step (engine, bottle, steam, files,
-#                              profile, reshade, finish: move_fail)
+#   GW2_ON_MAC_MOVE_FAIL=<step>  install move fails at that step (engine, settings, bottle, steam,
+#                              files, profile, reshade, finish: move_fail)
 #   GW2_ON_MAC_WATCH_TIMEOUT, GW2_ON_MAC_WATCH_GRACE, GW2_ON_MAC_WATCH_QUITWAIT,
 #   GW2_ON_MAC_WATCH_POLL      watch-session's times in seconds (900, 30, 20, 2)
 #   GW2_ON_MAC_VMMAP_TIMEOUT   how long vmmap may take before it is ended, in seconds (60)
@@ -788,6 +788,39 @@ SETTINGS_RESETS="
 2 dxmt wine macdrv
 "
 SETTINGS_VERSION=$(printf '%s\n' "$SETTINGS_RESETS" | awk 'NF { v = $1 } END { print v + 0 }')
+# What a move from 0.1.x (install move, move_settings) does with each of 0.1.x's settings, one row
+# a key: "<key> <what> [<0.1.x's default>]". kept: 0.1.x's value, which means the same here (a key
+# 0.1.x's file doesn't have reads as 0.1.x's default; a value this version doesn't take, as this
+# version's default). default: this version's default. dropped: no such setting here. 0.1.x's
+# settings.conf has no version line and every key in it, chosen or not (main's write_settings), so
+# a kept value is what 0.1.x ran with. Keys of this version that 0.1.x doesn't have start at their
+# defaults. fastlocks: 0.1.x's default was on, a spin in CrossOver's msync; here it is another port,
+# off by default (#45, #105). gamemode: always on here, the engine's loader is a Game Mode app.
+# coolworkers: none here (docs/adr/0006). mousespeed is a factor on GameController's counts here,
+# on the pointer's speed there: the same choice in Settings.
+SETTINGS_FROM_01="
+retina kept on
+fpscap kept off
+metalfx kept off
+hud kept off
+warm kept on
+coolworkers dropped off
+fastlocks default on
+ncpu kept 8
+uiscale kept off
+uiscale_size kept 1.75
+uiscale_sans kept on
+uiscale_cinema kept on
+gamemode dropped on
+launchopts kept
+rawmouse kept on
+mousespeed kept 1
+updates kept on
+debug kept off
+steambg kept on
+quitsteam kept on
+reshade kept off
+"
 # A development build (CHANNEL=dev) starts with every switch on: I debug from everything on
 # backwards. Its rows that are switches go on once, by settings.conf's line dev_version=, as
 # SETTINGS_RESETS does for defaults: a row of DEV_ROWS, "<version> <key>=<value> ...", reads as
@@ -925,6 +958,41 @@ write_settings() { # [<key> <value>]: settings.conf with every key, one of them 
     echo "settings_version=$SETTINGS_VERSION"
     [ "$d" = 0 ] || echo "dev_version=$d"
     cat
+  } | put "$SETTINGS" 644
+}
+
+# move_settings: this app's settings.conf from 0.1.x's, through SETTINGS_FROM_01, at this version
+# (settings_version: no reset of SETTINGS_RESETS applies to it); the keys left out read as this
+# version's defaults, and write_settings (install_bottle) writes them all. MOVE_LOST: the sentence
+# for what didn't come along that 0.1.x had chosen or ran with (a dropped or reset key whose value
+# doesn't match what this version does).
+move_settings() {
+  local old="$OLD_APPDIR/settings.conf" k how def v lines="" gone=""
+  MOVE_LOST=""
+  while read -r k how def; do
+    [ -n "$k" ] || continue
+    if grep -q "^$k=" "$old" 2>/dev/null; then v=$(sed -n "s/^$k=//p" "$old" | tail -1); else v=${def:-}; fi
+    case "$how" in
+      kept)
+        if setting_valid "$k" "$v"; then lines="$lines$k=$v
+"
+        else log "settings from $OLD_LABEL: $k=$v isn't a value of this version; its default"
+        fi ;;
+      default|dropped) log "settings from $OLD_LABEL: $k=$v $how" ;;
+    esac
+    case "$k=$v" in
+      fastlocks=on) gone="${gone:+$gone; }Fast locks is off, this version's default" ;;
+      gamemode=off) gone="${gone:+$gone; }Game Mode is always on here" ;;
+      coolworkers=off|coolworkers=) ;;
+      coolworkers=*) gone="${gone:+$gone; }Cooler job workers don't exist on this engine" ;;
+    esac
+  done <<EOF
+$SETTINGS_FROM_01
+EOF
+  [ -z "$gone" ] || MOVE_LOST="Changed from $OLD_LABEL: $gone."
+  { echo "# $APP_NAME settings (change them in the app: $APP_NAME > Settings…)"
+    echo "settings_version=$SETTINGS_VERSION"
+    printf '%s' "$lines"
   } | put "$SETTINGS" 644
 }
 
@@ -3728,7 +3796,8 @@ move_reshade() {
   move_paths "$GAME_DIR/ReShade.ini" || die "$APP_NAME couldn't change $GAME_DIR/ReShade.ini. Try again (details in $LOGS/install.log)."
 }
 
-# install_moved <route>: install move after the engine and the bottle. Steam's route runs Valve's installer first, as for an install (its registry), then 0.1.x's
+# install_moved <route>: install move after the engine, the settings (move_settings) and the
+# bottle. Steam's route runs Valve's installer first, as for an install (its registry), then 0.1.x's
 # Steam folder takes the new one's place.
 install_moved() {
   local route=$1 u ou d dst what="" lost files how steamline
@@ -3797,10 +3866,11 @@ install_moved() {
   [ "$RSH" != on ] || what="${what:+$what, }ReShade$([ "$MOVE_RS" != moved ] || echo " with your presets")"
   [ "$(uiscale_state)" != on ] || what="${what:+$what, }the larger interface"
   lost="" files="Guild Wars 2" how="cloned, no extra space" steamline=""
+  [ -z "$MOVE_LOST" ] || lost=" $MOVE_LOST"
   [ "$MOVE_HOW" != copied ] || how=copied
   if [ "$route" = steam ]; then files="Steam with Guild Wars 2 in its library" steamline=" Steam may ask you to sign in once."; fi
   if [ "$GAME" = yes ] || [ -n "$DRY" ]; then
-    echo "@done Your install moved from $OLD_LABEL: $files ($how), your game settings${what:+ and your addons as they were ($what)}.$lost$steamline $OLD_LABEL stays as it was. Press Play."
+    echo "@done Your install moved from $OLD_LABEL: $files ($how), your game settings${what:+, your addons as they were ($what)} and your settings.$lost$steamline $OLD_LABEL stays as it was. Press Play."
   else
     echo "@done Your install moved from $OLD_LABEL.$lost Steam is starting: it brings the game up to date, and may ask you to sign in once; this window follows it."
   fi
@@ -4650,6 +4720,11 @@ cmd_install() {
   move_fail engine
   phase 2
   step "The game's own bottle"
+  if [ -n "$moving" ]; then
+    say "Your settings from $OLD_LABEL ($OLD_APPDIR/settings.conf)"
+    move_settings
+    move_fail settings
+  fi
   install_bottle
   if [ -n "$moving" ]; then
     move_fail bottle

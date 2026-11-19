@@ -153,6 +153,7 @@ and stay as they were on the day of the move.
   the compiled effects' cache and any path you set by hand. The interface addon's files are
   written again from your settings, and the finishing touches put the addons in order, as at every
   Play.
+- Your settings come over as the *From 0.1* column under [Settings](#settings) says.
 
 On the same disk it clones, which takes no space until one of the copies changes. From another
 disk, such as a bottle you linked to an external drive, it copies after checking the free space.
@@ -263,34 +264,47 @@ Four keys have no row: `dxmt`, `wine` and `macdrv` pick my DXMT fork, my `ntdll.
 with `gw2om.sh set`. The rows that need one of my files are greyed while the engine's own is
 chosen, and the main window's *Engine* and *Graphics* checks name the files in place.
 
-| Pane | Setting | Key | Default | What it does |
-|---|---|---|---|---|
-| Graphics | Retina | `retina` | on | draws at your display's full resolution, at some cost in frame rate |
-| | Frame cap | `fpscap` | off | a steady cap paced by Metal at 30, 40, 60 or 120, for a display above 60 Hz or for a lower steady rate. With *Vsync* and the game's own Vertical Sync on, a cap at or above the display's refresh does nothing |
-| | Vsync | `vsync` | on | my DXMT fork's display sync (`CAMetalLayer`'s vsync): Metal shows each frame on one of the display's refreshes. Off, the game's rule gets `DXMT_DISPLAY_SYNC=0`, and DXMT asks Metal for a minimum time between frames instead: one refresh, or the frame cap's interval. The row acts only while the game's own Vertical Sync is on, see [The game's environment](#the-games-environment). The frame-limiter tip shows only while the row is on. Greyed while the engine's own DXMT is chosen |
-| | Metal | `metal` | 4 | Metal 3 or Metal 4 for my DXMT fork (`DXMT_METAL4=0` or `=1` in the game's rule; at Metal 4 with `DXMT_MTL4_PRESENT=mtl3` too, see [The game's environment](#the-games-environment)). Metal 4 is the newer path. Switch to Metal 3 for better backwards compatibility. A `settings.conf` without the key reads 4, and one with `metal=3` keeps it: Install and Repair wrote the key into every file while Metal 3 was the default. Greyed while the engine's own DXMT is chosen |
-| | MetalFX for Subsample | `metalfx` | off | MetalFX upscales the 3D scene and the interface stays sharp. It works only with the game's Render Sampling set to Subsample, and does nothing at Native. Greyed while the engine's own DXMT is chosen |
-| | Metal HUD | `hud` | off | Apple's overlay with frame rate and frame times, over the game only and not over Steam's windows |
-| | Launcher frames | `launcherframes` | off | the launcher's window gets a copy of each frame, and a frame equal to the last is skipped (`WINE_MACDRV_SURFACE=copy,skip`). Against a launcher that flickers. Experimental. It stays off until I've looked at the launcher on three starts (#105). Greyed while the engine's own `winemac.so` is chosen |
-| Performance | Shader warming | `warm` | on | builds the pipelines the last sessions used before the game asks for them. Experimental, as my DXMT fork's table calls `DXMT_WARM`. Greyed while the engine's own DXMT is chosen |
-| | CPUs the game sees | `ncpu` | 8 | from 2 up to your Mac's logical CPUs, or all. The game starts one job worker per CPU, minus one |
-| | Job wakes | `jobwakes` | on | a job the game hands out wakes one sleeping worker, and none when no worker sleeps (`WINE_HEAT_WAKE=one,skip`). Greyed while the engine's own `ntdll.so` is chosen |
-| | Event pool | `eventpool` | on | closed events are kept and handed out again, without a request to the Wine server (`WINE_HEAT_EVPOOL=1`). Greyed while the engine's own `ntdll.so` is chosen |
-| | Faster locks | `fastlocks` | off | short spins before the game thread sleeps on a busy lock, a job group or an event (`WINE_HEAT_SPIN=lock=20:game,event=30:game`). Experimental. It stays off until a session of mine shows more hits than misses (#105). Greyed while the engine's own `ntdll.so` is chosen |
-| Interface | Larger interface | `uiscale` | off | my interface addon, see below |
-| | Interface Size "Larger" | `uiscale_size` | 1.75 | the addon's scale: 1.5, 1.75, 1.8 or 2.0 |
-| | Small text in Cronos | `uiscale_sans` | on | chat, the tracker and labels have no larger font, so the addon draws them in Cronos at the larger size |
-| | Cinematic dialogue | `uiscale_cinema` | off | story cinematics size their dialogue apart from the interface. This draws it at the same size, with a small code patch |
-| | arcdps | `arcdps` | off | downloads or removes arcdps, see below |
-| | ReShade | `reshade` | off | downloads or removes ReShade, see below |
-| Game | Start Steam in the background | `steambg` | on | Steam starts without a window once it remembers your login |
-| | Quit Steam when the game quits | `quitsteam` | on | shown while the previous setting is on |
-| | Launch options | `launchopts` | none | arguments for `Gw2-64.exe`, using letters, digits and `-_.:=,/+` |
-| | Quit GW2 on Mac after launching | | off | the app quits once Play has started Steam or the game |
-| Mouse | Raw mouse-look | `rawmouse` | on | on, the game's raw input is the mouse's own counts from GameController; off, it is the pointer's movement, see below |
-| | Mouse-look speed | `mousespeed` | 1× | a factor on the mouse's own counts, from 0.5× to 3×, which my `winemac.so` applies before the game gets them (`WINE_MACDRV_MOUSE_SCALE`). The game's own camera settings apply on top. Greyed while *Raw mouse-look* is off, while the engine's own `winemac.so` is chosen, or while my file in this app doesn't have the switch |
-| Updates | Check automatically | `updates` | on | Sparkle checks for new versions. Off in development builds, which have no update feed |
-| Troubleshooting | Debug logging | `debug` | off | DXMT's log at `debug` and Wine's errors, for a bug report, at some cost in performance. With my `winemac.so`, also its `macsurface` lines for `Gw2-64.exe`. FEX's messages too, and with my `ntdll.so` FEX's counters. On in development builds |
+| Pane | Setting | Key | Default | From 0.1 | What it does |
+|---|---|---|---|---|---|
+| Graphics | Retina | `retina` | on | kept | draws at your display's full resolution, at some cost in frame rate |
+| | Frame cap | `fpscap` | off | kept | a steady cap paced by Metal at 30, 40, 60 or 120, for a display above 60 Hz or for a lower steady rate. With *Vsync* and the game's own Vertical Sync on, a cap at or above the display's refresh does nothing |
+| | Vsync | `vsync` | on | new | my DXMT fork's display sync (`CAMetalLayer`'s vsync): Metal shows each frame on one of the display's refreshes. Off, the game's rule gets `DXMT_DISPLAY_SYNC=0`, and DXMT asks Metal for a minimum time between frames instead: one refresh, or the frame cap's interval. The row acts only while the game's own Vertical Sync is on, see [The game's environment](#the-games-environment). The frame-limiter tip shows only while the row is on. Greyed while the engine's own DXMT is chosen |
+| | Metal | `metal` | 4 | new | Metal 3 or Metal 4 for my DXMT fork (`DXMT_METAL4=0` or `=1` in the game's rule; at Metal 4 with `DXMT_MTL4_PRESENT=mtl3` too, see [The game's environment](#the-games-environment)). Metal 4 is the newer path. Switch to Metal 3 for better backwards compatibility. A `settings.conf` without the key reads 4, and one with `metal=3` keeps it: Install and Repair wrote the key into every file while Metal 3 was the default. Greyed while the engine's own DXMT is chosen |
+| | MetalFX for Subsample | `metalfx` | off | kept | MetalFX upscales the 3D scene and the interface stays sharp. It works only with the game's Render Sampling set to Subsample, and does nothing at Native. Greyed while the engine's own DXMT is chosen |
+| | Metal HUD | `hud` | off | kept | Apple's overlay with frame rate and frame times, over the game only and not over Steam's windows |
+| | Launcher frames | `launcherframes` | off | new | the launcher's window gets a copy of each frame, and a frame equal to the last is skipped (`WINE_MACDRV_SURFACE=copy,skip`). Against a launcher that flickers. Experimental. It stays off until I've looked at the launcher on three starts (#105). Greyed while the engine's own `winemac.so` is chosen |
+| Performance | Shader warming | `warm` | on | kept | builds the pipelines the last sessions used before the game asks for them. Experimental, as my DXMT fork's table calls `DXMT_WARM`. Greyed while the engine's own DXMT is chosen |
+| | CPUs the game sees | `ncpu` | 8 | kept | from 2 up to your Mac's logical CPUs, or all. The game starts one job worker per CPU, minus one |
+| | Job wakes | `jobwakes` | on | new | a job the game hands out wakes one sleeping worker, and none when no worker sleeps (`WINE_HEAT_WAKE=one,skip`). Greyed while the engine's own `ntdll.so` is chosen |
+| | Event pool | `eventpool` | on | new | closed events are kept and handed out again, without a request to the Wine server (`WINE_HEAT_EVPOOL=1`). Greyed while the engine's own `ntdll.so` is chosen |
+| | Faster locks | `fastlocks` | off | reset to off | short spins before the game thread sleeps on a busy lock, a job group or an event (`WINE_HEAT_SPIN=lock=20:game,event=30:game`). Experimental. It stays off until a session of mine shows more hits than misses (#105). Greyed while the engine's own `ntdll.so` is chosen |
+| Interface | Larger interface | `uiscale` | off | kept | my interface addon, see below |
+| | Interface Size "Larger" | `uiscale_size` | 1.75 | kept | the addon's scale: 1.5, 1.75, 1.8 or 2.0 |
+| | Small text in Cronos | `uiscale_sans` | on | kept | chat, the tracker and labels have no larger font, so the addon draws them in Cronos at the larger size |
+| | Cinematic dialogue | `uiscale_cinema` | off | kept | story cinematics size their dialogue apart from the interface. This draws it at the same size, with a small code patch |
+| | arcdps | `arcdps` | off | as it was | downloads or removes arcdps, see below |
+| | ReShade | `reshade` | off | kept | downloads or removes ReShade, see below |
+| Game | Start Steam in the background | `steambg` | on | kept | Steam starts without a window once it remembers your login |
+| | Quit Steam when the game quits | `quitsteam` | on | kept | shown while the previous setting is on |
+| | Launch options | `launchopts` | none | kept | arguments for `Gw2-64.exe`, using letters, digits and `-_.:=,/+` |
+| | Quit GW2 on Mac after launching | | off | kept | the app quits once Play has started Steam or the game |
+| Mouse | Raw mouse-look | `rawmouse` | on | kept | on, the game's raw input is the mouse's own counts from GameController; off, it is the pointer's movement, see below |
+| | Mouse-look speed | `mousespeed` | 1× | kept | a factor on the mouse's own counts, from 0.5× to 3×, which my `winemac.so` applies before the game gets them (`WINE_MACDRV_MOUSE_SCALE`). The game's own camera settings apply on top. Greyed while *Raw mouse-look* is off, while the engine's own `winemac.so` is chosen, or while my file in this app doesn't have the switch |
+| Updates | Check automatically | `updates` | on | kept | Sparkle checks for new versions. Off in development builds, which have no update feed |
+| Troubleshooting | Debug logging | `debug` | off | kept | DXMT's log at `debug` and Wine's errors, for a bug report, at some cost in performance. With my `winemac.so`, also its `macsurface` lines for `Gw2-64.exe`. FEX's messages too, and with my `ntdll.so` FEX's counters. On in development builds |
+
+*From 0.1* is what a move from GW2 on Mac 0.1 does with each setting (`SETTINGS_FROM_01` in
+`gw2om.sh`). 0.1's `settings.conf` has no version line and writes every key, so a value there is
+what 0.1 ran with, chosen or not. A kept key means the same here and keeps 0.1's value. A key 0.1's
+file lacks, from a release older than the key, reads as 0.1's default: *Cinematic dialogue* was on
+there and is off here. A value this version doesn't take, such as a CPU count above this Mac's,
+reads as this version's default. *Faster locks* resets to off: on 0.1 it was a spin in CrossOver's
+msync, here it is another port with its own default. 0.1's *Game Mode* has no row here, since the
+engine's loader is a Game Mode app, and 0.1's *Cooler job workers* has none on this line
+([ADR 0006](docs/adr/0006-0.2-has-no-cooler-job-workers.md)), so both are dropped. *Mouse-look speed* keeps its value, though here it scales the mouse's own
+counts and on 0.1 the pointer's speed, so the camera may turn at another speed. Settings that are
+new on this line start at their defaults. The move's summary names the ones that changed from
+what 0.1 ran with.
 
 ### Raw mouse-look
 
@@ -816,8 +830,9 @@ ArenaNet. `gw2om.sh scan` finds the installs and `gw2om.sh check-game <dir>` che
 Both only read.
 
 A move, `gw2om.sh install move`, runs the same phases from 0.1's install
-([Moving from GW2 on Mac 0.1](#moving-from-gw2-on-mac-01)). On Steam's route 0.1's Steam folder
-replaces the one Valve's installer made. It refuses while 0.1's Wine runs, and checks again before each folder it clones
+([Moving from GW2 on Mac 0.1](#moving-from-gw2-on-mac-01)). Before the bottle it writes
+`settings.conf` from 0.1's, and on Steam's route 0.1's Steam folder replaces the one Valve's
+installer made. It refuses while 0.1's Wine runs, and checks again before each folder it clones
 and after the last. A failed or cancelled move also removes the ReShade folder and
 `reshade-compiler` it brought, `dxmt.conf` and `.session.lock`, so the app's folder is as empty as
 before. `gw2om.sh status` prints `old_install`, `move` (yes when the window should start it),

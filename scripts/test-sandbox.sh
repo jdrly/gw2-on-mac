@@ -3535,8 +3535,12 @@ winp() { printf 'Z:%s' "$1" | tr / '\\'; }
 ARC_CHAIN=addons/arcdps/chain/d3d11.dll CHAINW='addons\arcdps\chain\d3d11.dll'
 GW2_ON_MAC_RESHADE_DLL_SHA256="$(shasum -a 256 "$SANDBOX/pe/ReShade64.dll" | cut -d' ' -f1)"
 export GW2_ON_MAC_RESHADE_DLL_SHA256
-old01() { # <steam|arenanet> <arcdps|both>
-  local g
+# every one of 0.1.4's keys off its default (reshade on, with the "both" layout), and the values a
+# move gives them here (SETTINGS_FROM_01: kept, this version's default, or dropped)
+OLD_SET="retina=off fpscap=40 metalfx=on hud=on warm=off coolworkers=3 fastlocks=on ncpu=2 uiscale=on uiscale_size=2.0 uiscale_sans=off uiscale_cinema=off gamemode=off launchopts=-maploadinfo rawmouse=off mousespeed=1.5 updates=off debug=on steambg=off quitsteam=off reshade=on"
+FROM01=$(sed -n '/^SETTINGS_FROM_01="$/,/^"$/p' "$APP/Contents/Resources/gw2om.sh" | awk 'NF >= 2 { print $1, $2 }')
+old01() { # <steam|arenanet> <arcdps|both> [<settings.conf lines>]
+  local g k
   rm -rf "$O1" "$OC"
   mkdir -p "$O1/engine/bin" "$O1/engine/lib/wine/x86_64-unix" "$O1B/drive_c/windows" "$O1U/AppData/Local/Steam" \
     "$O1U/AppData/Roaming/Guild Wars 2/Screens" "$O1/gamemode/GW2.app/Contents/MacOS" "$OC/reshade" "$OC/dxmt/Gw2-64.exe"
@@ -3577,7 +3581,12 @@ old01() { # <steam|arenanet> <arcdps|both>
       "$(winp "$OC/reshade")" "$(printf %s "${g#"$O1B/drive_c/"}" | tr / '\\')" "$CHAINW" "$(winp "$O1RS")" >"$O1RS/ReShade.ini"
     echo "[Mine]" >"$O1RS/Presets/Mine.ini" && echo "// fxh" >"$O1RS/Shaders/Standard/ReShade.fxh"
   fi
-  { echo "# GW2 on Mac settings"; echo "uiscale=on"; echo "reshade=$([ "$2" = both ] && echo on || echo off)"; } >"$O1/settings.conf"
+  if [ -n "${3+x}" ]; then printf '%s' "$3" >"$O1/settings.conf"
+  else
+    { echo "# GW2 on Mac settings"; for k in $OLD_SET; do
+        case "$2 $k" in "arcdps reshade="*) echo reshade=off ;; *) echo "$k" ;; esac
+      done; } >"$O1/settings.conf"
+  fi
 }
 # what the app's folder holds, the bottle with Steam and the game in it, and 0.1's: its content and
 # every file's and folder's size, mtime and mode
@@ -3586,6 +3595,21 @@ o1_same() { [ "$(o1snap)" = "$O1SNAP" ]; }
 nothing_made() { [ -z "$(ls -A "$AD" 2>/dev/null)" ]; }
 # ini_clean <file>: no line names 0.1's folders (Application Support's or Caches' GW2 on Mac)
 ini_clean() { ! grep -iqF -e "$(winp "$O1")\\" -e "$(winp "$OC")\\" "$1" && ! grep -iqE "$(winp "$O1" | sed 's/\\/\\\\/g')$" "$1"; }
+# settings_moved: this app's settings.conf as SETTINGS_FROM_01 says for the OLD_SET file, key by key
+settings_moved() {
+  local k how want got
+  printf '%s\n' "$FROM01" | while read -r k how; do
+    case " $OLD_SET " in *" $k="*) ;; *) echo "OLD_SET has no $k"; return 1 ;; esac
+    want=$(printf '%s\n' $OLD_SET | sed -n "s/^$k=//p")
+    got=$(sett "$k")
+    case "$how" in
+      kept) [ "$got" = "$want" ] || { echo "$k: $got, not $want"; return 1; } ;;
+      default) [ "$got" = "$(GW2_ON_MAC_ROOT="$SANDBOX/nowhere-root" "$GW2OM" settings | sed -n "s/^$k=//p")" ] || { echo "$k: $got, not the default"; return 1; } ;;
+      dropped) ! grep -q "^$k=" "$AD/settings.conf" || [ "$k" = gamemode ] || { echo "$k is in settings.conf"; return 1; } ;;
+      *) echo "$k: $how?"; return 1 ;;
+    esac
+  done
+}
 mv_done() { echo "$out" | sed -n 's/^@done //p'; }
 
 old01 steam both
@@ -3617,7 +3641,7 @@ check "dry-run install move: exits 0, makes nothing; every Wine call as crossove
   eval '[ "$rc" = 0 ] && nothing_made && echo "$out" | grep -qxF "[dry-run] wine (USER=crossover) wineboot --init" && ! echo "$out" | grep "^\[dry-run\] wine " | grep -qv "(USER=crossover)" && has <(echo "$out") "^\[dry-run\] clone $O1ST to "'
 
 # a failure at each step, and a cancel after the clone: nothing of the move stays, 0.1 as it was
-for p in engine bottle steam files profile reshade finish; do
+for p in engine settings bottle steam files profile reshade finish; do
   out=$(GW2_ON_MAC_MOVE_FAIL=$p g install move 2>&1) && rc=0 || rc=$?
   check "the move failing at $p leaves nothing, and 0.1 as it was" \
     eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error The move failed at $p" && nothing_made && o1_same && [ "$(st move)" = yes ]'
@@ -3661,10 +3685,12 @@ check "  the game folder's ReShade.ini names this app's ReShade folder" \
 check "  the ReShade folder with the preset and shaders; its ini names this app's cache and folder, the chain path on" \
   eval 'same "$O1RS/Presets/Mine.ini" "$AD/ReShade/Presets/Mine.ini" && same "$O1RS/Shaders/Standard/ReShade.fxh" "$AD/ReShade/Shaders/Standard/ReShade.fxh" && has "$AD/ReShade/ReShade.ini" "^IntermediateCachePath=$(winp "$CACHE/reshade" | sed "s/\\\\/\\\\\\\\/g")\$" && has "$AD/ReShade/ReShade.ini" "^SavePath=$(winp "$AD/ReShade" | sed "s/\\\\/\\\\\\\\/g")\\\\Screenshots\$" && has "$AD/ReShade/ReShade.ini" "^EnableProxyLibrary=1\$"'
 check "  no line of either ini names a folder of 0.1's" eval 'ini_clean "$GM/ReShade.ini" && ini_clean "$AD/ReShade/ReShade.ini"'
-check "  the larger interface's files follow this app's setting, off" eval '[ ! -e "$GM/version.dll" ] && [ ! -e "$GM/gw2-ui-scale.ini" ]'
+check "  the larger interface: this app's version.dll, its ini from the settings" \
+  eval 'same "$COMP/ui-scale/version.dll" "$GM/version.dll" && has "$GM/gw2-ui-scale.ini" "^scale=2.0\$"'
+check "  the settings, key by key as SETTINGS_FROM_01 says, at this version" eval 'settings_moved && grep -q "^settings_version=" "$AD/settings.conf" && ! grep -q "^coolworkers=" "$AD/settings.conf"'
 check "  no DXMT or ReShade cache of 0.1's came along" eval '[ -z "$(find "$CACHE" -type f \( -name shaders.bin -o -name effect.bin \) 2>/dev/null)" ]'
 check "  the summary: what came along, what changed, Steam's login, 0.1 as it was" \
-  eval 'has <(mv_done) "^Your install moved from GW2 on Mac 0.1: Steam with Guild Wars 2 in its library (cloned, no extra space), your game settings and your addons as they were (arcdps, ReShade with your presets)\. Steam may ask you to sign in once\. GW2 on Mac 0\.1 stays as it was\. Press Play\.$" || { mv_done; false; }'
+  eval 'has <(mv_done) "^Your install moved from GW2 on Mac 0.1: Steam with Guild Wars 2 in its library (cloned, no extra space), your game settings, your addons as they were (arcdps, ReShade with your presets, the larger interface) and your settings\. Changed from GW2 on Mac 0\.1: Cooler job workers don.t exist on this engine; Fast locks is off, this version.s default; Game Mode is always on here\. Steam may ask you to sign in once\. GW2 on Mac 0\.1 stays as it was\. Press Play\.$" || { mv_done; false; }'
 check "  0.1's folders as they were" o1_same
 c=$(play_cmd)
 check "  Play: Steam as crossover" eval 'every_wine_as crossover && [[ "$c" == *"steam.exe -applaunch 1284210"* ]]'
@@ -3674,13 +3700,17 @@ check "Start fresh: this app's install goes, the move doesn't start by itself ag
   eval '[ "$rc" = 0 ] && [ "$(st installed) $(st move) $(st move_record) $(st old_install)" = "no no skipped yes" ] && [ "$(ls -A "$AD" | LC_ALL=C sort | tr "\n" " ")" = "ReShade moved-from-0.1 " ] && o1_same'
 rm -rf "$AD"
 
-# arcdps alone
-old01 steam arcdps
+# a 0.1.3-age settings file (keys missing: 0.1's defaults) with Cooler job workers at 3, arcdps alone
+old01 steam arcdps "$(printf 'fpscap=60\ncoolworkers=3\n')"
 O1SNAP=$(o1snap)
 out=$(g install move 2>&1) && rc=0 || rc=$?
-check "install move (Steam, arcdps alone) exits 0" [ "$rc" = 0 ]
+check "install move (Steam, arcdps alone, an older settings file with coolworkers=3) exits 0" [ "$rc" = 0 ]
 check "  arcdps as d3d11.dll, no ReShade, no ReShade folder made" \
   eval 'same "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll" && [ "$(st arcdps_state) $(st reshade_state)" = "on off" ] && [ ! -e "$AD/ReShade" ]'
+check "  the keys the file lacks read as 0.1's defaults (uiscale_cinema on), the rest as kept; coolworkers dropped" \
+  eval '[ "$(sett fpscap) $(sett uiscale_cinema) $(sett steambg) $(sett fastlocks) $(sett ncpu)" = "60 on on off 8" ] && ! grep -q "^coolworkers=" "$AD/settings.conf"'
+check "  the summary names Fast locks and Cooler job workers" \
+  has <(mv_done) "Changed from GW2 on Mac 0.1: Cooler job workers don.t exist on this engine; Fast locks is off, this version.s default\."
 c=$(play_cmd)
 check "  the first Play shows Steam's window though Steam remembers a login; the next goes silent again" \
   eval '[[ "$c" == *"steam.exe -applaunch 1284210"* && "$c" != *-silent* ]] && [ "$(st origin)" = moved ]'
@@ -3704,7 +3734,7 @@ check "  the game's settings; no Steam files in the profile" \
   eval 'same "$O1U/AppData/Roaming/Guild Wars 2/Local.dat" "$BOTTLE/drive_c/users/crossover/AppData/Roaming/Guild Wars 2/Local.dat" && [ ! -e "$BOTTLE/drive_c/users/crossover/AppData/Local/Steam" ]'
 check "  arcdps at the chain path, ReShade in, both inis name only this app's folders" \
   eval 'same "$SANDBOX/pe/arcdps.dll" "$GA/$ARC_CHAIN" && [ "$(st arcdps_state) $(st reshade_state)" = "on on" ] && ini_clean "$GA/ReShade.ini" && ini_clean "$AD/ReShade/ReShade.ini" && has "$AD/ReShade/ReShade.ini" "^ProxyLibrary=C:.Program Files.Guild Wars 2.addons.arcdps.chain.d3d11.dll\$"'
-check "  the summary" has <(mv_done) "^Your install moved from GW2 on Mac 0.1: Guild Wars 2 (cloned, no extra space), your game settings and your addons as they were (arcdps, ReShade with your presets)\..* GW2 on Mac 0.1 stays as it was\. Press Play\.$"
+check "  the summary" has <(mv_done) "^Your install moved from GW2 on Mac 0.1: Guild Wars 2 (cloned, no extra space), your game settings, your addons as they were (arcdps, ReShade with your presets, the larger interface) and your settings\..* GW2 on Mac 0.1 stays as it was\. Press Play\.$"
 check "  0.1's folders as they were" o1_same
 # a bottle an earlier version made keeps its user's name (the Mac's login there)
 mv "$BOTTLE/drive_c/users/crossover" "$BOTTLE/drive_c/users/$(id -un)x"
