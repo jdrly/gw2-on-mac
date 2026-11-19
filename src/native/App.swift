@@ -142,7 +142,8 @@ final class Installer {
   // dropped (checked by gw2om.sh check-setup)
   var route: Route = Route(rawValue: UserDefaults.standard.string(forKey: "route") ?? "") ?? .steam {
     didSet {
-      UserDefaults.standard.set(route.rawValue, forKey: "route")
+      // (kept only once status says this Mac runs the engine: nothing writes before that)
+      if macosChecked { UserDefaults.standard.set(route.rawValue, forKey: "route") }
       if route == .existing && oldValue != .existing { scanGames() }
     }
   }
