@@ -241,11 +241,20 @@ func installer(_ state: String) -> Installer {
     }
   case "moved":
     // Ready after the move (the summary under the panel)
-    st = st.merging(["origin": "move", "old_install": "yes", "move": "no", "move_record": "moved"]) { $1 }
-    i.phase = .succeeded(.move, "Your install moved from GW2 on Mac 0.1: Steam with Guild Wars 2 in its library (cloned, no extra space), "
+    st = st.merging(["origin": "move", "old_install": "no", "move": "no", "move_record": "moved", "move_game": "here"]) { $1 }
+    i.phase = .succeeded(.move, "Your install moved from GW2 on Mac 0.1: Steam with Guild Wars 2 in its library (moved on this disk, no extra space), "
                          + "your game settings, your addons as they were (arcdps, ReShade with your presets) and your settings. "
                          + "Changed from GW2 on Mac 0.1: Faster locks is off, this version's default. Steam may ask you to sign in once. "
-                         + "GW2 on Mac 0.1 stays as it was. Press Play.")
+                         + "To play on GW2 on Mac 0.1 again, choose Rollback to 0.1.4 in Settings › Troubleshooting. Press Play.")
+  case "rolled-back", "moving-in":
+    // after Rollback: installed, the game back in 0.1's folder; then Move it in again running
+    st = st.merging(["origin": "moved", "old_install": "yes", "move": "no", "move_record": "moved", "move_game": "01",
+                     "game": "no", "steam": "no", "rollback_version": "0.1.4",
+                     "rollback_dmg": "https://github.com/jdrly/gw2-on-mac/releases/download/v0.1.4/GW2-on-Mac-0.1.4.dmg"]) { $1 }
+    if state == "moving-in" {
+      i.operation = .moveIn
+      i.phase = .working(.moveIn)
+    }
   case let s where s.hasPrefix("session-"):
     // after Play: the start's stages, Playing, Steam closing after the game (Session.swift)
     st["busy"] = "steam"
@@ -354,6 +363,10 @@ func renderAll(_ dir: URL, exports: URL?) async {
     ("main-moving-dark", "moving", true, nil),
     ("main-move-failed-light", "move-failed", false, nil),
     ("main-moved-light", "moved", false, nil),
+    ("main-moved-dark", "moved", true, nil),
+    ("main-rolled-back-light", "rolled-back", false, nil),
+    ("main-rolled-back-dark", "rolled-back", true, nil),
+    ("main-moving-in-light", "moving-in", false, nil),
     ("main-starting-light", "session-starting", false, "7-starting.png"),
     ("main-starting-dark", "session-starting", true, "7-starting-dark.png"),
     ("main-playing-light", "session-playing", false, "8-playing.png"),
@@ -372,7 +385,8 @@ func renderAll(_ dir: URL, exports: URL?) async {
     "session-signing-in": .starting, "session-loading": .starting, "session-arenanet": .starting,
     "session-playing": .playing, "session-playing-nohint": .playing, "session-closing": .ready,
     "session-steam-update": .starting,
-    "move-waiting": .installing, "moving": .installing, "move-failed": .installing, "moved": .ready]
+    "move-waiting": .installing, "moving": .installing, "move-failed": .installing, "moved": .ready,
+    "rolled-back": .rolledBack, "moving-in": .rolledBack]
   // what the window does about the move from 0.1 for a status (a model check): start it, wait for
   // 0.1, or nothing (installed, no move, a Mac below the engine's macOS, a move that failed or was
   // cancelled, whether 0.1 runs or not)
@@ -551,7 +565,9 @@ func renderAll(_ dir: URL, exports: URL?) async {
       write(rep, dir.appendingPathComponent(name + ".png"))
       // (Troubleshooting with Start fresh: after a move from 0.1, and before one, nothing installed)
       if pane == .troubleshooting {
-        for (n, extra) in [("moved", ["old_install": "yes", "move_record": "moved", "origin": "moved"]),
+        // (moved: with Rollback to 0.1.4 above Start fresh, the game here)
+        for (n, extra) in [("moved", ["old_install": "no", "move_record": "moved", "origin": "moved", "move_game": "here",
+                                      "rollback_version": "0.1.4"]),
                            ("not-installed", ["installed": "no", "old_install": "yes", "move_record": ""])] {
           write(await render(SettingsView(settings: settings(extra)), size: SettingsView.designSize, dark: dark),
                 dir.appendingPathComponent("settings-troubleshooting-start-fresh-\(n)-light.png"))
@@ -605,6 +621,11 @@ func renderAll(_ dir: URL, exports: URL?) async {
     let reshadeSheet = AddonWarning.reshade(isPresented: .constant(true), version: "6.8.0") {}
     write(await render(reshadeSheet, size: CGSize(width: 460, height: 278), dark: dark, chrome: false),
           dir.appendingPathComponent("sheet-reshade-warning-\(dark ? "dark" : "light").png"))
+    let rollbackSheet = RollbackSheet(version: "0.1.4",
+      dmg: URL(string: "https://github.com/jdrly/gw2-on-mac/releases/download/v0.1.4/GW2-on-Mac-0.1.4.dmg"),
+      isPresented: .constant(true))
+    write(await render(rollbackSheet, size: CGSize(width: 460, height: 250), dark: dark, chrome: false),
+          dir.appendingPathComponent("sheet-rollback-\(dark ? "dark" : "light").png"))
     let presetSheet = AddonWarning.preset(isPresented: .constant(true), name: "Golden Hour.ini") {}
     write(await render(presetSheet, size: CGSize(width: 460, height: 172), dark: dark, chrome: false),
           dir.appendingPathComponent("sheet-reshade-preset-\(dark ? "dark" : "light").png"))

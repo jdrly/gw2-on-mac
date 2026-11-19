@@ -21,6 +21,8 @@ struct MainView: View {
   @Environment(\.openWindow) private var openWindow
   @State private var confirmUninstall = false
   @State private var showLogSheet = false
+  // after Rollback: how to install GW2 on Mac 0.1.x (RollbackSheet, from RolledBackPanel)
+  @State private var showRollbackSheet = false
   @State private var blocked: Blocked?
 
   struct Blocked: Identifiable {
@@ -55,12 +57,16 @@ struct MainView: View {
     .animation(.smooth, value: installer.panel)
     .animation(.smooth, value: installer.status)
     .sheet(isPresented: $showLogSheet) { LogSheet(installer: installer) }
+    .sheet(isPresented: $showRollbackSheet) {
+      RollbackSheet(version: installer.rollbackVersion, dmg: installer.rollbackDMG, isPresented: $showRollbackSheet)
+    }
     .onChange(of: installer.closeSheets) { _, _ in
       showLogSheet = false
+      showRollbackSheet = false
       confirmUninstall = false
       blocked = nil
     }
-    .onChange(of: showLogSheet || confirmUninstall || blocked != nil) { _, open in
+    .onChange(of: showLogSheet || showRollbackSheet || confirmUninstall || blocked != nil) { _, open in
       installer.sheetOpen = open
     }
     // (a setting saved in the Settings window: the checks read it again, the Metal row's in Graphics)
@@ -78,7 +84,11 @@ struct MainView: View {
       Text("This removes everything \(appName) created: the Wine engine and the game's bottle. The "
            + "game's files are in the bottle, so they go with it: Guild Wars 2 has to download again if "
            + "you install it later. Its caches go too, DXMT's shader cache with them. Your account, "
-           + "characters and Steam library are not affected. The logs are kept.")
+           + "characters and Steam library are not affected. The logs are kept."
+           + (installer.status["move_game"] == "here"
+              ? " The game moved here from GW2 on Mac 0.1, which has no copy of it now. To keep it for 0.1, "
+                + "choose Rollback to \(installer.rollbackVersion) in Settings › Troubleshooting first."
+              : ""))
     }
     .alert(blocked?.title ?? "", isPresented: Binding(get: { blocked != nil }, set: { if !$0 { blocked = nil } }),
            presenting: blocked) { _ in
@@ -95,7 +105,8 @@ struct MainView: View {
       repair: { askRepair() },
       uninstall: { askUninstall() },
       settings: { settings.reload(); openWindow(id: "settings") },
-      showLog: { showLogSheet = true })
+      showLog: { showLogSheet = true },
+      downloadRollback: { showRollbackSheet = true })
   }
 
   private func askInstall() {
@@ -158,6 +169,7 @@ struct PanelActions {
   let uninstall: () -> Void
   let settings: () -> Void
   let showLog: () -> Void
+  let downloadRollback: () -> Void
 }
 
 // MARK: - Background and header
@@ -394,6 +406,9 @@ struct ThisMac: View {
       game = Check(id: "Guild Wars 2", icon: "swords", value: "Installed · \(route)", tone: .good)
     } else if installer.phase == .waitingForOld {
       game = Check(id: "Guild Wars 2", icon: "swords", value: "In GW2 on Mac 0.1 · moves next", tone: .pending)
+    } else if installer.rolledBack {
+      game = Check(id: "Guild Wars 2", icon: "swords",
+                   value: installer.phase == .working(.moveIn) ? "Moving in…" : "In GW2 on Mac 0.1 · Rollback", tone: .off)
     } else if installer.phase == .waitingForGame || installer.isOperating && installer.operation != .uninstall {
       game = Check(id: "Guild Wars 2", icon: "swords", value: installer.moving ? "Moving…" : "Installing…", tone: .pending)
     } else {
@@ -618,6 +633,7 @@ struct RightColumn: View {
       case .ready: ReadyPanel(installer: installer, actions: actions)
       case .starting: StartingPanel(installer: installer, session: installer.session ?? .init(fromPlay: false))
       case .playing: PlayingPanel(installer: installer, session: installer.session ?? .init(fromPlay: false), actions: actions)
+      case .rolledBack: RolledBackPanel(installer: installer, actions: actions)
       }
       ResultNote(installer: installer, actions: actions)
     }
@@ -642,7 +658,7 @@ struct ResultNote: View {
       }
     // (an install that ends in Ready: existing game files; the downloads go on to waiting)
     case .succeeded(.uninstall, let message), .succeeded(.repair, let message), .succeeded(.install, let message),
-         .succeeded(.move, let message):
+         .succeeded(.move, let message), .succeeded(.moveIn, let message):
       HStack(alignment: .top, spacing: 7) {
         LucideIcon(name: "circle-check", size: 13).foregroundStyle(Brand.good).padding(.top, 1)
         Text(message).font(.body(12.5)).bodyBox(12.5).foregroundStyle(Brand.fg2).fixedSize(horizontal: false, vertical: true)
@@ -1096,7 +1112,8 @@ struct MoveNote: View {
       case .waitingForGame:
         note("Steam brings your Guild Wars 2 up to date, and may ask you to sign in once. This window follows it.")
       case .working:
-        note("GW2 on Mac 0.1 stays as it is: its files are cloned, not moved."
+        note("The game moves on this disk, so it takes no extra space. GW2 on Mac 0.1 keeps its settings, "
+             + "and Rollback in Settings › Troubleshooting gives the game back to it."
              + (installer.status["move_route"] == "arenanet" ? "" : " Steam may ask you to sign in once."))
       default:
         HStack(spacing: 6) {
@@ -1229,6 +1246,47 @@ struct ReadyPanel: View {
 
   // after the game: the watcher closes the Steam the Play started (gw2om.sh watch-session)
   private var closing: Bool { installer.session?.closing ?? false }
+}
+
+// After Rollback (gw2om.sh rollback): Guild Wars 2 is in GW2 on Mac 0.1's folder again, and this
+// app's install has no game. The way to 0.1.x (its DMG, RollbackSheet), and the way to move the game
+// in again (gw2om.sh move-in: a rename, no download)
+struct RolledBackPanel: View {
+  let installer: Installer
+  let actions: PanelActions
+
+  private var movingIn: Bool { installer.phase == .working(.moveIn) }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      InkHeading(title: "The game is in GW2 on Mac 0.1", size: 17, alignment: .center) { EmptyView() }
+      Text("Rollback put Guild Wars 2 back where GW2 on Mac 0.1 had it. To play it there, install "
+           + "GW2 on Mac \(installer.rollbackVersion) over this app. To play it here, move it in again: "
+           + "a rename on this disk, with no download.")
+        .font(.body(13)).bodyBox(13, 1.3).foregroundStyle(Brand.fg2).fixedSize(horizontal: false, vertical: true)
+      Button { installer.start(.moveIn) } label: {
+        HStack(spacing: 10) {
+          LucideIcon(name: movingIn ? "loader-circle" : "undo-2", size: 18)
+          Text(movingIn ? "Moving in…" : "Move it in again")
+        }
+      }
+      .buttonStyle(.crimson)
+      .disabled(!installer.loaded || installer.isBusy)
+      Button(action: actions.downloadRollback) {
+        HStack(spacing: 6) {
+          LucideIcon(name: "download", size: 14)
+          Text("Download GW2 on Mac \(installer.rollbackVersion)…").font(.body(13.5, .semibold)).bodyBox(13.5)
+        }
+      }
+      .buttonStyle(QuietButtonStyle(color: Brand.accent))
+      .disabled(installer.rollbackDMG == nil)
+      SecondaryActions(installer: installer, actions: actions)
+    }
+    .padding(.top, 14)
+    .padding(.horizontal, 16)
+    .padding(.bottom, 16)
+    .brandPanel()
+  }
 }
 
 // MARK: - Log

@@ -221,7 +221,11 @@ final class GameSettings {
     }
   }
 
-  // gw2om.sh reset-shaders / reinstall-engine / start-fresh
+  // Rollback has put the game back in GW2 on Mac 0.1's folder: the window shows how to install
+  // 0.1.x (RollbackSheet)
+  var rolledBack = false
+
+  // gw2om.sh reset-shaders / reinstall-engine / start-fresh / rollback
   func run(_ command: String, _ extra: [String] = []) {
     guard action == nil else { return }
     action = command
@@ -229,9 +233,10 @@ final class GameSettings {
     let script = script
     Task {
       let output = await Installer.capture(script: script, arguments: [command] + extra)
+      let last = output.split(separator: "\n").last { $0.hasPrefix("@done ") || $0.hasPrefix("@error ") }
       action = nil
-      actionResult = output.split(separator: "\n").last { $0.hasPrefix("@done ") || $0.hasPrefix("@error ") }
-        .map { String($0.drop { $0 != " " }.dropFirst()) } ?? "Done."
+      actionResult = last.map { String($0.drop { $0 != " " }.dropFirst()) } ?? "Done."
+      if command == "rollback", last?.hasPrefix("@done ") == true { rolledBack = true }
       reload()
     }
   }
@@ -307,6 +312,7 @@ struct SettingsView: View {
   // Start fresh's confirmation was opened over the moved install (else before the move): what the
   // confirmation says, and what gw2om.sh start-fresh is told
   @State private var freshMoved = false
+  private var rollbackVersion: String { settings.values["rollback_version"] ?? "" }
   @Environment(\.colorScheme) private var scheme
 
   var body: some View {
@@ -361,6 +367,10 @@ struct SettingsView: View {
         settings.setReshade(true)
       }
     }
+    .sheet(isPresented: $settings.rolledBack) {
+      RollbackSheet(version: rollbackVersion,
+                    dmg: URL(string: settings.values["rollback_dmg"] ?? ""), isPresented: $settings.rolledBack)
+    }
     .sheet(isPresented: Binding(get: { settings.importedPreset != nil }, set: { if !$0 { settings.importedPreset = nil } })) {
       let name = settings.importedPreset ?? ""
       AddonWarning.preset(isPresented: Binding(get: { settings.importedPreset != nil }, set: { if !$0 { settings.importedPreset = nil } }),
@@ -382,6 +392,7 @@ struct SettingsView: View {
     switch confirmAction {
     case "reset-shaders": "Reset the shader cache?"
     case "start-fresh": "Start fresh?"
+    case "rollback": "Rollback to \(rollbackVersion)?"
     default: "Reinstall the engine?"
     }
   }
@@ -389,6 +400,7 @@ struct SettingsView: View {
     switch confirmAction {
     case "reset-shaders": "Reset"
     case "start-fresh": "Start Fresh"
+    case "rollback": "Rollback"
     default: "Reinstall"
     }
   }
@@ -400,10 +412,15 @@ struct SettingsView: View {
         + "them again, with more hitches at first."
     case "start-fresh":
       (freshMoved
-       ? "This removes \(appName)'s install, the one moved from GW2 on Mac 0.1, as Uninstall does: the engine and the bottle with the game in it. "
+       ? "Guild Wars 2 goes back to GW2 on Mac 0.1's folder first, as Rollback does. Then this removes \(appName)'s install, "
+         + "the one moved from GW2 on Mac 0.1, as Uninstall does: the engine and the bottle. "
        : "")
         + "The main window then shows the install choices, and GW2 on Mac 0.1's install no longer moves by itself. "
-        + "GW2 on Mac 0.1 stays as it is. Your ReShade presets stay too."
+        + "Your ReShade presets stay."
+    case "rollback":
+      "Guild Wars 2 goes back to GW2 on Mac 0.1's folder, as it is now, with its updates: a rename on this disk. "
+        + "The addon files GW2 on Mac 0.1 had in the game folder go back as they were. \(appName) keeps its engine and "
+        + "bottle without the game, and its main window can move the game in again."
     default:
       "The Wine engine is unpacked again from the verified download and \(appName)'s graphics and "
         + "Wine pieces go back in. The bottle, the game and your settings stay."
@@ -640,8 +657,17 @@ struct SettingsView: View {
       if settings.installed ? ["move", "moved"].contains(settings.values["origin"] ?? "")
           : settings.values["old_install"] == "yes" && (settings.values["move_record"] ?? "").isEmpty {
         SettingsGroup {
+          // (Rollback: while the game a move renamed in is in this app's bottle)
+          if settings.installed && settings.values["move_game"] == "here" && !rollbackVersion.isEmpty {
+            SettingRow("Rollback to \(rollbackVersion)", "Puts Guild Wars 2 back where GW2 on Mac 0.1 had it, with no copy and no download, so you can install GW2 on Mac \(rollbackVersion) over this app and play there.") {
+              SmallButton(settings.action == "rollback" ? "Rolling back…" : "Rollback…", icon: "undo-2") {
+                confirmAction = "rollback"
+              }
+              .disabled(settings.action != nil || settings.running)
+            }
+          }
           SettingRow("Start fresh", settings.installed
-                     ? "Removes the install moved from GW2 on Mac 0.1 and shows the install choices, to install Steam and the game anew. GW2 on Mac 0.1 stays as it is."
+                     ? "Gives the game back to GW2 on Mac 0.1, removes the install moved from it and shows the install choices, to install Steam and the game anew."
                      : "Skips the move and shows the install choices, to install Steam and the game anew. GW2 on Mac 0.1 stays as it is.") {
             SmallButton(settings.action == "start-fresh" ? "Starting fresh…" : "Start fresh…", icon: "rotate-ccw") {
               freshMoved = settings.installed
@@ -878,6 +904,49 @@ struct InterfaceWarning: View {
         Spacer()
         Button("Cancel") { isPresented = false }.keyboardShortcut(.cancelAction)
         Button("Turn On") { isPresented = false; confirm() }.keyboardShortcut(.defaultAction).tint(Brand.accent)
+      }
+    }
+    .padding(22)
+    .frame(width: 460)
+    .background(Brand.bg)
+  }
+
+  private func bullet(_ text: String) -> some View {
+    HStack(alignment: .top, spacing: 8) {
+      Circle().fill(Brand.accent).frame(width: 5, height: 5).padding(.top, 6)
+      Text(text).font(.body(13)).bodyBox(13).foregroundStyle(Brand.fg2).fixedSize(horizontal: false, vertical: true)
+    }
+  }
+}
+
+// After Rollback: how to play on GW2 on Mac 0.1.x again. Download opens the release's DMG in the
+// browser, which downloads it (0.1.x's releases are notarized); version and URL come from
+// gw2om.sh's LAST_01, the last 0.1.x release.
+struct RollbackSheet: View {
+  let version: String
+  let dmg: URL?
+  @Binding var isPresented: Bool
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      HStack(spacing: 10) {
+        LucideIcon(name: "undo-2", size: 22).foregroundStyle(Brand.accent)
+        Text("Guild Wars 2 is back in GW2 on Mac 0.1").font(.head(19)).foregroundStyle(Brand.fg)
+      }
+      VStack(alignment: .leading, spacing: 8) {
+        bullet("Download GW2 on Mac \(version) and open the DMG.")
+        bullet("Quit \(appName), then drag GW2 on Mac from the DMG to Applications and replace this app.")
+        bullet("GW2 on Mac \(version) finds its install as on the day of the move, with the game as you left it here. Steam or the game's launcher patches it at its next start if it needs to.")
+        bullet("If you update to this version again, its main window can move the game in again.")
+      }
+      HStack {
+        Spacer()
+        Button("Close") { isPresented = false }.keyboardShortcut(.cancelAction)
+        Button("Download GW2 on Mac \(version)") {
+          if let dmg { NSWorkspace.shared.open(dmg) }
+        }
+        .keyboardShortcut(.defaultAction).tint(Brand.accent)
+        .disabled(dmg == nil)
       }
     }
     .padding(22)
