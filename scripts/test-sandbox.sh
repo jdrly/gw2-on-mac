@@ -333,27 +333,6 @@ fixture_install() {
 
 # --- The stand-in engine: the real engine's layout (Mach9's: the loader in an app bundle, bin/wine
 # and lib/wine/aarch64-unix/wine links to it, the dxmt tree for arm64), files that only pretend
-section "A gw2om.sh call that doesn't end fails its check by name (CALL_LIMIT)"
-# (two stand-ins for gw2om.sh, through the wrapper with a limit of 2 s, each in a checks folder of
-# its own: one never ends, and one ends but leaves a process holding its stdout and stderr, so the
-# tees wait)
-cp /bin/sleep "$SANDBOX/bin/holder"
-printf '#!/bin/bash\nexec "%s" 600\n' "$SANDBOX/bin/holder" >"$SANDBOX/bin/hangs"
-printf '#!/bin/bash\necho game=yes\n"%s" 600 &\n' "$SANDBOX/bin/holder" >"$SANDBOX/bin/leaves"
-chmod 755 "$SANDBOX/bin/hangs" "$SANDBOX/bin/leaves"
-limited() { # <stand-in>: the output of a check that calls it, and the seconds it took
-  local t0=$SECONDS
-  ( CHECKS="$SANDBOX/limit/$1" CHECK_OUT="$SANDBOX/limit/$1/0001.txt" GW2OM="$SANDBOX/bin/$1" CALL_LIMIT=2 pass=0 fail=0
-    mkdir -p "$CHECKS"; check "a check that calls $1" [ "$(st game)" = yes ] )
-  echo "took $((SECONDS - t0))"
-}
-for s in hangs leaves; do
-  out=$(limited "$s")
-  check "  $s: the check fails within 10 s, naming the call and its file" eval 'echo "$out" | grep -qx "  FAIL a check that calls $s (gw2om.sh status had not ended after 2 s: checks/0001.txt)" && [ "${out##*took }" -le 10 ]'
-  check "  the file has the processes, the holder among them" has "$SANDBOX/limit/$s/0001.txt" "$SANDBOX/bin/holder 600"
-  pkill -f "^$SANDBOX/bin/holder" 2>/dev/null || true
-done
-
 section "Stand-in engine and downloads"
 S="$SANDBOX/standin/wine"
 LOADER=lib/wine/aarch64-unix/wine.app/Contents/MacOS/wine
@@ -576,6 +555,28 @@ TOTAL                              1.0T     7.3G     6.7G     1.4G      68K   51
 TOTAL, minus reserved VM space   745.6G     7.3G     6.7G     1.4G      68K   514.4M    11.5M    52825
 EOF
 chmod 755 "$SANDBOX/bin/vmmap"
+
+section "A gw2om.sh call that doesn't end fails its check by name (CALL_LIMIT)"
+# (two stand-ins for gw2om.sh, through the wrapper with a limit of 2 s, each in a checks folder of
+# its own: one never ends, and one ends but leaves a process holding its stdout and stderr, so the
+# tees wait)
+cp "$SANDBOX/sleeper" "$SANDBOX/bin/holder"
+printf '#!/bin/bash\nexec "%s" 600\n' "$SANDBOX/bin/holder" >"$SANDBOX/bin/hangs"
+printf '#!/bin/bash\necho game=yes\n"%s" 600 &\n' "$SANDBOX/bin/holder" >"$SANDBOX/bin/leaves"
+chmod 755 "$SANDBOX/bin/hangs" "$SANDBOX/bin/leaves"
+limited() { # <stand-in>: the output of a check that calls it (without bash's lines about the
+  # processes the watchdog ended), and the seconds it took
+  local t0=$SECONDS
+  ( CHECKS="$SANDBOX/limit/$1" CHECK_OUT="$SANDBOX/limit/$1/0001.txt" GW2OM="$SANDBOX/bin/$1" CALL_LIMIT=2 pass=0 fail=0
+    mkdir -p "$CHECKS"; check "a check that calls $1" [ "$(st game)" = yes ] ) 2>/dev/null
+  echo "took $((SECONDS - t0))"
+}
+for stub in hangs leaves; do
+  out=$(limited "$stub")
+  check "  $stub: the check fails within 10 s, naming the call and its file" eval 'echo "$out" | grep -qx "  FAIL a check that calls $stub (gw2om.sh status had not ended after 2 s: checks/0001.txt)" && [ "${out##*took }" -le 10 ]'
+  check "  the file has the processes, the holder among them" has "$SANDBOX/limit/$stub/0001.txt" "$SANDBOX/bin/holder 600"
+  pkill -f "^$SANDBOX/bin/holder" 2>/dev/null || true
+done
 
 if in_group settings; then
 # --- Dry runs change nothing
