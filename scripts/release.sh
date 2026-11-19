@@ -85,7 +85,8 @@ MODE="${1:-}"
 # Only the argument lists the header names, before the publish guard, so an extra argument can't
 # take a publishing mode past it (#300)
 case "$MODE" in
-  ""|--sign-only|--no-notarize|--no-release|--ci|--ci-dry-run)
+  "") if [ $# != 0 ]; then echo "unknown option: ''" >&2; exit 2; fi ;;
+  --sign-only|--no-notarize|--no-release|--ci|--ci-dry-run)
     if [ $# -gt 1 ]; then echo "unknown option: $2" >&2; exit 2; fi ;;
   --dev|--adhoc)
     if [ $# -gt 2 ] || { [ $# = 2 ] && [ "$2" != --no-release ]; }; then

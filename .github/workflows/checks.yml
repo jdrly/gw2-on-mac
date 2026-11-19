@@ -199,7 +199,7 @@ jobs:
             echo "$s"
           }
           for publish in "" 1; do
-            for args in "'' x" "--ci x" "--dev x" "--adhoc x" "--dev --no-release x" "--feed 0.2.0 x"; do
+            for args in "''" "'' x" "--ci x" "--dev x" "--adhoc x" "--dev --no-release x" "--feed 0.2.0 x"; do
               eval "set -- $args"
               s=$(run "$publish" "$@")
               if [ "$s" != 2 ] || ! grep -Eq '^(unknown option|usage): ' "$d/release.txt" || [ -e "$d/called" ]; then
