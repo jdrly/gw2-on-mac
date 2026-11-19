@@ -56,6 +56,20 @@ extension Installer {
     }
   }
 
+  // An install that waits for Steam's download while no Steam runs (a move's too, if the app was
+  // stopped before it started Steam): the waiting panel's Play, gw2om.sh play, starts Steam on the
+  // game's install page, and the panel goes on following the download
+  func resumeDownload() {
+    guard !launching else { return }
+    launching = true
+    let script = script
+    Task {
+      _ = await Installer.capture(script: script, arguments: ["play"])
+      launching = false
+      refresh()
+    }
+  }
+
   // Settings › Game: "Quit the app after launching" (off by default)
   static let quitAfterLaunchKey = "quitAfterLaunch"
 }

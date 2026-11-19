@@ -179,8 +179,10 @@ func installer(_ state: String) -> Installer {
     i.phase = .working(.install)
     i.stepIndex = 2
     i.progress = .init(label: "SteamSetup.exe", done: 2_100_000, total: 3_400_000)
-  case "waiting":
+  case "waiting", "waiting-no-steam":
     st["game"] = "no"; st["stage"] = "waiting_game"
+    // (no Steam running: the panel offers Play, which starts it)
+    if state == "waiting-no-steam" { st["origin"] = "move" } else { st["busy"] = "steam" }
     i.operation = .install
     i.phase = .waitingForGame
     i.stepIndex = 3
@@ -348,6 +350,7 @@ func renderAll(_ dir: URL, exports: URL?) async {
     ("main-arenanet-light", "arenanet", false, nil),
     ("main-waiting-dark", "waiting", true, nil),
     ("main-waiting-light", "waiting", false, nil),
+    ("main-waiting-no-steam-light", "waiting-no-steam", false, nil),
     ("main-failed-light", "failed", false, nil),
     ("main-uninstalling-light", "uninstalling", false, nil),
     ("main-existing-light", "existing", false, nil),

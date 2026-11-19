@@ -601,8 +601,12 @@ folder, and nothing else.
 *Uninstall…* in the window asks first and tells you the game's files go with the bottle. Close the
 game and Steam before you run it. It removes everything in the table above except the logs, the
 ReShade folder, the move's record and GW2 on Mac 0.1.x's folders, which it never touches. After a
-move the game in the bottle is the only copy, so Uninstall refuses until *Rollback* has given it
-back to 0.1.x. To do it by hand:
+move the game in the bottle is the only copy, so Uninstall refuses while a game is in the bottle,
+until *Rollback* has given it back to 0.1.x. Every removal the app makes works the same way: a folder
+with a `Gw2.dat` or `Gw2-64.exe` in it stays, and the log says why, unless the install never came
+from a move and you asked to uninstall it. To do it by hand, after a move only once *Rollback* has
+given the game back (check that `~/Library/Application Support/GW2 on Mac arm64/bottle` has no
+`Gw2.dat` in it):
 
 ```sh
 rm -rf ~/Library/"Application Support/GW2 on Mac arm64" ~/Library/Caches/"GW2 on Mac arm64"   # the ReShade folder too

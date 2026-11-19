@@ -3626,7 +3626,16 @@ check "no_cp_of finds a logged cp of a folder with spaces and parentheses in its
 printf '+ mv /y %q\n' "$H/a b/(c)" >"$NOCP_LOG"
 check "  and a logged mv at the end of a line" eval '! no_cp_of "$H/a b/(c)"'
 unset NOCP_LOG
-nothing_made() { [ -z "$(ls -A "$AD" 2>/dev/null)" ]; }
+# every recursive removal goes through safe_rm, which leaves a folder with a game in it
+rm_outside() {
+  awk '/^safe_rm\(\) \{/ { f = 1 } f && /^}/ { f = 0; next }
+    !f && !/^[[:space:]]*#/ && /(^|[^[:alnum:]_-])rm +-[[:alpha:]]*[rR]/ { print FNR ": " $0; n++ } END { exit n > 0 }' "$1"
+}
+check "gw2om.sh has no recursive rm outside safe_rm" rm_outside "$APP/Contents/Resources/gw2om.sh"
+{ cat "$APP/Contents/Resources/gw2om.sh"; echo '  rm -fr "$x"'; } >"$SANDBOX/rmcheck.sh"
+check "  (the check finds one added)" eval '! rm_outside "$SANDBOX/rmcheck.sh" >/dev/null'
+# (the session's lock file stays, held or not: a lock file is never removed while anyone may hold it)
+nothing_made() { [ -z "$(ls -A "$AD" 2>/dev/null | grep -vx .session.lock)" ]; }
 # ini_clean <file>: no line names 0.1's folders (Application Support's or Caches' GW2 on Mac)
 ini_clean() { ! grep -iqF -e "$(winp "$O1")\\" -e "$(winp "$OC")\\" "$1" && ! grep -iqE "$(winp "$O1" | sed 's/\\/\\\\/g')$" "$1"; }
 # settings_moved: this app's settings.conf as SETTINGS_FROM_01 says for the OLD_SET file, key by key
@@ -3798,10 +3807,11 @@ O1SNAP=$(o1snap)
 GDINO=$(ino "$O1GAME/Gw2.dat")
 # (TERM and KILL once the move's record is written: the move is done and stays; then Rollback and
 # Uninstall, for the move below)
-for sig in TERM KILL; do
-  move_paused "$sig" env GW2_ON_MAC_TEST_PAUSE_AT=move-done "$GW2OM" install move
-  check "a move stopped ($sig) after its record is written keeps the move: installed, the game here" \
-    eval '[ "$paused" = yes ] && [ "$rc" = "$([ "$sig" = TERM ] && echo 143 || echo 137)" ] && [ "$(st installed) $(st move_game)" = "yes here" ] && [ ! -e "$AD/move-undo" ] && [ "$(ino "$STEAM")" = "$O1INO" ]'
+for p in "TERM move-done" "KILL move-done" "TERM move-retired"; do
+  sig=${p% *}
+  move_paused "$sig" env GW2_ON_MAC_TEST_PAUSE_AT="${p#* }" "$GW2OM" install move
+  check "a move stopped ($p: after its record is written) keeps the move: installed, the game here" \
+    eval '[ "$paused" = yes ] && [ "$rc" = "$([ "$sig" = TERM ] && echo 143 || echo 137)" ] && [ "$(st installed) $(st move_game)" = "yes here" ] && [ ! -e "$AD/move-undo" ] && [ "$(ino "$STEAM")" = "$O1INO" ] && [ -f "$GD/Gw2.dat" ]'
   g rollback >/dev/null 2>&1; g uninstall >/dev/null 2>&1; rm -rf "$AD"
   check "  Rollback, Uninstall: 0.1 as it was" eval 'o1_same && [ "$(ino "$O1ST")" = "$O1INO" ]'
 done
@@ -3843,6 +3853,26 @@ check "  0.1's folders as they were, but for the Steam folder" o1_rest_same "$O1
 c=$(play_cmd)
 check "  Play: Steam as crossover" eval 'every_wine_as crossover && [[ "$c" == *"steam.exe -applaunch 1284210"* ]]'
 sessions_reset
+# Steam moved the game to another library in this app's bottle: Rollback (and with it Start fresh)
+# refuses, the game stays where Steam put it
+SL="$BOTTLE/drive_c/SteamLibrary/steamapps"
+mkdir -p "$SL/common" && mv "$GM" "$SL/common/" && mv "$STEAM/steamapps/appmanifest_1284210.acf" "$SL/" &&
+  printf '"libraryfolders"\n{\n\t"1"\n\t{\n\t\t"path"\t\t"C:\\\\SteamLibrary"\n\t}\n}\n' >"$STEAM/steamapps/libraryfolders.vdf"
+check "Steam's game in another library of the bottle: status follows it" [ "$(st game_dir) $(st game)" = "$SL/common/Guild Wars 2 yes" ]
+out=$(g rollback 2>&1) && rc=0 || rc=$?
+check "  Rollback refuses: the game isn't in the folder that came from 0.1; nothing moved" \
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error Guild Wars 2 isn.t in the folder that came from GW2 on Mac 0.1" && [ "$(ino "$STEAM")" = "$O1INO" ] && [ -f "$SL/common/Guild Wars 2/Gw2.dat" ] && [ ! -e "$AD/move-undo" ]'
+out=$(g start-fresh --moved 2>&1) && rc=0 || rc=$?
+check "  Start fresh refuses too, and Uninstall; the game stays" \
+  eval '[ "$rc" != 0 ] && ! g uninstall >/dev/null 2>&1 && [ -f "$SL/common/Guild Wars 2/Gw2.dat" ] && [ "$(st installed)" = yes ]'
+mv "$SL/common/Guild Wars 2" "$STEAM/steamapps/common/" && mv "$SL/appmanifest_1284210.acf" "$STEAM/steamapps/" &&
+  rm "$STEAM/steamapps/libraryfolders.vdf" && rm -r "$BOTTLE/drive_c/SteamLibrary"
+# Repair with the bottle's system.reg gone: it would make the bottle anew, but the game is in it
+mv "$BOTTLE/system.reg" "$SANDBOX/system.reg"
+out=$(g repair 2>&1) && rc=0 || rc=$?
+check "Repair with system.reg gone and the game in the bottle: refused, the game stays" \
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error The game.s bottle has no system.reg, and a game is in it" && [ "$(ino "$STEAM")" = "$O1INO" ] && [ -f "$GM/Gw2.dat" ]'
+mv "$SANDBOX/system.reg" "$BOTTLE/system.reg"
 out=$(g start-fresh --before-move 2>&1) && rc=0 || rc=$?
 check "Start fresh confirmed before the move, with the move finished meanwhile: refused, the install stays" \
   eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error The move from GW2 on Mac 0.1 has finished meanwhile" && [ "$(st installed) $(st move_record)" = "yes moved" ]'
@@ -3850,6 +3880,9 @@ mv "$AD/moved-from-0.1" "$SANDBOX/record"
 out=$(g start-fresh --moved 2>&1) && rc=0 || rc=$?
 check "Start fresh with the move's record missing: refused, the game stays here" \
   eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac can.t give the game back to GW2 on Mac 0.1" && [ "$(st installed)" = yes ] && [ "$(ino "$STEAM")" = "$O1INO" ]'
+out=$(g uninstall 2>&1) && rc=0 || rc=$?
+check "  Uninstall with the record missing (origin move): refused, the game stays" \
+  eval '[ "$rc" != 0 ] && [ "$(ino "$STEAM")" = "$O1INO" ] && [ -f "$GM/Gw2.dat" ] && [ "$(st installed)" = yes ]'
 cp "$SANDBOX/record" "$AD/moved-from-0.1"
 out=$(g start-fresh --moved 2>&1) && rc=0 || rc=$?
 check "Start fresh: the game goes back first (the same inode, 0.1's addon files), this app's install goes, the move doesn't start by itself again; 0.1 as it was" \
@@ -3893,7 +3926,7 @@ check "Rollback with 0.1's place taken: refused, nothing changed, the game here"
 rmdir "$O1ST"
 move_paused KILL env GW2_ON_MAC_TEST_PAUSE_AT=rollback-renamed "$GW2OM" rollback
 check "Rollback killed after its rename: the next status renames it in again, the install as it was" \
-  eval '[ "$paused $rc" = "yes 137" ] && [ -e "$O1ST" ] && [ "$(st move_game) $(st game)" = "here yes" ] && [ ! -e "$O1ST" ] && [ "$(ino "$STEAM")" = "$O1INO" ] && [ ! -e "$AD/move-undo" ]'
+  eval '[ "$paused $rc" = "yes 137" ] && [ -e "$O1ST" ] && [ "$(st move_game) $(st game)" = "here yes" ] && [ ! -e "$O1ST" ] && [ "$(ino "$STEAM")" = "$O1INO" ] && [ ! -e "$AD/move-undo" ] && [ "$(gsnap)" = "$GSNAP" ]'
 out=$(g rollback 2>&1) && rc=0 || rc=$?
 check "Rollback: Steam's folder back in 0.1's bottle (the same inode), with the addon files 0.1 had: 0.1 as it was" \
   eval '[ "$rc" = 0 ] && [ "$(ino "$O1ST")" = "$O1INO" ] && o1_same'

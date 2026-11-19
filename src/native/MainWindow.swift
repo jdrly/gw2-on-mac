@@ -1070,6 +1070,19 @@ struct InstallingPanel: View {
              : "Sign in to Steam and install Guild Wars 2 there. This window follows the download.")
           .font(.body(12)).bodyBox(12).foregroundStyle(Brand.fg3).fixedSize(horizontal: false, vertical: true)
           .padding(.top, 2)
+        // (Steam isn't running, so nothing downloads: Play starts it on the game's install page)
+        if installer.installedRoute != .arenanet && installer.busy != "steam" {
+          Button { installer.resumeDownload() } label: {
+            HStack(spacing: 10) {
+              LucideIcon(name: "play", size: 18)
+              Text("Play")
+            }
+          }
+          .buttonStyle(.crimson)
+          .disabled(installer.launching)
+          .help("Starts Steam, which finishes the game's download")
+          .padding(.top, 6)
+        }
       }
     }
     .padding(.vertical, 14)
