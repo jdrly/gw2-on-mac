@@ -994,7 +994,7 @@ struct InkCheckbox: View {
 struct DropZone: View {
   @Bindable var installer: Installer
   @State private var targeted = false
-  static let officialDownload = URL(string: "https://www.guildwars2.com/en/download/")!
+  static let officialDownload = URL(string: "https://account.arena.net/welcome")!
 
   var body: some View {
     HStack(spacing: 8) {
