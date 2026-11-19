@@ -7,10 +7,10 @@
 // without them has an empty SUFeedURL and no SUPublicEDKey, and start() leaves Sparkle unstarted:
 // Check for Updates… is disabled and the Updates pane says so (README.md, Releasing).
 //
-// Sparkle keeps its settings in the app's defaults (cz.jandrly.gw2onmac.arm64). Installing an update
+// Sparkle keeps its settings in the app's defaults (cz.jandrly.gw2onmac). Installing an update
 // always takes a click. Only an install, repair or uninstall in progress holds an update.
 //
-// For testing, `defaults write cz.jandrly.gw2onmac.arm64 GW2UpdateFeedURL <url>` replaces the feed
+// For testing, `defaults write cz.jandrly.gw2onmac GW2UpdateFeedURL <url>` replaces the feed
 // (Sparkle accepts http only on 127.0.0.1/localhost), which also starts Sparkle without a feed in
 // Info.plist.
 //
@@ -23,7 +23,8 @@ import SwiftUI
 
 @MainActor
 final class Updates: NSObject, SPUUpdaterDelegate {
-  static let appBundleID = "cz.jandrly.gw2onmac.arm64"
+  // 0.1.x's id, which 0.2 takes so that a 0.1.x install updates to it (ADR 0018; build.sh's APP_ID)
+  static let appBundleID = "cz.jandrly.gw2onmac"
   static let feedOverrideKey = "GW2UpdateFeedURL"
   // build.sh compiles development builds with GW2_DEV (and writes GW2Channel dev into
   // Info.plist for som.sh); release binaries contain none of the dev-only UI.

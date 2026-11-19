@@ -93,10 +93,10 @@ esac
 IDENTITY="${IDENTITY:-Developer ID Application: Jan Drly (3JT82CY6ZK)}"
 PROFILE="${NOTARY_PROFILE:-swgl-notary}"
 REPO=jdrly/gw2-on-mac
-# The app's name on disk (src/gw2om.sh's APP_FOLDER, the .app's file name), and as GitHub's asset
-# names have it. The releases and the DMG keep it, so 0.2's builds don't read as 0.1.x's.
-APP_NAME="$(sed -n 's/^APP_FOLDER="\(.*\)"$/\1/p' src/gw2om.sh)"
-[ -n "$APP_NAME" ] || { echo "No APP_FOLDER=\"…\" line in src/gw2om.sh" >&2; exit 1; }
+# The app's name and file name (src/gw2om.sh's APP_NAME), and as GitHub's asset names have it:
+# 0.1.x's, so the DMG and the deltas go on from GW2-on-Mac-<version>.dmg (ADR 0018).
+APP_NAME="$(sed -n 's/^APP_NAME="\(.*\)"$/\1/p' src/gw2om.sh)"
+[ -n "$APP_NAME" ] || { echo "No APP_NAME=\"…\" line in src/gw2om.sh" >&2; exit 1; }
 DASHED="${APP_NAME// /-}"
 SRC="dist/$APP_NAME.app"
 ENT="$PWD/src/entitlements"
@@ -439,7 +439,11 @@ rm -rf "$feed"
 mkdir -p "$feed"
 cp -c "$UPDATES/$DASHED"-*.dmg "$feed/"
 [ -f "$NOTES" ] && cp "$NOTES" "$feed/$DASHED-$VERSION.md"
+# (--versions: an item for this version only. generate_appcast keeps the newest version of every
+# minimum macOS, so 0.1.x's DMGs, for 26.0, would get an item of their own beside 0.2's for 26.4.
+# The older DMGs stay the bases of the deltas.)
 "$SPARKLE_BIN/generate_appcast" ${ED_KEY_FILE:+--ed-key-file "$ED_KEY_FILE"} \
+  --versions "$(plutil -extract CFBundleVersion raw "$APP/Contents/Info.plist")" \
   --maximum-versions 1 --maximum-deltas 5 --embed-release-notes \
   --download-url-prefix "$URL_PREFIX" "$feed"
 # Deltas are named "<name><new>-<old>.delta"; GitHub replaces spaces in asset names, so
@@ -458,7 +462,19 @@ done
 rm -rf "$feed"
 xmllint --noout "$OUT/appcast.xml"
 ! grep -q "${APP_NAME// /%20}" "$OUT/appcast.xml" || { echo "appcast.xml still names unrenamed deltas" >&2; exit 1; }
+# One item, and it names the macOS the app needs (its LSMinimumSystemVersion), so Sparkle on an
+# older macOS doesn't offer it: 0.1.x runs on 26.0, 0.2 needs 26.4
+min="$(plutil -extract LSMinimumSystemVersion raw "$APP/Contents/Info.plist")"
+[ "$(xmllint --xpath 'count(/rss/channel/item)' "$OUT/appcast.xml")" = 1 ] || { echo "appcast.xml has more than one item" >&2; exit 1; }
+[ "$(xmllint --xpath "string(/rss/channel/item/*[local-name()='minimumSystemVersion'])" "$OUT/appcast.xml")" = "$min" ] ||
+  { echo "appcast.xml's item doesn't say sparkle:minimumSystemVersion $min (the app's LSMinimumSystemVersion)" >&2; exit 1; }
 echo "  $OUT/appcast.xml, ${#deltas[@]} delta(s)"
+# generate_appcast skips a delta it couldn't make or that isn't smaller than the DMG, without a word
+# in its summary: name each older DMG it made none from (the update from it downloads the DMG)
+for v in ${kept[@]+"${kept[@]}"}; do
+  [ "$v" != "$VERSION" ] && [ -f "$UPDATES/$DASHED-$v.dmg" ] || continue
+  [ -e "$OUT/$DASHED-$VERSION-from-$v.delta" ] || echo "  no delta from $v: generate_appcast made none (too large, or it failed); $v downloads the DMG"
+done
 
 # Check the feed as Sparkle will: lengths and EdDSA signatures against the app's public key.
 echo "[release] checking the update feed"

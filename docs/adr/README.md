@@ -4,8 +4,8 @@ One decision per file. The files go by number, not by date. 0001 to 0011 record 
 wrote them down on 2026-11-17, after 0012 and 0013 had landed, and kept their numbers below
 those two. Their dates don't follow their numbers. A new decision takes the next free number.
 
-0001, 0002 and 0014 are about 0.1.x and live on `main`. 0003 to 0010, 0012, 0013 and 0015 to 0017 are
-about the 0.2 line on this branch, `arm64`. 0011 is on both. The two branches share one set of
+0001, 0002 and 0014 are about 0.1.x and live on `main`. 0003 to 0010, 0012, 0013 and 0015 to 0018
+are about the 0.2 line on this branch, `arm64`. 0011 is on both. The two branches share one set of
 numbers, so a number taken on one is not used on the other.
 
 | File | Decided | One line |
@@ -16,7 +16,7 @@ numbers, so a number taken on one is not used on the other.
 | [0004](0004-dev-builds-come-from-github-runners-ad-hoc-signed.md) | 2026-11-11 | 0.2 dev builds are built on GitHub's runners, ad hoc signed, as pre-releases that can never become latest. |
 | [0005](0005-the-0.2-settings-have-no-dxmt-wine-or-mac-driver-choice.md) | 2026-11-12 | The DXMT, Wine and Mac driver rows left the 0.2 Settings. The app runs my pieces, and the keys stay in the backend. |
 | [0006](0006-0.2-has-no-cooler-job-workers.md) | 2026-11-12 | The Cooler job workers row and its port to the arm64 engine are dropped. 0.1.x keeps the row, off by default from its next release (#248). |
-| [0007](0007-0.2-shows-itself-as-gw2-on-mac-and-keeps-its-own-name-on-disk.md) | 2026-11-12 | Nothing shown says "arm64". The bundle id and folders keep it, so 0.2 installs beside 0.1.x. |
+| [0007](0007-0.2-shows-itself-as-gw2-on-mac-and-keeps-its-own-name-on-disk.md) | 2026-11-12, superseded by 0018 | Nothing shown says "arm64". The bundle id and folders keep it, so 0.2 installs beside 0.1.x. |
 | [0008](0008-the-app-writes-emulatemodeset-off.md) | 2026-11-12 | `EmulateModeset`=`N`, for 0.1.x's behaviour and the Gamma slider. Not the cursor stutter's fix, as first recorded. |
 | [0009](0009-a-dev-build-starts-with-every-switch-on.md) | 2026-11-12, narrowed 2026-11-15 | Dev builds turn every fork switch on from `dev-switches.conf`. Not a cap below 60, and not a hot-path cost without a symptom seen in play. |
 | [0010](0010-0.2-defaults-to-metal-4-with-the-metal-3-present.md) | 2026-11-13 | The *Metal* row defaults to Metal 4 with `DXMT_MTL4_PRESENT=mtl3`. Supersedes the Metal 3 default of the day before. |
@@ -27,3 +27,4 @@ numbers, so a number taken on one is not used on the other.
 | [0015](0015-sandbox-suite-in-three-jobs.md) | 2026-11-17 | The suite's `steam` group splits into `settings` and `sessions`, and `sessions` starts from an install it makes itself. Three jobs, 15 minutes each. |
 | [0016](0016-an-engine-of-another-release-is-replaced-by-repair.md) | 2026-11-17 | An engine an earlier version of the app installed counts as installed. Play refuses and names Repair, which replaces it with the pinned one. |
 | [0017](0017-a-release-candidate-is-a-dev-build-by-another-name.md) | 2026-11-19 | A release candidate, `X.Y.Z-rc.N`, is built and published as a dev build is. Only its name and the chip differ, and it sorts above every dev build of its version. |
+| [0018](0018-0.2-is-the-same-app-as-0.1.x-and-keeps-its-own-folders.md) | 2026-11-19 | 0.2 takes 0.1.x's file name, bundle id and feed, so 0.1.4 updates to it. Its folders keep "GW2 on Mac arm64". 0.1.5 is the last 0.1.x I plan, and the minimum macOS is 26.4. |

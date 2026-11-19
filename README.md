@@ -10,20 +10,21 @@ which have switches for the game. The engine's own DXMT, `ntdll.so` and `winemac
 them, and a setting switches back to each. A build can also carry my build of FEX, which goes in
 only when I choose it from Terminal. It changes nothing you already have installed.
 
-> **This is the `arm64` branch.** It builds *GW2 on Mac arm64*, the development app for 0.2,
-> which moves the game to an arm64 Wine engine. 0.1.x runs CrossOver 26.3 under Rosetta with my
+> **This is the `arm64` branch.** It builds GW2 on Mac 0.2, which moves the game to an arm64 Wine
+> engine. 0.1.x runs CrossOver 26.3 under Rosetta with my
 > DXMT fork and my Wine pieces. This app puts my DXMT fork, built for the arm64 engine, into its
 > engine, and my Wine pieces for it: an `ntdll.so` with job wakes, the event pool, the msync fix
 > and fast locks, and a `winemac.so` with the launcher's frame copies. A build made without one of
-> those files leaves the engine's own in place. Its window, menus and About panel say *GW2 on Mac*,
-> as 0.1.x's do. On disk it has its own name, *GW2 on Mac arm64*: the app's file name and its
-> folders in `~/Library`, with its own bundle id (`cz.jandrly.gw2onmac.arm64`), so it installs
-> next to GW2 on Mac 0.1.x and shares nothing with it. A text that names one of its folders gives
-> the folder's real name. The shown name is `APP_NAME` at the top of `src/gw2om.sh` and
-> `collect-logs.sh` and `appName` in `src/native/App.swift`; the name on disk is `APP_FOLDER` in
-> those two scripts and `session-report.sh`, and `appFolder` in `App.swift`. The Dock and Finder
-> show the file name. It has no updates, and 0.1.x stays the release on `main`. The paths below
-> are this app's.
+> those files leaves the engine's own in place. It is the same app as 0.1.x to macOS and to
+> Sparkle: `GW2 on Mac.app`, bundle id `cz.jandrly.gw2onmac`, 0.1.x's feed, so a 0.1.x install
+> updates to it (ADR 0018). Every build of this branch has that identity, a dev build too, and
+> replaces whatever `GW2 on Mac.app` is in `/Applications`. Its folders in `~/Library` keep their
+> own name, *GW2 on Mac arm64*, and 0.1.x's folders are only ever read. A text that names one of
+> its folders gives the folder's real name. The app's name and file name are `APP_NAME` at the top
+> of `src/gw2om.sh` and `collect-logs.sh` and `appName` in `src/native/App.swift`; the folders'
+> name is `APP_FOLDER` in those two scripts and `session-report.sh`, and `appFolder` in
+> `App.swift`. A dev build has no updates, and 0.1.x stays the release on `main` until 0.2.0 is
+> out. The paths below are this app's.
 
 Website: [gw2onmac.com](https://gw2onmac.com). Download: the
 [latest release](https://github.com/jdrly/gw2-on-mac/releases/latest).
@@ -195,7 +196,10 @@ by a line `dev_version=` in `settings.conf` (`DEV_ROWS` in `gw2om.sh`, read the 
 `SETTINGS_RESETS` is), it turns on *Job wakes*, *Event pool*, *Faster locks*, *Launcher frames*,
 *Shader warming*, *MetalFX for Subsample*, *Raw mouse-look* and `fex=mine`, which takes effect in a
 build that carries my FEX. A row I turn off afterwards stays off. The switches without a row are in
-`dev-switches.conf` ([The game's environment](#the-games-environment)). A release reads neither.
+`dev-switches.conf` ([The game's environment](#the-games-environment)), which a release never reads.
+A dev build and the release share the folders, so a release that finds the `dev_version=` line
+reads those rows at their defaults, and its next write drops the line. A dev build after it turns them on
+again.
 
 Four keys have no row: `dxmt`, `wine` and `macdrv` pick my DXMT fork, my `ntdll.so` and my
 `winemac.so` (`fork`, `mine`, `mine`) or the engine's own (`engine`), and `fex` picks my FEX
@@ -460,7 +464,7 @@ on, and ReShade's
 `d3d11.dll`, `ReShade.ini` and the `d3dcompiler_47.dll` the app put there only while *ReShade* is
 on. The app never touches another program's `version.dll`, `d3d11.dll`, `dxgi.dll`,
 `d3dcompiler_47.dll` or `ReShade.ini` there. The app's own preferences, such as the chosen
-route and the last Settings pane, live in the defaults domain `cz.jandrly.gw2onmac.arm64`. Other Wine
+route and the last Settings pane, live in the defaults domain `cz.jandrly.gw2onmac`, 0.1.x's. Other Wine
 apps' bottles are only ever read.
 
 ## Uninstall
@@ -513,7 +517,7 @@ Storage, stays where it is.
 
 ```mermaid
 flowchart LR
-    app["GW2 on Mac arm64.app<br/>SwiftUI window"] -->|"runs"| sh["gw2om.sh<br/>install, play, settings"]
+    app["GW2 on Mac.app<br/>SwiftUI window"] -->|"runs"| sh["gw2om.sh<br/>install, play, settings"]
     sh -->|"downloads, checks"| engine["Wine engine<br/>Mach9 0.4.0, Wine 11.21, FEX"]
     sh -->|"creates"| bottle["Bottle<br/>Steam and the game"]
     engine -->|"runs"| game["Gw2-64.exe"]
@@ -1225,7 +1229,7 @@ You need Xcode 27, for the macOS 27 SDK. The app targets macOS 26.4, as the engi
 
 ```sh
 scripts/stage-components.sh    # copy my DXMT fork, my ntdll.so, winemac.so and FEX and the addon into prebuilt/
-./build.sh                     # build dist/GW2 on Mac arm64.app, ad-hoc signed
+./build.sh                     # build dist/GW2 on Mac.app, ad-hoc signed
 ```
 
 On this branch the app bundles five components: my DXMT fork built for the arm64 engine, my
@@ -1505,7 +1509,7 @@ To try things by hand, `GW2_ON_MAC_ROOT=/abs/dir` puts every path `gw2om.sh` and
 use under that folder, and `GW2_ON_MAC_DRY_RUN=1` prints what would change without changing it:
 
 ```sh
-R="dist/GW2 on Mac arm64.app/Contents/Resources"
+R="dist/GW2 on Mac.app/Contents/Resources"
 GW2_ON_MAC_ROOT=$PWD/work/app-sandbox/try GW2_ON_MAC_DRY_RUN=1 "$R/gw2om.sh" install steam
 ```
 
@@ -1526,7 +1530,10 @@ delta updates and checks it with `scripts/check-appcast.swift`.
   apps read `https://github.com/jdrly/gw2-on-mac/releases/latest/download/appcast.xml`.
 - The feed needs an app built with `GW2_ON_MAC_FEED_URL` and `GW2_ON_MAC_ED_PUBLIC_KEY`.
 - `--sign-only` and `--no-notarize` run locally without touching GitHub.
-- `--dev` makes `GW2-on-Mac-arm64-<version>.dmg` with `GW2 on Mac arm64.app` in it and publishes
+- The appcast's item names the app's `LSMinimumSystemVersion` as `sparkle:minimumSystemVersion`,
+  26.4 on this branch, or the script stops. Sparkle on an older macOS then offers nothing.
+
+- `--dev` makes `GW2-on-Mac-<version>.dmg` with `GW2 on Mac.app` in it and publishes
   it as a GitHub pre-release with no feed, so `releases/latest` stays on 0.1.x. A release
   candidate goes out the same way, titled "(release candidate)" where a development build's says
   "(development build)".
@@ -1536,8 +1543,27 @@ delta updates and checks it with `scripts/check-appcast.swift`.
   `ntdll.so` or `winemac.so`. It
   mounts the DMG and checks that its app matches `dist/<name>.files` file for file, with a valid
   signature, this app's bundle id, the dev channel and no feed. The pre-release gets the DMG and
-  the record `GW2-on-Mac-arm64-<version>.build.txt`, and the notes get a section on installing a
+  the record `GW2-on-Mac-<version>.build.txt`, and the notes get a section on installing a
   build that isn't notarized.
+
+**The update from 0.1.x, a test still to run on my Mac.** `release.sh` builds a feed only for a
+plain version, never for `X.Y.Z-dev.N` or `X.Y.Z-rc.N`, so the test build is 0.2.0 itself, with the
+feed and key 0.1.x has, its feed served from `127.0.0.1` and never uploaded. With 0.1.4's DMG in
+`release/updates/`, the feed gets a delta from it, or the script says it made none:
+
+```sh
+key="$(plutil -extract SUPublicEDKey raw "/Applications/GW2 on Mac.app/Contents/Info.plist")"
+GW2_ON_MAC_VERSION=0.2.0 GW2_ON_MAC_ED_PUBLIC_KEY="$key" \
+  GW2_ON_MAC_FEED_URL=https://github.com/jdrly/gw2-on-mac/releases/latest/download/appcast.xml ./build.sh
+gh release download v0.1.4 -R jdrly/gw2-on-mac -p 'GW2-on-Mac-0.1.4.dmg' -D release/updates
+DOWNLOAD_URL_PREFIX=http://127.0.0.1:8000/ RELEASE_NOTES=work/0.2.0-test.md scripts/release.sh --no-release
+(cd release/0.2.0 && python3 -m http.server 8000 --bind 127.0.0.1)   # in a second window, left running
+defaults write cz.jandrly.gw2onmac GW2UpdateFeedURL http://127.0.0.1:8000/appcast.xml
+```
+
+`work/0.2.0-test.md` is the notes the update window shows. Then I quit 0.1.4, open it again so it
+reads the test feed, and click *Check for Updates…*. Afterwards `defaults delete cz.jandrly.gw2onmac
+GW2UpdateFeedURL`, because 0.2 reads the same domain.
 
 **Dev builds come from GitHub's runners.** The Dev build workflow
 ([`.github/workflows/devbuild.yml`](.github/workflows/devbuild.yml)) builds one from `arm64` and
@@ -1587,7 +1613,7 @@ gh release download v0.2.0-dev.5 -R jdrly/gw2-on-mac -p '*.dmg' -D ~/Downloads
 
 A dev build is signed ad hoc and not notarized. `gh release download` sets no quarantine
 attribute, so macOS opens it. After a download in a browser, `xattr -dr com.apple.quarantine
-"/Applications/GW2 on Mac arm64.app"` comes before the first start. Signing it with my Developer
+"/Applications/GW2 on Mac.app"` comes before the first start. Signing it with my Developer
 ID on the runner is a later step.
 - I haven't tested `wineserver` under the hardened runtime yet.
 

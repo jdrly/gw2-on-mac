@@ -15,11 +15,10 @@
 import AppKit
 import SwiftUI
 
-// The app's name in its window, menus, About panel and texts (gw2om.sh's APP_NAME, which
-// Info.plist gets from build.sh), and its name on disk: the .app's file name and the three folders
-// gw2om.sh keeps in ~/Library (its APP_FOLDER). The 0.2 development build shows the name 0.1.x
-// shows but keeps its own on disk, so it installs next to 0.1.x and shares nothing with it. A
-// text that names a folder uses appFolder.
+// The app's name in its window, menus, About panel and texts and the .app's file name (gw2om.sh's
+// APP_NAME, which Info.plist gets from build.sh), as 0.1.x's, and the name of the three folders
+// gw2om.sh keeps in ~/Library (its APP_FOLDER), which stay 0.2's own (ADR 0018). A text that names
+// a folder uses appFolder.
 let appName = "GW2 on Mac"
 let appFolder = "GW2 on Mac arm64"
 
