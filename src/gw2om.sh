@@ -1323,8 +1323,8 @@ dxmt_names() {
 # WINE_HEAT_CONTROL, whose file can say prof=on during a session, in a line of dev-switches.conf (a
 # development build's) or an env= entry of compatdb.local. Any rule's entry counts: a rule for
 # exe=* or the game's Steam app id reaches the game too, and one for another program only costs
-# FEX_ENTRYHEADERLOOKUP while I sample (sampler_fex). (awk reads all of it: nothing ends the pipe
-# early under pipefail.)
+# the game FEX_ENTRYHEADERLOOKUP for as long as that line stays (sampler_fex). (awk reads all of
+# it: nothing ends the pipe early under pipefail.)
 heat_prof_on() {
   { if [ -n "$DEV_ON" ] && [ -f "$DEV_FILE" ]; then cat "$DEV_FILE"; fi
     if [ -f "$RULES_LOCAL" ]; then tr ';' '\n' <"$RULES_LOCAL" | sed -n 's/^env=//p'; fi; } |

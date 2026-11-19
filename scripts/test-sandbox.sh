@@ -3014,9 +3014,9 @@ if fexb; then
   dev_files
   check "  with WINE_HEAT_PROF=off: none" no_lookup
   sed -i '' '/^WINE_HEAT_PROF=/d' "$DEVF"
-  printf 'exe=Gw2-64.exe;env=WINE_HEAT_PROF=on\n' >"$DAD/compatdb.local"
+  printf 'exe=*;env=WINE_HEAT_PROF=on\n' >"$DAD/compatdb.local"
   dev_files
-  check "  with WINE_HEAT_PROF=on in compatdb.local: FEX_ENTRYHEADERLOOKUP=0 last in the game's rule" sampler_off
+  check "  with WINE_HEAT_PROF=on in a compatdb.local rule for exe=*, which reaches the game too: FEX_ENTRYHEADERLOOKUP=0 last in the game's rule" sampler_off
   echo FEX_ENTRYHEADERLOOKUP=1 >>"$DEVF"
   dev_files
   check "  and a FEX_ENTRYHEADERLOOKUP=1 line of mine: out of the rule and status, saying why, and FEX_ENTRYHEADERLOOKUP=0 still last" \
