@@ -70,8 +70,12 @@ double space, not even for a moment.
 - The space check of the move is the one of an import: the engine's and the bottle's 3 GB. The game
   needs none.
 - A 0.1.x install whose Steam or game folder sits on another volume can't move. Start fresh
-  installs anew, and *Game files I already have* can still copy it, which is my choice to make for
-  that disk, not the update's.
+  installs anew.
+- *Game files I already have* doesn't take 0.1.x's game (#293): it refuses anything in 0.1.x's
+  folders, by its own path or resolved. It still clones or copies another app's game, since that
+  is the player's choice: only after a yes to that folder at that size, which the window asks with
+  the space it takes, and the backend refuses a yes to another path or size. A folder that is a
+  link, sits behind one or has any link in it is refused.
 - After Rollback, Repair doesn't reinstall Steam into the bottle on Steam's route, so the place
   stays free for Move in.
 - A move that 0.1.x's player rolls back and moves in again saves 0.1.x's addon files anew each time

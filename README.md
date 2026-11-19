@@ -79,12 +79,9 @@ signature over this exact file. Then the engine and bottle go in and the install
 installer leaves no record of when it's done, so the app treats the game as installed once
 `Gw2.dat` is larger than 1 GB and neither the installer nor `Gw2-64.exe` is running.
 
-**Game files I already have.** If you already play in GW2 on Mac 0.1, CrossOver, Whisky or an app
-wrapper, the app can take that copy of the game instead of downloading 75 GB again. It looks in
-these places:
+**Game files I already have.** If you already play in CrossOver, Whisky or an app wrapper, the
+app can copy that game instead of downloading 75 GB again. It looks in these places:
 
-- GW2 on Mac 0.1's bottle in `~/Library/Application Support/GW2 on Mac/bottle`, listed as
-  `GW2 on Mac 0.1`
 - CrossOver's bottles in `~/Library/Application Support/CrossOver/Bottles`
 - Whisky's bottles in `~/Library/Containers/com.isaacmarovitz.Whisky/Bottles` and
   `…/Data/Bottles`, named from each bottle's `Metadata.plist`
@@ -100,9 +97,21 @@ size, and the route. That's Steam if Steam's `appmanifest_1284210.acf` sits next
 ArenaNet otherwise. If your copy is somewhere else, use *Choose folder…* or drop the folder on the card. A
 game folder works, and so does a bottle or wrapper app with the game in it.
 
-On the same disk the app clones the files with APFS. That takes a moment and no extra space until
-one of the copies changes. From another disk it copies them, after checking there's room for their
-size plus 1 GB. Either way it only reads your original. My own addon files are left behind. So is
+GW2 on Mac 0.1's game isn't listed, and *Choose folder…* refuses it and anything else in 0.1's
+folders, by its own path or through a link: the first start moves it into this app by a rename
+(see [Moving from GW2 on Mac 0.1](#moving-from-gw2-on-mac-01)), and after a Rollback *Move it in
+again* does. After *Start fresh*, install the game with Steam or ArenaNet's installer. A folder
+that is a link, sits behind one, or has any link in it is refused too: the copy would keep the
+link, which can lead back to the original's files.
+
+Whichever way it goes, the game ends up taking its space twice, so *Install* first asks. The alert
+names the folder and says "This may take up to N GB on this disk", with the disk's free space,
+and copies only on a yes. That yes holds for that folder at that size: if the folder changed since
+the window measured it, even during the install's first steps, the install refuses and you choose
+it again. On the same disk the app clones the files with APFS, which grows apart from the original
+at the game's first patch, and macOS copies outright where it can't clone. From another disk it
+copies them. Either way it first checks there's room for the whole size plus 1 GB, and it only
+reads your original. My own addon files are left behind. So is
 arcdps, as `d3d11.dll` or `dxgi.dll`, because addons aren't cleared for this engine yet, and any
 other program's `d3d11.dll`, and a ReShade and the `ReShade.ini` next to `Gw2-64.exe`: turn ReShade
 on in Settings instead. The summary says what stayed behind. Any other addon, such as an
@@ -189,13 +198,13 @@ the background* on.
 failed, it stops the move. After a move it first gives the game back to 0.1, as *Rollback* does,
 then removes the moved install as Uninstall does, and never another install. If the move's record
 is missing, so it can't give the game back, it changes nothing. Either
-way the move no longer starts by itself, and the install choices list 0.1's game under *Game files
-I already have*. The app keeps that in `moved-from-0.1` in its folder (`moved` or `skipped`), which
+way the move no longer starts by itself, and *Game files I already have* doesn't take 0.1's game. The app keeps that in `moved-from-0.1` in its folder (`moved` or `skipped`), which
 Uninstall leaves, so uninstalling a moved install doesn't move 0.1's again.
 
 The app moves an install when 0.1's folder has its manifest, a bottle and a complete game where
 0.1's state says: in Steam's own library, or in the folder ArenaNet's route used. A game in
-another Steam library isn't moved, and *Game files I already have* can still import it.
+another Steam library isn't moved, and *Game files I already have* doesn't take it from 0.1's
+folder either.
 
 ## Going back to 0.1.x
 
@@ -1647,7 +1656,10 @@ Without one, those checks are skipped. It covers:
   answer, the `wineserver -k` fallback, and Uninstall stopping the watcher.
 - existing game files: stand-in GW2 on Mac 0.1, CrossOver, Whisky and wrapper bottles with a
   sparse `Gw2.dat`, the scan, arcdps and another `d3d11.dll` left behind, a checksum of 0.1's
-  folders before and after, check-game, the clone on both routes, the settings and their backup,
+  folders before and after, 0.1's game refused by the scan, check-game and the import (by its path
+  and through a link either way), a folder that is a link, sits behind one or has one in it refused, the folder changed under the
+  install lock after the yes, the
+  import refused without a yes or with a yes to another path or size, check-game, the clone on both routes, the settings and their backup,
   a real copy from an attached disk image when `hdiutil` can attach one, a forced copy
   (`GW2_ON_MAC_IMPORT_COPY`), the free-space refusal (`GW2_ON_MAC_FREE_KB`), the refusal while the
   game runs, and that the sources never change
