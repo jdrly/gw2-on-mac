@@ -320,7 +320,8 @@ A development build starts with every switch on, since I debug from everything o
 by a line `dev_version=` in `settings.conf` (`DEV_ROWS` in `gw2om.sh`, read the way
 `SETTINGS_RESETS` is), it turns on *Job wakes*, *Event pool*, *Faster locks*, *Launcher frames*,
 *Shader warming*, *MetalFX for Subsample*, *Raw mouse-look* and `fex=mine`, which takes effect in a
-build that carries my FEX. A row I turn off afterwards stays off. The switches without a row are in
+build that carries my FEX. Version 2 turns on *Debug logging*, also over a `settings.conf` that
+says off. A row I turn off afterwards stays off. The switches without a row are in
 `dev-switches.conf` ([The game's environment](#the-games-environment)), which a release never reads.
 A dev build and the release share the folders, so a release that finds the `dev_version=` line
 reads those rows at their defaults, and its next write drops the line. A dev build after it turns them on

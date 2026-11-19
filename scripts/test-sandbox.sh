@@ -4394,9 +4394,9 @@ cef_tail() { dev_expect | sed 's/=.*/=/; s/^/;env=/' | tr -d '\n'; }
 # W32WHY: why the WINE_WIN32U_* lines stay out with the app's own Mac driver: its build has no
 # win32u.so, or its narrowed record doesn't name them
 if [ "$W32U" = mine ]; then W32WHY="my win32u.so doesn't have it"; else W32WHY="my win32u.so isn't in the engine"; fi
-rows_on() { # <settings.conf>: the rows of a development build on, once (dev_version=1)
+rows_on() { # <settings.conf>: the rows of a development build on, once (dev_version=2)
   local k
-  for k in dev_version=1 jobwakes=on eventpool=on fastlocks=on launcherframes=on warm=on metalfx=on rawmouse=on fex=mine; do
+  for k in dev_version=2 debug=on jobwakes=on eventpool=on fastlocks=on launcherframes=on warm=on metalfx=on rawmouse=on fex=mine; do
     grep -qx "$k" "$1" || return 1
   done
 }
@@ -4420,7 +4420,7 @@ out=$(dg install steam 2>&1) && rc=0 || rc=$?
 check "a development build's fresh install: dev-switches.conf, version= first, every switch of the table on, in its order" \
   eval '[ "$rc" = 0 ] && [ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && [ "$(grep "^[A-Z]" "$DEVF" | grep -v "^version=")" = "$(printf "%s\n" "$DEVTABLE" | cut -d" " -f2)" ]'
 check "  each under a comment that names its piece and its issue and says played or unplayed" comments_ok "$DEVF"
-check "  the rows on, once: settings.conf at dev_version=1" rows_on "$DAD/settings.conf"
+check "  the rows on, once: settings.conf at dev_version=2" rows_on "$DAD/settings.conf"
 check "  and the install said both" eval 'echo "$out" | grep -q "^Development build: the switch rows on, once: jobwakes=on " && echo "$out" | grep -q "^dev-switches.conf: version $DEVVER, switched on: "'
 # A release candidate, X.Y.Z-rc.N (docs/adr/0017), is a development build by another name.
 # build.sh's bundle_version (read from build.sh) gives it a CFBundleVersion above every dev build
@@ -4713,7 +4713,17 @@ check "  updated: the newer switch at the end, on, under its comment; the commen
   eval '[ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && [ "$(tail -1 "$DEVF")" = DXMT_COMPILE_DEMAND=1 ] && tail -2 "$DEVF" | head -1 | grep -q "^# my DXMT fork " && grep -qx "#FEX_DYNAMICL1CACHE=0" "$DEVF" && ! grep -qx "FEX_DYNAMICL1CACHE=0" "$DEVF" && grep -qx MY_OWN_SWITCH=1 "$DEVF"'
 dg set metalfx off >/dev/null
 dg repair >/dev/null 2>&1
-check "a row I turn off stays off through the next update" eval 'grep -qx metalfx=off "$DAD/settings.conf" && grep -qx dev_version=1 "$DAD/settings.conf"'
+check "a row I turn off stays off through the next update" eval 'grep -qx metalfx=off "$DAD/settings.conf" && grep -qx dev_version=2 "$DAD/settings.conf"'
+# (a file a development build before row 2 wrote, with Debug logging off: row 2 turns it on once,
+# the rows of 1 stay as they are; Debug logging off afterwards stays off)
+sed -i '' -e 's/^dev_version=.*/dev_version=1/' -e 's/^debug=.*/debug=off/' "$DAD/settings.conf"
+out=$(dg repair 2>&1)
+check "a file at dev_version=1 with Debug logging off: row 2 turns it on once, metalfx stays off" \
+  eval 'grep -qx debug=on "$DAD/settings.conf" && grep -qx metalfx=off "$DAD/settings.conf" && grep -qx dev_version=2 "$DAD/settings.conf" && echo "$out" | grep -qx "Development build: the switch rows on, once: debug=on"'
+dg set debug off >/dev/null
+dg repair >/dev/null 2>&1
+check "  Debug logging off afterwards stays off" eval 'grep -qx debug=off "$DAD/settings.conf" && grep -qx dev_version=2 "$DAD/settings.conf"'
+dg set debug on >/dev/null
 # drop_rows: the file without those variables' lines, their comments and the empty line above
 # each, as an older build wrote them
 drop_rows() { # <file> <NAME...>
@@ -4998,11 +5008,11 @@ check "  raw mouse-look off afterwards stays off" eval 'grep -qx rawmouse=off "$
 # rows read as their defaults while the dev_version= line is there, and its next write drops the
 # line and writes those defaults
 rsett() { rg settings | sed -n "s/^$1=//p"; }
-check "a release build over it reads the rows at their defaults: fex engine, fast locks off, raw mouse-look on" \
-  eval 'grep -qx dev_version=1 "$RAD/settings.conf" && grep -qx fex=mine "$RAD/settings.conf" && [ "$(rsett fex)" = engine ] && [ "$(rsett fastlocks)" = off ] && [ "$(rsett rawmouse)" = on ] && grep -qx dev_version=1 "$RAD/settings.conf"'
+check "a release build over it reads the rows at their defaults: fex engine, fast locks off, raw mouse-look on, Debug logging off" \
+  eval 'grep -qx dev_version=2 "$RAD/settings.conf" && grep -qx fex=mine "$RAD/settings.conf" && [ "$(rsett fex)" = engine ] && [ "$(rsett fastlocks)" = off ] && [ "$(rsett rawmouse)" = on ] && [ "$(rsett debug)" = off ] && grep -qx dev_version=2 "$RAD/settings.conf"'
 rg set quitsteam off >/dev/null
 check "  its next write: no dev_version line, the rows at their defaults, my change in" \
-  eval '! grep -q "^dev_version=" "$RAD/settings.conf" && grep -qx fex=engine "$RAD/settings.conf" && grep -qx fastlocks=off "$RAD/settings.conf" && grep -qx rawmouse=on "$RAD/settings.conf" && grep -qx quitsteam=off "$RAD/settings.conf"'
+  eval '! grep -q "^dev_version=" "$RAD/settings.conf" && grep -qx fex=engine "$RAD/settings.conf" && grep -qx fastlocks=off "$RAD/settings.conf" && grep -qx rawmouse=on "$RAD/settings.conf" && grep -qx debug=off "$RAD/settings.conf" && grep -qx quitsteam=off "$RAD/settings.conf"'
 dgr repair >/dev/null 2>&1
 check "  a development build after it turns the rows on again" rows_on "$RAD/settings.conf"
 mkdir -p "$SANDBOX/relzip"
