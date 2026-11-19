@@ -138,25 +138,37 @@ cat >"$G" <<'EOF'
 # and 2 and nothing else, so its detached processes, which redirect those, hold no tee open. This
 # exits with gw2om.sh's status once both tees are done, so its output is all there when it ends.
 # A call that hasn't ended after CALL_LIMIT seconds (gw2om.sh itself, or a tee whose FIFO a process
-# still holds open) is ended by a watchdog: it writes the processes and the open FIFOs to the
-# check's file, names the call in checks/timeout.new, which fails the check, and ends this
-# script's children (gw2om.sh, the tees and itself). It holds none of the call's pipes and ends
-# within a second of the call.
-f="$CHECK_OUT.$$" w=$$
+# still holds open) is ended by a watchdog. It writes the call's record, then the processes and the
+# open FIFOs into the check's file (10 s at most: a ps that hangs doesn't stop it), then ends every
+# process under this script but itself: TERM, and KILL 2 s later for one that waits (a shell whose
+# TERM trap waits for its child). A process that has left the tree (a detached one) stays. This
+# script then adds the record to checks/timeout.new, which fails the check it ran in, and exits
+# 124. While that file is there, a call doesn't run, so a check spends one limit at most. The
+# watchdog holds none of the call's pipes and ends within a second of the call.
+f="$CHECK_OUT.$$" w=$$ to="${CHECK_OUT%/*}/timeout.new"
+if [ -e "$to" ]; then echo "\$ gw2om.sh $* (not run: a call before it ran out of its limit)" >>"$CHECK_OUT"; exit 124; fi
 mkfifo "$f.1" "$f.2" || exec "$GW2OM" "$@"
 echo "\$ gw2om.sh $*" >>"$CHECK_OUT"
 ( i=0
   while [ "$i" -lt "$CALL_LIMIT" ]; do sleep 1; kill -0 "$w" 2>/dev/null || exit 0; i=$((i + 1)); done
-  { echo "gw2om.sh $* had not ended after $CALL_LIMIT s (the wrapper is pid $w). The processes:"
-    ps -axww -o pid,ppid,pgid,stat,etime,command
-    echo "The open FIFOs (a tee ends once no process has its FIFO open for writing):"
-    lsof -n -u "$(id -u)" 2>/dev/null | awk 'NR == 1 || $5 == "FIFO"'; } >>"$CHECK_OUT" 2>&1
-  echo "gw2om.sh $* had not ended after $CALL_LIMIT s" >>"${CHECK_OUT%/*}/timeout.new"
-  pkill -TERM -P "$w" ) </dev/null >/dev/null 2>&1 &
+  echo "gw2om.sh $* had not ended after $CALL_LIMIT s: checks/${CHECK_OUT##*/}" >"$f.timeout"
+  ( { echo "gw2om.sh $* had not ended after $CALL_LIMIT s (the wrapper is pid $w). The processes:"
+      ps -axww -o pid,ppid,pgid,stat,etime,command
+      echo "The open FIFOs (a tee ends once no process has its FIFO open for writing):"
+      lsof -n -u "$(id -u)" 2>/dev/null | awk 'NR == 1 || $5 == "FIFO"'; } >>"$CHECK_OUT" 2>&1 ) &
+  d=$! i=0
+  while kill -0 "$d" 2>/dev/null && [ "$i" -lt 10 ]; do sleep 1; i=$((i + 1)); done
+  me=$(exec sh -c 'echo $PPID')
+  for sig in TERM KILL; do
+    kill -"$sig" $(ps -axo pid=,ppid= | awk -v r="$w" -v x="$me" '{ up[$1] = $2 }
+      END { for (k in up) { q = k; while (q in up && q != x) { if (up[q] == r) { print k; break } q = up[q] } } }') 2>/dev/null
+    sleep 2
+  done ) </dev/null >/dev/null 2>&1 &
 { rm -f "$f.1"; exec tee -a "$CHECK_OUT"; } <"$f.1" & t1=$!
 { rm -f "$f.2"; exec tee -a "$CHECK_OUT" >&2; } <"$f.2" & t2=$!
 "$GW2OM" "$@" >"$f.1" 2>"$f.2"; rc=$?
 wait "$t1" "$t2"
+if [ -e "$f.timeout" ]; then cat "$f.timeout" >>"$to"; rm -f "$f.timeout"; rc=124; fi
 exit "$rc"
 EOF
 chmod 755 "$G"
@@ -175,14 +187,14 @@ end_check() {
   fi
   CHECK_OUT="$CHECKS/$(printf %04d $((pass + fail + 1))).txt"
 }
-# A gw2om.sh call that ran out of CALL_LIMIT (the wrapper's line in checks/timeout.new) fails the
+# A gw2om.sh call that ran out of CALL_LIMIT (the wrapper's record in checks/timeout.new) fails the
 # check it ran in, or the next one for a call outside a check, whatever its commands said, and the
 # FAIL line names the call and the file with the watchdog's process list
 ok() { if [ -e "$CHECKS/timeout.new" ]; then bad "$*"; return; fi; pass=$((pass + 1)); echo "  ok   $*"; end_check ok "$*"; }
 bad() {
   local why=""
   if [ -e "$CHECKS/timeout.new" ]; then
-    why=" ($(tr '\n' ';' <"$CHECKS/timeout.new" | sed 's/;$//; s/;/; /g'): checks/${CHECK_OUT##*/})"
+    why=" ($(tr '\n' ';' <"$CHECKS/timeout.new" | sed 's/;$//; s/;/; /g'))"
     rm -f "$CHECKS/timeout.new"
   fi
   fail=$((fail + 1)); echo "  FAIL $*$why"; end_check FAIL "$*$why"
@@ -196,6 +208,28 @@ section_end() {
   SEC_NAME=""
 }
 section() { section_end; SEC_NAME=$* SEC_T0=$SECONDS; echo; echo "== $*"; }
+# finish: the seconds per section, the counts, and after a failure the summary and the checks' files
+# in $FAILED; its status is the run's
+finish() {
+  section_end
+  echo
+  echo "Seconds per section (GROUP=$GROUP, $SECONDS s in all):"
+  printf '%s' "$SEC_TIMES"
+  [ -z "${GITHUB_STEP_SUMMARY:-}" ] || { echo "### test-sandbox.sh, GROUP=$GROUP: $SECONDS s"; echo '```'; printf '%s' "$SEC_TIMES"; echo '```'; } >>"$GITHUB_STEP_SUMMARY"
+  echo
+  echo "$pass passed, $fail failed"
+  end_sandbox_processes
+  if [ "$fail" != 0 ]; then
+    first=$(grep -m1 '^[0-9]* FAIL ' "$CHECKS/checks.txt")
+    { echo "First failed check: ${first#* FAIL }"; echo
+      echo "The last 40 lines of its commands' output (checks/${first%% *}.txt; its state files in checks/${first%% *}.state):"; echo
+      echo '```'; tail -n 40 "$CHECKS/${first%% *}.txt" 2>/dev/null; echo '```'; } >"$CHECKS/summary.md"
+    cp -R "$CHECKS" "$FAILED"
+    echo "The checks' files: $FAILED"
+  fi
+  [ -n "${KEEP:-}" ] || rm -rf "$SANDBOX"
+  [ "$fail" = 0 ]
+}
 g() { "$G" "$@"; }
 st() { g status | sed -n "s/^$1=//p"; }
 sett() { g settings | sed -n "s/^$1=//p"; }
@@ -556,27 +590,36 @@ TOTAL, minus reserved VM space   745.6G     7.3G     6.7G     1.4G      68K   51
 EOF
 chmod 755 "$SANDBOX/bin/vmmap"
 
+if in_group rest; then
 section "A gw2om.sh call that doesn't end fails its check by name (CALL_LIMIT)"
-# (two stand-ins for gw2om.sh, through the wrapper with a limit of 2 s, each in a checks folder of
-# its own: one never ends, and one ends but leaves a process holding its stdout and stderr, so the
-# tees wait)
+# (stand-ins for gw2om.sh, through the wrapper with a limit of 2 s, each in a checks folder of its
+# own: one never ends; one waits for its child with a TERM trap, which bash runs only once the child
+# has ended; one ends but leaves a detached process holding its stdout and stderr, so the tees wait)
 cp "$SANDBOX/sleeper" "$SANDBOX/bin/holder"
 printf '#!/bin/bash\nexec "%s" 600\n' "$SANDBOX/bin/holder" >"$SANDBOX/bin/hangs"
-printf '#!/bin/bash\necho game=yes\n"%s" 600 &\n' "$SANDBOX/bin/holder" >"$SANDBOX/bin/leaves"
-chmod 755 "$SANDBOX/bin/hangs" "$SANDBOX/bin/leaves"
-limited() { # <stand-in>: the output of a check that calls it (without bash's lines about the
+printf '#!/bin/bash\ntrap "exit 143" TERM\n"%s" 601\n' "$SANDBOX/bin/holder" >"$SANDBOX/bin/traps"
+printf '#!/bin/bash\necho game=yes\n"%s" 602 &\n' "$SANDBOX/bin/holder" >"$SANDBOX/bin/leaves"
+chmod 755 "$SANDBOX/bin/hangs" "$SANDBOX/bin/traps" "$SANDBOX/bin/leaves"
+limited() { # <stand-in>: the output of a check that calls it twice (without bash's lines about the
   # processes the watchdog ended), and the seconds it took
   local t0=$SECONDS
   ( CHECKS="$SANDBOX/limit/$1" CHECK_OUT="$SANDBOX/limit/$1/0001.txt" GW2OM="$SANDBOX/bin/$1" CALL_LIMIT=2 pass=0 fail=0
-    mkdir -p "$CHECKS"; check "a check that calls $1" [ "$(st game)" = yes ] ) 2>/dev/null
+    mkdir -p "$CHECKS"; check "a check that calls $1" [ "$(st game)/$(st game)" = yes/yes ] ) 2>/dev/null
   echo "took $((SECONDS - t0))"
 }
-for stub in hangs leaves; do
-  out=$(limited "$stub")
-  check "  $stub: the check fails within 10 s, naming the call and its file" eval 'echo "$out" | grep -qx "  FAIL a check that calls $stub (gw2om.sh status had not ended after 2 s: checks/0001.txt)" && [ "${out##*took }" -le 10 ]'
-  check "  the file has the processes, the holder among them" has "$SANDBOX/limit/$stub/0001.txt" "$SANDBOX/bin/holder 600"
+for stub in hangs:600 traps:601 leaves:602; do
+  out=$(limited "${stub%:*}")
+  check "  ${stub%:*}: the check fails within 10 s, naming the call and its file, and its second call doesn't run" \
+    eval 'echo "$out" | grep -qx "  FAIL a check that calls ${stub%:*} (gw2om.sh status had not ended after 2 s: checks/0001.txt)" && [ "${out##*took }" -le 10 ] && has "$SANDBOX/limit/${stub%:*}/0001.txt" "gw2om.sh status (not run: a call before it"'
+  check "  the file has the processes, the holder among them" has "$SANDBOX/limit/${stub%:*}/0001.txt" "$SANDBOX/bin/holder ${stub#*:}"
+  if [ "${stub%:*}" = leaves ]; then
+    check "  the detached holder outlives the call (the suite's own ends end it)" eval 'pgrep -f "^$SANDBOX/bin/holder 602" >/dev/null'
+  else
+    check "  the stand-in and its holder are gone when the check ends" eval '! pgrep -f "^$SANDBOX/bin/holder ${stub#*:}" >/dev/null && ! pgrep -f "^/bin/bash $SANDBOX/bin/${stub%:*}$" >/dev/null'
+  fi
   pkill -f "^$SANDBOX/bin/holder" 2>/dev/null || true
 done
+fi
 
 if in_group settings; then
 # --- Dry runs change nothing
@@ -1939,7 +1982,7 @@ fi
 
 if in_group sessions; then
 # (alone, this group starts from an install of its own: the sections before it didn't run)
-[ "$GROUP" = all ] || fixture_install || { echo "the fixture's install failed" >&2; exit 1; }
+[ "$GROUP" = all ] || fixture_install || { bad "the fixture's install (fixture_install), which the rest of this group needs"; finish; exit 1; }
 section "Steam in the background after the first login"
 LU="$STEAM/config/loginusers.vdf"
 rm -f "$LU"
@@ -4927,21 +4970,4 @@ fi
 
 # (a call after the last check that ran out of its limit)
 [ ! -e "$CHECKS/timeout.new" ] || bad "after the last check"
-section_end
-echo
-echo "Seconds per section (GROUP=$GROUP, $SECONDS s in all):"
-printf '%s' "$SEC_TIMES"
-[ -z "${GITHUB_STEP_SUMMARY:-}" ] || { echo "### test-sandbox.sh, GROUP=$GROUP: $SECONDS s"; echo '```'; printf '%s' "$SEC_TIMES"; echo '```'; } >>"$GITHUB_STEP_SUMMARY"
-echo
-echo "$pass passed, $fail failed"
-end_sandbox_processes
-if [ "$fail" != 0 ]; then
-  first=$(grep -m1 '^[0-9]* FAIL ' "$CHECKS/checks.txt")
-  { echo "First failed check: ${first#* FAIL }"; echo
-    echo "The last 40 lines of its commands' output (checks/${first%% *}.txt; its state files in checks/${first%% *}.state):"; echo
-    echo '```'; tail -n 40 "$CHECKS/${first%% *}.txt" 2>/dev/null; echo '```'; } >"$CHECKS/summary.md"
-  cp -R "$CHECKS" "$FAILED"
-  echo "The checks' files: $FAILED"
-fi
-[ -n "${KEEP:-}" ] || rm -rf "$SANDBOX"
-[ "$fail" = 0 ]
+finish
