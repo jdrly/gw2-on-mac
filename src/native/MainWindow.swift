@@ -57,7 +57,16 @@ struct MainView: View {
     }
     .background { WindowBackground() }
     .ignoresSafeArea()
-    .frame(minWidth: MainView.designSize.width, minHeight: MainView.designSize.height)
+    // The window's sizes don't follow what it shows (#310). With only a minimum here, the ideal
+    // size, which a hosting controller hands AppKit as its preferred size, followed the panel:
+    // 1173 wide, and 652 to 792 high by state. The crashes in #310 are AppKit giving up on
+    // constraints passes that keep asking for another, and 0.1.4's went through a preferred size
+    // computed inside such a pass. I couldn't reproduce them, so this takes away one way a state
+    // change could resize a window mid-pass. Whether it was the one that crashed is still open.
+    // Fixed at the design size, the ideal size is the same in every state, like the minimum.
+    // With no maximum, the player can still make the window larger.
+    .frame(minWidth: MainView.designSize.width, idealWidth: MainView.designSize.width, maxWidth: .infinity,
+           minHeight: MainView.designSize.height, idealHeight: MainView.designSize.height, maxHeight: .infinity)
     .animation(.smooth, value: installer.phase)
     .animation(.smooth, value: installer.panel)
     .animation(.smooth, value: installer.status)

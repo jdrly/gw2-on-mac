@@ -532,6 +532,42 @@ func renderAll(_ dir: URL, exports: URL?) async {
       }
     }
   }
+  // MainView's sizes don't follow the panel (#310, a model check). Hosted in a window with a
+  // hidden title bar that takes both its minimum and its preferred size, the preferred size is
+  // the window's minimum in every state, and the content's minimum is the design size. Before the
+  // change, the preferred size was 1173 wide and 684 to 824 high by state.
+  do {
+    func text(_ s: CGSize) -> String { String(format: "%.1f×%.1f", s.width, s.height) }
+    func same(_ a: CGSize, _ b: CGSize) -> Bool { abs(a.width - b.width) <= 0.5 && abs(a.height - b.height) <= 0.5 }
+    var failed = false
+    for state in Set(mains.map { $0.1 }).sorted() {
+      let minimum = NSHostingController(rootView: MainView(installer: installer(state), settings: settings()))
+        .sizeThatFits(in: .zero)
+      let hosting = NSHostingController(rootView: MainView(installer: installer(state), settings: settings()))
+      hosting.sizingOptions = [.minSize, .preferredContentSize]
+      let win = NSWindow(contentViewController: hosting)
+      win.isReleasedWhenClosed = false
+      win.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+      win.titlebarAppearsTransparent = true
+      win.titleVisibility = .hidden
+      win.setContentSize(size)
+      for _ in 0..<5 {
+        win.layoutIfNeeded()
+        try? await Task.sleep(for: .milliseconds(50))
+      }
+      let preferred = hosting.preferredContentSize, windowMin = win.contentMinSize
+      win.close()
+      let ok = same(minimum, size) && same(preferred, windowMin)
+      print("\(ok ? "ok" : "FAIL") main window sizes, \(state): minimum \(text(minimum)), preferred \(text(preferred)), "
+            + "window minimum \(text(windowMin))")
+      failed = failed || !ok
+    }
+    if failed {
+      print("FAIL the main window's sizes follow its state (above): the minimum must be \(text(size)) and the "
+            + "preferred size the window's minimum")
+      exit(1)
+    }
+  }
   for (name, state, dark, design) in mains {
     let rep = await render(MainView(installer: installer(state), settings: settings()), size: size, dark: dark)
     write(rep, dir.appendingPathComponent(name + ".png"))
