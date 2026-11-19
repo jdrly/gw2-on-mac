@@ -1502,7 +1502,7 @@ staged, the addon, fonts, art and licences. It
 downloads Sparkle at a pinned version and sha256, and compiles the Icon Composer icon
 `src/AppIcon.icon` with actool into `Assets.car` and a fallback `AppIcon.icns`.
 
-- `GW2_ON_MAC_VERSION` sets the version, 0.2.0-dev.5 by default. `X.Y.Z-dev.N` makes a development build,
+- `GW2_ON_MAC_VERSION` sets the version, 0.2.0 by default. `X.Y.Z-dev.N` makes a development build,
   as in SWTOR on Mac, and `X.Y.Z-rc.N` a release candidate, N below 1000 in both. A release
   candidate is a development build in everything but its name: the chip says "Release candidate ·
   0.2.0-rc.1" and the release's title "(release candidate)". Its `CFBundleVersion` sorts above
@@ -1710,6 +1710,10 @@ delta updates and checks it with `scripts/check-appcast.swift`.
 - Every mode that creates or changes a GitHub release stops unless `GW2_ON_MAC_PUBLISH=1`. The
   default mode creates a draft release, and publishing the draft makes the update live. Installed
   apps read `https://github.com/jdrly/gw2-on-mac/releases/latest/download/appcast.xml`.
+- The draft's tag goes on the commit the app was built from, and not on `main`, which is 0.1.x.
+  `build.sh` writes that commit to `dist/<name>.commit`, marked "with changes" when the checkout
+  had a changed or untracked file before or after the build. Before signing, the script stops
+  unless that record is `HEAD` as is, on `origin/arm64` (`RELEASE_BRANCH`), and the tag is free.
 - The feed needs an app built with `GW2_ON_MAC_FEED_URL` and `GW2_ON_MAC_ED_PUBLIC_KEY`.
 - `--sign-only` and `--no-notarize` run locally without touching GitHub.
 - The appcast's item names the macOS the engine needs, `src/gw2om.sh`'s `MACOS_MIN` (26.4), as
@@ -1724,7 +1728,7 @@ delta updates and checks it with `scripts/check-appcast.swift`.
   "(development build)".
 - `--adhoc` does the same without my Developer ID, for the Dev build workflow. It keeps
   `build.sh`'s ad hoc signatures and only verifies them, makes an unsigned DMG, and doesn't
-  notarize. It refuses a version below `build.sh`'s, a tag that exists and the stand-in DXMT,
+  notarize. It refuses a version below `build.sh`'s `DEV_VERSION`, a tag that exists and the stand-in DXMT,
   `ntdll.so` or `winemac.so`. It
   mounts the DMG and checks that its app matches `dist/<name>.files` file for file, with a valid
   signature, this app's bundle id, the dev channel and no feed. The pre-release gets the DMG and
@@ -1756,12 +1760,15 @@ publishes it as the pre-release `v<version>`. A release candidate (`-f version=0
 the same way ([ADR 0017](docs/adr/0017-a-release-candidate-is-a-dev-build-by-another-name.md)):
 
 ```sh
-gh workflow run devbuild.yml --ref arm64                    # DXMT's newest green commit, build.sh's version
-gh workflow run devbuild.yml --ref arm64 -f dxmt_commit=<sha> -f wine_commit=<sha> -f macdrv_commit=<sha> -f fex_commit=<sha> -f version=0.2.0-dev.6
+gh workflow run devbuild.yml --ref arm64 -f version=0.2.0-rc.3   # DXMT's newest green commit
+gh workflow run devbuild.yml --ref arm64 -f dxmt_commit=<sha> -f wine_commit=<sha> -f macdrv_commit=<sha> -f fex_commit=<sha> -f version=0.2.0-rc.4
 gh workflow run devbuild.yml --ref arm64 -f publish=false   # a dry run: the DMG as an artifact, 7 days
 gh release download v0.2.0-dev.5 -R jdrly/gw2-on-mac -p '*.dmg' -D ~/Downloads
 ```
 
+- Without `version` the run takes `DEV_VERSION` from `build.sh`, and never `APP_VERSION`, which is
+  0.2.0 while I prepare that release. A version below `DEV_VERSION` is refused, so a number isn't
+  published twice. `DEV_VERSION` is still 0.2.0-dev.5, so a run without `version` stops at its tag.
 - DXMT is my fork's build of a commit on its `gw2-on-mac`: the release asset
   `dxmt-arm64-<commit>.tar.xz` of jdrly/dxmt's `arm64-builds`, checked against GitHub's digest,
   or until that exists, the artifact `dxmt-arm64-<commit>` of the fork's `GW2` run, fetched with
@@ -1788,7 +1795,7 @@ gh release download v0.2.0-dev.5 -R jdrly/gw2-on-mac -p '*.dmg' -D ~/Downloads
   them: the app's and the forks' commits, and a link to the DXMT fork's changes since the previous
   dev build's DXMT. The record names all five commits.
 - The run proves its refusals on copies: the stand-in DXMT, `ntdll.so`, `winemac.so` and FEX, a
-  `VERSION` with another commit or another engine, a version below `build.sh`'s and a tag that
+  `VERSION` with another commit or another engine, a version below `build.sh`'s `DEV_VERSION` and a tag that
   exists. With `wine_commit`, `macdrv_commit` or `fex_commit`, also a build whose `VERSION` names
   another commit, base or engine, a file that isn't the one its `VERSION` names and a `.so` without
   a valid signature. `release.sh` checks that the DMG's app has that commit's file with the sha256
