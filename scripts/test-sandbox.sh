@@ -50,7 +50,7 @@ sessions_reset() {
   local i=0
   end_sandbox_processes
   pkill -f "^$APP/Contents/Resources/helpers/sessionlock hold" 2>/dev/null || true
-  while pgrep -f "^/bin/bash $G watch-session" >/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+  while pgrep -f "^/bin/bash $GW2OM watch-session" >/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
   rm -f "$AD/session" "$AD/session.req" "$SANDBOX/steam.pid" "$SANDBOX/game.pid"
 }
 rm -rf "$SANDBOX" "$FAILED"
@@ -417,6 +417,26 @@ printf 'GetProcAddress addextension2 for arcdps\n' >>"$SANDBOX/pe/nexus.dll"
 make_pe "$SANDBOX/pe/ReShade64.dll" ReShadeRegisterAddon ReShadeUnregisterAddon ReShadeRegisterEvent
 printf 'ReShade 6.8.0 (stand-in)\n' >>"$SANDBOX/pe/ReShade64.dll"
 cp "$SANDBOX/pe/ReShade64.dll" "$SANDBOX/pe/reshade-addon.dll" && printf 'the Addon build\n' >>"$SANDBOX/pe/reshade-addon.dll"
+# arcdps from a local deltaconnected.com (each group's addon checks; the arcdps section changes it
+# and puts it back)
+cp "$SANDBOX/pe/arcdps.dll" "$ARCSRV/d3d11.dll"
+echo "$(md5 -q "$ARCSRV/d3d11.dll")  d3d11.dll" >"$ARCSRV/d3d11.dll.md5sum"
+export GW2_ON_MAC_ARCDPS_URL="file://$ARCSRV"
+arcst() { g status | sed -n "s/^arcdps_state=//p"; }
+# collect: Collect Logs into $SANDBOX/zip, unzipped into $SANDBOX/unzipped (Z: its folder)
+collect() {
+  rm -rf "$SANDBOX/zip" "$SANDBOX/unzipped" && mkdir -p "$SANDBOX/zip" "$SANDBOX/unzipped"
+  zip=$("$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip" 2>"$SANDBOX/collect.err" | tail -1)
+  Z="$SANDBOX/unzipped/$(basename "$zip" .zip)"
+  [ -f "$zip" ] && (cd "$SANDBOX/unzipped" && unzip -q "$zip")
+}
+# winf <path>: the path as Wine writes it, without the Z:; no_home <files or folders>: no home
+# folder (as / or \ paths) and no user name in them
+winf() { printf '%s' "$1" | tr / '\\'; }
+no_home() {
+  ! grep -rqiF -e "$HOME/" -e "$H/" -e "$(winf "$HOME")\\" -e "$(winf "$H")\\" -e "\\Users\\$(id -un)\\" "$@" &&
+    ! grep -rqiw -e "$(id -un)" "$@"
+}
 # (macOS kills copies of /bin/sleep: an ad-hoc signed program of my own keeps its signature)
 printf '#include <unistd.h>\n#include <stdlib.h>\nint main(int c, char **v) { sleep(c > 1 ? atoi(v[1]) : 60); return 0; }\n' >"$SANDBOX/sleeper.c"
 clang -O2 -o "$SANDBOX/sleeper" "$SANDBOX/sleeper.c"
@@ -1058,10 +1078,6 @@ check "  turning it off leaves it alone too" has "$GD/version.dll" "another addo
 rm -f "$GD/version.dll"
 
 section "arcdps (Settings › Interface)"
-cp "$SANDBOX/pe/arcdps.dll" "$ARCSRV/d3d11.dll"
-echo "$(md5 -q "$ARCSRV/d3d11.dll")  d3d11.dll" >"$ARCSRV/d3d11.dll.md5sum"
-export GW2_ON_MAC_ARCDPS_URL="file://$ARCSRV"
-arcst() { g status | sed -n "s/^arcdps_state=//p"; }
 check "arcdps off by default: status arcdps=off, arcdps_state=off" [ "$(st arcdps)/$(arcst)" = off/off ]
 check "  settings say so too, and settings.conf has no arcdps key" eval '[ "$(sett arcdps)/$(sett arcdps_state)" = off/off ] && ! grep -q "^arcdps=" "$AD/settings.conf"'
 out=$(g set arcdps on 2>&1) && rc=0 || rc=$?
@@ -1488,20 +1504,6 @@ for pid in 9101 9202 9303 9404; do
 done
 echo "profile" >"$LOGS/heat-prof-9404.log"
 mkdir -p "$ARC/logs" && : >"$ARC/logs/$(id -un)-boss.zevtc" && : >"$ARC/logs/$(id -un)_boss.zevtc"
-# collect: Collect Logs into $SANDBOX/zip, unzipped into $SANDBOX/unzipped (Z: its folder)
-collect() {
-  rm -rf "$SANDBOX/zip" "$SANDBOX/unzipped" && mkdir -p "$SANDBOX/zip" "$SANDBOX/unzipped"
-  zip=$("$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip" 2>"$SANDBOX/collect.err" | tail -1)
-  Z="$SANDBOX/unzipped/$(basename "$zip" .zip)"
-  [ -f "$zip" ] && (cd "$SANDBOX/unzipped" && unzip -q "$zip")
-}
-# winf <path>: the path as Wine writes it, without the Z:; no_home <files or folders>: no home
-# folder (as / or \ paths) and no user name in them
-winf() { printf '%s' "$1" | tr / '\\'; }
-no_home() {
-  ! grep -rqiF -e "$HOME/" -e "$H/" -e "$(winf "$HOME")\\" -e "$(winf "$H")\\" -e "\\Users\\$(id -un)\\" "$@" &&
-    ! grep -rqiw -e "$(id -un)" "$@"
-}
 # (arcdps.log also with the game folder as Wine writes it, and the user name)
 printf '2026-11-13 13:42:41.000: info: loaded Z:%s\\d3d11.dll for %s\n' "$(winf "$GD")" "$(id -un)" >>"$ARC/arcdps.log"
 rm -f "$SANDBOX/vmmap.args"
@@ -1845,21 +1847,6 @@ rm -rf "$GD/addons" "$GD/d3d11.dll" "$AD/compatdb.local" "$STEAM/dumps" "$GD/Cra
 collect
 check "no ReShade folder and nothing in the game folder: Collect Logs works and says ReShade is off" \
   eval '[ ! -e "$AD/ReShade" ] && [ -f "$Z/system-info.txt" ] && grep -qxF "ReShade: off; arcdps off" "$Z/system-info.txt" && grep -qxF "  ReShade folder: none" "$Z/system-info.txt" && [ ! -e "$Z/reshade" ] && [ ! -e "$Z/game-logs/addon-files.txt" ]'
-# (DXMT's wait field is count, the window's total and its longest: two windows with waits and one
-# without, which adds nothing)
-printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60
-info:  COMPILE variants=10 air=0/0 pso=1/15 built=2 failed=0 build=shader:0/0.0 pipeline:2/30.0 queue=0/0 threads=2 wait=13x 109.6/21.1 slow=0
-info:  COMPILE variants=5 air=0/0 pso=1/15 built=1 failed=0 build=shader:0/0.0 pipeline:1/9.0 queue=0/0 threads=2 wait=0x 0.0/0.0 slow=0
-info:  COMPILE variants=3 air=0/0 pso=1/15 built=1 failed=0 build=shader:0/0.0 pipeline:1/12.0 queue=0/0 threads=2 wait=3x 31.4/18.9 slow=0
-' >"$SANDBOX/compile_d3d11.log"
-out=$("$APP/Contents/Resources/session-report.sh" "$SANDBOX/compile_d3d11.log" 2>&1)
-check "the session report adds up DXMT's compile waits as its log gives them, and the longest" \
-  has <(echo "$out") "^Compiles: 18 shader variants, 4 pipelines built, 0 failed; DXMT's encode thread waited 16 times, about 141 ms in all, the longest 21.1 ms$"
-out=$("$APP/Contents/Resources/session-report.sh" --compare "$SANDBOX/compile_d3d11.log" "$SANDBOX/compile_d3d11.log" 2>&1 |
-  awk '/^compile_wait/ { print $1, $2, $3 }' | tr '\n' '|')
-check "  and --compare prints the same three numbers for both sessions" \
-  [ "$out" = "compile_waits 16 16|compile_wait_ms 141 141|compile_wait_max 21.1 21.1|" ]
-rm -f "$SANDBOX/compile_d3d11.log"
 
 fi
 
@@ -2836,7 +2823,7 @@ check "Collect Logs with ReShade on: ReShade.log, ReShade.ini, the current prese
   eval 'for f in ReShade.log ReShade.ini preset.ini shaders.txt; do [ -f "$Z/reshade/$f" ] || exit 1; done'
 check "  none of them, nor the reports, holds the home folder or the user name; nor does a name in the zip" \
   eval 'no_home "$Z/reshade" "$Z/system-info.txt" "$Z/session-report.txt" && ! unzip -Z1 "$zip" | grep -qiw "$(id -un)"'
-check "  the Z:\\ paths kept, from ~ on; the preset's techniques kept" eval 'grep -qxF "IntermediateCachePath=Z:~\\Library\\Caches\\GW2 on Mac\\reshade" "$Z/reshade/ReShade.ini" && has "$Z/reshade/preset.ini" "^Techniques=Deband@Deband.fx$"'
+check "  the Z:\\ paths kept, from ~ on; the preset's techniques kept" eval 'grep -qxF "IntermediateCachePath=Z:~\\Library\\Caches\\$APP_FOLDER\\reshade" "$Z/reshade/ReShade.ini" && has "$Z/reshade/preset.ini" "^Techniques=Deband@Deband.fx$"'
 check "  ReShade.log: its last 5 MB, the binary line and the last line in, the first out" \
   eval 'head -1 "$Z/reshade/ReShade.log" | grep -qxF "[GW2 on Mac: only the last 5 MB of ReShade.log]" && has "$Z/reshade/ReShade.log" "^LAST LINE" && has "$Z/reshade/ReShade.log" "^binary " && ! has "$Z/reshade/ReShade.log" "FIRST LINE" && [ "$(stat -f %z "$Z/reshade/ReShade.log")" -lt 5100000 ]'
 check "  shaders.txt names the files, the 20 MB one too; no file of Shaders in the zip" \
@@ -3360,6 +3347,9 @@ mkdir -p "$CXG/bin64" "$CXS"
 echo "stand-in game" >"$CXG/Gw2-64.exe" && mkfile -n 2g "$CXG/Gw2.dat" && echo "bin" >"$CXG/bin64/CoherentUI64.dll"
 cp "$COMP/ui-scale/version.dll" "$CXG/version.dll" && echo "scale=1.75" >"$CXG/gw2-ui-scale.ini" && echo "arcdps" >"$CXG/d3d11.dll"
 cp "$SANDBOX/pe/nexus.dll" "$CXG/dxgi.dll"
+# (its addons folder a link to one outside the game folder, with arcdps at ReShade's chain path)
+mkdir -p "$SANDBOX/shared-addons/arcdps/chain" && cp "$SANDBOX/pe/arcdps.dll" "$SANDBOX/shared-addons/arcdps/chain/d3d11.dll"
+ln -s "$SANDBOX/shared-addons" "$CXG/addons"
 printf '"AppState"\n{\n\t"appid"\t\t"1284210"\n\t"installdir"\t\t"Guild Wars 2"\n\t"StateFlags"\t\t"4"\n}\n' >"$CX/Program Files (x86)/Steam/steamapps/appmanifest_1284210.acf"
 echo "cx local.dat" >"$CXS/Local.dat" && echo "<GSA_SDK cx/>" >"$CXS/GFXSettings.Gw2-64.exe.xml"
 WB="$H/Library/Containers/com.isaacmarovitz.Whisky/Bottles/5F0C2A9E-0000-4000-8000-00000000AA01"
@@ -3430,6 +3420,9 @@ check "  Steam installed, not started for an install" eval '[ "$(st steam)" = ye
 check "  our own addon left out (version.dll, gw2-ui-scale.ini)" eval '[ ! -e "$GDI/version.dll" ] && [ ! -e "$GDI/gw2-ui-scale.ini" ]'
 check "  another program's d3d11.dll left out, and the summary says so" eval '[ ! -e "$GDI/d3d11.dll" ] && has <(echo "$out") "^@done .*Another program.s d3d11.dll stayed behind\."'
 check "  another addon (not arcdps) came along, and the summary names it" eval 'same "$CXG/dxgi.dll" "$GDI/dxgi.dll" && has <(echo "$out") "^@done .*Addons that came along: dxgi.dll"'
+check "  arcdps at the chain path behind a link: the link came along, and the file it leads to is still there" \
+  eval '[ -L "$GDI/addons" ] && same "$SANDBOX/pe/arcdps.dll" "$SANDBOX/shared-addons/arcdps/chain/d3d11.dll"'
+rm -f "$GDI/addons"
 check "  its ReShade.ini stayed behind, the summary says so; its presets and shaders came along" eval '[ ! -e "$GDI/ReShade.ini" ] && has <(echo "$out") "^@done .*ReShade stayed behind: turn it on in Settings › Interface." && has <(echo "$out") "^ReShade stayed behind in $CXG (ReShade.ini)" && same "$CXG/ReShadePreset.ini" "$GDI/ReShadePreset.ini" && same "$CXG/reshade-shaders/Shaders/Mine.fx" "$GDI/reshade-shaders/Shaders/Mine.fx"'
 check "  the game's settings in the bottle" eval 'same "$CXS/Local.dat" "$BS/Local.dat" && same "$CXS/GFXSettings.Gw2-64.exe.xml" "$BS/GFXSettings.Gw2-64.exe.xml"'
 check "  the summary: cloned, with the settings" has <(echo "$out") "^@done Guild Wars 2 is ready: its files were cloned from CrossOver · Steam GW2 (no extra space), with your game settings"

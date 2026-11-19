@@ -3329,6 +3329,11 @@ import_game() {
   fi
   for n in $ARCDPS_DLLS; do
     [ -f "$src/$n" ] || continue
+    # (arcdps at ReShade's chain path only through real folders: a link there leads to the source's
+    # or another folder, and the copy keeps the link, so a removal would reach that file)
+    case "$n" in
+      "$ARC_CHAIN") [ ! -L "$src/addons" ] && [ ! -L "$src/addons/arcdps" ] && [ ! -L "$src/addons/arcdps/chain" ] || continue ;;
+    esac
     if is_arcdps "$src/$n"; then out="$out $n" arc=yes
     elif is_reshade "$src/$n"; then :
     elif [ "$n" = d3d11.dll ]; then out="$out $n" other=yes
@@ -4399,7 +4404,6 @@ cmd_repair() {
   # (last: what it can't download fails the repair after the rest is done)
   sync_reshade download
   sync_arcdps
-  apply_registry
   log "repair complete"
   echo "@done Repaired: the engine and the bottle's settings are set up again. The game draws with $(dxmt_label "$(dxmt_in_use)")$(for k in $UNIX_LIBS; do printf ', with %s' "$(lib_label "$k" "$(lib_in_use "$k")")"; done), and runs on $(fex_label "$(fex_in_use)")."
 }
