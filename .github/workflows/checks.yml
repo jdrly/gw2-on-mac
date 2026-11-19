@@ -143,9 +143,10 @@ jobs:
           git ls-files -z '*.sh' | xargs -0 grep -l --null -m1 '^#!/bin/zsh' | xargs -0 -n 1 /bin/zsh -n
 
       # release.sh's step on the feed's item, on fixture feeds laid out as 0.1.4's published
-      # appcast.xml (which ends without a newline), with no key: an item from an app whose
-      # LSMinimumSystemVersion is 26.0 then says gw2om.sh's MACOS_MIN, one that says it already stays
-      # byte for byte, and one without it stops the release
+      # appcast.xml (which ends without a newline), with no key, and with release notes that quote
+      # the element: an item from an app whose LSMinimumSystemVersion is 26.0 then says gw2om.sh's
+      # MACOS_MIN and nothing else changes, one that says it already stays byte for byte, and one
+      # without it stops the release
       - name: release.sh names the engine's macOS in the feed's item, not the app's
         run: |
           min="$(sed -n 's/^MACOS_MIN=//p' src/gw2om.sh)"
@@ -159,18 +160,20 @@ jobs:
               '            <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>' \
               "$1" \
               '            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>' \
+              '            <description sparkle:format="markdown"><![CDATA[## GW2 on Mac 0.2.0' '' \
+              '<sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>' \
+              ']]></description>' \
               '            <enclosure url="https://github.com/jdrly/gw2-on-mac/releases/download/v0.2.0/GW2-on-Mac-0.2.0.dmg" length="1" type="application/octet-stream" sparkle:edSignature="AA=="/>' \
               '        </item>' '    </channel>'
             printf '</rss>'
           }
-          item() { xmllint --xpath "string(/rss/channel/item/*[local-name()='minimumSystemVersion'])" "$1"; }
           d="$RUNNER_TEMP/feed-min"
           mkdir -p "$d"
-          feed '            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>' >"$d/app.xml"
-          cp "$d/app.xml" "$d/before.xml"
+          # (with a final newline, so the comparison doesn't depend on what sed does without one)
+          { feed '            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>'; echo; } >"$d/app.xml"
+          { feed "            <sparkle:minimumSystemVersion>$min</sparkle:minimumSystemVersion>"; echo; } >"$d/want.xml"
           scripts/release.sh --feed-min "$d/app.xml"
-          [ "$(item "$d/app.xml")" = "$min" ] || { echo "The item says $(item "$d/app.xml"), not $min"; exit 1; }
-          diff <(grep -v minimumSystemVersion "$d/before.xml") <(grep -v minimumSystemVersion "$d/app.xml")
+          diff "$d/want.xml" "$d/app.xml"
           feed "            <sparkle:minimumSystemVersion>$min</sparkle:minimumSystemVersion>" >"$d/engine.xml"
           cp "$d/engine.xml" "$d/before.xml"
           scripts/release.sh --feed-min "$d/engine.xml"

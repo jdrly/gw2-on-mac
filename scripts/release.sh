@@ -109,13 +109,14 @@ MACOS_MIN="$(sed -n 's/^MACOS_MIN=\([0-9][0-9.]*\)$/\1/p' src/gw2om.sh)"
 [ -n "$MACOS_MIN" ] || { echo "No MACOS_MIN=… line in src/gw2om.sh" >&2; exit 1; }
 feed_min() { # <appcast.xml>: its one item gets sparkle:minimumSystemVersion $MACOS_MIN, or the release
   # stops. A feed that already says it is left as it is, byte for byte. (The appcast is not signed.)
-  local f=$1 min="/rss/channel/item/*[local-name()='minimumSystemVersion']"
+  # The edit stops at the item's description, so release notes that quote the element keep it.
+  local f=$1 min="/rss/channel/item/*[local-name()='minimumSystemVersion' and namespace-uri()='http://www.andymatuschak.org/xml-namespaces/sparkle']"
   [ "$(xmllint --xpath 'count(/rss/channel/item)' "$f")" = 1 ] || { echo "$f doesn't have exactly one item" >&2; exit 1; }
   if [ "$(xmllint --xpath "string($min)" "$f")" != "$MACOS_MIN" ]; then
-    sed "s|<sparkle:minimumSystemVersion>[^<]*</sparkle:minimumSystemVersion>|<sparkle:minimumSystemVersion>$MACOS_MIN</sparkle:minimumSystemVersion>|" "$f" >"$f.tmp"
+    sed "1,/<description/s|<sparkle:minimumSystemVersion>[^<]*</sparkle:minimumSystemVersion>|<sparkle:minimumSystemVersion>$MACOS_MIN</sparkle:minimumSystemVersion>|" "$f" >"$f.tmp"
     mv "$f.tmp" "$f"
   fi
-  [ "$(xmllint --xpath "string($min)" "$f")" = "$MACOS_MIN" ] ||
+  [ "$(xmllint --xpath "count($min)" "$f")" = 1 ] && [ "$(xmllint --xpath "string($min)" "$f")" = "$MACOS_MIN" ] ||
     { echo "$f's item doesn't say sparkle:minimumSystemVersion $MACOS_MIN (src/gw2om.sh's MACOS_MIN)" >&2; exit 1; }
 }
 if [ "$MODE" = --feed-min ]; then
@@ -454,6 +455,10 @@ esac
 # afresh every time and holds only this version (it would rewrite older entries' URLs to
 # this release's).
 echo "[release] building the update feed"
+# The feed names this checkout's MACOS_MIN, so it has to be the one in the app it offers (--feed
+# takes the app from the draft's DMG, which may come from another commit)
+[ "$(sed -n 's/^MACOS_MIN=\([0-9][0-9.]*\)$/\1/p' "$APP/Contents/Resources/gw2om.sh")" = "$MACOS_MIN" ] ||
+  { echo "The app's gw2om.sh doesn't say MACOS_MIN=$MACOS_MIN, as src/gw2om.sh does" >&2; exit 1; }
 mkdir -p "$UPDATES"
 rm -f "$UPDATES/${DMG##*/}"
 cp -c "$DMG" "$UPDATES/"
