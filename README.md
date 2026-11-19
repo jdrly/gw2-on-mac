@@ -19,7 +19,8 @@ only when I choose it from Terminal. It changes nothing you already have install
 > Sparkle: `GW2 on Mac.app`, bundle id `cz.jandrly.gw2onmac`, 0.1.x's feed, so a 0.1.x install
 > updates to it (ADR 0018). Every build of this branch has that identity, a dev build too, and
 > replaces whatever `GW2 on Mac.app` is in `/Applications`. Its folders in `~/Library` keep their
-> own name, *GW2 on Mac arm64*, and 0.1.x's folders are only ever read. A text that names one of
+> own name, *GW2 on Mac arm64*, and 0.1.x's folders are only ever read: at its first start it moves
+> 0.1.x's install into them ([Moving from GW2 on Mac 0.1](#moving-from-gw2-on-mac-01)). A text that names one of
 > its folders gives the folder's real name. The app's name and file name are `APP_NAME` at the top
 > of `src/gw2om.sh` and `collect-logs.sh` and `appName` in `src/native/App.swift`; the folders'
 > name is `APP_FOLDER` in those two scripts and `session-report.sh`, and `appFolder` in
@@ -127,6 +128,66 @@ stay, such as cached downloads, logs and `dxmt.conf`. You can quit
 the app during a Steam or ArenaNet download. The window picks the download up again when you open
 it, and *Stop waiting* stops following it but keeps the engine and the bottle.
 
+## Moving from GW2 on Mac 0.1
+
+When the app finds GW2 on Mac 0.1's install and has no install of its own, it moves that install
+at its first start, by itself. The window shows the move's steps in place of the install choices.
+Nothing of 0.1 is moved in the sense of taken away: 0.1's folders are only read, at every step,
+and stay as they were on the day of the move.
+
+- The move makes a new bottle with this engine. Its Windows user is `crossover`, as in 0.1's
+  bottle: CrossOver's Wine names every user so, and Mach9's Wine takes the name from `USER`, which
+  the app passes. With the same name the profile stays `C:\users\crossover`, and Wine's
+  `CryptProtectData` derives the same key, so what a program protected in 0.1's bottle can be read
+  in the new one. Every new bottle of this app gets that name. A bottle an earlier build made
+  keeps the name it has.
+- On Steam's route it installs Steam from Valve first, for Steam's registry entries, then puts a
+  clone of 0.1's whole Steam folder in its place: Steam with its remembered login, its config and
+  `userdata`, and the library with the game. Then the profile's `AppData\Local\Steam`. On
+  ArenaNet's route it clones the game's folder.
+- The game's settings folder, `AppData\Roaming\Guild Wars 2`, comes whole.
+- The addons come as they were in the game folder: arcdps as `d3d11.dll`, or at ReShade's chain
+  path, with its settings; ReShade's `d3d11.dll`, `ReShade.ini` and compiler. The ReShade folder
+  with your presets and shaders is cloned into this app's folder, with the record of the compiler
+  0.1 placed. Both `ReShade.ini` files then name this app's folders instead of 0.1's: `BasePath`,
+  the compiled effects' cache and any path you set by hand. The interface addon's files are
+  written again from your settings, and the finishing touches put the addons in order, as at every
+  Play.
+- Your settings come over as the *From 0.1* column under [Settings](#settings) says.
+
+A clone copies a link as a link, so every link in what the move clones must lead to a file inside
+this app's folder. A link to a folder, into 0.1's folders or to a folder elsewhere that 0.1 uses
+too, such as a ReShade folder on an external drive, stops the move before anything writes through
+it. *Start fresh* then installs anew.
+
+On the same disk it clones, which takes no space until one of the copies changes. From another
+disk, such as a bottle you linked to an external drive, it copies after checking the free space.
+DXMT's shader caches and ReShade's compiled effects don't come along. The game builds them again
+while you play.
+
+The move waits while anything of 0.1 runs: its Steam, the game, ArenaNet's installer or 0.1's Wine.
+The window says what it waits for, and the move starts once that has quit. A move that 0.1
+interrupts, that fails or that you cancel removes everything it created, and the app is not
+installed again. *Try again* runs it once more, and so does the next start of the app.
+
+Steam may ask you to sign in once in the new bottle. I haven't tested yet whether its remembered
+login survives the move, so the first Play after it shows Steam's window, even with *Start Steam in
+the background* on.
+
+Going back is 0.1's app from its release page, dragged over this one. It finds its install as it
+was on the day of the move.
+
+*Start fresh* in Settings › Troubleshooting installs anew instead. While the move waits or after it
+failed, it stops the move. After a move it removes the moved install, as Uninstall does, and
+never another install. Either
+way the move no longer starts by itself, and the install choices list 0.1's game under *Game files
+I already have*. The app keeps that in `moved-from-0.1` in its folder (`moved` or `skipped`), which
+Uninstall leaves, so uninstalling a moved install doesn't move 0.1's again.
+
+The app moves an install when 0.1's folder has its manifest, a bottle and a complete game where
+0.1's state says: in Steam's own library, or in the folder ArenaNet's route used. A game in
+another Steam library isn't moved, and *Game files I already have* can still import it.
+
 ## Playing
 
 Once the game is installed, the window shows *Play*, *Repair*, *Settings* and *Uninstall…*.
@@ -209,34 +270,47 @@ Four keys have no row: `dxmt`, `wine` and `macdrv` pick my DXMT fork, my `ntdll.
 with `gw2om.sh set`. The rows that need one of my files are greyed while the engine's own is
 chosen, and the main window's *Engine* and *Graphics* checks name the files in place.
 
-| Pane | Setting | Key | Default | What it does |
-|---|---|---|---|---|
-| Graphics | Retina | `retina` | on | draws at your display's full resolution, at some cost in frame rate |
-| | Frame cap | `fpscap` | off | a steady cap paced by Metal at 30, 40, 60 or 120, for a display above 60 Hz or for a lower steady rate. With *Vsync* and the game's own Vertical Sync on, a cap at or above the display's refresh does nothing |
-| | Vsync | `vsync` | on | my DXMT fork's display sync (`CAMetalLayer`'s vsync): Metal shows each frame on one of the display's refreshes. Off, the game's rule gets `DXMT_DISPLAY_SYNC=0`, and DXMT asks Metal for a minimum time between frames instead: one refresh, or the frame cap's interval. The row acts only while the game's own Vertical Sync is on, see [The game's environment](#the-games-environment). The frame-limiter tip shows only while the row is on. Greyed while the engine's own DXMT is chosen |
-| | Metal | `metal` | 4 | Metal 3 or Metal 4 for my DXMT fork (`DXMT_METAL4=0` or `=1` in the game's rule; at Metal 4 with `DXMT_MTL4_PRESENT=mtl3` too, see [The game's environment](#the-games-environment)). Metal 4 is the newer path. Switch to Metal 3 for better backwards compatibility. A `settings.conf` without the key reads 4, and one with `metal=3` keeps it: Install and Repair wrote the key into every file while Metal 3 was the default. Greyed while the engine's own DXMT is chosen |
-| | MetalFX for Subsample | `metalfx` | off | MetalFX upscales the 3D scene and the interface stays sharp. It works only with the game's Render Sampling set to Subsample, and does nothing at Native. Greyed while the engine's own DXMT is chosen |
-| | Metal HUD | `hud` | off | Apple's overlay with frame rate and frame times, over the game only and not over Steam's windows |
-| | Launcher frames | `launcherframes` | off | the launcher's window gets a copy of each frame, and a frame equal to the last is skipped (`WINE_MACDRV_SURFACE=copy,skip`). Against a launcher that flickers. Experimental. It stays off until I've looked at the launcher on three starts (#105). Greyed while the engine's own `winemac.so` is chosen |
-| Performance | Shader warming | `warm` | on | builds the pipelines the last sessions used before the game asks for them. Experimental, as my DXMT fork's table calls `DXMT_WARM`. Greyed while the engine's own DXMT is chosen |
-| | CPUs the game sees | `ncpu` | 8 | from 2 up to your Mac's logical CPUs, or all. The game starts one job worker per CPU, minus one |
-| | Job wakes | `jobwakes` | on | a job the game hands out wakes one sleeping worker, and none when no worker sleeps (`WINE_HEAT_WAKE=one,skip`). Greyed while the engine's own `ntdll.so` is chosen |
-| | Event pool | `eventpool` | on | closed events are kept and handed out again, without a request to the Wine server (`WINE_HEAT_EVPOOL=1`). Greyed while the engine's own `ntdll.so` is chosen |
-| | Faster locks | `fastlocks` | off | short spins before the game thread sleeps on a busy lock, a job group or an event (`WINE_HEAT_SPIN=lock=20:game,event=30:game`). Experimental. It stays off until a session of mine shows more hits than misses (#105). Greyed while the engine's own `ntdll.so` is chosen |
-| Interface | Larger interface | `uiscale` | off | my interface addon, see below |
-| | Interface Size "Larger" | `uiscale_size` | 1.75 | the addon's scale: 1.5, 1.75, 1.8 or 2.0 |
-| | Small text in Cronos | `uiscale_sans` | on | chat, the tracker and labels have no larger font, so the addon draws them in Cronos at the larger size |
-| | Cinematic dialogue | `uiscale_cinema` | off | story cinematics size their dialogue apart from the interface. This draws it at the same size, with a small code patch |
-| | arcdps | `arcdps` | off | downloads or removes arcdps, see below |
-| | ReShade | `reshade` | off | downloads or removes ReShade, see below |
-| Game | Start Steam in the background | `steambg` | on | Steam starts without a window once it remembers your login |
-| | Quit Steam when the game quits | `quitsteam` | on | shown while the previous setting is on |
-| | Launch options | `launchopts` | none | arguments for `Gw2-64.exe`, using letters, digits and `-_.:=,/+` |
-| | Quit GW2 on Mac after launching | | off | the app quits once Play has started Steam or the game |
-| Mouse | Raw mouse-look | `rawmouse` | on | on, the game's raw input is the mouse's own counts from GameController; off, it is the pointer's movement, see below |
-| | Mouse-look speed | `mousespeed` | 1× | a factor on the mouse's own counts, from 0.5× to 3×, which my `winemac.so` applies before the game gets them (`WINE_MACDRV_MOUSE_SCALE`). The game's own camera settings apply on top. Greyed while *Raw mouse-look* is off, while the engine's own `winemac.so` is chosen, or while my file in this app doesn't have the switch |
-| Updates | Check automatically | `updates` | on | Sparkle checks for new versions. Off in development builds, which have no update feed |
-| Troubleshooting | Debug logging | `debug` | off | DXMT's log at `debug` and Wine's errors, for a bug report, at some cost in performance. With my `winemac.so`, also its `macsurface` lines for `Gw2-64.exe`. FEX's messages too, and with my `ntdll.so` FEX's counters. On in development builds |
+| Pane | Setting | Key | Default | From 0.1 | What it does |
+|---|---|---|---|---|---|
+| Graphics | Retina | `retina` | on | kept | draws at your display's full resolution, at some cost in frame rate |
+| | Frame cap | `fpscap` | off | kept | a steady cap paced by Metal at 30, 40, 60 or 120, for a display above 60 Hz or for a lower steady rate. With *Vsync* and the game's own Vertical Sync on, a cap at or above the display's refresh does nothing |
+| | Vsync | `vsync` | on | new | my DXMT fork's display sync (`CAMetalLayer`'s vsync): Metal shows each frame on one of the display's refreshes. Off, the game's rule gets `DXMT_DISPLAY_SYNC=0`, and DXMT asks Metal for a minimum time between frames instead: one refresh, or the frame cap's interval. The row acts only while the game's own Vertical Sync is on, see [The game's environment](#the-games-environment). The frame-limiter tip shows only while the row is on. Greyed while the engine's own DXMT is chosen |
+| | Metal | `metal` | 4 | new | Metal 3 or Metal 4 for my DXMT fork (`DXMT_METAL4=0` or `=1` in the game's rule; at Metal 4 with `DXMT_MTL4_PRESENT=mtl3` too, see [The game's environment](#the-games-environment)). Metal 4 is the newer path. Switch to Metal 3 for better backwards compatibility. A `settings.conf` without the key reads 4, and one with `metal=3` keeps it: Install and Repair wrote the key into every file while Metal 3 was the default. Greyed while the engine's own DXMT is chosen |
+| | MetalFX for Subsample | `metalfx` | off | kept | MetalFX upscales the 3D scene and the interface stays sharp. It works only with the game's Render Sampling set to Subsample, and does nothing at Native. Greyed while the engine's own DXMT is chosen |
+| | Metal HUD | `hud` | off | kept | Apple's overlay with frame rate and frame times, over the game only and not over Steam's windows |
+| | Launcher frames | `launcherframes` | off | new | the launcher's window gets a copy of each frame, and a frame equal to the last is skipped (`WINE_MACDRV_SURFACE=copy,skip`). Against a launcher that flickers. Experimental. It stays off until I've looked at the launcher on three starts (#105). Greyed while the engine's own `winemac.so` is chosen |
+| Performance | Shader warming | `warm` | on | kept | builds the pipelines the last sessions used before the game asks for them. Experimental, as my DXMT fork's table calls `DXMT_WARM`. Greyed while the engine's own DXMT is chosen |
+| | CPUs the game sees | `ncpu` | 8 | kept | from 2 up to your Mac's logical CPUs, or all. The game starts one job worker per CPU, minus one |
+| | Job wakes | `jobwakes` | on | new | a job the game hands out wakes one sleeping worker, and none when no worker sleeps (`WINE_HEAT_WAKE=one,skip`). Greyed while the engine's own `ntdll.so` is chosen |
+| | Event pool | `eventpool` | on | new | closed events are kept and handed out again, without a request to the Wine server (`WINE_HEAT_EVPOOL=1`). Greyed while the engine's own `ntdll.so` is chosen |
+| | Faster locks | `fastlocks` | off | reset to off | short spins before the game thread sleeps on a busy lock, a job group or an event (`WINE_HEAT_SPIN=lock=20:game,event=30:game`). Experimental. It stays off until a session of mine shows more hits than misses (#105). Greyed while the engine's own `ntdll.so` is chosen |
+| Interface | Larger interface | `uiscale` | off | kept | my interface addon, see below |
+| | Interface Size "Larger" | `uiscale_size` | 1.75 | kept | the addon's scale: 1.5, 1.75, 1.8 or 2.0 |
+| | Small text in Cronos | `uiscale_sans` | on | kept | chat, the tracker and labels have no larger font, so the addon draws them in Cronos at the larger size |
+| | Cinematic dialogue | `uiscale_cinema` | off | kept | story cinematics size their dialogue apart from the interface. This draws it at the same size, with a small code patch |
+| | arcdps | `arcdps` | off | as it was | downloads or removes arcdps, see below |
+| | ReShade | `reshade` | off | kept | downloads or removes ReShade, see below |
+| Game | Start Steam in the background | `steambg` | on | kept | Steam starts without a window once it remembers your login |
+| | Quit Steam when the game quits | `quitsteam` | on | kept | shown while the previous setting is on |
+| | Launch options | `launchopts` | none | kept | arguments for `Gw2-64.exe`, using letters, digits and `-_.:=,/+` |
+| | Quit GW2 on Mac after launching | | off | kept | the app quits once Play has started Steam or the game |
+| Mouse | Raw mouse-look | `rawmouse` | on | kept | on, the game's raw input is the mouse's own counts from GameController; off, it is the pointer's movement, see below |
+| | Mouse-look speed | `mousespeed` | 1× | kept | a factor on the mouse's own counts, from 0.5× to 3×, which my `winemac.so` applies before the game gets them (`WINE_MACDRV_MOUSE_SCALE`). The game's own camera settings apply on top. Greyed while *Raw mouse-look* is off, while the engine's own `winemac.so` is chosen, or while my file in this app doesn't have the switch |
+| Updates | Check automatically | `updates` | on | kept | Sparkle checks for new versions. Off in development builds, which have no update feed |
+| Troubleshooting | Debug logging | `debug` | off | kept | DXMT's log at `debug` and Wine's errors, for a bug report, at some cost in performance. With my `winemac.so`, also its `macsurface` lines for `Gw2-64.exe`. FEX's messages too, and with my `ntdll.so` FEX's counters. On in development builds |
+
+*From 0.1* is what a move from GW2 on Mac 0.1 does with each setting (`SETTINGS_FROM_01` in
+`gw2om.sh`). 0.1's `settings.conf` has no version line and writes every key, so a value there is
+what 0.1 ran with, chosen or not. A kept key means the same here and keeps 0.1's value. A key 0.1's
+file lacks, from a release older than the key, reads as 0.1's default: *Cinematic dialogue* was on
+there and is off here. A value this version doesn't take, such as a CPU count above this Mac's,
+reads as this version's default. *Faster locks* resets to off: on 0.1 it was a spin in CrossOver's
+msync, here it is another port with its own default. 0.1's *Game Mode* has no row here, since the
+engine's loader is a Game Mode app, and 0.1's *Cooler job workers* has none on this line
+([ADR 0006](docs/adr/0006-0.2-has-no-cooler-job-workers.md)), so both are dropped. *Mouse-look speed* keeps its value, though here it scales the mouse's own
+counts and on 0.1 the pointer's speed, so the camera may turn at another speed. Settings that are
+new on this line start at their defaults. The move's summary names the ones that changed from
+what 0.1 ran with.
 
 ### Raw mouse-look
 
@@ -454,6 +528,7 @@ nothing in `/Applications` besides itself.
 | `…/GW2 on Mac arm64/bottle/` | the game's Wine prefix with Steam, the game's files and the game's settings. About 75 GB, or no extra space for a clone of files on the same disk | removed, with the game |
 | `…/GW2 on Mac arm64/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `compatdb.rules`, `compatdb.local`, `dev-switches.conf`, `session`, `session.req`, `.session.lock`, `reshade-compiler` | settings, install state, what was installed, DXMT's options, the game's compatdb rules and my own, a development build's switches, the current game session and its lock, the sha256 of the compiler the app put next to `Gw2-64.exe` | removed |
 | `…/GW2 on Mac arm64/ReShade/` | ReShade's settings, log, presets, shaders, textures and screenshots | kept |
+| `…/GW2 on Mac arm64/moved-from-0.1` | `moved` once the move from GW2 on Mac 0.1 has run, `skipped` after *Start fresh*: either way the move doesn't start by itself again | kept |
 | `~/Library/Caches/GW2 on Mac arm64/downloads/` | the engine archive, `SteamSetup.exe`, a copy of `Gw2Setup-64.exe`, and in `reshade/` the checked `ReShade64.dll` and fxc2's compiler | removed |
 | `~/Library/Caches/GW2 on Mac arm64/fork/dxmt/` | my DXMT fork's caches (`DXMT_CACHE_DIR`): `Gw2-64.exe/` holds the game's shaders, recorded pipelines and pipeline archives, and the other processes keep theirs next to it | removed. *Reset the shader cache* in Settings empties it too |
 | `~/Library/Caches/GW2 on Mac arm64/dxmt/Gw2-64.exe/` | the engine's own DXMT's shader cache for the game, where 0.2.0-dev.1 kept it, apart from my fork's, which translates shaders differently. Other processes keep theirs where the engine's DXMT puts it by default | removed, and emptied by *Reset the shader cache* |
@@ -467,13 +542,13 @@ on, and ReShade's
 on. The app never touches another program's `version.dll`, `d3d11.dll`, `dxgi.dll`,
 `d3dcompiler_47.dll` or `ReShade.ini` there. The app's own preferences, such as the chosen
 route and the last Settings pane, live in the defaults domain `cz.jandrly.gw2onmac`, 0.1.x's. Other Wine
-apps' bottles are only ever read.
+apps' bottles are only ever read, and so are GW2 on Mac 0.1's folders.
 
 ## Uninstall
 
 *Uninstall…* in the window asks first and tells you the game's files go with the bottle. Close the
 game and Steam before you run it. It removes everything in the table above except the logs and
-the ReShade folder. To do it by hand:
+the ReShade folder and the move's record. To do it by hand:
 
 ```sh
 rm -rf ~/Library/"Application Support/GW2 on Mac arm64" ~/Library/Caches/"GW2 on Mac arm64"   # the ReShade folder too
@@ -760,11 +835,23 @@ then Steam on the Steam route, then places the folder in the bottle's
 ArenaNet. `gw2om.sh scan` finds the installs and `gw2om.sh check-game <dir>` checks one folder.
 Both only read.
 
+A move, `gw2om.sh install move`, runs the same phases from 0.1's install
+([Moving from GW2 on Mac 0.1](#moving-from-gw2-on-mac-01)). Before the bottle it writes
+`settings.conf` from 0.1's, and on Steam's route 0.1's Steam folder replaces the one Valve's
+installer made. It refuses while 0.1's Wine runs, and checks again before each folder it clones
+and after the last. A failed or cancelled move also removes the ReShade folder and
+`reshade-compiler` it brought, `dxmt.conf` and `.session.lock`, so the app's folder is as empty as
+before. `gw2om.sh status` prints `old_install`, `move` (yes when the window should start it),
+`move_record`, `move_route`, `move_busy` and `move_wait`. `gw2om.sh start-fresh` is
+Troubleshooting's *Start fresh*.
+
 ## The game's environment
 
-The install's own Wine calls, `wineboot` and Valve's Steam installer, get `WINEPREFIX`,
+The install's own Wine calls, `wineboot` and Valve's Steam installer, get `USER`, `WINEPREFIX`,
 `WINEDEBUG=-all`, `WINEMSYNC=1` and `WINEDLLOVERRIDES=winemenubuilder.exe=d`, and nothing else of
-the app's. If the app inherited `WINE_COMPATDB`, `WINE_COMPATDB_FILE`, `WINE_LARGE_ADDRESS_AWARE`
+the app's. `USER` is the bottle's Windows user, the name of its folder in `drive_c/users`, or
+`crossover` for a new bottle: Mach9's Wine names the user after it
+([ADR 0019](docs/adr/0019-0.1.x-moves-into-a-new-bottle-at-the-first-start.md)). If the app inherited `WINE_COMPATDB`, `WINE_COMPATDB_FILE`, `WINE_LARGE_ADDRESS_AWARE`
 or `WINE_PROF_SERVICE`, they are removed from every Wine start, because each changes what the
 engine does for every process. The engine's built-in rules already give each process DXMT, leave
 Gecko out, keep `rundll32.exe` from offering to install Mono, and set Steam's web helper up.
@@ -774,7 +861,7 @@ the session's first process, `dxmt.conf`, and the game's compatdb rules. `gw2om.
 `gw2om.sh rules` print what Play would use.
 
 The environment is fixed while Steam runs, because Steam passes its own on to the game. It holds
-`WINEPREFIX`, `WINEDEBUG=-all`, `WINEDLLOVERRIDES=winemenubuilder.exe=d`, `WINEMSYNC=1`,
+`USER`, `WINEPREFIX`, `WINEDEBUG=-all`, `WINEDLLOVERRIDES=winemenubuilder.exe=d`, `WINEMSYNC=1`,
 `DXMT_CONFIG_FILE`, `DXMT_LOG_PATH`, `WINE_COMPATDB_FILE`, and `WINENCPU` unless the game sees every
 CPU. Debug logging adds `DXMT_LOG_LEVEL=debug` and sets `WINEDEBUG=err+all,fixme-all`, with
 `,Gw2-64.exe:+macsurface` while my `winemac.so` is in place: my driver's channel, in the launcher
@@ -1402,7 +1489,7 @@ What still needs my Mac is signing with my Developer ID, notarizing and publishi
 real arcdps's checks, and playing.
 
 `scripts/test-sandbox.sh` tests the backend of a built app end to end in `work/app-sandbox/test`,
-with 975 checks on a Mac without my workspace. It uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and
+with 1049 checks on a Mac without my workspace. It uses a stand-in engine archive whose `bin/wine` only pretends, plays Steam's and
 ArenaNet's downloads itself, and uses a clone of the game's own ArenaNet-signed `Gw2-64.exe` as the
 installer to check. That's `SIGNED_PE`, by default the copy in my development workspace's bottle.
 Without one, those checks are skipped. It covers:
@@ -1460,6 +1547,13 @@ Without one, those checks are skipped. It covers:
   process's install lock, and one wins. A fresh contender arrives while another holds the claim
   after reading a live owner, and gets refused. A missing piece refuses Play, and this version's
   pieces under 0.1.0's manifest count as set up.
+- the move from GW2 on Mac 0.1, from a stand-in 0.1.4 install on both routes, with arcdps alone and
+  with ReShade (its ini once as a link): each file in its place, both inis free of 0.1's folders,
+  `USER=crossover` on every Wine start, the settings key by key as `SETTINGS_FROM_01` says and the
+  summary's changes, Start fresh before, after and over another install, and Uninstall keeping the
+  record. 0.1's folders are checksummed and listed before and after a finished move, a cancel, a
+  failure at each step (`GW2_ON_MAC_MOVE_FAIL`), each kind of 0.1 process, a short copy path, and
+  links out of the clone.
 - play, the busy checks, repair, reset-shaders, reinstall-engine and the lock
 - Collect Logs' redaction, arcdps's logs and the crash dumps (recent ones in, older ones, one
   too large, one with the user's folder in UTF-16 and `.dmp` files elsewhere out), ReShade's files

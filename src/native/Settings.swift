@@ -221,14 +221,14 @@ final class GameSettings {
     }
   }
 
-  // gw2om.sh reset-shaders / reinstall-engine
-  func run(_ command: String) {
+  // gw2om.sh reset-shaders / reinstall-engine / start-fresh
+  func run(_ command: String, _ extra: [String] = []) {
     guard action == nil else { return }
     action = command
     actionResult = nil
     let script = script
     Task {
-      let output = await Installer.capture(script: script, arguments: [command])
+      let output = await Installer.capture(script: script, arguments: [command] + extra)
       action = nil
       actionResult = output.split(separator: "\n").last { $0.hasPrefix("@done ") || $0.hasPrefix("@error ") }
         .map { String($0.drop { $0 != " " }.dropFirst()) } ?? "Done."
@@ -304,6 +304,9 @@ struct SettingsView: View {
   @State private var confirmArcdps = false
   @State private var confirmReshade = false
   @State private var confirmAction: String?
+  // Start fresh's confirmation was opened over the moved install (else before the move): what the
+  // confirmation says, and what gw2om.sh start-fresh is told
+  @State private var freshMoved = false
   @Environment(\.colorScheme) private var scheme
 
   var body: some View {
@@ -318,8 +321,9 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(alignment: .bottom) { Rectangle().fill(Brand.border).frame(height: 1) }
             .accessibilityAddTraits(.isHeader)
+          // (Troubleshooting's Start fresh works before an install too: its pane disables the rest)
           pane(selectedPane)
-            .disabled(!settings.loaded || !settings.installed)
+            .disabled(!settings.loaded || !settings.installed && selectedPane != .troubleshooting)
           notes
         }
         .padding(.top, 16)
@@ -362,20 +366,47 @@ struct SettingsView: View {
       AddonWarning.preset(isPresented: Binding(get: { settings.importedPreset != nil }, set: { if !$0 { settings.importedPreset = nil } }),
                           name: name) { settings.usePreset(name) }
     }
-    .alert(confirmAction == "reset-shaders" ? "Reset the shader cache?" : "Reinstall the engine?",
-           isPresented: Binding(get: { confirmAction != nil }, set: { if !$0 { confirmAction = nil } })) {
-      Button(confirmAction == "reset-shaders" ? "Reset" : "Reinstall", role: .destructive) {
-        if let a = confirmAction { settings.run(a) }
+    .alert(confirmTitle, isPresented: Binding(get: { confirmAction != nil }, set: { if !$0 { confirmAction = nil } })) {
+      Button(confirmButton, role: .destructive) {
+        if let a = confirmAction { settings.run(a, a == "start-fresh" ? [freshMoved ? "--moved" : "--before-move"] : []) }
         confirmAction = nil
       }
       Button("Cancel", role: .cancel) { confirmAction = nil }
     } message: {
-      Text(confirmAction == "reset-shaders"
-           ? "This clears \(appName)'s DXMT shader caches for the game (in ~/Library/Caches/\(appFolder)), my fork's and the engine's DXMT's: "
-             + "its compiled shaders, pipeline archives and recorded pipelines. The next sessions build "
-             + "them again, with more hitches at first."
-           : "The Wine engine is unpacked again from the verified download and \(appName)'s graphics and "
-             + "Wine pieces go back in. The bottle, the game and your settings stay.")
+      Text(confirmMessage)
+    }
+  }
+
+  // Troubleshooting's confirmations
+  private var confirmTitle: String {
+    switch confirmAction {
+    case "reset-shaders": "Reset the shader cache?"
+    case "start-fresh": "Start fresh?"
+    default: "Reinstall the engine?"
+    }
+  }
+  private var confirmButton: String {
+    switch confirmAction {
+    case "reset-shaders": "Reset"
+    case "start-fresh": "Start Fresh"
+    default: "Reinstall"
+    }
+  }
+  private var confirmMessage: String {
+    switch confirmAction {
+    case "reset-shaders":
+      "This clears \(appName)'s DXMT shader caches for the game (in ~/Library/Caches/\(appFolder)), my fork's and the engine's DXMT's: "
+        + "its compiled shaders, pipeline archives and recorded pipelines. The next sessions build "
+        + "them again, with more hitches at first."
+    case "start-fresh":
+      (freshMoved
+       ? "This removes \(appName)'s install, the one moved from GW2 on Mac 0.1, as Uninstall does: the engine and the bottle with the game in it. "
+       : "")
+        + "The main window then shows the install choices, and GW2 on Mac 0.1's install no longer moves by itself. "
+        + "GW2 on Mac 0.1 stays as it is. Your ReShade presets stay too."
+    default:
+      "The Wine engine is unpacked again from the verified download and \(appName)'s graphics and "
+        + "Wine pieces go back in. The bottle, the game and your settings stay."
     }
   }
 
@@ -604,40 +635,59 @@ struct SettingsView: View {
       }
 
     case .troubleshooting:
-      SettingsGroup {
-        SettingRow("Debug logging", "Detailed DXMT logs and Wine's errors, for bug reports, at some cost in performance. Turn it on only when asked to.") {
-          InkSwitch(isOn: settings.toggle("debug"))
+      // (Start fresh: over an install moved from GW2 on Mac 0.1, or before the move, while 0.1 has
+      // an install and neither a move nor Start fresh happened here)
+      if settings.installed ? ["move", "moved"].contains(settings.values["origin"] ?? "")
+          : settings.values["old_install"] == "yes" && (settings.values["move_record"] ?? "").isEmpty {
+        SettingsGroup {
+          SettingRow("Start fresh", settings.installed
+                     ? "Removes the install moved from GW2 on Mac 0.1 and shows the install choices, to install Steam and the game anew. GW2 on Mac 0.1 stays as it is."
+                     : "Skips the move and shows the install choices, to install Steam and the game anew. GW2 on Mac 0.1 stays as it is.") {
+            SmallButton(settings.action == "start-fresh" ? "Starting fresh…" : "Start fresh…", icon: "rotate-ccw") {
+              freshMoved = settings.installed
+              confirmAction = "start-fresh"
+            }
+            .disabled(settings.action != nil || settings.running)
+          }
         }
       }
-      SettingsGroup {
-        SettingRow("Collect Logs", "A zip of \(appName)'s, Wine's, DXMT's and the game's logs for a bug report, without account names or passwords. Also in the \(appName) menu.") {
-          SmallButton("Collect…", icon: "file-text") {
-            NotificationCenter.default.post(name: .collectLogs, object: nil)
+      Group {
+        SettingsGroup {
+          SettingRow("Debug logging", "Detailed DXMT logs and Wine's errors, for bug reports, at some cost in performance. Turn it on only when asked to.") {
+            InkSwitch(isOn: settings.toggle("debug"))
           }
         }
-        SettingRow("Reset the shader cache", "Deletes DXMT's compiled shaders and recorded pipelines for the game. Try it if the game draws wrongly after an update.") {
-          SmallButton(settings.action == "reset-shaders" ? "Resetting…" : "Reset…", icon: "eraser") {
-            confirmAction = "reset-shaders"
+        SettingsGroup {
+          SettingRow("Collect Logs", "A zip of \(appName)'s, Wine's, DXMT's and the game's logs for a bug report, without account names or passwords. Also in the \(appName) menu.") {
+            SmallButton("Collect…", icon: "file-text") {
+              NotificationCenter.default.post(name: .collectLogs, object: nil)
+            }
           }
-          .disabled(settings.action != nil || settings.running)
+          SettingRow("Reset the shader cache", "Deletes DXMT's compiled shaders and recorded pipelines for the game. Try it if the game draws wrongly after an update.") {
+            SmallButton(settings.action == "reset-shaders" ? "Resetting…" : "Reset…", icon: "eraser") {
+              confirmAction = "reset-shaders"
+            }
+            .disabled(settings.action != nil || settings.running)
+          }
+          SettingRow("Reinstall the engine", "Unpacks the Wine engine again and puts \(appName)'s pieces back in. The bottle, the game and your settings stay.") {
+            SmallButton(settings.action == "reinstall-engine" ? "Reinstalling…" : "Reinstall…", icon: "rotate-ccw") {
+              confirmAction = "reinstall-engine"
+            }
+            .disabled(settings.action != nil || settings.running)
+          }
         }
-        SettingRow("Reinstall the engine", "Unpacks the Wine engine again and puts \(appName)'s pieces back in. The bottle, the game and your settings stay.") {
-          SmallButton(settings.action == "reinstall-engine" ? "Reinstalling…" : "Reinstall…", icon: "rotate-ccw") {
-            confirmAction = "reinstall-engine"
+        if let result = settings.actionResult { note("info", result, Brand.fg3) }
+        SettingsGroup {
+          SettingRow("Get help", "Ask Pharaphobia on Discord or open a GitHub issue, with the zip from Collect Logs. Never ArenaNet's support: \(appName) is unofficial.") {
+            HStack(spacing: 8) {
+              Link(destination: Support.discord) { Text("Discord ↗").font(.body(13, .bold)).foregroundStyle(Brand.accent) }
+              Link(destination: Support.issues) { Text("GitHub ↗").font(.body(13, .bold)).foregroundStyle(Brand.accent) }
+            }
+            .fixedSize()
           }
-          .disabled(settings.action != nil || settings.running)
         }
       }
-      if let result = settings.actionResult { note("info", result, Brand.fg3) }
-      SettingsGroup {
-        SettingRow("Get help", "Ask Pharaphobia on Discord or open a GitHub issue, with the zip from Collect Logs. Never ArenaNet's support: \(appName) is unofficial.") {
-          HStack(spacing: 8) {
-            Link(destination: Support.discord) { Text("Discord ↗").font(.body(13, .bold)).foregroundStyle(Brand.accent) }
-            Link(destination: Support.issues) { Text("GitHub ↗").font(.body(13, .bold)).foregroundStyle(Brand.accent) }
-          }
-          .fixedSize()
-        }
-      }
+      .disabled(!settings.installed)
     }
   }
 

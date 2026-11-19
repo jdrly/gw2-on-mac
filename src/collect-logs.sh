@@ -64,9 +64,9 @@ LOGS="$H/Library/Logs/$APP_FOLDER"
 DIAG="$H/Library/Logs/DiagnosticReports"
 BOTTLE="$APPDIR/bottle"
 STEAM="$BOTTLE/drive_c/Program Files (x86)/Steam"
-# The bottle's Windows user, as gw2om.sh's bottle_user finds it (upstream Wine names it after the
-# Mac's user)
-BOTTLE_USER="$(id -un)"
+# The bottle's Windows user, as gw2om.sh's bottle_user finds it (its users/ folder; crossover, the
+# name a new bottle gets, without one)
+BOTTLE_USER=crossover
 for u in "$BOTTLE/drive_c/users"/*; do
   [ -d "$u" ] || continue
   case "${u##*/}" in Public|public) continue ;; esac
@@ -252,6 +252,15 @@ redact() {  # [game] stdin → stdout (game: also game_rules)
       s = rep(s, home, "~", 0); s = rep(s, "Z:" whome, "Z:~", 0)
       s = rep(s, "/Users/" user, "/Users/USER", 1)
       s = rep(s, "\\users\\" user, "\\users\\USER", 1)
+      # (the Windows user the app passes to Wine, USER= in session.env and install.log: the Mac
+      # login in a bottle an earlier version made, whatever word it is; crossover names nobody)
+      wu = ""
+      while (match(s, /USER=[^ \t)";,]+/)) {
+        wv = substr(s, RSTART + 5, RLENGTH - 5)
+        wu = wu substr(s, 1, RSTART - 1) ((wv == "crossover" || wv == "USER") ? substr(s, RSTART, RLENGTH) : "USER=USER")
+        s = substr(s, RSTART + RLENGTH)
+      }
+      s = wu s
       if (length(user) >= 2 && !(tolower(user) in common)) s = rep(s, user, "USER", wordonly)
       if (length(fullname) >= 3) s = rep(s, fullname, "NAME", wordonly)
       for (i = 1; i <= n; i++) if (length(accounts[i]) >= 2) s = rep(s, accounts[i], "ACCOUNT", wordonly)
@@ -696,7 +705,11 @@ found_raw() { local f=$1; shift; found "$@" "$f"; }
 # as UTF-16 at both byte offsets (a Windows name with letters outside ASCII). It also looks for the
 # Mac's and the bottle's user in a Windows path, the full name and GW2 account names (Name.1234,
 # as game_rules takes them out).
-for u in "$(id -un)" "$BOTTLE_USER"; do printf 'users\\%s\\\nusers/%s/\n' "$u" "$u"; done >"$work/dump-names"
+# (the bottle's user crossover, the name every bottle gets from 0.2.0 on, names nobody)
+for u in "$(id -un)" "$BOTTLE_USER"; do
+  [ "$u" != crossover ] || [ "$u" = "$(id -un)" ] || continue
+  printf 'users\\%s\\\nusers/%s/\n' "$u" "$u"
+done >"$work/dump-names"
 full_name="$(id -F 2>/dev/null)"
 [ "${#full_name}" -lt 3 ] || echo "$full_name" >>"$work/dump-names"
 ( cd "$out" && find . -type f ) | sed 's|^\./||' | while IFS= read -r rel; do

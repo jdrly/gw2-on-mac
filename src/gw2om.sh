@@ -22,6 +22,14 @@
 #                              2): engine, bottle (and Steam, if the folder is Steam's), then the
 #                              folder cloned into the bottle (same disk) or copied, the game's
 #                              settings with it, and the finishing touches; the source is only read
+#   gw2om.sh install move      GW2 on Mac 0.1.x's install into this app (the window starts it by
+#                              itself at the first start, status: move=yes): engine, a new bottle
+#                              whose Windows user is crossover as 0.1.x's, Steam from Valve, then
+#                              0.1.x's Steam folder (its login and the game), the profile's Steam
+#                              files, the game's settings, the addons as they were, the ReShade
+#                              folder and the app's settings (SETTINGS_FROM_01) cloned or copied in;
+#                              refused while 0.1.x's Wine runs (the window waits for it); 0.1.x's
+#                              folders are only read
 #   gw2om.sh scan              the Guild Wars 2 installs of other Wine apps on this Mac (GW2 on Mac
 #                              0.1, CrossOver, Whisky, app wrappers, Heroic, GameHub, ~/.wine), one
 #                              "game" line each
@@ -37,6 +45,10 @@
 #   gw2om.sh uninstall         removes everything this app created: the bottle (with the game in
 #                              it), the engine, the settings, its caches (DXMT's in them); logs
 #                              stay
+#   gw2om.sh start-fresh [--before-move|--moved]
+#                              Settings › Troubleshooting: the move from 0.1.x no longer starts by
+#                              itself, and this app's install goes as uninstall removes it
+#                              (--before-move: not if the move has finished meanwhile)
 #   gw2om.sh play              starts the game (Steam: steam.exe -applaunch 1284210, -silent once
 #                              Steam remembers a login; ArenaNet: Gw2-64.exe) with the settings as
 #                              its environment and its compatdb rules (compatdb.rules), and the
@@ -134,11 +146,14 @@
 #                              most files it may have
 #   GW2_ON_MAC_ADDONS_LAYOUT   exclusive: arcdps and ReShade refuse each other (ADDONS_LAYOUT)
 #   GW2_ON_MAC_TEST_PAUSE, GW2_ON_MAC_TEST_PAUSE_AT   wait at a point while that file is there
-#                              (test_pause: locked, lock-owner-read, lock-stale-checked, arcdps-moved)
+#                              (test_pause: locked, lock-owner-read, lock-stale-checked, arcdps-moved,
+#                              move-cloned)
 #   GW2_ON_MAC_LOCK_WAIT      how long a contender waits for the install lock's claim (5 s)
 #   GW2_ON_MAC_ALLOW_WINE=1    let the real engine's Wine run in a sandbox (never in the tests)
 #   GW2_ON_MAC_IMPORT_COPY=1   install import copies even on the same disk (the other-disk path)
 #   GW2_ON_MAC_FREE_KB=<n>     the free space the app's disk reports (KB)
+#   GW2_ON_MAC_MOVE_FAIL=<step>  install move fails at that step (engine, settings, bottle, steam,
+#                              files, profile, reshade, finish: move_fail)
 #   GW2_ON_MAC_WATCH_TIMEOUT, GW2_ON_MAC_WATCH_GRACE, GW2_ON_MAC_WATCH_QUITWAIT,
 #   GW2_ON_MAC_WATCH_POLL      watch-session's times in seconds (900, 30, 20, 2)
 #   GW2_ON_MAC_VMMAP_TIMEOUT   how long vmmap may take before it is ended, in seconds (60)
@@ -146,7 +161,8 @@
 # Lines for the app start with "@": "@phase <n>" (the timeline: install 1 engine, 2 bottle,
 # 3 Steam or ArenaNet's installer, 4 the game's download, 5 finishing touches; install import
 # 1 engine, 2 bottle, then Steam's route 3 Steam, 4 the files, 5 finishing touches, or ArenaNet's
-# 3 the files, 4 finishing touches; uninstall 1 stop, 2 bottle, 3 the rest), "@step <text>", "@progress <label> <bytes> <total>", "@warn <text>",
+# 3 the files, 4 finishing touches; install move the same as install import; uninstall 1 stop,
+# 2 bottle, 3 the rest), "@step <text>", "@progress <label> <bytes> <total>", "@warn <text>",
 # "@notice <text>", "@error <text>", "@done <text>", "@preset <name>" (reshade import). Everything
 # else is plain log text.
 # Runs under macOS's /bin/bash 3.2.
@@ -262,7 +278,8 @@ ENG="$APPDIR/engine"                  # the unpacked engine, as it ships
 BOTTLE="$APPDIR/bottle"               # the game's Wine prefix (Steam and the game live in it)
 SETTINGS="$APPDIR/settings.conf"
 STATE="$APPDIR/state"                 # route, stage (none|waiting_game|finished), game_dir,
-                                      # origin (download|import)
+                                      # origin (download|import|move, moved after the first
+                                      # Play of a move)
 MANIFEST="$APPDIR/install-manifest.json"
 DXMT_CONF="$APPDIR/dxmt.conf"
 # The game's compatdb rules (WINE_COMPATDB_FILE): written at each start, read by every process of
@@ -292,6 +309,19 @@ FORK_CACHE_BASE="$CACHE/fork"
 DXMT_CACHE_FORK="$FORK_CACHE_BASE/dxmt/Gw2-64.exe"
 STEAM_DIR="$BOTTLE/drive_c/Program Files (x86)/Steam"
 STEAM_EXE='C:\Program Files (x86)\Steam\steam.exe'
+# GW2 on Mac 0.1.x's install, which this app moves into its own folder at its first start (install
+# move): 0.1.x's folders by their own name, only ever read. 0.1.x's Windows user is crossover
+# (CrossOver's Wine names every user so), and every bottle of this app gets that name too
+# (bottle_user, docs/adr/0019). MOVE_RECORD says the move happened ("moved") or that I chose Start
+# fresh ("skipped"): either way the app doesn't move by itself again. Uninstall keeps it.
+OLD_LABEL="GW2 on Mac 0.1"
+OLD_APPDIR="$H/Library/Application Support/GW2 on Mac"
+OLD_CACHE="$H/Library/Caches/GW2 on Mac"
+OLD_ENG="$OLD_APPDIR/engine"
+OLD_BOTTLE="$OLD_APPDIR/bottle"
+OLD_STEAM="$OLD_BOTTLE/drive_c/Program Files (x86)/Steam"
+WIN_USER=crossover
+MOVE_RECORD="$APPDIR/moved-from-0.1"
 # What uninstall removes in APPDIR (the folder itself goes too once empty; gamemode is what a build
 # of this line before the Mach9 engine made)
 APP_FILES="engine bottle gamemode settings.conf state install-manifest.json dxmt.conf compatdb.rules compatdb.local dev-switches.conf engine.new bottle.new session session.req .session.lock reshade-compiler"
@@ -368,18 +398,29 @@ set_state() {
 # argv[0], so ps shows C:\...\name.exe for its processes, while their executable is the engine's
 # loader in wine.app. Only this engine's processes count (another Wine, a Mach9.app elsewhere,
 # another sandbox's test or my own setup never stop this one).
+#
+# proc_list old: GW2 on Mac 0.1.x's processes instead, as 0.1.x's own proc_list tells them (main's
+# src/gw2om.sh): an executable in its folder (the engine, or the Game Mode bundle's copy of the
+# loader, gamemode/GW2.app, which the game runs as with Game Mode on), or a winetemp link to the
+# engine's loader (tagged by the loader's inode and size); its wineserver, or the stock one kept
+# next to mine (wineserver.stock), is the session.
 proc_list() {
-  local helper="$RES/helpers/procpaths"
+  local helper="$RES/helpers/procpaths" e="$ENG/" s="$ENG/bin/wineserver" t="" old="" l
+  if [ "${1:-}" = old ]; then
+    e="$OLD_APPDIR/" s="$OLD_ENG/bin/wineserver" old=yes l="$OLD_ENG/lib/wine/x86_64-unix/wine"
+    [ ! -f "$l" ] || t="/winetemp-$(stat -f '%i-%z' "$l")-"
+  fi
   { if [ -x "$helper" ]; then "$helper" 2>/dev/null | sed 's/^/P /'; fi
     ps -axww -o pid=,comm= 2>/dev/null | sed 's/^ */C /'; } |
-  awk -v e="$ENG/" -v s="$ENG/bin/wineserver" '
+  awk -v e="$e" -v s="$s" -v t="$t" -v old="$old" '
     $1 == "P" { x = $0; sub(/^P [0-9]+ /, "", x); real[$2] = x; next }
     { pid = $2; prog = $0; sub(/^C [0-9]+ /, "", prog)
       exe = (pid in real) ? real[pid] : prog
-      if (index(exe, e) != 1) next
+      if (old != "") sub(/\/lib\/wine\/\.\.\/\.\.\/bin\//, "/bin/", exe)
+      if (index(exe, e) != 1 && (t == "" || !index(exe, t))) next
       p = tolower(prog) }
-    exe == s { print "session", pid, prog; next }
-    p ~ /[\/\\]gw2-64\.exe$/ { print "game", pid, prog; next }
+    exe == s || (old != "" && exe ~ /\/bin\/wineserver(\.stock)?$/) { print "session", pid, prog; next }
+    p ~ /[\/\\]gw2-64\.exe$/ || (old != "" && exe ~ /\/Gw2-64\.exe$/) { print "game", pid, prog; next }
     p ~ /[\/\\]gw2setup-64\.exe$/ { print "installer", pid, prog; next }
     p ~ /[\/\\](steam|steamwebhelper|steamservice|steamerrorreporter)\.exe$/ { print "steam", pid, prog; next }
     { print "engine", pid, prog }' || true
@@ -407,6 +448,22 @@ busy_message() {
   esac
 }
 session_running() { case "$(busy_of "$(proc_list)")" in game|steam|installer|session) return 0 ;; esac; return 1; }
+# old_busy: OLD_BUSY (none, or what of 0.1.x runs: game, steam, installer, session) and OLD_WAIT, the
+# sentence for it. The move waits while any of them runs, since they may write the files it
+# clones. Leftovers (Wine processes without their wineserver) can't, and may never end: they don't
+# count.
+old_busy() {
+  local l
+  l=$(proc_list old)
+  OLD_BUSY=$(busy_of "$l") OLD_WAIT=""
+  case "$OLD_BUSY" in
+    game) OLD_WAIT="Guild Wars 2 is running in $OLD_LABEL. Quit it, and the move starts." ;;
+    steam) OLD_WAIT="Steam is running in $OLD_LABEL. Quit Steam there (Steam > Exit), and the move starts." ;;
+    installer) OLD_WAIT="ArenaNet's installer is running in $OLD_LABEL. Let it finish or quit it, and the move starts." ;;
+    session) OLD_WAIT="$OLD_LABEL's Wine is still running ($(proc_names "$l" session engine)). It ends a few seconds after Steam and the game have quit, and the move starts then." ;;
+    *) OLD_BUSY=none ;;
+  esac
+}
 
 # Ends leftover processes of the engine: only when no wineserver of it runs, so they can't belong
 # to a session
@@ -579,13 +636,16 @@ wine_allowed() {
 # the app inherited them (the engine's own rules give Steam and the game what they need)
 COMPATDB_UNSET=(-u WINE_COMPATDB -u WINE_COMPATDB_FILE -u WINE_LARGE_ADDRESS_AWARE -u WINE_PROF_SERVICE)
 
-# wine_do <args...>: Wine in the bottle for the install's own steps (output to the log)
+# wine_do <args...>: Wine in the bottle for the install's own steps (output to the log), as the
+# bottle's Windows user (USER, bottle_user)
 wine_do() {
-  if [ -n "$DRY" ]; then echo "[dry-run] wine $*"; return; fi
+  local u
+  u=$(bottle_user)
+  if [ -n "$DRY" ]; then echo "[dry-run] wine (USER=$u) $*"; return; fi
   wine_allowed
-  log "+ wine $*"
+  log "+ wine (USER=$u) $*"
   env -u WINELOADER -u WINESERVER -u WINEDLLPATH -u DYLD_FALLBACK_LIBRARY_PATH "${COMPATDB_UNSET[@]}" \
-    WINEPREFIX="$BOTTLE" WINEDEBUG=-all WINEMSYNC=1 WINEDLLOVERRIDES=winemenubuilder.exe=d \
+    USER="$u" WINEPREFIX="$BOTTLE" WINEDEBUG=-all WINEMSYNC=1 WINEDLLOVERRIDES=winemenubuilder.exe=d \
     "$ENG/bin/wine" "$@" </dev/null >>"$LOGFILE" 2>&1
 }
 
@@ -730,6 +790,39 @@ SETTINGS_RESETS="
 2 dxmt wine macdrv
 "
 SETTINGS_VERSION=$(printf '%s\n' "$SETTINGS_RESETS" | awk 'NF { v = $1 } END { print v + 0 }')
+# What a move from 0.1.x (install move, move_settings) does with each of 0.1.x's settings, one row
+# a key: "<key> <what> <0.1.x's default, - for none> <its name in Settings>". kept: 0.1.x's value,
+# which means the same here (a key 0.1.x's file doesn't have reads as 0.1.x's default; a value this
+# version doesn't take, as this version's default). default: this version's default. dropped: no
+# such setting here. 0.1.x's settings.conf has no version line and every key in it, chosen or not
+# (main's write_settings), so a kept value is what 0.1.x ran with. Keys of this version that 0.1.x
+# doesn't have start at their defaults (vsync, #269). fastlocks: 0.1.x's default was on, a spin in CrossOver's
+# msync; here it is another port, off by default (#45, #105). gamemode: always on here, the
+# engine's loader is a Game Mode app. coolworkers: none here (docs/adr/0006). mousespeed is a factor
+# on GameController's counts here, on the pointer's speed there: the same choice in Settings.
+SETTINGS_FROM_01="
+retina kept on Retina
+fpscap kept off Frame cap
+metalfx kept off MetalFX for Subsample
+hud kept off Metal HUD
+warm kept on Shader warming
+coolworkers dropped off Cooler job workers
+fastlocks default on Faster locks
+ncpu kept 8 CPUs the game sees
+uiscale kept off Larger interface
+uiscale_size kept 1.75 Interface Size Larger
+uiscale_sans kept on Small text in Cronos
+uiscale_cinema kept on Cinematic dialogue
+gamemode dropped on Game Mode
+launchopts kept - Launch options
+rawmouse kept on Raw mouse-look
+mousespeed kept 1 Mouse-look speed
+updates kept on Check for updates automatically
+debug kept off Debug logging
+steambg kept on Start Steam in the background
+quitsteam kept on Quit Steam when the game quits
+reshade kept off ReShade
+"
 # A development build (CHANNEL=dev) starts with every switch on: I debug from everything on
 # backwards. Its rows that are switches go on once, by settings.conf's line dev_version=, as
 # SETTINGS_RESETS does for defaults: a row of DEV_ROWS, "<version> <key>=<value> ...", reads as
@@ -870,6 +963,69 @@ write_settings() { # [<key> <value>]: settings.conf with every key, one of them 
   } | put "$SETTINGS" 644
 }
 
+# move_settings: this app's settings.conf from 0.1.x's, through SETTINGS_FROM_01, at this version
+# (settings_version: no reset of SETTINGS_RESETS applies to it); the keys left out read as this
+# version's defaults, and write_settings (install_bottle) writes them all. MOVE_OLD: each key's
+# value as 0.1.x ran with it, for move_changes.
+move_settings() {
+  local old="$OLD_APPDIR/settings.conf" k how def v lines=""
+  MOVE_OLD=""
+  while read -r k how def _; do
+    [ -n "$k" ] || continue
+    [ "$def" != - ] || def=""
+    if grep -q "^$k=" "$old" 2>/dev/null; then v=$(sed -n "s/^$k=//p" "$old" | tail -1); else v=$def; fi
+    MOVE_OLD="$MOVE_OLD$k=$v
+"
+    case "$how" in
+      kept)
+        if setting_valid "$k" "$v"; then lines="$lines$k=$v
+"
+        else log "settings from $OLD_LABEL: $k=$v isn't a value of this version; its default"
+        fi ;;
+      default|dropped) log "settings from $OLD_LABEL: $k=$v $how" ;;
+    esac
+  done <<EOF
+$SETTINGS_FROM_01
+EOF
+  { echo "# $APP_NAME settings (change them in the app: $APP_NAME > Settings…)"
+    echo "settings_version=$SETTINGS_VERSION"
+    printf '%s' "$lines"
+  } | put "$SETTINGS" 644
+}
+
+# move_changes: MOVE_LOST, the move's sentence for each setting that doesn't run as 0.1.x ran it,
+# in SETTINGS_FROM_01's order, with why: a dropped one 0.1.x had off its default, one at this
+# version's default, a development build's switch (DEV_ROWS), a value this Mac or this version
+# doesn't take. None in a dry run, which writes no settings to compare with.
+move_changes() {
+  local k how def label old new gone=""
+  MOVE_LOST=""
+  [ -z "$DRY" ] || return 0
+  while read -r k how def label; do
+    [ -n "$k" ] || continue
+    [ "$def" != - ] || def=""
+    old=$(printf '%s' "$MOVE_OLD" | sed -n "s/^$k=//p" | tail -1)
+    case "$how" in
+      dropped)
+        [ "$old" != "$def" ] || continue
+        if [ "$k" = gamemode ]; then gone="${gone:+$gone; }$label is always on here"
+        else gone="${gone:+$gone; }$label isn't a setting on this engine"
+        fi ;;
+      *)
+        new=$(setting "$k")
+        [ "$new" != "$old" ] || continue
+        if [ -n "$DEV_ON" ] && in_list "$k" "$DEV_ROW_KEYS"; then gone="${gone:+$gone; }$label is ${new:-none}, as a development build starts"
+        elif [ "$how" = default ]; then gone="${gone:+$gone; }$label is ${new:-none}, this version's default"
+        elif ! setting_valid "$k" "$old"; then gone="${gone:+$gone; }$label is ${new:-none}: ${old:-none} isn't a choice here"
+        else gone="${gone:+$gone; }$label is ${new:-none}, not ${old:-none}"
+        fi ;;
+    esac
+  done <<EOF
+$SETTINGS_FROM_01
+EOF
+  [ -z "$gone" ] || MOVE_LOST="Changed from $OLD_LABEL: $gone."
+}
+
 # dxmt.conf: DXMT's options for the game (DXMT_CONFIG_FILE)
 write_dxmt_conf() {
   local cap
@@ -907,6 +1063,7 @@ game_env() {
   fi
   [ "$(dxmt_in_use)" != fork ] || fork=yes
   E=(
+    "USER=$(bottle_user)"
     "WINEPREFIX=$BOTTLE"
     "WINEDEBUG=$debug"
     "WINEDLLOVERRIDES=winemenubuilder.exe=d"
@@ -3237,7 +3394,7 @@ GAME_RELS=("Program Files (x86)/Steam/steamapps/common/Guild Wars 2" "Program Fi
 # levels). Anything else: Choose folder… (check-game).
 wine_places() {
   local d a
-  for d in "$H/Library/Application Support/GW2 on Mac/bottle/drive_c" \
+  for d in "$OLD_BOTTLE/drive_c" \
     "$H/Library/Application Support/CrossOver/Bottles"/*/drive_c \
     "$H/Library/Containers/com.isaacmarovitz.Whisky/Bottles"/*/drive_c \
     "$H/Library/Containers/com.isaacmarovitz.Whisky/Data/Bottles"/*/drive_c \
@@ -3259,7 +3416,7 @@ wine_places() {
 source_label() {
   local p=$1 r n
   case "$p" in
-    "$H/Library/Application Support/GW2 on Mac/"*) echo "GW2 on Mac 0.1" ;;
+    "$OLD_APPDIR/"*) echo "$OLD_LABEL" ;;
     "$H/Library/Application Support/CrossOver/Bottles/"*)
       r=${p#"$H/Library/Application Support/CrossOver/Bottles/"}; echo "CrossOver · ${r%%/*}" ;;
     "$H/Library/Containers/com.isaacmarovitz.Whisky/"*)
@@ -3347,6 +3504,48 @@ game_runs_anywhere() {
   printf '%s\n' "$l" | awk -v r="${ROOT:+$ROOT/}" 'tolower($0) ~ /gw2-64\.exe/ && (r == "" || index($0, r)) { f = 1 } END { exit !f }'
 }
 
+# clone_tree <source> <destination> <what> <progress label> [<bytes>]: the folder cloned (same disk:
+# no extra space) or copied (another disk, or GW2_ON_MAC_IMPORT_COPY), the copy after a free-space
+# check and with progress. <destination> must not exist; its folder must. Links inside it stay
+# links (cp -R). CLONE_HOW: cloned or copied.
+clone_tree() {
+  local src=$1 dst=$2 what=$3 label=$4 total=${5:-} pid free
+  CLONE_HOW=""
+  if [ -n "$DRY" ]; then
+    if same_volume "$src"; then CLONE_HOW=cloned; echo "[dry-run] clone $src to $dst"
+    else CLONE_HOW=copied; echo "[dry-run] copy $src to $dst"
+    fi
+    return 0
+  fi
+  if same_volume "$src"; then
+    say "Cloning $what from $src: the same disk, so it takes no extra space"
+    if run cp -Rpc "$src" "$dst" 2>>"$LOGFILE"; then
+      CLONE_HOW=cloned
+      [ -z "$total" ] || echo "@progress $label $total $total"
+      return 0
+    fi
+    log "cloning failed; copying instead"
+    rm -rf "$dst"
+  fi
+  [ -n "$total" ] || total=$(folder_bytes "$src")
+  free=$(free_kb)
+  [ "$(( ${free:-0} * 1024 ))" -ge "$((total + 1000000000))" ] ||
+    die "Not enough free disk space to copy $what: they need $(( (total + 999999999) / 1000000000 )) GB (and 1 GB to spare), $(( ${free:-0} / 1000000 )) GB are free."
+  say "Copying $what from $src ($(( (total + 500000000) / 1000000000 )) GB, from another disk)"
+  { printf '+ cp -Rp %q %q\n' "$src" "$dst"; } >>"$LOGFILE"
+  cp -Rp "$src" "$dst" 2>>"$LOGFILE" &
+  pid=$!
+  FETCH_PID=$pid
+  while kill -0 "$pid" 2>/dev/null; do
+    echo "@progress $label $(folder_bytes "$dst") $total"
+    sleep 1
+  done
+  wait "$pid" || { FETCH_PID=; die "Copying $what failed (details in $LOGS/install.log)."; }
+  FETCH_PID=
+  echo "@progress $label $total $total"
+  CLONE_HOW=copied
+}
+
 # import_game <source dir> <bottle's game dir>: the folder cloned (same disk) or copied (with a
 # free-space check and progress). Left out, and named in LEFT: my own addon's files (version.dll
 # with its mark, gw2-ui-scale.*), arcdps (d3d11.dll or dxgi.dll; addons are not cleared for this
@@ -3354,7 +3553,7 @@ game_runs_anywhere() {
 # ReShade.ini next to Gw2-64.exe, which points into the other install) stays behind too, named in
 # RESHADE_LEFT. Any other addon comes along as it is (ADDONS names them).
 import_game() {
-  local src=$1 dst=$2 total pid n out="" arc="" other=""
+  local src=$1 dst=$2 total n out="" arc="" other=""
   RESHADE_LEFT=""
   total=$(folder_bytes "$src")
   LEFT=""
@@ -3386,35 +3585,9 @@ import_game() {
     return
   fi
   run mkdir -p "$(dirname "$dst")"
-  IMPORT_DST=$dst IMPORT_HOW=""
-  if same_volume "$src"; then
-    say "Cloning the game's files from $src: the same disk, so it takes no extra space"
-    if run cp -Rpc "$src" "$dst" 2>>"$LOGFILE"; then
-      IMPORT_HOW=cloned
-    else
-      log "cloning failed; copying instead"
-      rm -rf "$dst"
-    fi
-  fi
-  if [ -z "$IMPORT_HOW" ]; then
-    local free
-    free=$(free_kb)
-    [ "$(( ${free:-0} * 1024 ))" -ge "$((total + 1000000000))" ] ||
-      die "Not enough free disk space to copy the game's files: they need $(( (total + 999999999) / 1000000000 )) GB (and 1 GB to spare), $(( ${free:-0} / 1000000 )) GB are free."
-    say "Copying the game's files from $src ($(( (total + 500000000) / 1000000000 )) GB, from another disk)"
-    { printf '+ cp -Rp %q %q\n' "$src" "$dst"; } >>"$LOGFILE"
-    cp -Rp "$src" "$dst" 2>>"$LOGFILE" &
-    pid=$!
-    FETCH_PID=$pid
-    while kill -0 "$pid" 2>/dev/null; do
-      echo "@progress Guild Wars 2 $(folder_bytes "$dst") $total"
-      sleep 1
-    done
-    wait "$pid" || { FETCH_PID=; die "Copying the game's files failed (details in $LOGS/install.log)."; }
-    FETCH_PID=
-    IMPORT_HOW=copied
-  fi
-  echo "@progress Guild Wars 2 $total $total"
+  IMPORT_DST=$dst
+  clone_tree "$src" "$dst" "the game's files" "Guild Wars 2" "$total"
+  IMPORT_HOW=$CLONE_HOW
   # (the copy checked again: a link made on the chain path meanwhile keeps that file)
   for n in $out; do
     [ "$n" != "$ARC_CHAIN" ] || chain_ok "$dst" || continue
@@ -3434,8 +3607,12 @@ import_game() {
   log "game files $IMPORT_HOW: $src -> $dst ($total bytes)${out:+; left out:$out}"
 }
 
-# The bottle's Windows user (upstream Wine names it after the Mac's user; CrossOver's engine said
-# crossover)
+# The bottle's Windows user: the name of its own folder in users/, else (a new bottle) crossover,
+# the name 0.1.x's CrossOver engine gives every user. Mach9's Wine names the user after USER
+# (dlls/ntdll/unix/loader.c), which wine_do and game_env pass, so a bottle keeps the name it was made
+# with: crossover from this version on, the Mac's login in a bottle an earlier one made. The name
+# is the profile folder's, and the key of what a program protected with CryptProtectData
+# (dlls/crypt32/protectdata.c): a bottle moved from 0.1.x reads its own data only as crossover.
 bottle_user() {
   local u
   for u in "$BOTTLE/drive_c/users"/*; do
@@ -3443,7 +3620,7 @@ bottle_user() {
     case "$(basename "$u")" in Public|public) continue ;; esac
     basename "$u"; return
   done
-  id -un
+  echo "$WIN_USER"
 }
 
 # import_settings <source game dir>: the game's settings (Local.dat: options and the remembered
@@ -3515,6 +3692,251 @@ install_imported() {
     IMPORT_DST="" IMPORT_ACF=""
     log "install import: Steam's record of the game is not complete; waiting for Steam"
     echo "@done Your game files were $how.$LEFT Steam is starting: sign in, and it brings the game up to date; this window follows it."
+  fi
+}
+
+# --- install move: GW2 on Mac 0.1.x's install into a new bottle of this app (docs/adr/0019)
+#
+# At its first start the window runs it by itself when status says move=yes: this app has no
+# install of its own (no manifest, no bottle), 0.1.x has one (old_install), and neither a move nor
+# Start fresh happened here before (MOVE_RECORD). It waits while anything of 0.1.x runs (old_busy).
+# The bottle is new, made by this engine, with 0.1.x's Windows user (crossover), and 0.1.x's
+# files are cloned into it: its Steam folder (Steam's login, config, userdata and the library with
+# the game) over the one Valve's installer just made, the profile's Steam files and the game's
+# settings, the ReShade folder. The addons come as they were, in the game folder, and the
+# finishing touches put them in order as at every Play. 0.1.x's folders are only read: a clone
+# shares their blocks until one side changes them. On another disk (a bottle linked elsewhere) the
+# trees are copied after a free-space check. A failure at any step removes what the move made
+# (CREATED, on_install_exit).
+
+# old_install: 0.1.x's install, if it has one to move: its manifest, its bottle, and a complete
+# Guild Wars 2 (game_ok) where its state says: in its Steam folder's own library, or on ArenaNet's
+# route at its game_dir. OLD_ROUTE, OLD_GAME. (A few stats: status runs it.)
+old_install() {
+  local route m dir
+  OLD_ROUTE="" OLD_GAME=""
+  [ -f "$OLD_APPDIR/install-manifest.json" ] && [ -f "$OLD_BOTTLE/system.reg" ] || return 1
+  route=$(sed -n 's/^route=//p' "$OLD_APPDIR/state" 2>/dev/null | tail -1)
+  case "$route" in
+    steam)
+      m="$OLD_STEAM/steamapps/appmanifest_$GW2_APPID.acf"
+      [ -f "$m" ] || return 1
+      dir="$OLD_STEAM/steamapps/common/$(acf "$m" installdir)" ;;
+    arenanet)
+      dir=$(sed -n 's/^game_dir=//p' "$OLD_APPDIR/state" 2>/dev/null | tail -1)
+      case "$dir" in */../*|*/..) dir="" ;; "$OLD_BOTTLE/drive_c/"?*) ;; *) dir="" ;; esac
+      [ -n "$dir" ] || dir="$OLD_BOTTLE/drive_c/Program Files/Guild Wars 2" ;;
+    *) return 1 ;;
+  esac
+  case "$dir" in */) return 1 ;; esac
+  game_ok "$dir" || return 1
+  OLD_ROUTE=$route OLD_GAME=$dir
+}
+
+# move_lines (status, settings): old_install, move (yes: the window starts the move), the record,
+# 0.1.x's route, and while move=yes what of 0.1.x runs and the sentence the window shows for it
+move_lines() {
+  local m=no
+  if old_install; then
+    echo "old_install=yes"
+    [ -f "$MANIFEST" ] || [ -d "$BOTTLE" ] || [ -f "$MOVE_RECORD" ] || m=yes
+  else
+    echo "old_install=no"
+  fi
+  echo "move=$m"
+  echo "move_record=$(head -1 "$MOVE_RECORD" 2>/dev/null || true)"
+  echo "move_route=$OLD_ROUTE"
+  OLD_BUSY=none OLD_WAIT=""
+  [ "$m" != yes ] || old_busy
+  echo "move_busy=$OLD_BUSY"
+  echo "move_wait=$OLD_WAIT"
+}
+
+# move_check_old: nothing of 0.1.x runs (before each tree the move clones, and after the last)
+move_check_old() {
+  old_busy
+  [ "$OLD_BUSY" = none ] || die "$OLD_LABEL started while the move ran, so it stopped and undid what it had done. $OLD_WAIT"
+}
+
+# move_fail <point>: the sandbox's failure at that step of the move (GW2_ON_MAC_MOVE_FAIL)
+move_fail() {
+  [ -n "$ROOT" ] && [ "${GW2_ON_MAC_MOVE_FAIL:-}" = "$1" ] || return 0
+  die "The move failed at $1 (GW2_ON_MAC_MOVE_FAIL, a test)."
+}
+
+# move_inside <dir> <base>: <dir> is a folder inside <base> once links are resolved. cp -R copies a
+# link as a link, so a linked folder in 0.1.x's tree would lead the writes after the clone (the
+# addons, ReShade's ini) into 0.1.x's files or elsewhere.
+move_inside() {
+  local d b
+  [ -z "$DRY" ] && [ -e "$1" ] || return 0
+  d=$(cd "$1" 2>/dev/null && pwd -P) || d=""
+  b=$(cd "$2" && pwd -P)
+  case "$d/" in "$b/"?*) return 0 ;; esac
+  die "$1 leads outside $2 (a link in $OLD_LABEL's folder?), so $APP_NAME doesn't move this install. Start fresh in Settings › Troubleshooting installs anew."
+}
+
+# path_under <path> <folder>: <path> is inside <folder> (a case of its own: bash 3.2 can't parse a
+# case pattern's parenthesis inside a $(...))
+path_under() { case "$1" in "$2/"?*) return 0 ;; esac; return 1; }
+
+# move_links <folder>...: every link in what the move cloned or kept leads to a file inside this
+# app's folder, its whole chain resolved (realpath). cp -R copies a link as a link, and what writes
+# after the clone (ReShade's ini, arcdps's renames, the addons, then Steam, the game and ReShade
+# themselves) would write through it: into 0.1.x's folders, or into a folder elsewhere that 0.1.x
+# links to as well, such as a ReShade folder on another disk. A link to a folder counts as leading
+# out wherever it leads (what is in that folder isn't looked through), and so does one that leads
+# nowhere.
+move_links() {
+  local d l p ap bad
+  [ -z "$DRY" ] || return 0
+  ap=$(cd "$APPDIR" && pwd -P)
+  bad=$(for d in "$@"; do
+      { [ -e "$d" ] || [ -L "$d" ]; } || continue
+      find "$d" -type l 2>/dev/null | while IFS= read -r l; do
+        p=$(realpath "$l" 2>/dev/null) || p=""
+        [ -n "$p" ] && [ -f "$p" ] && path_under "$p" "$ap" || echo "$l"
+      done
+    done | head -1) || true
+  [ -z "$bad" ] ||
+    die "$bad is a link to a folder or out of the files the move cloned, so $APP_NAME doesn't move this install: what it writes there would reach $OLD_LABEL's files. Start fresh in Settings › Troubleshooting installs anew."
+}
+
+# move_paths <ini>: 0.1.x's folders in it (or in the file it links to), as ReShade's ini spells them (Z:\...\GW2 on Mac, a
+# comma doubled), now this app's: its BasePath, IntermediateCachePath (0.1.x's cache folder) and any
+# path a player set by hand. A name is replaced where it ends: at a backslash, a quote, a comma,
+# a semicolon or the line's end.
+move_paths() {
+  local f=$1 tmp
+  [ -f "$f" ] || return 0
+  # (a link: the file it leads to, which move_links has kept inside this app's folder; checked
+  # again here, since this is the one write the move makes in a file it didn't create)
+  if [ -L "$f" ]; then
+    f=$(realpath "$f") || return 1
+    path_under "$f" "$(cd "$APPDIR" && pwd -P)" || return 1
+  fi
+  if [ -n "$DRY" ]; then echo "[dry-run] $OLD_LABEL's folders in $f renamed to this app's"; return 0; fi
+  tmp="$f.gw2om-new.$$"
+  OA="$(winpath "$OLD_APPDIR")" NA="$(winpath "$APPDIR")" OC="$(winpath "$OLD_CACHE")" NC="$(winpath "$CACHE")" LC_ALL=C awk '
+    function rep(s, a, b,   i, o, c) {
+      o = ""
+      while ((i = index(s, a)) > 0) {
+        c = substr(s, i + length(a), 1)
+        if (c == "" || c == "\\" || c == "\"" || c == "," || c == ";" || c == "\r") o = o substr(s, 1, i - 1) b
+        else o = o substr(s, 1, i - 1 + length(a))
+        s = substr(s, i + length(a))
+      }
+      return o s
+    }
+    { print rep(rep($0, ENVIRON["OA"], ENVIRON["NA"]), ENVIRON["OC"], ENVIRON["NC"]) }' "$f" >"$tmp" || { rm -f "$tmp"; return 1; }
+  if cmp -s "$tmp" "$f"; then rm -f "$tmp"; return 0; fi
+  chmod 644 "$tmp" && mv -f "$tmp" "$f" || { rm -f "$tmp"; return 1; }
+  log "$f: $OLD_LABEL's folders renamed to this app's"
+}
+
+# move_reshade: 0.1.x's ReShade folder (its ini, presets, shaders, textures, screenshots) cloned
+# into this app's, with the record of the compiler 0.1.x put next to Gw2-64.exe. A ReShade folder
+# this app has already (an earlier install's, which Uninstall left) stays as it is, and 0.1.x's
+# stays where it is. Then ReShade's two inis name this app's folders (move_paths): else ReShade
+# would write into 0.1.x's cache. MOVE_RS: moved, kept or empty.
+move_reshade() {
+  MOVE_RS=""
+  if [ -d "$OLD_APPDIR/ReShade" ]; then
+    if [ -e "$RS" ] || [ -L "$RS" ]; then
+      say "$APP_NAME's ReShade folder is there already ($RS): it stays, and $OLD_LABEL's stays in $OLD_APPDIR/ReShade"
+      MOVE_RS=kept
+    else
+      clone_tree "$OLD_APPDIR/ReShade" "$RS" "ReShade's folder" ReShade
+      MOVE_RS=moved
+    fi
+  fi
+  move_links "$RS"
+  if [ -f "$OLD_APPDIR/reshade-compiler" ] && [ ! -e "$RS_COMPILER_RECORD" ]; then
+    run cp -p "$OLD_APPDIR/reshade-compiler" "$RS_COMPILER_RECORD"
+  fi
+  move_paths "$RS/ReShade.ini" || die "$APP_NAME couldn't change ReShade's settings ($RS/ReShade.ini). Try again (details in $LOGS/install.log)."
+  move_paths "$GAME_DIR/ReShade.ini" || die "$APP_NAME couldn't change $GAME_DIR/ReShade.ini. Try again (details in $LOGS/install.log)."
+}
+
+# install_moved <route>: install move after the engine, the settings (move_settings) and the
+# bottle. Steam's route runs Valve's installer first, as for an install (its registry), then 0.1.x's
+# Steam folder takes the new one's place.
+install_moved() {
+  local route=$1 u ou d dst what="" lost files how steamline
+  ou="$OLD_BOTTLE/drive_c/users/$WIN_USER"
+  [ -n "$DRY" ] || [ "$(bottle_user)" = "$WIN_USER" ] ||
+    die "Wine made the new bottle's user $(bottle_user), not $WIN_USER, so $APP_NAME can't move $OLD_LABEL's install into it."
+  u="$BOTTLE/drive_c/users/$WIN_USER"
+  phase 3
+  if [ "$route" = steam ]; then
+    install_steam
+    move_fail steam
+    phase 4
+  fi
+  step "Your install, from $OLD_LABEL"
+  move_check_old
+  if [ "$route" = steam ]; then
+    run rm -rf "$STEAM_DIR"
+    clone_tree "$OLD_STEAM" "$STEAM_DIR" "Steam's folder with Guild Wars 2" "Steam and Guild Wars 2"
+  else
+    dst="$BOTTLE/drive_c/${OLD_GAME#"$OLD_BOTTLE/drive_c/"}"
+    run mkdir -p "$(dirname "$dst")"
+    clone_tree "$OLD_GAME" "$dst" "the game's files" "Guild Wars 2"
+  fi
+  MOVE_HOW=$CLONE_HOW
+  test_pause move-cloned
+  move_fail files
+  # (the profile: Steam's files in AppData/Local on Steam's route, the game's settings folder)
+  for d in "AppData/Local/Steam" "AppData/Roaming/Guild Wars 2"; do
+    [ -d "$ou/$d" ] || continue
+    [ "$route" = steam ] || [ "$d" != AppData/Local/Steam ] || continue
+    move_check_old
+    run rm -rf "${u:?}/$d"
+    run mkdir -p "$(dirname "$u/$d")"
+    clone_tree "$ou/$d" "$u/$d" "$(basename "$d")'s folder in AppData" "$(basename "$d")"
+  done
+  move_fail profile
+  move_check_old
+  move_links "$STEAM_DIR" "${dst:-$STEAM_DIR}" "$u/AppData/Local/Steam" "$u/AppData/Roaming/Guild Wars 2"
+  if [ -z "$DRY" ]; then
+    set_state route "$route"
+    set_state origin move
+    [ "$route" = steam ] || set_state game_dir "$dst"
+  fi
+  game_state
+  [ -n "$DRY" ] || [ -n "$GAME_DIR" ] || die "The game's folder isn't where $OLD_LABEL's Steam says it is. Start fresh in Settings › Troubleshooting installs anew."
+  move_inside "$GAME_DIR" "$BOTTLE"
+  move_reshade
+  move_check_old
+  move_fail reshade
+  write_manifest
+  if [ "$GAME" = yes ] || [ -n "$DRY" ]; then
+    if [ "$route" = steam ]; then phase 5; else phase 4; fi
+    step "Finishing touches"
+    finish_touches
+    move_fail finish
+  else
+    step "Steam opens: it brings Guild Wars 2 up to date"
+    launch "$STEAM_EXE" "steam://install/$GW2_APPID"
+    set_state stage waiting_game
+  fi
+  echo moved | put "$MOVE_RECORD" 644
+  log "install move complete ($MOVE_HOW)"
+  # (what came along: the addons as the game folder has them now)
+  arcdps_state
+  reshade_state
+  [ "$ARC" != on ] || what="arcdps"
+  [ "$RSH" != on ] || what="${what:+$what, }ReShade$([ "$MOVE_RS" != moved ] || echo " with your presets")"
+  [ "$(uiscale_state)" != on ] || what="${what:+$what, }the larger interface"
+  lost="" files="Guild Wars 2" how="cloned, no extra space" steamline=""
+  move_changes
+  [ -z "$MOVE_LOST" ] || lost=" $MOVE_LOST"
+  [ "$MOVE_HOW" != copied ] || how=copied
+  if [ "$route" = steam ]; then files="Steam with Guild Wars 2 in its library" steamline=" Steam may ask you to sign in once."; fi
+  if [ "$GAME" = yes ] || [ -n "$DRY" ]; then
+    echo "@done Your install moved from $OLD_LABEL: $files ($how), your game settings${what:+, your addons as they were ($what)} and your settings.$lost$steamline $OLD_LABEL stays as it was. Press Play."
+  else
+    echo "@done Your install moved from $OLD_LABEL.$lost Steam is starting: it brings the game up to date, and may ask you to sign in once; this window follows it."
   fi
 }
 
@@ -3698,6 +4120,9 @@ status() {
   echo "reshade=$(setting reshade)"
   reshade_lines
   echo "session=$(session_live)"
+  # (GW2 on Mac 0.1.x's install, which the window moves into this app at its first start: move=yes,
+  # and while something of 0.1.x runs, move_busy and move_wait say what)
+  move_lines
 }
 
 settings() {
@@ -3719,6 +4144,11 @@ settings() {
   reshade_lines
   echo "cpus=$CPU_MAX"
   echo "steam_login=$(steam_remembers_login && echo yes || echo no)"
+  # (Troubleshooting's Start fresh: shown over the moved install, origin move or moved, or before
+  # the move while 0.1.x has an install)
+  echo "old_install=$(old_install && echo yes || echo no)"
+  echo "origin=$(state origin)"
+  echo "move_record=$(head -1 "$MOVE_RECORD" 2>/dev/null || true)"
 }
 
 cmd_set() {
@@ -3858,13 +4288,14 @@ on_install_exit() {
     stop_wine >/dev/null 2>&1 || true
     # all or nothing: what this run created goes again (an earlier engine or bottle stays)
     for c in $CREATED; do
-      if [ -e "$APPDIR/$c" ]; then rm -rf "${APPDIR:?}/$c"; log "removed $c (install failed)"; fi
+      if [ -e "$APPDIR/$c" ] || [ -L "$APPDIR/$c" ]; then rm -rf "${APPDIR:?}/$c"; log "removed $c (install failed)"; fi
     done
     # the game's files this run cloned or copied (and Steam's record of them), if the bottle stays
     if [ -n "${FETCH_PID:-}" ]; then wait "$FETCH_PID" 2>/dev/null || true; fi
     if [ -n "${IMPORT_DST:-}" ] && [ -e "$IMPORT_DST" ]; then rm -rf "$IMPORT_DST"; log "removed $IMPORT_DST (install failed)"; fi
     if [ -n "${IMPORT_ACF:-}" ] && [ -e "$IMPORT_ACF" ]; then rm -f "$IMPORT_ACF"; fi
     rm -rf "$APPDIR"/*.new 2>/dev/null || true
+    rm -f "$APPDIR"/*.new.$$ 2>/dev/null || true
     log "install failed (status $st)"
   fi
   unlock
@@ -4307,11 +4738,17 @@ cmd_watch_session() {
 }
 
 cmd_install() {
-  local route=${1:-} setup=${2:-} want src="" with_settings=yes
+  local route=${1:-} setup=${2:-} want src="" with_settings=yes moving=""
   CREATED="" FETCH_PID="" IMPORT_DST="" IMPORT_ACF=""
   # a first install's state and manifest go too if it fails
   [ -f "$MANIFEST" ] || CREATED="state install-manifest.json"
-  case "$route" in steam|arenanet|import) ;; *) echo "@error Usage: gw2om.sh install steam | install arenanet <Gw2Setup-64.exe> | install import <game folder> [--no-settings]"; exit 2 ;; esac
+  case "$route" in steam|arenanet|import|move) ;; *) echo "@error Usage: gw2om.sh install steam | install arenanet <Gw2Setup-64.exe> | install import <game folder> [--no-settings] | install move"; exit 2 ;; esac
+  if [ "$route" = move ]; then
+    old_install || { echo "@error There is no $OLD_LABEL install to move: $OLD_APPDIR has no bottle with a complete Guild Wars 2 in it."; exit 2; }
+    old_busy
+    [ "$OLD_BUSY" = none ] || { echo "@error $OLD_WAIT"; exit 1; }
+    moving=yes route=$OLD_ROUTE
+  fi
   if [ "$route" = import ]; then
     [ "${3:-}" != --no-settings ] || with_settings=no
     src=$(game_dir_of "$setup") || { echo "@error There is no Guild Wars 2 in ${setup:-that folder} (Gw2-64.exe and a Gw2.dat of more than 1 GB)."; exit 2; }
@@ -4319,27 +4756,58 @@ cmd_install() {
     route=$(game_route_of "$src")
     if game_runs_anywhere; then echo "@error Guild Wars 2 is running. Quit it first (in every app), so its files don't change while they are copied."; exit 1; fi
   fi
-  if [ "$route" = arenanet ] && [ -z "$src" ]; then
+  if [ "$route" = arenanet ] && [ -z "$src" ] && [ -z "$moving" ]; then
     [ -n "$setup" ] || { echo "@error Drop Gw2Setup-64.exe from ArenaNet's site first."; exit 2; }
     want=$(cmd_check_setup "$setup") || true
     want=$(echo "$want" | tail -1)
     case "$want" in "@done "*) ;; *) echo "$want"; exit 1 ;; esac
   fi
   open_log
-  log "---- install $route${src:+ import $src} $VERSION (engine $ENGINE_NAME) root=${ROOT:-/} dry=${DRY:-0}"
+  log "---- install $route${src:+ import $src}${moving:+ move from $OLD_GAME} $VERSION (engine $ENGINE_NAME) root=${ROOT:-/} dry=${DRY:-0}"
   phase 1
   step "Checking your Mac"
-  preflight ${src:+import}
+  preflight ${src:+import}${moving:+import}
   lock
+  # (a move goes only into a folder without an install, where no move or Start fresh happened
+  # before: checked under the lock, before the rollback is armed, which would stop Wine in an
+  # install that isn't the move's)
+  if [ -n "$moving" ] && { [ -f "$MANIFEST" ] || [ -d "$BOTTLE" ] || [ -f "$MOVE_RECORD" ]; }; then
+    unlock
+    if [ -f "$MOVE_RECORD" ]; then
+      echo "@error $APP_NAME doesn't move $OLD_LABEL's install again: $([ "$(head -1 "$MOVE_RECORD")" = skipped ] && echo "Start fresh was chosen here" || echo "it was moved here before") ($MOVE_RECORD)."
+    else
+      echo "@error $APP_NAME has an install of its own already, so it doesn't move $OLD_LABEL's."
+    fi
+    exit 1
+  fi
   trap on_install_exit EXIT
   trap 'exit 143' TERM INT HUP   # Cancel in the app: roll back through the EXIT trap
+  # (what a move creates in the app's folder is all it removes if it fails, a ReShade folder
+  # Uninstall left included; the record of the move too, written last)
+  if [ -n "$moving" ]; then
+    CREATED="state install-manifest.json moved-from-0.1"
+    for c in settings.conf dxmt.conf compatdb.rules .session.lock ReShade reshade-compiler; do
+      [ -e "$APPDIR/$c" ] || [ -L "$APPDIR/$c" ] || CREATED="$CREATED $c"
+    done
+  fi
   [ -n "$DRY" ] || mkdir -p "$APPDIR"
   step "The Wine engine"
   install_engine
   apply_engine_files
+  move_fail engine
   phase 2
   step "The game's own bottle"
+  if [ -n "$moving" ]; then
+    say "Your settings from $OLD_LABEL ($OLD_APPDIR/settings.conf)"
+    move_settings
+    move_fail settings
+  fi
   install_bottle
+  if [ -n "$moving" ]; then
+    move_fail bottle
+    install_moved "$route"
+    return
+  fi
   if [ -n "$src" ]; then
     install_imported "$route" "$src" "$with_settings"
     return
@@ -4508,8 +4976,10 @@ cmd_play() {
   local fresh=no joined=no steam_before=no route silent="" window="" quit=no try rc
   route=$(state route)
   [ "$route" = arenanet ] || route=steam
+  # (the first Play after a move from 0.1.x shows Steam's window: its login came along, but Steam
+  # may ask for it once in the new bottle, and a hidden window would wait for it unseen)
   if [ "$route" = steam ]; then
-    if [ "$(setting steambg)" = on ] && steam_remembers_login; then silent=-silent window=hidden; else window=shown; fi
+    if [ "$(setting steambg)" = on ] && steam_remembers_login && [ "$(state origin)" != move ]; then silent=-silent window=hidden; else window=shown; fi
   fi
   if [ -z "$DRY" ] && [ ! -x "$LOCKER" ]; then
     warn "$APP_NAME's session helper is missing ($LOCKER): Steam stays open after the game. Reinstall $APP_NAME."
@@ -4607,6 +5077,7 @@ cmd_play() {
       echo "updated=$(date +%s)"; echo "result="; } >"$SESSION.new.$$"
     mv -f "$SESSION.new.$$" "$SESSION"
     : >"$SESSION_REQ"
+    [ "$(state origin)" != move ] || set_state origin moved
     # the watcher, which inherits the lock (fd 9) and writes its pid into the session
     nohup /bin/bash "$RES/gw2om.sh" watch-session --handoff </dev/null >/dev/null 2>&1 &
     exec 9>&-
@@ -4872,7 +5343,6 @@ cmd_env() {
 }
 
 cmd_uninstall() {
-  local c
   open_log
   log "---- uninstall $VERSION root=${ROOT:-/} dry=${DRY:-0}"
   phase 1
@@ -4881,6 +5351,12 @@ cmd_uninstall() {
   lock
   # (the folder itself goes too once empty)
   trap 'unlock; rmdir "$APPDIR" 2>/dev/null || true' EXIT
+  uninstall_files
+}
+
+# uninstall_files: Uninstall's removal, with the install lock held (cmd_uninstall, Start fresh)
+uninstall_files() {
+  local c
   stop_watcher
   [ -n "$DRY" ] || stop_wine
   phase 2
@@ -4901,6 +5377,36 @@ cmd_uninstall() {
     return 0
   fi
   echo "@done $APP_NAME is removed, with the bottle and the game in it. Logs stay in $LOGS."
+}
+
+# start-fresh [--before-move|--moved] (Settings › Troubleshooting): the move from 0.1.x doesn't
+# start by itself any more (MOVE_RECORD skipped), and the install it moved goes first, as Uninstall
+# removes it; the window then shows the install choices. The intent is what I confirmed:
+# --before-move while nothing was installed (if the move has finished since, nothing changes),
+# --moved over the moved install (state origin move or moved: never another install). One install
+# lock covers the check, Uninstall's removal (uninstall_files) and the record, so nothing installs
+# or moves in between; while the game or Steam runs nothing changes. 0.1.x's install stays as it is;
+# the install choices still list its game.
+cmd_start_fresh() {
+  local want=${1:-} have=no
+  open_log
+  log "---- start-fresh $want $VERSION root=${ROOT:-/} dry=${DRY:-0}"
+  check_not_running
+  lock
+  trap 'unlock' EXIT
+  if [ -f "$MANIFEST" ] || [ -d "$BOTTLE" ]; then have=yes; fi
+  [ -n "$want" ] || { if [ "$have" = yes ]; then want=--moved; else want=--before-move; fi; }
+  if [ "$want" = --before-move ] && [ "$have" = yes ]; then
+    die "The move from $OLD_LABEL has finished meanwhile, so Start fresh changed nothing. To remove the moved install, choose Start fresh again."
+  fi
+  if [ "$have" = yes ]; then
+    case "$(state origin)" in move|moved) ;; *) die "This install isn't the one moved from $OLD_LABEL, so Start fresh leaves it. Uninstall removes it." ;; esac
+    uninstall_files
+  fi
+  [ -n "$DRY" ] || mkdir -p "$APPDIR"
+  echo skipped | put "$MOVE_RECORD" 644
+  log "start fresh: $OLD_LABEL's install doesn't move by itself any more"
+  echo "@done $APP_NAME starts fresh: choose how to install Guild Wars 2 in the main window. $OLD_LABEL stays as it was, and its game files are under Game files I already have."
 }
 
 cmd_end_leftovers() {
@@ -4991,6 +5497,7 @@ case "${1:-}" in
   stop-waiting) cmd_stop_waiting ;;
   repair) cmd_repair ;;
   uninstall) cmd_uninstall ;;
+  start-fresh) shift; cmd_start_fresh "$@" ;;
   play) cmd_play ;;
   watch-session) shift; cmd_watch_session "$@" ;;
   session-status) shift; cmd_session_status "$@" ;;
