@@ -3746,6 +3746,30 @@ move_inside() {
   die "$1 leads outside $2 (a link in $OLD_LABEL's folder?), so $APP_NAME doesn't move this install. Start fresh in Settings › Troubleshooting installs anew."
 }
 
+# move_links <folder>...: no link in what the move cloned leads into 0.1.x's folders. cp -R copies
+# a link as a link, and the steps after the clone write through what they find there (ReShade's
+# ini, arcdps's renames, the addons). A link elsewhere (a screenshots folder on another disk) stays.
+move_links() {
+  local d l t q p oa oc bad
+  [ -z "$DRY" ] || return 0
+  oa=$(cd "$OLD_APPDIR" 2>/dev/null && pwd -P) || oa=$OLD_APPDIR
+  oc=$(cd "$OLD_CACHE" 2>/dev/null && pwd -P) || oc=$OLD_CACHE
+  bad=$(for d in "$@"; do
+      { [ -e "$d" ] || [ -L "$d" ]; } || continue
+      find "$d" -type l 2>/dev/null | while IFS= read -r l; do
+        t=$(readlink "$l")
+        case "$t" in /*) ;; *) t="$(dirname "$l")/$t" ;; esac
+        if [ -d "$t" ]; then p=$(cd "$t" && pwd -P) || p=$t
+        elif q=$(cd "$(dirname "$t")" 2>/dev/null && pwd -P); then p="$q/$(basename "$t")"
+        else p=$t
+        fi
+        case "$p/" in "$oa/"*|"$oc/"*) echo "$l" ;; esac
+      done
+    done | head -1) || true
+  [ -z "$bad" ] ||
+    die "$bad is a link into $OLD_LABEL's folders, and $APP_NAME would write through it, so it doesn't move this install. Start fresh in Settings › Troubleshooting installs anew."
+}
+
 # move_paths <ini>: 0.1.x's folders in it, as ReShade's ini spells them (Z:\...\GW2 on Mac, a
 # comma doubled), now this app's: its BasePath, IntermediateCachePath (0.1.x's cache folder) and any
 # path a player set by hand. A name is replaced where it ends: at a backslash, a quote, a comma,
@@ -3768,7 +3792,7 @@ move_paths() {
     }
     { print rep(rep($0, ENVIRON["OA"], ENVIRON["NA"]), ENVIRON["OC"], ENVIRON["NC"]) }' "$f" >"$tmp" || { rm -f "$tmp"; return 1; }
   if cmp -s "$tmp" "$f"; then rm -f "$tmp"; return 0; fi
-  chmod 644 "$tmp" && mv -f "$tmp" "$f"
+  chmod 644 "$tmp" && mv -f "$tmp" "$f" || { rm -f "$tmp"; return 1; }
   log "$f: $OLD_LABEL's folders renamed to this app's"
 }
 
@@ -3785,10 +3809,10 @@ move_reshade() {
       MOVE_RS=kept
     else
       clone_tree "$OLD_APPDIR/ReShade" "$RS" "ReShade's folder" ReShade
-      move_inside "$RS" "$APPDIR"
       MOVE_RS=moved
     fi
   fi
+  move_links "$RS"
   if [ -f "$OLD_APPDIR/reshade-compiler" ] && [ ! -e "$RS_COMPILER_RECORD" ]; then
     run cp -p "$OLD_APPDIR/reshade-compiler" "$RS_COMPILER_RECORD"
   fi
@@ -3835,6 +3859,7 @@ install_moved() {
   done
   move_fail profile
   move_check_old
+  move_links "$STEAM_DIR" "${dst:-$STEAM_DIR}" "$u/AppData/Local/Steam" "$u/AppData/Roaming/Guild Wars 2"
   if [ -z "$DRY" ]; then
     set_state route "$route"
     set_state origin move
@@ -3843,8 +3868,8 @@ install_moved() {
   game_state
   [ -n "$DRY" ] || [ -n "$GAME_DIR" ] || die "The game's folder isn't where $OLD_LABEL's Steam says it is. Start fresh in Settings › Troubleshooting installs anew."
   move_inside "$GAME_DIR" "$BOTTLE"
-  [ ! -d "$GAME_DIR/addons" ] || move_inside "$GAME_DIR/addons" "$BOTTLE"
   move_reshade
+  move_check_old
   move_fail reshade
   write_manifest
   if [ "$GAME" = yes ] || [ -n "$DRY" ]; then
@@ -4229,6 +4254,7 @@ on_install_exit() {
     if [ -n "${IMPORT_DST:-}" ] && [ -e "$IMPORT_DST" ]; then rm -rf "$IMPORT_DST"; log "removed $IMPORT_DST (install failed)"; fi
     if [ -n "${IMPORT_ACF:-}" ] && [ -e "$IMPORT_ACF" ]; then rm -f "$IMPORT_ACF"; fi
     rm -rf "$APPDIR"/*.new 2>/dev/null || true
+    rm -f "$APPDIR"/*.new.[0-9]* 2>/dev/null || true
     log "install failed (status $st)"
   fi
   unlock
@@ -4701,15 +4727,25 @@ cmd_install() {
   step "Checking your Mac"
   preflight ${src:+import}${moving:+import}
   lock
+  # (a move goes only into a folder without an install, where no move or Start fresh happened
+  # before: checked under the lock, before the rollback is armed, which would stop Wine in an
+  # install that isn't the move's)
+  if [ -n "$moving" ] && { [ -f "$MANIFEST" ] || [ -d "$BOTTLE" ] || [ -f "$MOVE_RECORD" ]; }; then
+    unlock
+    if [ -f "$MOVE_RECORD" ]; then
+      echo "@error $APP_NAME doesn't move $OLD_LABEL's install again: $([ "$(head -1 "$MOVE_RECORD")" = skipped ] && echo "Start fresh was chosen here" || echo "it was moved here before") ($MOVE_RECORD)."
+    else
+      echo "@error $APP_NAME has an install of its own already, so it doesn't move $OLD_LABEL's."
+    fi
+    exit 1
+  fi
   trap on_install_exit EXIT
   trap 'exit 143' TERM INT HUP   # Cancel in the app: roll back through the EXIT trap
-  # (a move goes only into a folder without an install, checked under the lock; what it creates
-  # there is all it removes if it fails, a ReShade folder Uninstall left included)
+  # (what a move creates in the app's folder is all it removes if it fails, a ReShade folder
+  # Uninstall left included; the record of the move too, written last)
   if [ -n "$moving" ]; then
-    CREATED=""
-    [ ! -f "$MANIFEST" ] && [ ! -d "$BOTTLE" ] || die "$APP_NAME has an install of its own already, so it doesn't move $OLD_LABEL's."
-    CREATED="state install-manifest.json"
-    for c in settings.conf dxmt.conf .session.lock ReShade reshade-compiler; do
+    CREATED="state install-manifest.json moved-from-0.1"
+    for c in settings.conf dxmt.conf compatdb.rules .session.lock ReShade reshade-compiler; do
       [ -e "$APPDIR/$c" ] || [ -L "$APPDIR/$c" ] || CREATED="$CREATED $c"
     done
   fi

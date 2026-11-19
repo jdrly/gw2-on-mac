@@ -639,7 +639,7 @@ struct SettingsView: View {
         SettingsGroup {
           SettingRow("Start fresh", settings.installed
                      ? "Removes the install moved from GW2 on Mac 0.1 and shows the install choices, to install Steam and the game anew. GW2 on Mac 0.1 stays as it is."
-                     : "Installs Steam and the game anew instead of moving GW2 on Mac 0.1's install. GW2 on Mac 0.1 stays as it is.") {
+                     : "Skips the move and shows the install choices, to install Steam and the game anew. GW2 on Mac 0.1 stays as it is.") {
             SmallButton(settings.action == "start-fresh" ? "Starting fresh…" : "Start fresh…", icon: "rotate-ccw") {
               confirmAction = "start-fresh"
             }

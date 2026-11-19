@@ -374,14 +374,14 @@ func renderAll(_ dir: URL, exports: URL?) async {
     "session-steam-update": .starting,
     "move-waiting": .installing, "moving": .installing, "move-failed": .installing, "moved": .ready]
   // what the window does about the move from 0.1 for a status (a model check): start it, wait for
-  // 0.1, or nothing (installed, no move, a Mac below the engine's macOS, a failed move; a failed
-  // one while 0.1 runs waits, and starts again once it has quit)
+  // 0.1, or nothing (installed, no move, a Mac below the engine's macOS, a move that failed or was
+  // cancelled, whether 0.1 runs or not)
   do {
     let base = ["installed": "no", "move": "yes", "move_busy": "none", "macos_ok": "yes", "arch": "arm64"]
     let failed = Installer.Phase.failed(.move, "x")
     let cases: [([String: String], Installer.Phase, Installer.MoveNext)] = [
       ([:], .idle, .start), (["move_busy": "steam"], .idle, .wait), (["move_busy": "game"], .waitingForOld, .wait),
-      ([:], .waitingForOld, .start), ([:], failed, .none), (["move_busy": "steam"], failed, .wait),
+      ([:], .waitingForOld, .start), ([:], failed, .none), (["move_busy": "steam"], failed, .none),
       (["installed": "yes"], .idle, .none), (["move": "no"], .idle, .none), (["macos_ok": "no"], .idle, .none),
     ]
     for (extra, phase, want) in cases where Installer.moveNext(base.merging(extra) { $1 }, phase: phase) != want {

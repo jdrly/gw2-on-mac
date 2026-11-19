@@ -1041,7 +1041,10 @@ struct InstallingPanel: View {
                 detail: detail(index, step), progress: index == installer.stepIndex ? installer.progress : nil)
       }
       if installer.moving {
-        MoveNote(installer: installer)
+        MoveNote(installer: installer, startFresh: {
+          UserDefaults.standard.set(SettingsPane.troubleshooting.rawValue, forKey: SettingsView.selectedPaneKey)
+          actions.settings()
+        })
       } else if installer.phase == .waitingForGame {
         Text(installer.imported
              ? "Sign in to Steam: it brings your Guild Wars 2 up to date. This window follows it."
@@ -1074,9 +1077,11 @@ struct InstallingPanel: View {
   }
 }
 
-// Under the move's steps: what it waits for, or what happens to 0.1, and where Start fresh is
+// Under the move's steps: what it waits for, or what happens to 0.1, and the way to Start fresh
+// (Settings › Troubleshooting)
 struct MoveNote: View {
   let installer: Installer
+  let startFresh: () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -1087,18 +1092,28 @@ struct MoveNote: View {
             .fixedSize(horizontal: false, vertical: true)
         }
       }
-      Text(text).font(.body(12)).bodyBox(12, 1.3).foregroundStyle(Brand.fg3)
-        .fixedSize(horizontal: false, vertical: true)
+      switch installer.phase {
+      case .waitingForGame:
+        note("Steam brings your Guild Wars 2 up to date, and may ask you to sign in once. This window follows it.")
+      case .working:
+        note("GW2 on Mac 0.1 stays as it is: its files are cloned, not moved."
+             + (installer.status["move_route"] == "arenanet" ? "" : " Steam may ask you to sign in once."))
+      default:
+        HStack(spacing: 6) {
+          Text("Or skip the move and install anew:").font(.body(12)).bodyBox(12, 1.3).foregroundStyle(Brand.fg3)
+          Button("Start fresh…", action: startFresh)
+            .buttonStyle(QuietButtonStyle(color: Brand.accent))
+            .font(.body(12, .bold)).bodyBox(12)
+            .help("Settings › Troubleshooting › Start fresh")
+        }
+      }
     }
     .padding(.top, 2)
   }
 
-  private var text: String {
-    switch installer.phase {
-    case .waitingForGame: return "Steam brings your Guild Wars 2 up to date, and may ask you to sign in once. This window follows it."
-    case .working: return "GW2 on Mac 0.1 stays as it is: its files are cloned, not moved. Steam may ask you to sign in once."
-    default: return "To install anew instead: Settings › Troubleshooting › Start fresh."
-    }
+  private func note(_ text: String) -> some View {
+    Text(text).font(.body(12)).bodyBox(12, 1.3).foregroundStyle(Brand.fg3)
+      .fixedSize(horizontal: false, vertical: true)
   }
 }
 

@@ -1507,7 +1507,7 @@ printf 'MDMP\0\0\0\0Assert( Couldn'"'"'t get string length ):C:\\buildworker\\st
 printf 'MDMP\0\0\0\0steam.exe\0' >"$STEAM/dumps/assert_gameoverlayui64.exe_20250101000000_1.dmp"
 touch -t 202501010000 "$STEAM/dumps/assert_gameoverlayui64.exe_20250101000000_1.dmp"
 dd if=/dev/zero of="$STEAM/dumps/assert_large.dmp" bs=1 count=0 seek=6000000 2>/dev/null
-{ printf 'MDMP\0\0\0\0'; printf 'C:\\users\\%s\\AppData' "$BUSER" | iconv -f ASCII -t UTF-16LE; } >"$STEAM/dumps/assert_userpath.dmp"
+{ printf 'MDMP\0\0\0\0'; printf 'C:\\users\\%s\\AppData' "$(id -un)" | iconv -f ASCII -t UTF-16LE; } >"$STEAM/dumps/assert_userpath.dmp"
 cp "$STEAM/config/loginusers.vdf" "$SANDBOX/loginusers.keep"
 printf '\t"76561198000000043"\n\t{\n\t\t"AccountName"\t\t"zz_second"\n\t\t"PersonaName"\t\t"Zž Persona Ř"\n\t}\n' >>"$STEAM/config/loginusers.vdf"
 { printf 'MDMP\0\0\0'; printf 'Zž Persona Ř' | iconv -f UTF-8 -t UTF-16LE; } >"$STEAM/dumps/assert_persona.dmp"
@@ -3663,6 +3663,13 @@ out=$(g install move 2>&1) && rc=0 || rc=$?
 check "a game folder that is a link: refused, nothing written through it, nothing left" \
   eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error .* leads outside" && nothing_made && [ "$(find "$SANDBOX/linked-game" -exec stat -f "%N %z %m %p" {} + | LC_ALL=C sort)" = "$LSNAP" ]'
 rm "$O1GAME" && mv "$SANDBOX/linked-game" "$O1GAME"
+# a link into 0.1's ReShade folder inside its Steam folder: refused after the clone, nothing left
+ln -s "$O1RS" "$O1ST/linked-reshade"
+O1SNAP=$(o1snap)
+out=$(g install move 2>&1) && rc=0 || rc=$?
+check "a link into 0.1's folders inside its Steam folder: refused, nothing left, 0.1 as it was" \
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error .*linked-reshade is a link into GW2 on Mac 0.1.s folders" && nothing_made && o1_same'
+rm "$O1ST/linked-reshade"
 O1SNAP=$(o1snap)
 
 : >"$STANDIN_LOG"
@@ -3712,13 +3719,19 @@ check "  the keys the file lacks read as 0.1's defaults (uiscale_cinema on), the
 check "  the summary names Fast locks and Cooler job workers" \
   has <(mv_done) "Changed from GW2 on Mac 0.1: Cooler job workers don.t exist on this engine; Fast locks is off, this version.s default\."
 c=$(play_cmd)
-check "  the first Play shows Steam's window though Steam remembers a login; the next goes silent again" \
+check "  the first Play shows Steam's window though Steam remembers a login" \
   eval '[[ "$c" == *"steam.exe -applaunch 1284210"* && "$c" != *-silent* ]] && [ "$(st origin)" = moved ]'
+sessions_reset
+c=$(play_cmd)
+check "  the next goes silent again" eval '[[ "$c" == *"steam.exe -silent -applaunch 1284210"* ]]'
 sessions_reset
 check "  0.1's folders as they were" o1_same
 out=$(g uninstall 2>&1)
 check "uninstall after a move keeps the move's record: no second move by itself" \
   eval '[ "$(st installed) $(st move) $(st move_record)" = "no no moved" ] && [ "$(ls -A "$AD")" = moved-from-0.1 ]'
+out=$(g install move 2>&1) && rc=0 || rc=$?
+check "  install move refused with the record there, nothing else made" \
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac doesn.t move GW2 on Mac 0.1.s install again: it was moved here before" && [ "$(ls -A "$AD")" = moved-from-0.1 ] && o1_same'
 rm -rf "$AD"
 
 old01 arenanet both

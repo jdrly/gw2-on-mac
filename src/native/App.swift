@@ -326,14 +326,15 @@ final class Installer {
   }
 
   // What the window does about the move from 0.1 with this status (not while an operation runs):
-  // start it, wait for 0.1's Steam or game to quit, or nothing (no move to do, a Mac that can't run
-  // the engine, or a move that failed: Try again or the next start of the app runs it again)
+  // start it, wait for 0.1's Steam or game to quit, or nothing: no move to do, a Mac that can't run
+  // the engine, or a move that failed or that I cancelled (Try again, or the next start of the
+  // app, runs it again)
   enum MoveNext { case start, wait, none }
   static func moveNext(_ values: [String: String], phase: Phase) -> MoveNext {
     guard values["move"] == "yes", values["installed"] != "yes", values["macos_ok"] != "no",
           (values["arch"] ?? "arm64") == "arm64" else { return .none }
-    if (values["move_busy"] ?? "none") != "none" { return .wait }
     if case .failed(.move, _) = phase { return .none }
+    if (values["move_busy"] ?? "none") != "none" { return .wait }
     return .start
   }
   private var lastFinishError: String {
@@ -768,7 +769,8 @@ struct AppCommands: Commands {
         openWindow(id: "settings")
       }
       .keyboardShortcut(",")
-      .disabled(!installer.installed)
+      // (before an install too while 0.1 has one: Troubleshooting's Start fresh)
+      .disabled(!installer.installed && installer.status["old_install"] != "yes")
       Button(logs.busy ? "Collecting Logs…" : "Collect Logs…") { logs.collect() }
         .disabled(logs.busy)
     }
