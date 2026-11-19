@@ -232,7 +232,8 @@ ENGINE_FEX_SO_SHA256=0a3e7ea4b76a3acc634993ec98f2ef7e4d52b3806a871856e8f80809957
 # another wineserver protocol.
 ENGINE_PIN_SHA256=$ENGINE_SHA256
 ENGINE_0_3_1_SHA256=90aff9a897ed0ff9aac44d0e06f0aecd3ee985afb38037f3f915451e51fa974e
-# The loader's entitlements need macOS 26.4 (wine.app's own Info.plist says so too)
+# The loader's entitlements need macOS 26.4 (wine.app's own Info.plist says so too). The update
+# feed's item names this value (scripts/release.sh reads it from this line).
 MACOS_MIN=26.4
 # Valve's Steam installer, from Valve's CDN (Valve updates it in place: not pinned, its sha256
 # goes to the log)

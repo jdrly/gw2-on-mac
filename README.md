@@ -1712,8 +1712,11 @@ delta updates and checks it with `scripts/check-appcast.swift`.
   apps read `https://github.com/jdrly/gw2-on-mac/releases/latest/download/appcast.xml`.
 - The feed needs an app built with `GW2_ON_MAC_FEED_URL` and `GW2_ON_MAC_ED_PUBLIC_KEY`.
 - `--sign-only` and `--no-notarize` run locally without touching GitHub.
-- The appcast's item names the app's `LSMinimumSystemVersion` as `sparkle:minimumSystemVersion`,
-  26.4 on this branch, or the script stops. Sparkle on an older macOS then offers nothing.
+- The appcast's item names the macOS the engine needs, `src/gw2om.sh`'s `MACOS_MIN` (26.4), as
+  `sparkle:minimumSystemVersion`, or the script stops. Sparkle on an older macOS then offers
+  nothing. `generate_appcast` writes the app's `LSMinimumSystemVersion` there, the macOS the app
+  opens on, and the script replaces it. `--feed-min <appcast.xml>` does only that step, on that
+  file, and the Checks workflow runs it on fixture feeds.
 
 - `--dev` makes `GW2-on-Mac-<version>.dmg` with `GW2 on Mac.app` in it and publishes
   it as a GitHub pre-release with no feed, so `releases/latest` stays on 0.1.x. A release
