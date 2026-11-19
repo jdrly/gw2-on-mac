@@ -3540,7 +3540,7 @@ check "0.1's folders: still the same checksum" [ "$(o1sum)" = "$O1SUM" ]
 fi
 
 if in_group move; then
-section "Move GW2 on Mac 0.1's install (install move)"
+section "Move GW2 on Mac 0.1's install (install move), its fixture and the checks' own checks"
 # GW2 on Mac 0.1.4's install as its folders hold it (main's gw2om.sh): a manifest, its state and
 # settings, an engine, a bottle whose Windows user is crossover with Steam (its login, config and
 # userdata) and the game in Steam's library, or the game in Program Files (ArenaNet's route); the
@@ -3729,6 +3729,7 @@ rm -f "$SANDBOX/gate-preset.ini"
 mv "$LOGS.aside" "$LOGS" 2>/dev/null; mv "$CACHE.aside" "$CACHE" 2>/dev/null
 mkdir -p "$LOGS" && : >"$LOGS/install.log"
 
+section "Move GW2 on Mac 0.1's install (install move), the move"
 old01 steam both
 check "status: 0.1's install, to move (the Steam route, nothing of 0.1 runs)" \
   [ "$(st old_install) $(st move) $(st move_route) $(st move_busy)" = "yes yes steam none" ]
