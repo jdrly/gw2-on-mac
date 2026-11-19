@@ -196,9 +196,9 @@ by a line `dev_version=` in `settings.conf` (`DEV_ROWS` in `gw2om.sh`, read the 
 `SETTINGS_RESETS` is), it turns on *Job wakes*, *Event pool*, *Faster locks*, *Launcher frames*,
 *Shader warming*, *MetalFX for Subsample*, *Raw mouse-look* and `fex=mine`, which takes effect in a
 build that carries my FEX. A row I turn off afterwards stays off. The switches without a row are in
-`dev-switches.conf` ([The game's environment](#the-games-environment)). A release reads neither: a
-dev build and the release share the folders, so a release that finds the `dev_version=` line reads
-those rows at their defaults, and its next write drops the line. A dev build after it turns them on
+`dev-switches.conf` ([The game's environment](#the-games-environment)), which a release never reads.
+A dev build and the release share the folders, so a release that finds the `dev_version=` line
+reads those rows at their defaults, and its next write drops the line. A dev build after it turns them on
 again.
 
 Four keys have no row: `dxmt`, `wine` and `macdrv` pick my DXMT fork, my `ntdll.so` and my

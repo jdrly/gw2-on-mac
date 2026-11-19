@@ -635,7 +635,7 @@ check "install.log" has "$LOGS/install.log" "install steam"
 # (0.1.x's file name and bundle id, so a 0.1.x install takes 0.2 as its update, and the id the
 # app starts Sparkle for: with another one updates stay off, silently; ADR 0018)
 check "the app is $APP_NAME.app with id cz.jandrly.gw2onmac, the one Updates.swift starts Sparkle for" \
-  eval '[ "${APP##*/}" = "$APP_NAME.app" ] && [ "$(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")" = cz.jandrly.gw2onmac ] && grep -qF "appBundleID = \"cz.jandrly.gw2onmac\"" "$ROOT/src/native/Updates.swift"'
+  eval '[ "${APP##*/}" = "$APP_NAME.app" ] && [ "$(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")" = cz.jandrly.gw2onmac ] && grep -qE "^ *static let appBundleID *= *\"cz\\.jandrly\\.gw2onmac\"" "$ROOT/src/native/Updates.swift"'
 # (the app's own three folders and nothing else in Library, so it never shares one with another
 # build of the app, such as 0.1.x)
 check "only the app's folders in Library: $APP_FOLDER" eval '[ "$(cd "$H/Library" && ls -d */* | tr "\n" "|")" = "Application Support/$APP_FOLDER|Caches/$APP_FOLDER|Logs/$APP_FOLDER|" ]'

@@ -465,8 +465,8 @@ xmllint --noout "$OUT/appcast.xml"
 # One item, and it names the macOS the app needs (its LSMinimumSystemVersion), so Sparkle on an
 # older macOS doesn't offer it: 0.1.x runs on 26.0, 0.2 needs 26.4
 min="$(plutil -extract LSMinimumSystemVersion raw "$APP/Contents/Info.plist")"
-[ "$(grep -c '<item>' "$OUT/appcast.xml")" = 1 ] || { echo "appcast.xml has more than one item" >&2; exit 1; }
-grep -qF "<sparkle:minimumSystemVersion>$min</sparkle:minimumSystemVersion>" "$OUT/appcast.xml" ||
+[ "$(xmllint --xpath 'count(/rss/channel/item)' "$OUT/appcast.xml")" = 1 ] || { echo "appcast.xml has more than one item" >&2; exit 1; }
+[ "$(xmllint --xpath "string(/rss/channel/item/*[local-name()='minimumSystemVersion'])" "$OUT/appcast.xml")" = "$min" ] ||
   { echo "appcast.xml's item doesn't say sparkle:minimumSystemVersion $min (the app's LSMinimumSystemVersion)" >&2; exit 1; }
 echo "  $OUT/appcast.xml, ${#deltas[@]} delta(s)"
 # generate_appcast skips a delta it couldn't make or that isn't smaller than the DMG, without a word
