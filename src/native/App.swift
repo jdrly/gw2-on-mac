@@ -52,8 +52,8 @@ final class Installer {
     }
   }
   // move: GW2 on Mac 0.1's install into this app (gw2om.sh install move), which the window starts by
-  // itself at the first start
-  enum Operation: String { case install, finish, repair, uninstall, move }
+  // itself at the first start; moveIn: the game moved in again after Rollback (gw2om.sh move-in)
+  enum Operation: String { case install, finish, repair, uninstall, move, moveIn = "move-in" }
   enum Phase: Equatable {
     case idle
     case working(Operation)
@@ -116,7 +116,8 @@ final class Installer {
       Step(id: 2, title: "The game's own bottle", detail: "With 0.1's Windows user and your settings"),
     ]
     let files = Step(id: route == .arenanet ? 3 : 4, title: "Your install, from GW2 on Mac 0.1",
-                     detail: route == .arenanet ? "The game, its settings and ReShade, cloned" : "Steam with your login, the game, its settings and ReShade, cloned")
+                     detail: route == .arenanet ? "The game moved on this disk; its settings and ReShade"
+                       : "Steam with your login and the game, moved on this disk; the game's settings and ReShade")
     return route == .arenanet
       ? common + [files, Step(id: 4, title: "Finishing touches", detail: finishingDetail)]
       : common + [Step(id: 3, title: "Steam, from Valve", detail: "SteamSetup.exe, then 0.1's Steam in its place"), files,
@@ -198,11 +199,20 @@ final class Installer {
   // everything is done: Play
   var ready: Bool { installed && gameInstalled && status["stage"] == "finished" }
   var installedRoute: Route? { Route(rawValue: status["route"] ?? "") }
+  // after Rollback: installed, the game back in GW2 on Mac 0.1's folder (status move_game=01)
+  var rolledBack: Bool { installed && status["move_game"] == "01" }
+  // the 0.1.x release Rollback names, and its DMG (gw2om.sh's LAST_01)
+  var rollbackVersion: String { status["rollback_version"] ?? "" }
+  var rollbackDMG: URL? { URL(string: status["rollback_dmg"] ?? "") }
   var appVersion: String { credits["version"] ?? "?" }
   var installedVersion: String { status["installed_version"] ?? appVersion }
   var installedOtherVersion: Bool { installed && installedVersion != appVersion }
   var diskFree: Int64 { Int64(status["disk_free"] ?? "") ?? 0 }
-  var diskNeeded: Int64 { Int64(status["disk_needed"] ?? "") ?? 75_000_000_000 }
+  // (a move from 0.1 or Move in renames the game: only the engine and the bottle need room)
+  var diskNeeded: Int64 {
+    let key = status["move"] == "yes" || status["move_game"] == "01" ? "move_disk_needed" : "disk_needed"
+    return Int64(status[key] ?? "") ?? 75_000_000_000
+  }
   var diskLow: Bool { loaded && !gameInstalled && diskFree > 0 && diskFree < diskNeeded }
   // What runs (gw2om.sh status "busy"): game, steam, installer (ArenaNet's), session (the
   // bottle's Wine), leftovers, none
@@ -236,15 +246,17 @@ final class Installer {
     }
   }
 
-  // The panel the right column shows
-  enum Panel { case choose, installing, ready, starting, playing }
+  // The panel the right column shows (rolledBack: the game is in GW2 on Mac 0.1's folder after
+  // Rollback, and Move in brings it back)
+  enum Panel { case choose, installing, ready, starting, playing, rolledBack }
   var panel: Panel {
     switch phase {
     case .working(.uninstall): return .installing
+    case .working(.moveIn): return .rolledBack
     case .working, .waitingForGame, .waitingForOld: return .installing
     case .failed(.move, _) where moving: return .installing
     default:
-      guard ready else { return .choose }
+      guard ready else { return rolledBack ? .rolledBack : .choose }
       switch sessionStage {
       case .playing: return .playing
       case .some: return .starting
@@ -299,7 +311,8 @@ final class Installer {
     // the app restarts; once the game is there, the finishing touches run (once: a failed finish
     // waits for Install or Repair)
     guard !isOperating else { return }
-    if values["stage"] == "waiting_game" {
+    // (after Rollback the game is in 0.1's folder: nothing to follow until Move in)
+    if values["stage"] == "waiting_game" && values["move_game"] != "01" {
       if values["game"] == "yes" {
         if phase != .failed(.finish, lastFinishError) { start(.finish) }
       } else {

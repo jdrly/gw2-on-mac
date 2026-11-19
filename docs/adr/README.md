@@ -4,7 +4,7 @@ One decision per file. The files go by number, not by date. 0001 to 0011 record 
 wrote them down on 2026-11-17, after 0012 and 0013 had landed, and kept their numbers below
 those two. Their dates don't follow their numbers. A new decision takes the next free number.
 
-0001, 0002 and 0014 are about 0.1.x and live on `main`. 0003 to 0010, 0012, 0013 and 0015 to 0019
+0001, 0002 and 0014 are about 0.1.x and live on `main`. 0003 to 0010, 0012, 0013 and 0015 to 0020
 are about the 0.2 line on this branch, `arm64`. 0011 is on both. The two branches share one set of
 numbers, so a number taken on one is not used on the other.
 
@@ -28,4 +28,5 @@ numbers, so a number taken on one is not used on the other.
 | [0016](0016-an-engine-of-another-release-is-replaced-by-repair.md) | 2026-11-17 | An engine an earlier version of the app installed counts as installed. Play refuses and names Repair, which replaces it with the pinned one. |
 | [0017](0017-a-release-candidate-is-a-dev-build-by-another-name.md) | 2026-11-19 | A release candidate, `X.Y.Z-rc.N`, is built and published as a dev build is. Only its name and the chip differ, and it sorts above every dev build of its version. |
 | [0018](0018-0.2-is-the-same-app-as-0.1.x-and-keeps-its-own-folders.md) | 2026-11-19 | 0.2 takes 0.1.x's file name, bundle id and feed, so 0.1.4 updates to it. Its folders keep "GW2 on Mac arm64". 0.1.5 is the last 0.1.x I plan, and the minimum macOS is 26.4. |
-| [0019](0019-0.1.x-moves-into-a-new-bottle-at-the-first-start.md) | 2026-11-19 | 0.1.x's install moves into a new bottle by itself at the first start, waits while 0.1.x runs, only reads its folders, brings the addons as they were, and every new bottle's Windows user is `crossover`. |
+| [0019](0019-0.1.x-moves-into-a-new-bottle-at-the-first-start.md) | 2026-11-19, its clones and read-only part superseded by 0020 | 0.1.x's install moves into a new bottle by itself at the first start, waits while 0.1.x runs, brings the addons as they were, and every new bottle's Windows user is `crossover`. |
+| [0020](0020-the-move-renames-the-game-and-rollback-renames-it-back.md) | 2026-11-19 | The move renames 0.1.x's Steam or game folder into 0.2, never copies it, and refuses another disk. A failure renames it back. *Rollback to 0.1.4* renames it back on request and offers 0.1.4's DMG. Supersedes decision 8 of the update plan. |

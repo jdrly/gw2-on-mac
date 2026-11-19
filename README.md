@@ -123,8 +123,11 @@ it, and *Stop waiting* stops following it but keeps the engine and the bottle.
 
 When the app finds GW2 on Mac 0.1's install and has no install of its own, it moves that install
 at its first start, by itself. The window shows the move's steps in place of the install choices.
-Nothing of 0.1 is moved in the sense of taken away: 0.1's folders are only read, at every step,
-and stay as they were on the day of the move.
+The game itself moves: 0.1's Steam folder, or on ArenaNet's route its game folder, is renamed into
+this app's bottle. A rename on the same disk is instant and takes no space, so the update never needs
+room for a second copy of the game, not even for a moment. Of 0.1's folders it renames that one
+folder and writes nothing else. 0.1 keeps its engine, its bottle without the game, its settings and
+its ReShade folder.
 
 - The move makes a new bottle with this engine. Its Windows user is `crossover`, as in 0.1's
   bottle: CrossOver's Wine names every user so, and Mach9's Wine takes the name from `USER`, which
@@ -132,42 +135,58 @@ and stay as they were on the day of the move.
   `CryptProtectData` derives the same key, so what a program protected in 0.1's bottle can be read
   in the new one. Every new bottle of this app gets that name. A bottle an earlier build made
   keeps the name it has.
-- On Steam's route it installs Steam from Valve first, for Steam's registry entries, then puts a
-  clone of 0.1's whole Steam folder in its place: Steam with its remembered login, its config and
-  `userdata`, and the library with the game. Then the profile's `AppData\Local\Steam`. On
-  ArenaNet's route it clones the game's folder.
-- The game's settings folder, `AppData\Roaming\Guild Wars 2`, comes whole.
+- On Steam's route it installs Steam from Valve first, for Steam's registry entries, then renames
+  0.1's whole Steam folder into its place: Steam with its remembered login, its config and
+  `userdata`, and the library with the game. Then it clones the profile's `AppData\Local\Steam`.
+  On ArenaNet's route it renames the game's folder.
+- The game's settings folder, `AppData\Roaming\Guild Wars 2`, is cloned whole, so 0.1 keeps its
+  copy.
 - The addons come as they were in the game folder: arcdps as `d3d11.dll`, or at ReShade's chain
-  path, with its settings; ReShade's `d3d11.dll`, `ReShade.ini` and compiler. The ReShade folder
-  with your presets and shaders is cloned into this app's folder, with the record of the compiler
-  0.1 placed. Both `ReShade.ini` files then name this app's folders instead of 0.1's: `BasePath`,
+  path, with its settings; ReShade's `d3d11.dll`, `ReShade.ini` and compiler. Before the rename the
+  app keeps a copy of these few files as 0.1 had them in `0.1-addons`, for a failed move and for
+  *Rollback*. The ReShade folder with your presets and shaders is cloned into this app's folder,
+  with the record of the compiler 0.1 placed. Both `ReShade.ini` files then name this app's folders instead of 0.1's: `BasePath`,
   the compiled effects' cache and any path you set by hand. The interface addon's files are
   written again from your settings, and the finishing touches put the addons in order, as at every
   Play.
 - Your settings come over as the *From 0.1* column under [Settings](#settings) says.
 
-A clone copies a link as a link, so every link in what the move clones must lead to a file inside
-this app's folder. A link to a folder, into 0.1's folders or to a folder elsewhere that 0.1 uses
-too, such as a ReShade folder on an external drive, stops the move before anything writes through
-it. *Start fresh* then installs anew.
+A rename and a clone keep a link as a link, so every link in what the move brings must lead to a
+file inside this app's folder. A link to a folder, into 0.1's folders or to a folder elsewhere that
+0.1 uses too, such as a ReShade folder on an external drive, stops the move before anything writes
+through it, and the folder is renamed back. *Start fresh* then installs anew.
 
-On the same disk it clones, which takes no space until one of the copies changes. From another
-disk, such as a bottle you linked to an external drive, it copies after checking the free space.
-DXMT's shader caches and ReShade's compiled effects don't come along. The game builds them again
-while you play.
+The move never copies the game. If 0.1's Steam or game folder is on another disk than this app's
+folder, or a link sits anywhere on the way to it or to this app's folder, as with a bottle you
+linked to an external drive, the move refuses before it writes anything and says why. DXMT's shader caches and ReShade's compiled effects
+don't come along. The game builds them again while you play.
 
 The move waits while anything of 0.1 runs: its Steam, the game, ArenaNet's installer or 0.1's Wine.
 The window says what it waits for, and the move starts once that has quit. A move that 0.1
-interrupts, that fails or that you cancel removes everything it created, and the app is not
-installed again. *Try again* runs it once more, and so does the next start of the app.
+interrupts, that fails or that you cancel puts back the addon files 0.1 had, renames the folder
+back, then removes everything it created, and the app is not installed again. Once the move has
+written its record it is done, and a cancel after that keeps it. *Try again* runs it once more, and
+so does the next start of the app. From its first write the move keeps `move-undo`: the folder's
+two places and its inode, and what the move makes. If the app is killed mid-move, the next start
+finds the folder by its inode at either place and, unless the record says the move was done,
+renames it back before anything else runs. It waits while Wine or the killed run's rename still
+runs. Nothing the app removes, there or anywhere else, may hold a game: every recursive removal goes
+through one function, which leaves a folder with a `Gw2.dat` or `Gw2-64.exe` in it, one with another
+volume mounted inside, or one it can't look through, and logs why. Only an install that never came
+from a move may remove its own game: at Uninstall, when its own install fails, and an import's own
+clone that failed before the copy takes its place. The rename itself is the kernel's `rename`,
+through macOS's `perl`, which fails rather than copy to another volume or move into a folder that is there, as `mv` would. The whole move
+holds the install lock, and from the rename's checks to the record the session's lock too, so no
+Play starts in between.
 
 Steam may ask you to sign in once in the new bottle. I haven't tested yet whether its remembered
 login survives the move, so the first Play after it shows Steam's window, even with *Start Steam in
 the background* on.
 
 *Start fresh* in Settings › Troubleshooting installs anew instead. While the move waits or after it
-failed, it stops the move. After a move it removes the moved install, as Uninstall does, and
-never another install. Either
+failed, it stops the move. After a move it first gives the game back to 0.1, as *Rollback* does,
+then removes the moved install as Uninstall does, and never another install. If the move's record
+is missing, so it can't give the game back, it changes nothing. Either
 way the move no longer starts by itself, and the install choices list 0.1's game under *Game files
 I already have*. The app keeps that in `moved-from-0.1` in its folder (`moved` or `skipped`), which
 Uninstall leaves, so uninstalling a moved install doesn't move 0.1's again.
@@ -178,23 +197,35 @@ another Steam library isn't moved, and *Game files I already have* can still imp
 
 ## Going back to 0.1.x
 
-The move only reads 0.1.x's folders, so 0.1.x is still there. To go back, download
-[0.1.4's DMG](https://github.com/jdrly/gw2-on-mac/releases/tag/v0.1.4) and drag its GW2 on Mac
-over this one. It finds its engine, bottle, settings, addons and ReShade folder as they were on the
-day of the move.
+The game lives in this app's bottle after the move, so 0.1.x has none until it gets it back.
+*Rollback to 0.1.4* in Settings › Troubleshooting does that. It refuses while the game or Steam
+runs. It renames the Steam or game folder back to where 0.1.x had it, again with no copy, and puts
+back the addon files 0.1.x had in the game folder: its `version.dll`, its `ReShade.ini` naming its
+own ReShade folder, arcdps where it had it. Then a window offers 0.1.4's DMG, which the browser
+downloads from the release. Quit this app, open the DMG and drag its GW2 on Mac to Applications over
+this one. 0.1.4 finds its engine, bottle, settings and ReShade folder as they were on the day of the
+move, with the game as 0.2 left it. The version and the link come from one line in `gw2om.sh`
+(`LAST_01`), the last 0.1.x release.
 
-- What you changed in the game and its addons on 0.2 stays on 0.2: graphics settings, key binds,
-  new ReShade presets, arcdps's settings. Your characters and everything else on ArenaNet's servers
-  are the same on both. The app's own preferences, such as *Quit GW2 on Mac after launching*, are
-  shared by both, since both are the same app to macOS.
-- 0.1.x's copy of the game is as old as the move. Steam, or on ArenaNet's route the game's
-  launcher, patches it at its next start, which downloads the patches since then, not the game.
+This app keeps its engine and bottle without the game. Its main window says the game is in 0.1's
+folder, and *Move it in again* renames it back in, as the move did. If you update from 0.1.4 to
+this version again, that is the button to press.
+
+- What you changed in the game's settings on 0.2 stays on 0.2: graphics settings, key binds, new
+  ReShade presets. The game folder goes back as it is, so arcdps's settings in `addons\arcdps` go
+  with it. Your characters and everything else on ArenaNet's servers are the same on both. The
+  app's own preferences, such as *Quit GW2 on Mac after launching*, are shared by both, since both
+  are the same app to macOS.
+- The game goes back with every patch 0.2 got, so 0.1.x has nothing to download.
 - On Steam's route, Steam's login in 0.1.x's bottle is as it was. Steam may still ask for it, if
   signing in from the new bottle ended the old session. I don't know whether it does.
 - 0.1.4's automatic update checks offer 0.2.0 again. *Skip This Version* ends that. *Check for
   Updates…* still shows it.
-- 0.2's folders, *GW2 on Mac arm64*, stay. Delete them by hand with the commands under
-  [Uninstall](#uninstall) if you don't come back.
+- 0.2's folders, *GW2 on Mac arm64*, stay, without the game. Delete them by hand with the commands
+  under [Uninstall](#uninstall) if you don't come back.
+
+Uninstall in this app removes the bottle with the game in it, except after a move: the game there is
+the only copy, so Uninstall refuses until *Rollback* has given it back.
 
 0.1.x's folders are `GW2 on Mac` in `~/Library/Application Support`, `~/Library/Caches` and
 `~/Library/Logs`, without "arm64". They stay until you delete them, and then the way back is gone:
@@ -203,8 +234,8 @@ day of the move.
 rm -rf ~/Library/"Application Support/GW2 on Mac" ~/Library/Caches/"GW2 on Mac" ~/Library/Logs/"GW2 on Mac"
 ```
 
-On the same disk the game in them shares its space with this app's clone, so deleting them frees
-0.1.x's engine and caches, and of the game only what was patched apart since the move.
+After a move the game isn't in them, so deleting them frees 0.1.x's engine, its bottle's own files
+and its caches.
 
 ## Playing
 
@@ -543,32 +574,42 @@ nothing in `/Applications` besides itself.
 | Path | What | Uninstall |
 |---|---|---|
 | `~/Library/Application Support/GW2 on Mac arm64/engine/` | the Wine engine as it ships, without its SDK, about 1 GB, with my DXMT fork's tree in `lib/wine/dxgi/dxmt` and my `ntdll.so` and `winemac.so` (with `win32u.so` when my driver's build has one) in `lib/wine/aarch64-unix`, and after `set fex mine` my FEX's three files, the engine's own next to each | removed |
-| `…/GW2 on Mac arm64/bottle/` | the game's Wine prefix with Steam, the game's files and the game's settings. About 75 GB, or no extra space for a clone of files on the same disk | removed, with the game |
-| `…/GW2 on Mac arm64/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `compatdb.rules`, `compatdb.local`, `dev-switches.conf`, `session`, `session.req`, `.session.lock`, `reshade-compiler` | settings, install state, what was installed, DXMT's options, the game's compatdb rules and my own, a development build's switches, the current game session and its lock, the sha256 of the compiler the app put next to `Gw2-64.exe` | removed |
+| `…/GW2 on Mac arm64/bottle/` | the game's Wine prefix with Steam, the game's files and the game's settings. About 75 GB, or no extra space for a clone of files on the same disk or a game moved from 0.1 | removed, with the game |
+| `…/GW2 on Mac arm64/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `compatdb.rules`, `compatdb.local`, `dev-switches.conf`, `session`, `session.req`, `reshade-compiler` | settings, install state, what was installed, DXMT's options, the game's compatdb rules and my own, a development build's switches, the current game session and its lock, the sha256 of the compiler the app put next to `Gw2-64.exe` | removed |
 | `…/GW2 on Mac arm64/ReShade/` | ReShade's settings, log, presets, shaders, textures and screenshots | kept |
-| `…/GW2 on Mac arm64/moved-from-0.1` | `moved` once the move from GW2 on Mac 0.1 has run, `skipped` after *Start fresh*: either way the move doesn't start by itself again | kept |
+| `…/GW2 on Mac arm64/.session.lock` | the game session's lock (a `flock`), which Play, the move and Rollback take | kept: a lock file is never removed while anyone may hold it |
+| `…/GW2 on Mac arm64/moved-from-0.1` | `moved` once the move from GW2 on Mac 0.1 has run, with the renamed folder's two places, or `skipped` after *Start fresh*: either way the move doesn't start by itself again | kept |
+| `…/GW2 on Mac arm64/0.1-addons/` | the addon files GW2 on Mac 0.1 had in the game folder on the day of the move, which *Rollback* puts back | removed |
+| `…/GW2 on Mac arm64/move-undo` | only while the move, *Rollback* or *Move it in again* runs: what it made and renamed, so a run that is killed is undone at the next start | not there |
 | `~/Library/Caches/GW2 on Mac arm64/downloads/` | the engine archive, `SteamSetup.exe`, a copy of `Gw2Setup-64.exe`, and in `reshade/` the checked `ReShade64.dll` and fxc2's compiler | removed |
 | `~/Library/Caches/GW2 on Mac arm64/fork/dxmt/` | my DXMT fork's caches (`DXMT_CACHE_DIR`): `Gw2-64.exe/` holds the game's shaders, recorded pipelines and pipeline archives, and the other processes keep theirs next to it | removed. *Reset the shader cache* in Settings empties it too |
 | `~/Library/Caches/GW2 on Mac arm64/dxmt/Gw2-64.exe/` | the engine's own DXMT's shader cache for the game, where 0.2.0-dev.1 kept it, apart from my fork's, which translates shaders differently. Other processes keep theirs where the engine's DXMT puts it by default | removed, and emptied by *Reset the shader cache* |
 | `~/Library/Caches/GW2 on Mac arm64/reshade/` | ReShade's compiled effects | removed. *Reset the shader cache* empties it too |
 | `~/Library/Logs/GW2 on Mac arm64/` | `install.log`, `wine.log`, DXMT's `Gw2-64_d3d11.log`, `session.env`, the heat logs, and `.lock-claim` for the install lock | kept |
-| `~/Library/Application Support/GW2 on Mac/`, `~/Library/Caches/GW2 on Mac/`, `~/Library/Logs/GW2 on Mac/` | GW2 on Mac 0.1.x's folders, not this app's. The move reads them, and nothing writes them. They are the way back ([Going back to 0.1.x](#going-back-to-01x)) | kept |
+| `~/Library/Application Support/GW2 on Mac/`, `~/Library/Caches/GW2 on Mac/`, `~/Library/Logs/GW2 on Mac/` | GW2 on Mac 0.1.x's folders, not this app's. The move renames their Steam or game folder into this app's bottle and writes nothing else of them, and *Rollback* renames it back. They are the way back ([Going back to 0.1.x](#going-back-to-01x)) | kept |
 
 In the game folder, `version.dll` and `gw2-ui-scale.ini` exist only while *Larger interface* is on,
 arcdps's `d3d11.dll`, or `addons\arcdps\chain\d3d11.dll` next to ReShade, only while *arcdps* is
 on, and ReShade's
 `d3d11.dll`, `ReShade.ini` and the `d3dcompiler_47.dll` the app put there only while *ReShade* is
 on. The app never touches another program's `version.dll`, `d3d11.dll`, `dxgi.dll`,
-`d3dcompiler_47.dll` or `ReShade.ini` there. The app's own preferences, such as the chosen
+`d3dcompiler_47.dll` or `ReShade.ini` there, with one exception: *Rollback* and a failed move put
+back the files GW2 on Mac 0.1 had at those names, and remove the ones it didn't have. The app's own preferences, such as the chosen
 route and the last Settings pane, live in the defaults domain `cz.jandrly.gw2onmac`, 0.1.x's. Other Wine
-apps' bottles are only ever read, and so are GW2 on Mac 0.1's folders.
+apps' bottles are only ever read. Of GW2 on Mac 0.1's folders the move renames the Steam or game
+folder, and nothing else.
 
 ## Uninstall
 
 *Uninstall…* in the window asks first and tells you the game's files go with the bottle. Close the
 game and Steam before you run it. It removes everything in the table above except the logs, the
-ReShade folder, the move's record and GW2 on Mac 0.1.x's folders, which it never touches. To do it
-by hand:
+ReShade folder, the move's record and GW2 on Mac 0.1.x's folders, which it never touches. After a
+move the game in the bottle is the only copy, so Uninstall refuses while a game is in the bottle,
+until *Rollback* has given it back to 0.1.x. Every removal the app makes works the same way: a folder
+with a `Gw2.dat` or `Gw2-64.exe` in it stays, and the log says why, unless the install never came
+from a move and you asked to uninstall it. To do it by hand, after a move only once *Rollback* has
+given the game back (check that `~/Library/Application Support/GW2 on Mac arm64/bottle` has no
+`Gw2.dat` in it):
 
 ```sh
 rm -rf ~/Library/"Application Support/GW2 on Mac arm64" ~/Library/Caches/"GW2 on Mac arm64"   # the ReShade folder too
@@ -857,11 +898,11 @@ Both only read.
 
 A move, `gw2om.sh install move`, runs the same phases from 0.1's install
 ([Moving from GW2 on Mac 0.1](#moving-from-gw2-on-mac-01)). Before the bottle it writes
-`settings.conf` from 0.1's, and on Steam's route 0.1's Steam folder replaces the one Valve's
-installer made. It refuses while 0.1's Wine runs, and checks again before each folder it clones
-and after the last. A failed or cancelled move also removes the ReShade folder and
-`reshade-compiler` it brought, `dxmt.conf` and `.session.lock`, so the app's folder is as empty as
-before. `gw2om.sh status` prints `old_install`, `move` (yes when the window should start it),
+`settings.conf` from 0.1's, and on Steam's route 0.1's Steam folder, renamed, replaces the one
+Valve's installer made. It refuses while 0.1's Wine runs, and checks again before the rename,
+before each folder it clones and after the last. A failed or cancelled move also removes the ReShade folder and
+`reshade-compiler` it brought and `dxmt.conf`, so the app's folder is as empty as before, but for
+`.session.lock`, which no removal takes while anyone may hold it. `gw2om.sh status` prints `old_install`, `move` (yes when the window should start it),
 `move_record`, `move_route`, `move_busy` and `move_wait`. `gw2om.sh start-fresh` is
 Troubleshooting's *Start fresh*.
 
@@ -1579,8 +1620,14 @@ Without one, those checks are skipped. It covers:
   `USER=crossover` on every Wine start, the settings key by key as `SETTINGS_FROM_01` says and the
   summary's changes, Start fresh before, after and over another install, and Uninstall keeping the
   record. 0.1's folders are checksummed and listed before and after a finished move, a cancel, a
-  failure at each step (`GW2_ON_MAC_MOVE_FAIL`), each kind of 0.1 process, a short copy path, and
-  links out of the clone.
+  failure at each step (`GW2_ON_MAC_MOVE_FAIL`), each kind of 0.1 process, a kill after the
+  rename, before and after it and after the record (TERM and KILL each, a kill followed by status
+  or by Uninstall), and links out of what the move brings. The renamed folder keeps its inode, and `install.log` has no `cp` or
+  `mv` of it. Another volume is refused through the test switch and through a disk image mounted in
+  0.1's bottle, and a linked folder on the way, with nothing written. Rollback is refused while
+  Wine runs and while 0.1's place is taken, killed half-way, done (0.1 as it was, file by file),
+  done twice, and followed by Move it in again, on both routes. Uninstall refuses while the moved
+  game is in the bottle, and Start fresh without the move's record.
 - play, the busy checks, repair, reset-shaders, reinstall-engine and the lock
 - Collect Logs' redaction, arcdps's logs and the crash dumps (recent ones in, older ones, one
   too large, one with the user's folder in UTF-16 and `.dmp` files elsewhere out), ReShade's files
