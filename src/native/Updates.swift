@@ -14,8 +14,8 @@
 // (Sparkle accepts http only on 127.0.0.1/localhost), which also starts Sparkle without a feed in
 // Info.plist.
 //
-// Development builds (compiled with GW2_DEV, GW2Channel dev in Info.plist, version X.Y.Z-dev.N;
-// build.sh) never check automatically, whatever the setting says.
+// Development builds and release candidates (compiled with GW2_DEV, GW2Channel dev in Info.plist,
+// version X.Y.Z-dev.N or X.Y.Z-rc.N; build.sh) never check automatically, whatever the setting says.
 
 import AppKit
 import Sparkle

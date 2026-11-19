@@ -1166,7 +1166,11 @@ downloads Sparkle at a pinned version and sha256, and compiles the Icon Composer
 `src/AppIcon.icon` with actool into `Assets.car` and a fallback `AppIcon.icns`.
 
 - `GW2_ON_MAC_VERSION` sets the version, 0.2.0-dev.5 by default. `X.Y.Z-dev.N` makes a development build,
-  as in SWTOR on Mac.
+  as in SWTOR on Mac, and `X.Y.Z-rc.N` a release candidate, N below 1000 in both. A release
+  candidate is a development build in everything but its name: the chip says "Release candidate ·
+  0.2.0-rc.1" and the release's title "(release candidate)". Its `CFBundleVersion` sorts above
+  every development build of the version and below the release (0.2.0-dev.23 is 0.1.9999.1023,
+  0.2.0-rc.1 is 0.1.9999.2001). Any other form stops the build.
 - `GW2_ON_MAC_FEED_URL` and `GW2_ON_MAC_ED_PUBLIC_KEY` turn updates on. Without them Sparkle stays
   off, which is normal for local builds.
 
@@ -1278,7 +1282,9 @@ Without one, those checks are skipped. It covers:
 - a development build's switches, last. The checks above run with them off
   (`GW2_ON_MAC_DEV_SWITCHES=off`). These run two copies of the app's `Resources`, one with
   `channel=dev` and one without a channel, in roots of their own: a development build's fresh
-  install with every switch of the table in `dev-switches.conf` and the rows on, the rule with
+  install with every switch of the table in `dev-switches.conf` and the rows on, `build.sh`'s
+  versions (0.2.0-rc.1 between 0.2.0's dev builds and 0.2.0, a malformed version refused) and a
+  release candidate's install, whose status shows its version, the rule with
   each line whose file has the switch and none whose file hasn't, status, `session.env`, the log
   and the session report, my FEX's two lookup lines in and out (`FEX_ENTRYHEADERLOOKUP` out with
   each of the sampler's lines, in `dev-switches.conf` or `compatdb.local`, also through a third
@@ -1336,7 +1342,9 @@ delta updates and checks it with `scripts/check-appcast.swift`.
 - The feed needs an app built with `GW2_ON_MAC_FEED_URL` and `GW2_ON_MAC_ED_PUBLIC_KEY`.
 - `--sign-only` and `--no-notarize` run locally without touching GitHub.
 - `--dev` makes `GW2-on-Mac-arm64-<version>.dmg` with `GW2 on Mac arm64.app` in it and publishes
-  it as a GitHub pre-release with no feed, so `releases/latest` stays on 0.1.x.
+  it as a GitHub pre-release with no feed, so `releases/latest` stays on 0.1.x. A release
+  candidate goes out the same way, titled "(release candidate)" where a development build's says
+  "(development build)".
 - `--adhoc` does the same without my Developer ID, for the Dev build workflow. It keeps
   `build.sh`'s ad hoc signatures and only verifies them, makes an unsigned DMG, and doesn't
   notarize. It refuses a version below `build.sh`'s, a tag that exists and the stand-in DXMT,
@@ -1348,7 +1356,8 @@ delta updates and checks it with `scripts/check-appcast.swift`.
 
 **Dev builds come from GitHub's runners.** The Dev build workflow
 ([`.github/workflows/devbuild.yml`](.github/workflows/devbuild.yml)) builds one from `arm64` and
-publishes it as the pre-release `v<version>`:
+publishes it as the pre-release `v<version>`. A release candidate (`-f version=0.2.0-rc.1`) takes
+the same way ([ADR 0017](docs/adr/0017-a-release-candidate-is-a-dev-build-by-another-name.md)):
 
 ```sh
 gh workflow run devbuild.yml --ref arm64                    # DXMT's newest green commit, build.sh's version
@@ -1398,8 +1407,8 @@ ID on the runner is a later step.
 - I haven't tested `wineserver` under the hardened runtime yet.
 
 Release notes live in [`release-notes/`](release-notes), one file per version, in SWTOR on Mac's
-format. Releases are `X.Y.Z`, development builds `X.Y.Z-dev.N`, with SWTOR on Mac's bundle-version
-scheme. Git ignores the `release/` output.
+format. Releases are `X.Y.Z`, development builds `X.Y.Z-dev.N` and release candidates
+`X.Y.Z-rc.N`, with SWTOR on Mac's bundle-version scheme. Git ignores the `release/` output.
 
 ## Layout
 

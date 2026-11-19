@@ -1,6 +1,8 @@
-# Dev build: a development build of GW2 on Mac arm64 made on GitHub's runners and published as a
-# pre-release v<version>, signed ad hoc and not notarized (no secret, no Developer ID). I download it
-# with `gh release download`, which sets no quarantine attribute.
+# Dev build: a development build (X.Y.Z-dev.N) or release candidate (X.Y.Z-rc.N) of GW2 on Mac arm64
+# made on GitHub's runners and published as a pre-release v<version>, signed ad hoc and not
+# notarized (no secret, no Developer ID). A release candidate is built and published exactly as a
+# development build is; only its name differs (docs/adr/0017). I download it with
+# `gh release download`, which sets no quarantine attribute.
 #
 #   plan        the DXMT commit (a full sha on jdrly/dxmt's gw2-on-mac, by default the newest whose
 #               GW2 run for its push ended success, printed with the branch head's state), the Wine
@@ -35,7 +37,7 @@
 #               job may write to the repository. Its refusals are proved on copies first.
 #
 # Run by hand on arm64: gh workflow run devbuild.yml --ref arm64 [-f dxmt_commit=<sha>]
-# [-f wine_commit=<sha>] [-f macdrv_commit=<sha>] [-f fex_commit=<sha>] [-f version=X.Y.Z-dev.N]
+# [-f wine_commit=<sha>] [-f macdrv_commit=<sha>] [-f fex_commit=<sha>] [-f version=X.Y.Z-dev.N|X.Y.Z-rc.N]
 # [-f publish=false]. A pull request that changes the build's scripts or workflows runs it with
 # publish false and no wine_commit, macdrv_commit or fex_commit; a dry run keeps the DMG and the
 # record as an artifact for 7 days.
@@ -61,7 +63,7 @@ on:
         type: string
         default: ""
       version:
-        description: X.Y.Z-dev.N, not lower than build.sh's; empty is build.sh's
+        description: X.Y.Z-dev.N or X.Y.Z-rc.N (N below 1000), not lower than build.sh's; empty is build.sh's
         type: string
         default: ""
       publish:
@@ -161,7 +163,9 @@ jobs:
           [ -z "$FEX_COMMIT" ] || on_branch fex_commit "$FEX_REPO" "$FEX_BRANCH" "$FEX_COMMIT"
           # shellcheck disable=SC2016 # (build.sh's line, literally)
           [ -n "$VERSION" ] || VERSION="$(sed -n 's/^APP_VERSION=${GW2_ON_MAC_VERSION:-\(.*\)}$/\1/p' build.sh)"
-          [[ $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+-dev\.[0-9]+$ ]] || fail "version is not X.Y.Z-dev.N: $VERSION"
+          # (build.sh's bundle_version takes the same forms)
+          [[ $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+-(dev|rc)\.(0|[1-9][0-9]?[0-9]?)$ ]] ||
+            fail "version is not X.Y.Z-dev.N or X.Y.Z-rc.N (N below 1000): $VERSION"
           if [ "$PUBLISH" = true ] && [ "$GITHUB_REF" != refs/heads/arm64 ]; then
             fail "Dev builds are published from arm64 only, not $GITHUB_REF; run it with publish false"
           fi
@@ -484,10 +488,13 @@ jobs:
           echo "APP_NAME=$name" >>"$GITHUB_ENV"
           [ "$(plutil -extract CFBundleShortVersionString raw "dist/$name.app/Contents/Info.plist")" = "$VERSION" ] ||
             { echo "::error::The build job's app is not version $VERSION"; exit 1; }
+          # (what the notes and the record call it, as release.sh's title does)
+          case "$VERSION" in *-rc.*) kind="release candidate" ;; *) kind="development build" ;; esac
+          echo "BUILD_KIND=$kind" >>"$GITHUB_ENV"
 
       # release-notes/<version>.md when the commit has it, otherwise notes in its form: the commits,
-      # the DXMT fork's changes since the DXMT of the previous dev build that has a record, and the
-      # commits of my ntdll.so, my winemac.so and my FEX, or none
+      # the DXMT fork's changes since the DXMT of the previous dev build or release candidate that
+      # has a record, and the commits of my ntdll.so, my winemac.so and my FEX, or none
       - name: Release notes
         env:
           GH_TOKEN: ${{ github.token }}
@@ -521,7 +528,7 @@ jobs:
               fex="None in this build: the engine's own FEX stays in place."
             fi
             prev="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isPrerelease \
-              --jq '[.[] | select(.isPrerelease and (.tagName | test("-dev\\.")))][0].tagName // ""')"
+              --jq '[.[] | select(.isPrerelease and (.tagName | test("-(dev|rc)\\.")))][0].tagName // ""')"
             if [ -n "$prev" ] && gh release download "$prev" --repo "$GITHUB_REPOSITORY" --pattern '*.build.txt' --output "$RUNNER_TEMP/prev.build.txt" 2>/dev/null; then
               old="$(sed -n 's/^dxmt \([0-9a-f]\{40\}\)$/\1/p' "$RUNNER_TEMP/prev.build.txt")"
               if [ -n "$old" ] && [ "$old" != "$DXMT_COMMIT" ]; then
@@ -531,7 +538,7 @@ jobs:
               fi
             fi
             cat >"$notes" <<EOF
-          ## $APP_NAME $VERSION (development build)
+          ## $APP_NAME $VERSION ($BUILD_KIND)
 
           The app at \`${app:0:7}\` with my DXMT fork at \`$short\`$wine, built on GitHub's runners.
 
@@ -561,7 +568,7 @@ jobs:
         run: |
           app="dist/$APP_NAME.app" record="$RUNNER_TEMP/record.txt"
           {
-            echo "$APP_NAME $VERSION, a development build by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "$APP_NAME $VERSION, a $BUILD_KIND by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo "app $(git rev-parse HEAD) ($GITHUB_REF)"
             echo "version $VERSION, CFBundleVersion $(plutil -extract CFBundleVersion raw "$app/Contents/Info.plist")"
             cat "$RUNNER_TEMP/components/components.txt"

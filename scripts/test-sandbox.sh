@@ -2898,6 +2898,31 @@ check "a development build's fresh install: dev-switches.conf, version= first, e
 check "  each under a comment that names its piece and its issue and says played or unplayed" comments_ok "$DEVF"
 check "  the rows on, once: settings.conf at dev_version=1" rows_on "$DAD/settings.conf"
 check "  and the install said both" eval 'echo "$out" | grep -q "^Development build: the switch rows on, once: jobwakes=on " && echo "$out" | grep -q "^dev-switches.conf: version $DEVVER, switched on: "'
+# A release candidate, X.Y.Z-rc.N (docs/adr/0017), is a development build by another name.
+# build.sh's bundle_version (read from build.sh) gives it a CFBundleVersion above every dev build
+# of its version and below the release, and refuses any other form. An app.properties with
+# version=0.2.0-rc.1 and the dev channel, as build.sh writes it for one: status shows that version,
+# and its switches are the development build's.
+eval "$(sed -n '/^bundle_version() {/,/^}/p' "$ROOT/build.sh")"
+rc_order() {
+  [ "$(bundle_version 0.2.0-dev.23)" = 0.1.9999.1023 ] && [ "$(bundle_version 0.2.0-rc.1)" = 0.1.9999.2001 ] || return 1
+  [ "$(printf '%s\n' 0.2.0 0.2.0-rc.1 0.2.0-dev.999 0.2.0-rc.999 0.2.0-dev.23 | while read -r v; do echo "$(bundle_version "$v") $v"; done |
+    sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | cut -d' ' -f2 | tr '\n' ' ')" = "0.2.0-dev.23 0.2.0-dev.999 0.2.0-rc.1 0.2.0-rc.999 0.2.0 " ]
+}
+check "build.sh's versions: 0.2.0-rc.1 is 0.1.9999.2001, above every dev build of 0.2.0 and below 0.2.0" rc_order
+rc_refused() {
+  local v
+  for v in 0.2.0-rc 0.2.0-rc.01 0.2.0-rc.1000 0.2.0-beta.1 0.2.0-rc.1-dev.2 0.2.0-dev.rc.1 0.2-rc.1; do
+    ! bundle_version "$v" >/dev/null 2>"$SANDBOX/bv.txt" && grep -qxF "Unsupported version $v (X.Y.Z, X.Y.Z-dev.N or X.Y.Z-rc.N, N below 1000)" "$SANDBOX/bv.txt" || return 1
+  done
+}
+check "  and refuses a malformed one (0.2.0-rc, rc.01, rc.1000, beta.1, rc.1-dev.2, dev.rc.1, 0.2-rc.1), saying which forms it takes" rc_refused
+RCR="$SANDBOX/res-rc"
+res_copy "$RCR" channel=dev
+sed -i '' 's/^version=.*/version=0.2.0-rc.1/' "$RCR/app.properties"
+GW2OM="$RCR/gw2om.sh" GW2_ON_MAC_ROOT="$DROOT" GW2_ON_MAC_DEV_SWITCHES='' "$G" status >"$SANDBOX/rc-status.txt" 2>&1
+check "  a release candidate's install (version=0.2.0-rc.1, channel=dev): status shows 0.2.0-rc.1, and the switches in the rule are a development build's" \
+  eval 'grep -qx version=0.2.0-rc.1 "$SANDBOX/rc-status.txt" && [ "$(sed -n "s/^dev_switches=//p" "$SANDBOX/rc-status.txt")" = "$(dev_expect | tr "\n" " " | sed "s/ \$//")" ]'
 if mine; then
   check "  Faster locks greyed while the file's WINE_HEAT_SPIN line sets it, set refused" \
     eval '[ "$(dg settings | sed -n "s/^fastlocks_state=//p")" = "off:Set in dev-switches.conf (WINE_HEAT_SPIN). Take its line out there to use this row." ] && ! dg set fastlocks off >/dev/null 2>&1'

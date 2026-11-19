@@ -24,7 +24,7 @@
 	<string>@VERSION@</string>
 	<key>CFBundleVersion</key>
 	<string>@BUILD@</string>
-	<!-- release or dev (build.sh: development builds X.Y.Z-dev.N) -->
+	<!-- release or dev (build.sh: development builds X.Y.Z-dev.N and release candidates X.Y.Z-rc.N) -->
 	<key>GW2Channel</key>
 	<string>@CHANNEL@</string>
 	<key>LSApplicationCategoryType</key>
