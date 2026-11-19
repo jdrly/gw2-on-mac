@@ -3464,6 +3464,24 @@ GW2_ON_MAC_STEAMSETUP_URL="file://$SANDBOX/missing.exe" "$G" install steam >"$SA
 check "install fails at Steam's download" eval '[ "$rc" != 0 ] && has "$SANDBOX/failed.txt" "@error The download of SteamSetup.exe"'
 check "the engine, bottle, settings, state and manifest it made are gone" sh -c "[ ! -e '$AD/engine' ] && [ ! -e '$AD/bottle' ] && [ ! -e '$AD/settings.conf' ] && [ ! -e '$AD/state' ] && [ ! -e '$AD/install-manifest.json' ]"
 check "no lock left" [ ! -e "$AD/.lock" ]
+check "nothing else left in the app's folder, dxmt.conf neither" [ -z "$(ad_list)" ]
+# a folder or a link where dxmt.conf goes: refused before the write, and it stays as it was
+mkdir -p "$AD/dxmt.conf" && echo mine >"$AD/dxmt.conf/sentinel"
+out=$(g install steam 2>&1) && rc=0 || rc=$?
+check "a folder at dxmt.conf: refused, the folder as it was, nothing else left" \
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error $AD/dxmt.conf is a folder or a link" && [ "$(ls -A "$AD/dxmt.conf")" = sentinel ] && [ "$(ad_list)" = dxmt.conf ]'
+rm -rf "$AD/dxmt.conf"
+ln -s "$SANDBOX/dxmt-elsewhere.conf" "$AD/dxmt.conf"
+out=$(g install steam 2>&1) && rc=0 || rc=$?
+check "a link at dxmt.conf to nothing: refused, the link as it was, nothing where it leads" \
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error $AD/dxmt.conf is a folder or a link" && [ "$(readlink "$AD/dxmt.conf")" = "$SANDBOX/dxmt-elsewhere.conf" ] && [ ! -e "$SANDBOX/dxmt-elsewhere.conf" ] && [ "$(ad_list)" = dxmt.conf ]'
+rm -f "$AD/dxmt.conf"
+# a failure after Steam's start wrote the game's rules (session.env can't be written): they go too
+mkdir -p "$LOGS/session.env"
+out=$(g install steam 2>&1) && rc=0 || rc=$?
+check "an install that fails after the rules are written leaves nothing, compatdb.rules neither" \
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@phase 4" && has <(echo "$out") "session.env: Is a directory" && [ -z "$(ad_list)" ]'
+rmdir "$LOGS/session.env"
 
 section "Stop waiting keeps the engine and the bottle"
 g install steam >/dev/null 2>&1
