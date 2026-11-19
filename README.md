@@ -1500,8 +1500,8 @@ Mac. It has read-only access and no secrets, and its actions are pinned by commi
   `winemac.so` with a `win32u.so` from pinned downloads in their assets' layout (signed dylibs
   built on the runner, as `file://` URLs), refuses each under another sha256, and refuses a Mac
   driver archive whose `VERSION` names a `win32u.so` it lacks.
-- `sandbox (settings)`, `sandbox (sessions)` and `sandbox (rest)`: `test-sandbox.sh` on that
-  build, its three groups (`GROUP`, below) as three jobs side by side. Without my workspace, the ArenaNet route and the real
+- `sandbox (settings)`, `sandbox (sessions)`, `sandbox (rest)` and `sandbox (move)`: `test-sandbox.sh`
+  on that build, its four groups (`GROUP`, below) as four jobs side by side. Without my workspace, the ArenaNet route and the real
   arcdps are skipped, and each skip shows as a notice on the run.
 - `renders`: `ui-render.sh`, with the PNGs as the run's `renders` artifact. A runner has no design
   exports, so there are no `compare-*.png`.
@@ -1628,8 +1628,10 @@ Without one, those checks are skipped. It covers:
 from the dry runs to Collect Logs. `GROUP=sessions` runs the rest of it, from Steam in the
 background to Uninstall, on an install it makes itself first (`fixture_install`). `GROUP=rest` runs
 only what starts from nothing: the ArenaNet route, a failed install, existing game files and a
-development build's switches. Without `GROUP` the suite runs all three in that order, and
-`sessions` goes on from the install `settings` made. Checks runs the three groups as three jobs. On one Mac, run them one at a
+development build's switches. `GROUP=move` runs only the move of GW2 on Mac 0.1's install, which
+also starts from nothing. Without `GROUP` the suite runs all four in that order, with the move
+between existing game files and the switches, and `sessions` goes on from the install `settings`
+made. Checks runs the four groups as four jobs. On one Mac, run them one at a
 time: each ends every watch-session of this app. At its end the suite prints the seconds each
 section took, and on a runner it adds them to the job's summary.
 

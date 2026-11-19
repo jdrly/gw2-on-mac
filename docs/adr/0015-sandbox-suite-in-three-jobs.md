@@ -39,6 +39,10 @@ build dry run of the same commit the three groups took 254, 270 and 411 s.
 - 0012's rule for a new section still holds: it goes into the group whose install it uses, and a
   section that starts from nothing goes into `rest`, or into a group of its own once `rest` passes
   8 minutes.
+- On 2026-11-19 the move of 0.1's install (#281) got that group of its own, `move` (#285): `rest`
+  ran out of its 15 minutes in the 0.2.0-rc.1 dev build (run 44464935469). Each group's limit is
+  now about 1.7 times its slowest job, as `checks.yml` says. The stand-in engine's `ok` isn't a
+  pass in `move`, so the four counts still add up to two more than a full run's.
 
 ## Alternatives I rejected
 
