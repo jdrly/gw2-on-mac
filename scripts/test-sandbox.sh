@@ -1635,6 +1635,31 @@ printf 'MDMP\0\0\0\0self Zz Arc Acct.1234\0' >"$STEAM/dumps/assert_account.dmp"
 printf 'MDMP\0\0\0\0Gw2-64.exe\0' >"$GD/Crash.dmp"
 printf 'MDMP\0\0\0\0Gw2-64.exe appdata\0' >"$GW2A/Crash.dmp"
 for f in "$H/decoy.dmp" "$BOTTLE/drive_c/decoy.dmp" "$H/Library/Logs/DiagnosticReports/Gw2-64.exe.dmp"; do printf 'MDMP\0decoy\0' >"$f"; done
+# (macOS's crash reports as .ips, a line of JSON and then the report's JSON. Of this app's
+# processes, by their coalition, the app's bundle ID: the game's, with its path in the home folder
+# as macOS writes it (/Users/USER/*/...) and the home folder in its images (\/) and in a Windows
+# path (\\). By their path in the engine's folder, in another coalition: one with /, and 9 with \/,
+# the oldest 2 days old, one more than the 10 Collect Logs takes. Not ours: another Wine's game and
+# its wine with the same names and paths, and an unrelated app. And 3 newer hang reports of wine,
+# by their name, which take none of the 10.)
+DR="$H/Library/Logs/DiagnosticReports"
+jsonp() { printf '%s' "$1" | sed 's|/|\\/|g'; }
+jsonw() { winf "$1" | sed 's/\\/\\\\/g'; }
+ips() {  # <file> <process name> <process path, as in the report> <coalition>
+  printf '{"app_name":"%s","timestamp":"2026-11-19 19:22:18.00 +0000","name":"%s","bug_type":"309"}\n{\n  "procName" : "%s",\n  "coalitionName" : "%s",\n  "procPath" : "%s",\n  "usedImages" : [{"path" : "%s"}, {"path" : "%s"}, {"name" : "wine"}],\n  "notes" : ["%s", "%s"]\n}\n' \
+    "$2" "$2" "$2" "$4" "$3" "$(jsonp "$H/Library/x.dylib")" "$(jsonp "$HOME/Library/y.dylib")" \
+    "Z:$(jsonw "$H")\\\\Library\\\\a" "Z:$(jsonw "$HOME")\\\\Library\\\\b" >"$DR/$1"
+}
+LOADER="lib/wine/aarch64-unix/wine.app/Contents/MacOS/wine"
+ips Gw2-64.exe-2026-11-19-192219.ips Gw2-64.exe "\\/Users\\/USER\\/*\\/wine.app\\/Contents\\/MacOS\\/wine" cz.jandrly.gw2onmac
+ips Mach9-2026-11-19-192219.ips Mach9 "$ENG/$LOADER" com.openssh.sshd.0
+for n in 0 1 2 3 4 5 6 7 8; do ips "wine-2026-11-18-00000$n.ips" wine "$(jsonp "$ENG/$LOADER")" com.openssh.sshd.0; done
+touch -t "$(date -v-2d +%Y%m%d%H%M)" "$DR/wine-2026-11-18-000000.ips"
+ips Gw2-64.exe-2026-11-19-192217.ips Gw2-64.exe "\\/Users\\/USER\\/*\\/wine.app\\/Contents\\/MacOS\\/wine" com.example.otherwine
+ips wine-2026-11-19-192217.ips wine "$(jsonp "/Applications/Other Wine.app/Contents/MacOS/wine")" com.example.otherwine
+ips Safari-2026-11-19-192219.ips Safari "\\/Applications\\/Safari.app\\/Contents\\/MacOS\\/Safari" com.apple.Safari
+for n in 1 2 3; do echo "Process: wine [$n]" >"$DR/wine64-preloader_2026-11-19-19222$n.hang"; done
+touch -t "$(date -v+1M +%Y%m%d%H%M)" "$DR"/wine64-preloader_*.hang
 cp "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll"
 # (the heat counters of 4 games in the logs folder, whose name has spaces, each with its server
 # requests, older than session.env so the session report leaves them alone, and a profile)
@@ -1942,6 +1967,14 @@ for f in userpath persona marker account; do
   check "  the dump with $f left out by the leak check" \
     eval '[ ! -e "$Z/crash-dumps/steam/assert_$f.dmp" ] && has "$Z/left-out.txt" "crash-dumps/steam/assert_$f.dmp"'
 done
+check "  the game's crash report, by this app's coalition, the home folder ~ (as \\/ and as \\\\)" \
+  eval 'f="$Z/crash-reports/Gw2-64.exe-2026-11-19-192219.ips"; grep -qF "\"path\" : \"~\\/Library\\/x.dylib\"" "$f" && grep -qF "\"path\" : \"~\\/Library\\/y.dylib\"" "$f" && grep -qF "\"Z:~\\\\Library\\\\a\", \"Z:~\\\\Library\\\\b\"" "$f" && ! grep -qiF -e "$(jsonp "$H")" -e "$(jsonp "$HOME")" -e "$(jsonw "$H")" -e "$(jsonw "$HOME")" -e "\\/Users\\/$(id -un)\\/" -e "\\\\Users\\\\$(id -un)\\\\" "$f" && no_home "$f"'
+check "  by their path in the engine's folder, with / and with \\/: the newest 10 of ours, and system-info names the 11th" \
+  eval '[ -f "$Z/crash-reports/Mach9-2026-11-19-192219.ips" ] && grep -qF "\"procPath\" : \"~/Library/Application Support/$APP_FOLDER/engine/" "$Z/crash-reports/Mach9-2026-11-19-192219.ips" && [ -f "$Z/crash-reports/wine-2026-11-18-000008.ips" ] && [ ! -e "$Z/crash-reports/wine-2026-11-18-000000.ips" ] && [ "$(ls "$Z/crash-reports" | grep -c "\.ips$")" = 10 ] && has "$Z/system-info.txt" "^  left out: wine-2026-11-18-000000.ips (more than 10 of the game, Steam and Wine)$"'
+check "  not another Wine's game or wine with the same names, nor an unrelated app, and system-info doesn't name them" \
+  eval '[ ! -e "$Z/crash-reports/Gw2-64.exe-2026-11-19-192217.ips" ] && [ ! -e "$Z/crash-reports/wine-2026-11-19-192217.ips" ] && [ ! -e "$Z/crash-reports/Safari-2026-11-19-192219.ips" ] && ! grep -qE "192217|Safari" "$Z/system-info.txt"'
+check "  the hang reports of wine by their name, which take none of the 10" \
+  eval '[ "$(ls "$Z/crash-reports" | grep -c "^wine64-preloader_.*\.hang$")" = 3 ]'
 # (the crash line from session-report.sh itself: a hardware exception with its code, a crash log
 # without an intercepted line, and one from before the session)
 SR="$APP/Contents/Resources/session-report.sh"
@@ -1985,7 +2018,8 @@ mv -f "$SANDBOX/state.keep" "$AD/state"
 mv -f "$SANDBOX/loginusers.keep" "$STEAM/config/loginusers.vdf"
 rm -rf "$GD/addons" "$GD/d3d11.dll" "$AD/compatdb.local" "$STEAM/dumps" "$GD/Crash.dmp" "$GW2A/Crash.dmp" "$RELC" \
   "$BOTTLE/drive_c/library" "$SANDBOX/outside" \
-  "$H/decoy.dmp" "$BOTTLE/drive_c/decoy.dmp" "$H/Library/Logs/DiagnosticReports/Gw2-64.exe.dmp"
+  "$H/decoy.dmp" "$BOTTLE/drive_c/decoy.dmp" "$H/Library/Logs/DiagnosticReports/Gw2-64.exe.dmp" \
+  "$DR"/*.ips "$DR"/*.hang
 collect
 check "no ReShade folder and nothing in the game folder: Collect Logs works and says ReShade is off" \
   eval '[ ! -e "$AD/ReShade" ] && [ -f "$Z/system-info.txt" ] && grep -qxF "ReShade: off; arcdps off" "$Z/system-info.txt" && grep -qxF "  ReShade folder: none" "$Z/system-info.txt" && [ ! -e "$Z/reshade" ] && [ ! -e "$Z/game-logs/addon-files.txt" ]'
