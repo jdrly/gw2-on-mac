@@ -192,8 +192,8 @@ Play starts in between.
 
 The first Play after the move shows Steam's window, even with *Start Steam in the background* on.
 If Steam asks you to sign in, sign in once. If Steam ever shows "steamwebhelper is not
-responding", *Restart Steam with GPU Acceleration disabled* gets past it. The deadlock in my Wine
-build that caused it is fixed ([#304](https://github.com/jdrly/gw2-on-mac/issues/304)), so please tell me on Discord or in
+responding", try *Restart Steam with GPU Acceleration disabled*. The deadlock in my Wine build that
+caused it at the first start is fixed ([#304](https://github.com/jdrly/gw2-on-mac/issues/304)), so please tell me on Discord or in
 [#264](https://github.com/jdrly/gw2-on-mac/issues/264) if you see it.
 
 *Start fresh* in Settings › Troubleshooting installs anew instead. While the move waits or after it
