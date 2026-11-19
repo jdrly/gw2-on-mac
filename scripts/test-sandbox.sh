@@ -389,7 +389,9 @@ export GW2_ON_MAC_WATCH_GRACE=2 GW2_ON_MAC_WATCH_QUITWAIT=2 GW2_ON_MAC_WATCH_POL
 # of their own section at the end: the others check the app as a release sets it up, apart from
 # Debug logging's default
 export GW2_ON_MAC_DEV_SWITCHES=off
-ok "stand-in engine ($GW2_ON_MAC_ENGINE_SIZE bytes) and SteamSetup.exe"
+# (not a pass in move, the fourth group, so the four groups' passes add up as the three groups' did)
+if [ "$GROUP" = move ]; then echo "  stand-in engine ($GW2_ON_MAC_ENGINE_SIZE bytes) and SteamSetup.exe"
+else ok "stand-in engine ($GW2_ON_MAC_ENGINE_SIZE bytes) and SteamSetup.exe"; fi
 
 # Stand-in PEs (an x86_64 DLL whose export directory holds the given names; a fixture, not a
 # loadable DLL): arcdps exports its extension API (addextension2) and names itself; another addon

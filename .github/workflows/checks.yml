@@ -333,8 +333,9 @@ jobs:
   # The suite as four groups side by side (scripts/test-sandbox.sh, GROUP): settings is the dry
   # runs to Collect Logs on one Steam install, sessions is Steam in the background to Uninstall on
   # an install it makes itself, rest is what starts from nothing but the move of 0.1's install, and
-  # move is that move. Each limit is about 1.7 times the group's slowest job, from the 0.2.0-rc.1
-  # dev build (run 44464935469), whose runners were slower than a pull request's:
+  # move is that move. Each limit is about 1.7 times the group's slowest job. For settings, move
+  # and rest that is in the 0.2.0-rc.1 dev build (run 44464935469), whose runners were slower than
+  # a pull request's; for sessions it is a pull request run, slower than the dev build's:
   #   settings: 11 min 8 s there, so 19
   #   move: its section took 7 min 39 s there inside rest, about 8 min as a job, so 14
   #   rest: never finished there. Its part before the move took 2 min 26 s, and dev-switches.conf
