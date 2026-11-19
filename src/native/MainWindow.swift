@@ -84,11 +84,7 @@ struct MainView: View {
       Text("This removes everything \(appName) created: the Wine engine and the game's bottle. The "
            + "game's files are in the bottle, so they go with it: Guild Wars 2 has to download again if "
            + "you install it later. Its caches go too, DXMT's shader cache with them. Your account, "
-           + "characters and Steam library are not affected. The logs are kept."
-           + (installer.status["move_game"] == "here"
-              ? " The game moved here from GW2 on Mac 0.1, which has no copy of it now. To keep it for 0.1, "
-                + "choose Rollback to \(installer.rollbackVersion) in Settings › Troubleshooting first."
-              : ""))
+           + "characters and Steam library are not affected. The logs are kept.")
     }
     .alert(blocked?.title ?? "", isPresented: Binding(get: { blocked != nil }, set: { if !$0 { blocked = nil } }),
            presenting: blocked) { _ in
@@ -135,6 +131,11 @@ struct MainView: View {
     installer.refresh {
       if let reason = busyReason {
         blocked = Blocked(title: "Can't uninstall now", message: reason)
+      } else if installer.status["move_game"] == "here" {
+        // (gw2om.sh uninstall refuses too: the game moved from 0.1 is its only copy)
+        blocked = Blocked(title: "Can't uninstall yet",
+                          message: "The game in \(appName)'s bottle is the one moved from GW2 on Mac 0.1, and its only copy. "
+                            + "Choose Rollback to \(installer.rollbackVersion) in Settings › Troubleshooting first; then Uninstall removes the rest.")
       } else {
         confirmUninstall = true
       }

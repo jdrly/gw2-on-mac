@@ -157,8 +157,8 @@ file inside this app's folder. A link to a folder, into 0.1's folders or to a fo
 through it, and the folder is renamed back. *Start fresh* then installs anew.
 
 The move never copies the game. If 0.1's Steam or game folder is on another disk than this app's
-folder, or reached through a link, as with a bottle you linked to an external drive, the move
-refuses before it writes anything and says why. DXMT's shader caches and ReShade's compiled effects
+folder, or a link sits anywhere on the way to it or to this app's folder, as with a bottle you
+linked to an external drive, the move refuses before it writes anything and says why. DXMT's shader caches and ReShade's compiled effects
 don't come along. The game builds them again while you play.
 
 The move waits while anything of 0.1 runs: its Steam, the game, ArenaNet's installer or 0.1's Wine.
@@ -166,12 +166,16 @@ The window says what it waits for, and the move starts once that has quit. A mov
 interrupts, that fails or that you cancel puts back the addon files 0.1 had, renames the folder
 back, then removes everything it created, and the app is not installed again. Once the move has
 written its record it is done, and a cancel after that keeps it. *Try again* runs it once more, and
-so does the next start of the app. From its first write the move keeps `move-undo`, which says what
-it made and, once it renames, what it renamed, and flushes it to disk. If the app is killed or the
-Mac loses power mid-move, the next start reads it and undoes the rename before anything else runs,
-so no Uninstall or Start fresh can take the game with the half-made bottle. The rename itself is
-the kernel's `rename`, through macOS's `perl`, which fails rather than copy to another volume or
-move into a folder that is there, as `mv` would.
+so does the next start of the app. From its first write the move keeps `move-undo`: the folder's
+two places and its inode, and what the move makes. If the app is killed mid-move, the next start
+finds the folder by its inode at either place and, unless the record says the move was done,
+renames it back before anything else runs. It waits while Wine or the killed run's rename still
+runs. Nothing the app removes, there or anywhere else, may hold the moved folder: before each
+removal it looks for that inode inside, and if it finds it, or can't tell, it leaves the folder and
+logs why. The rename itself is the kernel's `rename`, through macOS's `perl`, which fails rather
+than copy to another volume or move into a folder that is there, as `mv` would. The whole move
+holds the install lock, and from the rename's checks to the record the session's lock too, so no
+Play starts in between.
 
 Steam may ask you to sign in once in the new bottle. I haven't tested yet whether its remembered
 login survives the move, so the first Play after it shows Steam's window, even with *Start Steam in
@@ -179,7 +183,8 @@ the background* on.
 
 *Start fresh* in Settings › Troubleshooting installs anew instead. While the move waits or after it
 failed, it stops the move. After a move it first gives the game back to 0.1, as *Rollback* does,
-then removes the moved install as Uninstall does, and never another install. Either
+then removes the moved install as Uninstall does, and never another install. If the move's record
+is missing, so it can't give the game back, it changes nothing. Either
 way the move no longer starts by itself, and the install choices list 0.1's game under *Game files
 I already have*. The app keeps that in `moved-from-0.1` in its folder (`moved` or `skipped`), which
 Uninstall leaves, so uninstalling a moved install doesn't move 0.1's again.
@@ -217,8 +222,8 @@ this version again, that is the button to press.
 - 0.2's folders, *GW2 on Mac arm64*, stay, without the game. Delete them by hand with the commands
   under [Uninstall](#uninstall) if you don't come back.
 
-Uninstall in this app removes the bottle with the game in it. After a move that is the only copy,
-so its confirmation says to choose *Rollback* first if 0.1 should keep the game.
+Uninstall in this app removes the bottle with the game in it, except after a move: the game there is
+the only copy, so Uninstall refuses until *Rollback* has given it back.
 
 0.1.x's folders are `GW2 on Mac` in `~/Library/Application Support`, `~/Library/Caches` and
 `~/Library/Logs`, without "arm64". They stay until you delete them, and then the way back is gone:
@@ -596,8 +601,8 @@ folder, and nothing else.
 *Uninstall…* in the window asks first and tells you the game's files go with the bottle. Close the
 game and Steam before you run it. It removes everything in the table above except the logs, the
 ReShade folder, the move's record and GW2 on Mac 0.1.x's folders, which it never touches. After a
-move the game in the bottle is the only copy, so choose *Rollback* first if 0.1.x should keep it. To
-do it by hand:
+move the game in the bottle is the only copy, so Uninstall refuses until *Rollback* has given it
+back to 0.1.x. To do it by hand:
 
 ```sh
 rm -rf ~/Library/"Application Support/GW2 on Mac arm64" ~/Library/Caches/"GW2 on Mac arm64"   # the ReShade folder too
@@ -1609,11 +1614,13 @@ Without one, those checks are skipped. It covers:
   summary's changes, Start fresh before, after and over another install, and Uninstall keeping the
   record. 0.1's folders are checksummed and listed before and after a finished move, a cancel, a
   failure at each step (`GW2_ON_MAC_MOVE_FAIL`), each kind of 0.1 process, a kill after the
-  rename (followed by status, and by Uninstall), a cancel after the move is done, and links out
-  of what the move brings. The renamed folder keeps its inode, and `install.log` has no `cp` or
-  `mv` of it. Another volume is refused through the test switch and through a disk image, with
-  nothing written. Rollback is refused while Wine runs, killed half-way, done (0.1 as it was,
-  file by file), done twice, and followed by Move it in again, on both routes.
+  rename, before and after it and after the record (TERM and KILL each, a kill followed by status
+  or by Uninstall), and links out of what the move brings. The renamed folder keeps its inode, and `install.log` has no `cp` or
+  `mv` of it. Another volume is refused through the test switch and through a disk image mounted in
+  0.1's bottle, and a linked folder on the way, with nothing written. Rollback is refused while
+  Wine runs and while 0.1's place is taken, killed half-way, done (0.1 as it was, file by file),
+  done twice, and followed by Move it in again, on both routes. Uninstall refuses while the moved
+  game is in the bottle, and Start fresh without the move's record.
 - play, the busy checks, repair, reset-shaders, reinstall-engine and the lock
 - Collect Logs' redaction, arcdps's logs and the crash dumps (recent ones in, older ones, one
   too large, one with the user's folder in UTF-16 and `.dmp` files elsewhere out), ReShade's files

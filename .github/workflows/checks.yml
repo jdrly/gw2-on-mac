@@ -337,7 +337,9 @@ jobs:
   # and rest that is in the 0.2.0-rc.1 dev build (run 44464935469), whose runners were slower than
   # a pull request's; for sessions it is a pull request run, slower than the dev build's:
   #   settings: 11 min 8 s there, so 19
-  #   move: its section took 7 min 39 s there inside rest, about 8 min as a job, so 14
+  #   move: its section took 7 min 39 s there inside rest, about 8 min as a job. #291 adds
+  #     renames, Rollback, Move in and the kills: 411 s against 287 s on the rented M1, 1.43 times,
+  #     so about 11 min 30 s, an estimate, and 20
   #   rest: never finished there. Its part before the move took 2 min 26 s, and dev-switches.conf
   #     onwards ran about 3.2 times slower than the 182 s of pull request run 44462903934, so about
   #     12 min, an estimate, and 21
@@ -354,7 +356,7 @@ jobs:
           - { group: settings, minutes: 19 }
           - { group: sessions, minutes: 24 }
           - { group: rest, minutes: 21 }
-          - { group: move, minutes: 14 }
+          - { group: move, minutes: 20 }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
