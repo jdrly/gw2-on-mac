@@ -246,8 +246,10 @@ redact() {  # [game] stdin → stdout (game: also game_rules)
       line = tolower($0)
       if (line ~ /serial number|hardware uuid|provisioning udid/) next
       s = $0
-      if (rhome != home) { s = rep(s, rhome, "~", 0); s = rep(s, wrhome, "~", 0) }
-      s = rep(s, home, "~", 0); s = rep(s, whome, "~", 0)
+      # (the home folder as Wine writes it only after Z:, where Wine puts the root of the Mac.
+      # C:\users\<name> is the bottle user, named after the Mac user on this line: USER below)
+      if (rhome != home) { s = rep(s, rhome, "~", 0); s = rep(s, "Z:" wrhome, "Z:~", 0) }
+      s = rep(s, home, "~", 0); s = rep(s, "Z:" whome, "Z:~", 0)
       s = rep(s, "/Users/" user, "/Users/USER", 1)
       s = rep(s, "\\users\\" user, "\\users\\USER", 1)
       if (length(user) >= 2 && !(tolower(user) in common)) s = rep(s, user, "USER", wordonly)
