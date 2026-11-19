@@ -654,7 +654,7 @@ func renderAll(_ dir: URL, exports: URL?) async {
       let gateSheet = RollbackSheet(version: "0.1.4",
         dmg: URL(string: "https://github.com/jdrly/gw2-on-mac/releases/download/v0.1.4/GW2-on-Mac-0.1.4.dmg"),
         isPresented: .constant(true), gate: .init(macos: "26.3", needs: "26.4", appVersion: "0.2.0"), downloaded: downloaded)
-      write(await render(gateSheet, size: CGSize(width: 460, height: downloaded ? 270 : 230), dark: dark, chrome: false),
+      write(await render(gateSheet, size: CGSize(width: 460, height: downloaded ? 230 : 190), dark: dark, chrome: false),
             dir.appendingPathComponent("sheet-macos-gate-\(downloaded ? "steps" : "download")-\(dark ? "dark" : "light").png"))
     }
     let presetSheet = AddonWarning.preset(isPresented: .constant(true), name: "Golden Hour.ini") {}
