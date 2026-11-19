@@ -52,7 +52,8 @@ sessions_reset() {
   end_sandbox_processes
   pkill -f "^$APP/Contents/Resources/helpers/sessionlock hold" 2>/dev/null || true
   while pgrep -f "^/bin/bash $GW2OM watch-session" >/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
-  rm -f "$AD/session" "$AD/session.req" "$SANDBOX/steam.pid" "$SANDBOX/game.pid"
+  # (and a write of them a killed watcher left half done: put's <file>.new.<pid>)
+  rm -f "$AD/session" "$AD/session.req" "$AD"/session.new.* "$AD"/session.req.new.* "$SANDBOX/steam.pid" "$SANDBOX/game.pid"
 }
 rm -rf "$SANDBOX" "$FAILED"
 mkdir -p "$SANDBOX"
@@ -3986,17 +3987,26 @@ if hdiutil create -quiet -size 20m -type SPARSE -fs APFS -volname gw2om-mnt "$SA
   out=$(g uninstall 2>&1) && rc=0 || rc=$?
   check "Uninstall with another volume mounted in the bottle: refused, the bottle (a file beside the mount too) and the volume's file stay" \
     eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac kept its bottle" && has "$BOTTLE/drive_c/sentinel.txt" beside && has "$MNT/kept.txt" "another volume" && has "$LOGS/install.log" "another volume is mounted inside it"'
-  hdiutil detach -quiet -force "$MNT" >/dev/null 2>&1; trap - EXIT
+  # (detached for sure before the next check: a runner may still hold the volume a moment)
+  i=0
+  while mount | grep -qF " on $MNT (" && [ $i -lt 20 ]; do
+    hdiutil detach -quiet -force "$MNT" >/dev/null 2>&1 || sleep 0.5
+    i=$((i + 1))
+  done
+  trap - EXIT
+  check "  the volume is detached again" eval '! mount | grep -qF " on $MNT ("'
 else
   echo "  skip the mounted volume (hdiutil could not attach one)"
 fi
-rmdir "$MNT"
+rmdir "$MNT" 2>/dev/null || true
+# (no watcher of the Plays above left to write the session's files into the app's folder)
+sessions_reset
 out=$(g uninstall 2>&1)
 check "uninstall after a move keeps the move's record: no second move by itself" \
-  eval '[ "$(st installed) $(st move) $(st move_record)" = "no no moved" ] && [ "$(ad_list)" = moved-from-0.1 ]'
+  eval '[ "$(st installed) $(st move) $(st move_record)" = "no no moved" ] && { [ "$(ad_list)" = moved-from-0.1 ] || { echo "    the app folder holds: $(ad_list)"; false; }; }'
 out=$(g install move 2>&1) && rc=0 || rc=$?
 check "  install move refused with the record there, nothing else made" \
-  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac doesn.t move GW2 on Mac 0.1.s install again: it was moved here before" && [ "$(ad_list)" = moved-from-0.1 ] && o1_same'
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac doesn.t move GW2 on Mac 0.1.s install again: it was moved here before" && { [ "$(ad_list)" = moved-from-0.1 ] || { echo "    the app folder holds: $(ad_list)"; false; }; } && o1_same'
 g install steam >/dev/null 2>&1
 out=$(g start-fresh --moved 2>&1) && rc=0 || rc=$?
 check "  Start fresh over an install made after it (not the moved one): refused, the install stays" \
