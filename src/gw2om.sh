@@ -943,6 +943,7 @@ $present
 $(heat_entries)
 $(fex_entries)
 $(dev_entries)
+$(sampler_fex)
 EOF
   echo "$game;env=DXMT_SHADER_CACHE_PATH=$(cdb_value "$(dxmt_cache)")$entries"
   echo "$cef;env=DXMT_SHADER_CACHE_PATH=$removed"
@@ -1113,9 +1114,9 @@ fex_entries() {
 # (jdrly/dxmt#226), a diagnostic for the same stutter, stays out: I turn it on by hand, so a change
 # in play has one cause. My ntdll.so's other changes
 # have no line: #99's counts act only with WINE_HEAT_COUNT=1, which Debug logging sets; the app sets
-# WINE_HEAT_PROF_FEX itself (#111); #101 and #104 have no switch. FEX_ENTRYHEADERLOOKUP (#162) stays
-# out of the rule while it can start my ntdll.so's sampler (heat_prof_on): with it on FEX no longer
-# stores the block a thread entered last, which the sampler reads (jdrly/FEX's GW2Contract.h).
+# WINE_HEAT_PROF_FEX itself (#111); #101 and #104 have no switch. FEX_ENTRYHEADERLOOKUP (#162) is on
+# in my FEX by default, and off while the rule can start my ntdll.so's sampler (sampler_fex); a line
+# of the file that turns it on stays out then.
 # FEX_HOSTFEATURES (#118) is a comma list that FEX ORs into one mask, and in a compatdb rule a later
 # entry for a variable replaces the earlier one. So the file's FEX_HOSTFEATURES lines go into the
 # rule as one entry (hf_join), and while a rule of compatdb.local for Gw2-64.exe sets it
@@ -1135,8 +1136,6 @@ DEV_SWITCHES="
 1 dxmt jdrly/dxmt#159 unplayed DXMT_WARM_JOBS=2 with Shader warming, two speculative jobs at once while Metal's cache is cold
 1 dxmt jdrly/dxmt#147 unplayed DXMT_SKIP_SAME_SRV=1 SetShaderResources skips a slot that already holds the incoming view
 1 dxmt jdrly/dxmt#73 unplayed DXMT_COMPILE_DEMAND=1 the compile service's declared policy (Shader warming turns it on too)
-5 fex #161 unplayed FEX_DISPATCHERL1LOOKUP=1 the dispatcher looks in the thread's L1 before it leaves for the lookup in C++
-5 fex #162 unplayed FEX_ENTRYHEADERLOOKUP=1 a block's entry stores nothing, and faults, suspends and self-modifying code find the block from the host PC. Stays out while the sampler can run (WINE_HEAT_PROF or WINE_HEAT_CONTROL), which reads what the entries stored.
 6 fex #164 unplayed FEX_LEA32BITADDS=1 lea with a 32-bit destination computes its address with 32-bit adds, one instruction instead of two
 6 fex #164 unplayed FEX_SIGNEXTENDINGLOADS=1 movsx and movsxd from memory load and sign-extend in one instruction when the load needs no TSO emulation, which hardware TSO turns off
 6 fex #165 unplayed FEX_ENTRYCOMPILELOCK=1 threads that miss on the same entry at once compile it once, and FEX's pool allocators read the CPU's counter for their clock instead of QueryPerformanceCounter
@@ -1159,7 +1158,7 @@ DEV_SWITCHES="
 # queue's pace (jdrly/dxmt#157: it gave up at frame 181 in every session).
 # Version 9: my DXMT fork has jdrly/dxmt#153, #154 and #204 on by default, and =0 turns each off.
 # Version 10: my DXMT fork has jdrly/dxmt#271's wait on by default (jdrly/dxmt#332), and =next turns
-# it off.
+# it off. Version 11: my FEX has #161's and #162's lookups on by default (#266), and =0 turns each off.
 DEV_GONE="
 4 jdrly/dxmt#227 DXMT_MTL4_PRESENT=mtl3 mtl4
 8 jdrly/dxmt#157 DXMT_PRESENT_QUEUE=pace -
@@ -1169,6 +1168,8 @@ DEV_GONE="
 9 jdrly/dxmt#154 DXMT_MTL4_TIMESTAMP_REUSE=1 0
 9 jdrly/dxmt#204 DXMT_MTL4_ALLOCATOR_POOL=1 0
 10 jdrly/dxmt#271 DXMT_MTL4_SHOWN_WAIT=write next
+11 #161 FEX_DISPATCHERL1LOOKUP=1 0
+11 #162 FEX_ENTRYHEADERLOOKUP=1 0
 "
 DEV_SWITCHES_VERSION=$(printf '%s\n' "$DEV_SWITCHES" "$DEV_GONE" | awk 'NF && $1 > v { v = $1 } END { print v + 0 }')
 # dev_piece_label <piece>: what the file and the log call it
@@ -1327,15 +1328,24 @@ heat_prof_on() {
     if [ -f "$RULES_LOCAL" ]; then tr ';' '\n' <"$RULES_LOCAL" | sed -n 's/^env=//p'; fi; } |
     awk '/^WINE_HEAT_PROF=(on|1)$/ || /^WINE_HEAT_CONTROL=./ { f = 1 } END { exit !f }'
 }
+# sampler_fex: FEX_ENTRYHEADERLOOKUP=0 for the game's rule while the rule can start my ntdll.so's
+# sampler (heat_prof_on) and my FEX, whose record names the switch, is in the engine; else nothing.
+# With the switch on, FEX no longer stores the block a thread entered last, which the sampler reads
+# (jdrly/FEX's GW2Contract.h), and my FEX has it on by default (#266). It comes after the file's
+# lines in the rule, so it wins over them. A release too: compatdb.local can start the sampler there.
+sampler_fex() {
+  [ "$(fex_in_use)" = mine ] && fex_in_version FEX_ENTRYHEADERLOOKUP && heat_prof_on || return 0
+  echo FEX_ENTRYHEADERLOOKUP=0
+}
 # dev_lines: dev-switches.conf's switch lines in a development build, one a line: "in NAME=value"
 # for one that goes into the game's rule, "out NAME=value <why>" for one that stays out. The
 # FEX_HOSTFEATURES lines that go in are one "in" line, at the first one's place (hf_join).
 dev_lines() {
   [ -n "$DEV_ON" ] && [ -f "$DEV_FILE" ] || return 0
-  local l row piece wine macdrv fex dxmt dnames="" why prof=off hf lhf hfdone=""
+  local l row piece wine macdrv fex dxmt dnames="" why sampler hf lhf hfdone=""
   wine=$(lib_in_use wine) macdrv=$(lib_in_use macdrv) fex=$(fex_in_use) dxmt=$(dxmt_in_use)
   [ "$dxmt" != fork ] || dnames=$(dxmt_names)
-  if heat_prof_on; then prof=on; fi
+  sampler=$(sampler_fex)
   # (the file's FEX_HOSTFEATURES as one value, and compatdb.local's for the game, which replaces it)
   hf=$(sed -n 's/^FEX_HOSTFEATURES=//p' "$DEV_FILE")
   hf=$(hf_join "$hf")
@@ -1355,8 +1365,6 @@ dev_lines() {
       fex)
         if [ "$fex" != mine ]; then why="$(dev_piece_label fex) isn't in the engine"
         elif ! fex_in_version "$l"; then why="$(dev_piece_label fex) doesn't have it"
-        elif [ "${l%%=*}" = FEX_ENTRYHEADERLOOKUP ] && [ "$prof" = on ]; then
-          why="the sampler can run (WINE_HEAT_PROF or WINE_HEAT_CONTROL), and it reads the block header this switch stops FEX from storing"
         elif [ "${l%%=*}" = FEX_HOSTFEATURES ] && [ -n "$lhf" ]; then
           why="compatdb.local's rule for Gw2-64.exe sets $lhf, which comes later and replaces it. For both, write FEX_HOSTFEATURES=$(hf_join "$hf" "${lhf#*=}") there"
         elif [ "${l%%=*}" = FEX_HOSTFEATURES ]; then
@@ -1366,6 +1374,10 @@ dev_lines() {
       dxmt)
         if [ "$dxmt" != fork ]; then why="$(dev_piece_label dxmt) isn't in the engine"
         elif ! printf '%s\n' "$dnames" | grep -qx "${l%%=*}"; then why="$(dev_piece_label dxmt) doesn't have it"
+        fi ;;
+      none)
+        if [ "${l%%=*}" = FEX_ENTRYHEADERLOOKUP ] && [ -n "$sampler" ]; then
+          why="the sampler can run (WINE_HEAT_PROF or WINE_HEAT_CONTROL), so the game's rule has FEX_ENTRYHEADERLOOKUP=0 after it"
         fi ;;
     esac
     if [ -z "$why" ]; then echo "in $l"; else echo "out $l ($why)"; fi

@@ -2831,6 +2831,8 @@ GONE9="DXMT_MTL4_DEVICE_RESIDENCY=1 DXMT_MTL4_TIMESTAMP_REUSE=1 DXMT_MTL4_ALLOCA
 # Version 10's row of DEV_GONE, and version 10's rows of DEV_SWITCHES in the table's order
 GONE10="DXMT_MTL4_SHOWN_WAIT=write"
 V10ON="DXMT_PRESENT_SKIP_NIL=1 DXMT_DRAIN_SPLITS=1 DXMT_REFRESH_REQUERY=1 DXMT_STEADY_SLEEP=1"
+# Version 11's rows of DEV_GONE
+GONE11="FEX_DISPATCHERL1LOOKUP=1 FEX_ENTRYHEADERLOOKUP=1"
 table_pieces() { local p; [ "$DEVVER" -ge 1 ] || return 1; for p in wine macdrv win32u fex fexany dxmt; do printf '%s\n' "$DEVTABLE" | grep -q "^$p " || return 1; done; }
 check "the table has switches of each piece" table_pieces
 # The components' records, narrowed: my ntdll.so names WINE_HEAT_SPIN, my winemac.so
@@ -2981,63 +2983,53 @@ check "  the session report's header prints them" \
 line_has() { awk -v s="$2" -v t="$3" 'index($0, s) == 1 && index($0, t) { f = 1 } END { exit !f }' "$1" 2>/dev/null; }
 check "  and those it left out, each with why: session.env's DEV_SWITCHES_OUT, and the report's header" \
   eval 'line_has "$DLOGS/session.env" "DEV_SWITCHES_OUT=" "WINE_WIN32U_SETCURSOR=shm ($W32WHY)" && line_has "$CHECKS/devreport.txt" "Dev switches left out: " "WINE_WIN32U_SETCURSOR=shm ($W32WHY)"'
-# FEX_DISPATCHERL1LOOKUP (#161) and FEX_ENTRYHEADERLOOKUP (#162): out while my FEX's record doesn't
-# name them, in once it does, out with the engine's own FEX. FEX_ENTRYHEADERLOOKUP also stays out
-# while the rule can start my ntdll.so's sampler (WINE_HEAT_PROF=on or =1, or WINE_HEAT_CONTROL),
-# from dev-switches.conf or compatdb.local; FEX_DISPATCHERL1LOOKUP stays in. Status and the rules
-# go to files first, for the greps.
-LOOKUPWHY="the sampler can run (WINE_HEAT_PROF or WINE_HEAT_CONTROL), and it reads the block header this switch stops FEX from storing"
+# The sampler and FEX_ENTRYHEADERLOOKUP (#162), which my FEX has on by default (#266): with it on,
+# FEX stores no block header at a block's entry, which my ntdll.so's sampler reads. While the rule
+# can start the sampler (WINE_HEAT_PROF=on or =1, or WINE_HEAT_CONTROL, from dev-switches.conf or
+# compatdb.local) and my FEX, whose record names the switch, is in the engine, the game's rule ends
+# with FEX_ENTRYHEADERLOOKUP=0, after the file's lines, and CefHost.exe has it unset. A line of mine
+# that turns it on stays out then, saying why. Status and the rules go to files first, for the greps.
+SAMPLERWHY="the sampler can run (WINE_HEAT_PROF or WINE_HEAT_CONTROL), so the game's rule has FEX_ENTRYHEADERLOOKUP=0 after it"
 dev_files() { dg status >"$SANDBOX/dev-status.txt" 2>&1; dg rules >"$SANDBOX/dev-rules.txt" 2>&1; }
 rule_has() { sed -n 1p "$SANDBOX/dev-rules.txt" | grep -E ";env=$1(;|\$)" >/dev/null; }
 in_status() { line_has "$SANDBOX/dev-status.txt" "dev_switches=" "$1"; }
 out_status() { line_has "$SANDBOX/dev-status.txt" "dev_switches_out=" "$1"; }
-lookups_in() { rule_has FEX_DISPATCHERL1LOOKUP=1 && rule_has FEX_ENTRYHEADERLOOKUP=1 && in_status FEX_DISPATCHERL1LOOKUP=1 && in_status FEX_ENTRYHEADERLOOKUP=1 && ! out_status FEX_ENTRYHEADERLOOKUP; }
-sampler_out() { ! rule_has FEX_ENTRYHEADERLOOKUP=1 && ! in_status FEX_ENTRYHEADERLOOKUP && out_status "FEX_ENTRYHEADERLOOKUP=1 ($LOOKUPWHY)" && rule_has FEX_DISPATCHERL1LOOKUP=1 && in_status FEX_DISPATCHERL1LOOKUP=1; }
+sampler_off() { sed -n 1p "$SANDBOX/dev-rules.txt" | grep -E ";env=FEX_ENTRYHEADERLOOKUP=0\$" >/dev/null && sed -n 2p "$SANDBOX/dev-rules.txt" | grep -E ";env=FEX_ENTRYHEADERLOOKUP=(;|\$)" >/dev/null; }
+no_lookup() { ! grep -q FEX_ENTRYHEADERLOOKUP "$SANDBOX/dev-rules.txt"; }
 if fexb; then
+  echo WINE_HEAT_PROF=on >>"$DEVF"
   dev_files
-  check "my FEX's record without FEX_DISPATCHERL1LOOKUP and FEX_ENTRYHEADERLOOKUP: both lines out, saying so" \
-    eval '! rule_has FEX_DISPATCHERL1LOOKUP=1 && ! rule_has FEX_ENTRYHEADERLOOKUP=1 && out_status "FEX_DISPATCHERL1LOOKUP=1 (my FEX doesn'"'"'t have it)" && out_status "FEX_ENTRYHEADERLOOKUP=1 (my FEX doesn'"'"'t have it)"'
-  dev_switches_line fex FEX_INITIALCODEBUFFERMB FEX_DISPATCHERL1LOOKUP FEX_ENTRYHEADERLOOKUP
+  check "my FEX's record without FEX_ENTRYHEADERLOOKUP, with WINE_HEAT_PROF=on: no FEX_ENTRYHEADERLOOKUP in the rules" no_lookup
+  sed -i '' '/^WINE_HEAT_PROF=/d' "$DEVF"
+  dev_switches_line fex FEX_INITIALCODEBUFFERMB FEX_ENTRYHEADERLOOKUP
   dev_files
-  check "  one that names both: both in the rule and in status" lookups_in
+  check "  one that names it, and no line that starts the sampler: none either" no_lookup
   for prof in WINE_HEAT_PROF=on WINE_HEAT_PROF=1 WINE_HEAT_CONTROL=/tmp/gw2-heat-control; do
     echo "$prof" >>"$DEVF"
     dev_files
-    check "  with $prof in dev-switches.conf: FEX_ENTRYHEADERLOOKUP out, saying the sampler can run; FEX_DISPATCHERL1LOOKUP still in" sampler_out
+    check "  with $prof in dev-switches.conf: FEX_ENTRYHEADERLOOKUP=0 last in the game's rule, unset for CefHost.exe" sampler_off
     sed -i '' "/^${prof%%=*}=/d" "$DEVF"
   done
   echo WINE_HEAT_PROF=off >>"$DEVF"
   dev_files
-  check "  with WINE_HEAT_PROF=off: both in" lookups_in
+  check "  with WINE_HEAT_PROF=off: none" no_lookup
   sed -i '' '/^WINE_HEAT_PROF=/d' "$DEVF"
   printf 'exe=Gw2-64.exe;env=WINE_HEAT_PROF=on\n' >"$DAD/compatdb.local"
   dev_files
-  check "  with WINE_HEAT_PROF=on in compatdb.local: FEX_ENTRYHEADERLOOKUP out, saying so; FEX_DISPATCHERL1LOOKUP still in" sampler_out
-  rm -f "$DAD/compatdb.local"
+  check "  with WINE_HEAT_PROF=on in compatdb.local: FEX_ENTRYHEADERLOOKUP=0 last in the game's rule" sampler_off
+  echo FEX_ENTRYHEADERLOOKUP=1 >>"$DEVF"
   dev_files
-  check "  without it: both in again" lookups_in
+  check "  and a FEX_ENTRYHEADERLOOKUP=1 line of mine: out of the rule and status, saying why, and FEX_ENTRYHEADERLOOKUP=0 still last" \
+    eval 'sampler_off && ! rule_has FEX_ENTRYHEADERLOOKUP=1 && ! in_status FEX_ENTRYHEADERLOOKUP && out_status "FEX_ENTRYHEADERLOOKUP=1 ($SAMPLERWHY)"'
+  sed -i '' '/^FEX_ENTRYHEADERLOOKUP=1$/d' "$DEVF"
   dg set fex engine >/dev/null 2>&1
   dev_files
-  check "  the engine's own FEX: both lines out, saying so" \
-    eval '! rule_has FEX_DISPATCHERL1LOOKUP=1 && ! rule_has FEX_ENTRYHEADERLOOKUP=1 && out_status "FEX_DISPATCHERL1LOOKUP=1 (my FEX isn'"'"'t in the engine)" && out_status "FEX_ENTRYHEADERLOOKUP=1 (my FEX isn'"'"'t in the engine)"'
+  check "  the engine's own FEX, the sampler's line still there: none (that FEX doesn't have the switch)" no_lookup
   dg set fex mine >/dev/null 2>&1
+  rm -f "$DAD/compatdb.local"
+  dev_files
+  check "  without the sampler's line: none again" no_lookup
   dev_switches_line fex FEX_INITIALCODEBUFFERMB
-  # The session report: a development build installed in a root of its own, with the sampler's
-  # line in compatdb.local first. The install's start of Steam writes session.env.
-  PROOT="$SANDBOX/profroot"
-  PAD="$PROOT/home/Library/Application Support/$APP_FOLDER" PLOGS="$PROOT/home/Library/Logs/$APP_FOLDER"
-  mkdir -p "$PAD"
-  printf 'exe=Gw2-64.exe;env=WINE_HEAT_PROF=on\n' >"$PAD/compatdb.local"
-  dev_switches_line fex FEX_INITIALCODEBUFFERMB FEX_DISPATCHERL1LOOKUP FEX_ENTRYHEADERLOOKUP
-  out=$(GW2OM="$DEVR/gw2om.sh" GW2_ON_MAC_ROOT="$PROOT" GW2_ON_MAC_DEV_SWITCHES='' "$G" install steam 2>&1) && rc=0 || rc=$?
-  printf 'info:  GW2 fork v0.80-441-ge02a4d6: DXMT_STATS=1 cpus=8 refresh=60\n' >"$PLOGS/Gw2-64_d3d11.log"
-  GW2_ON_MAC_ROOT="$PROOT" "$APP/Contents/Resources/session-report.sh" >"$CHECKS/profreport.txt" 2>&1
-  check "a development build's install with WINE_HEAT_PROF=on in compatdb.local: session.env and the session report say FEX_ENTRYHEADERLOOKUP was left out and why, and FEX_DISPATCHERL1LOOKUP was on" \
-    eval '[ "$rc" = 0 ] && line_has "$PLOGS/session.env" "DEV_SWITCHES_OUT=" "FEX_ENTRYHEADERLOOKUP=1 ($LOOKUPWHY)" && line_has "$CHECKS/profreport.txt" "Dev switches left out: " "FEX_ENTRYHEADERLOOKUP=1 ($LOOKUPWHY)" && line_has "$CHECKS/profreport.txt" "Dev switches that were on (dev-switches.conf): " FEX_DISPATCHERL1LOOKUP=1 && ! line_has "$CHECKS/profreport.txt" "Dev switches that were on (dev-switches.conf): " FEX_ENTRYHEADERLOOKUP'
-  dev_switches_line fex FEX_INITIALCODEBUFFERMB
-  # (the stand-ins its install started, as end_sandbox_processes ends them)
-  pkill -f "^$(cd "$PROOT" && pwd -P)/" 2>/dev/null || true
-  rm -rf "$PROOT"
   # Version 6's FEX lines (#164, #165, #118): out while my FEX's record doesn't name them, in once
   # it does (FEX_HOSTFEATURES with its value, as jdrly/FEX#12's VERSION writes it), out with the
   # engine's own FEX. FEX_HOSTFEATURES: the file's lines as one entry, the later of enableavx and
@@ -3087,7 +3079,7 @@ if fexb; then
   dg set fex mine >/dev/null 2>&1
   dev_switches_line fex FEX_INITIALCODEBUFFERMB
 else
-  skipfex "FEX_DISPATCHERL1LOOKUP and FEX_ENTRYHEADERLOOKUP in and out of the rule, and the sampler's line"
+  skipfex "FEX_ENTRYHEADERLOOKUP=0 in the rule while the sampler can run"
   skipfex "version 6's FEX lines in and out of the rule, and FEX_HOSTFEATURES with my own lines and compatdb.local"
 fi
 # My win32u.so in the engine with my winemac.so, from a build whose record names its two switches:
@@ -3193,16 +3185,15 @@ check "a second start (Repair) changes neither file and adds nothing" \
 sed -i '' -e 's/^version=.*/version=0/' -e '/DXMT_COMPILE_DEMAND/d' -e '/compile service.s declared policy/d' "$DEVF"
 out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
 check "Play with the file older than the table: it would write the file (dry run)" \
-  eval 'echo "$out" | grep -qxF "[dry-run] write $DEVF" && echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: DXMT_COMPILE_DEMAND=1; out of the list: DXMT_MTL4_PRESENT=mtl3 $GONE8 $GONE9 $GONE10"'
+  eval 'echo "$out" | grep -qxF "[dry-run] write $DEVF" && echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: DXMT_COMPILE_DEMAND=1; out of the list: DXMT_MTL4_PRESENT=mtl3 $GONE8 $GONE9 $GONE10 $GONE11"'
 dg repair >/dev/null 2>&1
 check "  updated: the newer switch at the end, on, under its comment; the commented-out line and mine kept" \
   eval '[ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && [ "$(tail -1 "$DEVF")" = DXMT_COMPILE_DEMAND=1 ] && tail -2 "$DEVF" | head -1 | grep -q "^# my DXMT fork " && grep -qx "#FEX_DYNAMICL1CACHE=0" "$DEVF" && ! grep -qx "FEX_DYNAMICL1CACHE=0" "$DEVF" && grep -qx MY_OWN_SWITCH=1 "$DEVF"'
 dg set metalfx off >/dev/null
 dg repair >/dev/null 2>&1
 check "a row I turn off stays off through the next update" eval 'grep -qx metalfx=off "$DAD/settings.conf" && grep -qx dev_version=1 "$DAD/settings.conf"'
-# A file at version 4, before #161 and #162's rows (version 5): both added at the end, on, each
-# under its comment, and nothing else changes. (drop_rows: the file without those variables' lines,
-# their comments and the empty line above each, as an older build wrote them)
+# drop_rows: the file without those variables' lines, their comments and the empty line above
+# each, as an older build wrote them
 drop_rows() { # <file> <NAME...>
   local f=$1
   shift
@@ -3220,18 +3211,18 @@ drop_rows() { # <file> <NAME...>
       for (i = 1; i <= NR; i++) if (!d[i]) print l[i]
     }' "$f"
 }
-drop_rows "$DEVF" FEX_DISPATCHERL1LOOKUP FEX_ENTRYHEADERLOOKUP | sed 's/^version=.*/version=4/' >"$SANDBOX/devf.v4old"
+# A file at version 4, before version 5's rows (#161, #162): nothing is added, since both left the
+# table at version 11 and the file names every later row. Play says which lines left the list.
+sed 's/^version=.*/version=4/' "$DEVF" >"$SANDBOX/devf.v4old"
 cp "$SANDBOX/devf.v4old" "$DEVF"
 GW2_ON_MAC_DRY_RUN=1 dg play >"$SANDBOX/v4play.txt" 2>&1
-check "a file at version 4: Play would add FEX_DISPATCHERL1LOOKUP=1 and FEX_ENTRYHEADERLOOKUP=1 (dry run)" \
-  eval '[ "$(grep -c "^FEX_.*LOOKUP=" "$DEVF")" = 0 ] && grep -qxF "dev-switches.conf: version $DEVVER, switched on: FEX_DISPATCHERL1LOOKUP=1 FEX_ENTRYHEADERLOOKUP=1; out of the list: $GONE8 $GONE9 $GONE10" "$SANDBOX/v4play.txt"'
+check "a file at version 4: Play would switch nothing on and say what left the list (dry run)" \
+  eval '[ "$(grep -c "^FEX_.*LOOKUP=" "$DEVF")" = 0 ] && grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: $GONE8 $GONE9 $GONE10 $GONE11" "$SANDBOX/v4play.txt"'
 dg repair >/dev/null 2>&1
-n=$(wc -l <"$DEVF" | tr -d ' ')
-awk -v n="$n" 'NR > 1 && NR <= n - 6' "$DEVF" >"$SANDBOX/devf.v5"
 sed 1d "$SANDBOX/devf.v4old" >"$SANDBOX/devf.v4rest"
-tail -6 "$DEVF" >"$SANDBOX/devf.added"
-check "  updated: the table's version, the two lines at the end, each under a comment naming my FEX, its issue and unplayed, the rest as it was" \
-  eval '[ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && same "$SANDBOX/devf.v4rest" "$SANDBOX/devf.v5" && [ -z "$(sed -n 1p "$SANDBOX/devf.added")" ] && sed -n 2p "$SANDBOX/devf.added" | grep "^# my FEX (#161), unplayed: " >/dev/null && [ "$(sed -n 3p "$SANDBOX/devf.added")" = FEX_DISPATCHERL1LOOKUP=1 ] && [ -z "$(sed -n 4p "$SANDBOX/devf.added")" ] && sed -n 5p "$SANDBOX/devf.added" | grep "^# my FEX (#162), unplayed: " >/dev/null && [ "$(sed -n 6p "$SANDBOX/devf.added")" = FEX_ENTRYHEADERLOOKUP=1 ]'
+sed 1d "$DEVF" >"$SANDBOX/devf.v5"
+check "  updated: the table's version, the rest as it was" \
+  eval '[ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && same "$SANDBOX/devf.v4rest" "$SANDBOX/devf.v5"'
 # A file at version 5, before version 6's rows (#164, #165, #118, jdrly/dxmt#265): the five added
 # at the end, on, each under its comment, and nothing else changes. Then FEX_HOSTFEATURES: a line of
 # mine about something else (enableafp) still gets disableavx added; one that already says enableavx,
@@ -3255,7 +3246,7 @@ drop_rows "$DEVF" FEX_LEA32BITADDS FEX_SIGNEXTENDINGLOADS FEX_ENTRYCOMPILELOCK F
 cp "$SANDBOX/devf.v5old" "$DEVF"
 GW2_ON_MAC_DRY_RUN=1 dg play >"$SANDBOX/v5play.txt" 2>&1
 check "a file at version 5: Play would add the five lines of version 6 (dry run)" \
-  eval '[ "$DEVVER" = 10 ] && [ "$(grep -c -e "^FEX_LEA32BITADDS=" -e "^FEX_HOSTFEATURES=" -e "^DXMT_RENAME_TRIM=" "$DEVF")" = 0 ] && grep -qxF "dev-switches.conf: version $DEVVER, switched on: $V5ON; out of the list: $GONE8 $GONE9 $GONE10" "$SANDBOX/v5play.txt"'
+  eval '[ "$DEVVER" = 11 ] && [ "$(grep -c -e "^FEX_LEA32BITADDS=" -e "^FEX_HOSTFEATURES=" -e "^DXMT_RENAME_TRIM=" "$DEVF")" = 0 ] && grep -qxF "dev-switches.conf: version $DEVVER, switched on: $V5ON; out of the list: $GONE8 $GONE9 $GONE10 $GONE11" "$SANDBOX/v5play.txt"'
 dg repair >/dev/null 2>&1
 n=$(wc -l <"$DEVF" | tr -d ' ')
 awk -v n="$n" 'NR > 1 && NR <= n - 15' "$DEVF" >"$SANDBOX/devf.v5new"
@@ -3266,11 +3257,11 @@ check "  updated: the table's version, the five lines at the end, each under a c
 v5_with() { { cat "$SANDBOX/devf.v5old"; echo "$1"; } >"$DEVF"; GW2_ON_MAC_DRY_RUN=1 dg play >"$SANDBOX/v5play.txt" 2>&1; dg repair >/dev/null 2>&1; }
 v5_with FEX_HOSTFEATURES=enableafp
 check "  a version-5 file with a FEX_HOSTFEATURES=enableafp line of mine: disableavx added at the end all the same, mine kept" \
-  eval 'grep -qxF "dev-switches.conf: version $DEVVER, switched on: $V5ON; out of the list: $GONE8 $GONE9 $GONE10" "$SANDBOX/v5play.txt" && grep -qx FEX_HOSTFEATURES=enableafp "$DEVF" && [ "$(sed -n "/^FEX_HOSTFEATURES=disableavx\$/=" "$DEVF")" -gt "$(sed -n "/^FEX_HOSTFEATURES=enableafp\$/=" "$DEVF")" ]'
+  eval 'grep -qxF "dev-switches.conf: version $DEVVER, switched on: $V5ON; out of the list: $GONE8 $GONE9 $GONE10 $GONE11" "$SANDBOX/v5play.txt" && grep -qx FEX_HOSTFEATURES=enableafp "$DEVF" && [ "$(sed -n "/^FEX_HOSTFEATURES=disableavx\$/=" "$DEVF")" -gt "$(sed -n "/^FEX_HOSTFEATURES=enableafp\$/=" "$DEVF")" ]'
 for hand in FEX_HOSTFEATURES=enableavx,enableafp '#FEX_HOSTFEATURES=disableavx'; do
   v5_with "$hand"
   check "  a version-5 file with $hand: the other four added, no FEX_HOSTFEATURES line" \
-    eval 'grep -qxF "dev-switches.conf: version $DEVVER, switched on: FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1 FEX_ENTRYCOMPILELOCK=1 DXMT_RENAME_TRIM=600; out of the list: $GONE8 $GONE9 $GONE10" "$SANDBOX/v5play.txt" && [ "$(grep -c "FEX_HOSTFEATURES=" "$DEVF")" = 1 ] && grep -qxF "$hand" "$DEVF"'
+    eval 'grep -qxF "dev-switches.conf: version $DEVVER, switched on: FEX_LEA32BITADDS=1 FEX_SIGNEXTENDINGLOADS=1 FEX_ENTRYCOMPILELOCK=1 DXMT_RENAME_TRIM=600; out of the list: $GONE8 $GONE9 $GONE10 $GONE11" "$SANDBOX/v5play.txt" && [ "$(grep -c "FEX_HOSTFEATURES=" "$DEVF")" = 1 ] && grep -qxF "$hand" "$DEVF"'
 done
 # A file at version 9, before version 10's rows (jdrly/dxmt#324, #316, #314): the four added at
 # the end, on, each under its comment, and nothing else changes. With one of them commented out in
@@ -3279,7 +3270,7 @@ drop_rows "$SANDBOX/devf.full" DXMT_PRESENT_SKIP_NIL DXMT_DRAIN_SPLITS DXMT_REFR
 cp "$SANDBOX/devf.v9old" "$DEVF"
 GW2_ON_MAC_DRY_RUN=1 dg play >"$SANDBOX/v9play.txt" 2>&1
 check "a file at version 9: Play would add the four lines of version 10 and say DXMT_MTL4_SHOWN_WAIT=write left the list (dry run)" \
-  eval '[ "$(grep -c -e "^DXMT_PRESENT_SKIP_NIL=" -e "^DXMT_DRAIN_SPLITS=" -e "^DXMT_REFRESH_REQUERY=" -e "^DXMT_STEADY_SLEEP=" "$DEVF")" = 0 ] && grep -qxF "dev-switches.conf: version $DEVVER, switched on: $V10ON; out of the list: $GONE10" "$SANDBOX/v9play.txt"'
+  eval '[ "$(grep -c -e "^DXMT_PRESENT_SKIP_NIL=" -e "^DXMT_DRAIN_SPLITS=" -e "^DXMT_REFRESH_REQUERY=" -e "^DXMT_STEADY_SLEEP=" "$DEVF")" = 0 ] && grep -qxF "dev-switches.conf: version $DEVVER, switched on: $V10ON; out of the list: $GONE10 $GONE11" "$SANDBOX/v9play.txt"'
 dg repair >/dev/null 2>&1
 n=$(wc -l <"$DEVF" | tr -d ' ')
 awk -v n="$n" 'NR > 1 && NR <= n - 12' "$DEVF" >"$SANDBOX/devf.v9new"
@@ -3292,7 +3283,7 @@ GW2_ON_MAC_DRY_RUN=1 dg play >"$SANDBOX/v9play.txt" 2>&1
 dg repair >/dev/null 2>&1
 dev_files
 check "  a version-9 file with #DXMT_DRAIN_SPLITS=1: the other three added, the line still commented out, and not in the rule or status" \
-  eval 'grep -qxF "dev-switches.conf: version $DEVVER, switched on: DXMT_PRESENT_SKIP_NIL=1 DXMT_REFRESH_REQUERY=1 DXMT_STEADY_SLEEP=1; out of the list: $GONE10" "$SANDBOX/v9play.txt" && [ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && [ "$(grep -c DXMT_DRAIN_SPLITS "$DEVF")" = 1 ] && grep -qx "#DXMT_DRAIN_SPLITS=1" "$DEVF" && ! grep -q DXMT_DRAIN_SPLITS "$SANDBOX/dev-rules.txt" "$SANDBOX/dev-status.txt"'
+  eval 'grep -qxF "dev-switches.conf: version $DEVVER, switched on: DXMT_PRESENT_SKIP_NIL=1 DXMT_REFRESH_REQUERY=1 DXMT_STEADY_SLEEP=1; out of the list: $GONE10 $GONE11" "$SANDBOX/v9play.txt" && [ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && [ "$(grep -c DXMT_DRAIN_SPLITS "$DEVF")" = 1 ] && grep -qx "#DXMT_DRAIN_SPLITS=1" "$DEVF" && ! grep -q DXMT_DRAIN_SPLITS "$SANDBOX/dev-rules.txt" "$SANDBOX/dev-status.txt"'
 cp "$SANDBOX/devf.full" "$DEVF"
 # A file at version 2 or 1: nothing is added, since version 3's DXMT_MTL4_ALLOCATOR_POOL left the
 # table at version 9 and the file names every later row. Play says which lines left the list.
@@ -3301,7 +3292,7 @@ for old in 2 1; do
   sed 1d "$DEVF" >"$SANDBOX/devf.v$old"
   out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
   check "a file at version $old: Play would switch nothing on and say what left the list (dry run)" \
-    eval '[ "$DEVVER" = 10 ] && echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: DXMT_MTL4_PRESENT=mtl3 $GONE8 $GONE9 $GONE10"'
+    eval '[ "$DEVVER" = 11 ] && echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: DXMT_MTL4_PRESENT=mtl3 $GONE8 $GONE9 $GONE10 $GONE11"'
   dg repair >/dev/null 2>&1
   sed 1d "$DEVF" >"$SANDBOX/devf.v${old}new"
   check "  updated: the table's version, the rest as it was" \
@@ -3319,7 +3310,7 @@ v3_present() { # <line>: the file as a version-3 build would have it, <line> las
 v3_present DXMT_MTL4_PRESENT=mtl3
 out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
 check "a file at version 3 with DXMT_MTL4_PRESENT=mtl3: Play would switch nothing on and say it left the list (dry run)" \
-  eval 'echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: DXMT_MTL4_PRESENT=mtl3 $GONE8 $GONE9 $GONE10"'
+  eval 'echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: DXMT_MTL4_PRESENT=mtl3 $GONE8 $GONE9 $GONE10 $GONE11"'
 dg repair >/dev/null 2>&1
 check "  updated: the line, its comment and the empty line above them gone, the table's version, the rest as it was" same "$DEVF" "$SANDBOX/devf.now"
 v3_present DXMT_MTL4_PRESENT=done
@@ -3358,7 +3349,7 @@ v7_gone() { # <the DXMT_PRESENT_QUEUE line> <the DXMT_PSO_GENERATIONS line>
 v7_gone DXMT_PRESENT_QUEUE=pace DXMT_PSO_GENERATIONS=1
 out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
 check "a file at version 7 with the PSO archive's lines and DXMT_PRESENT_QUEUE=pace: Play would switch nothing on and say they left the list (dry run)" \
-  eval 'echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: $GONE8 $GONE9 $GONE10"'
+  eval 'echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: $GONE8 $GONE9 $GONE10 $GONE11"'
 dg repair >/dev/null 2>&1
 check "  updated: the three lines, their comments and the empty lines above them gone, the table's version, the rest as it was" same "$DEVF" "$SANDBOX/devf.now8"
 v7_gone DXMT_PRESENT_QUEUE=two '#DXMT_PSO_GENERATIONS=1'
@@ -3382,7 +3373,7 @@ v8_gone() { # <the DXMT_MTL4_ALLOCATOR_POOL line>
 v8_gone DXMT_MTL4_ALLOCATOR_POOL=1
 out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
 check "a file at version 8 with the three Metal 4 lines: Play would switch nothing on and say they left the list (dry run)" \
-  eval 'echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: $GONE9 $GONE10"'
+  eval 'echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: $GONE9 $GONE10 $GONE11"'
 dg repair >/dev/null 2>&1
 check "  updated: the three lines, their comments and the empty lines above them gone, the table's version, the rest as it was" same "$DEVF" "$SANDBOX/devf.now9"
 v8_gone '#DXMT_MTL4_ALLOCATOR_POOL=1'
@@ -3403,7 +3394,7 @@ v9_gone() { # <the DXMT_MTL4_SHOWN_WAIT line>
 v9_gone DXMT_MTL4_SHOWN_WAIT=write
 out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
 check "a file at version 9 with DXMT_MTL4_SHOWN_WAIT=write: Play would switch nothing on and say it left the list (dry run)" \
-  eval 'echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: $GONE10"'
+  eval 'echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: $GONE10 $GONE11"'
 dg repair >/dev/null 2>&1
 check "  updated: the line, its comment and the empty line above them gone, the table's version, the rest as it was" same "$DEVF" "$SANDBOX/devf.now10"
 v9_gone DXMT_MTL4_SHOWN_WAIT=next
@@ -3415,6 +3406,29 @@ dg repair >/dev/null 2>&1
 check "  commented out: DXMT_MTL4_SHOWN_WAIT=next in its place under a comment saying why" \
   eval '[ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && [ "$(tail -1 "$DEVF")" = DXMT_MTL4_SHOWN_WAIT=next ] && tail -2 "$DEVF" | head -1 | grep -q "^# Commented out before version 10\. DXMT_MTL4_SHOWN_WAIT=write is on without this line now, so this keeps it off\." && ! grep -qx "#DXMT_MTL4_SHOWN_WAIT=write" "$DEVF"'
 cp "$SANDBOX/devf.now10" "$DEVF"
+# The table (version 11 took FEX_DISPATCHERL1LOOKUP=1 and FEX_ENTRYHEADERLOOKUP=1 out: my FEX has
+# both on by default, #266) over the file of a build at version 10, which has them under the
+# comments that build wrote: as written, each line and its comment go; commented out, a line
+# becomes NAME=0 under a comment saying why.
+cp "$DEVF" "$SANDBOX/devf.now11"
+v10_gone() { # <the FEX_ENTRYHEADERLOOKUP line>
+  { echo version=10; sed 1d "$SANDBOX/devf.now11"; echo
+    echo "# my FEX (#161), unplayed: the dispatcher looks in the thread's L1 before it leaves for the lookup in C++"
+    echo "FEX_DISPATCHERL1LOOKUP=1"; echo
+    echo "# my FEX (#162), unplayed: a block's entry stores nothing, and faults, suspends and self-modifying code find the block from the host PC. Stays out while the sampler can run (WINE_HEAT_PROF or WINE_HEAT_CONTROL), which reads what the entries stored."
+    echo "$1"; } >"$DEVF"
+}
+v10_gone FEX_ENTRYHEADERLOOKUP=1
+out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
+check "a file at version 10 with my FEX's two lookup lines: Play would switch nothing on and say they left the list (dry run)" \
+  eval 'echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: $GONE11"'
+dg repair >/dev/null 2>&1
+check "  updated: both lines, their comments and the empty lines above them gone, the table's version, the rest as it was" same "$DEVF" "$SANDBOX/devf.now11"
+v10_gone '#FEX_ENTRYHEADERLOOKUP=1'
+dg repair >/dev/null 2>&1
+check "  commented out: FEX_ENTRYHEADERLOOKUP=0 in its place under a comment saying why, FEX_DISPATCHERL1LOOKUP gone" \
+  eval '[ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && [ "$(tail -1 "$DEVF")" = FEX_ENTRYHEADERLOOKUP=0 ] && tail -2 "$DEVF" | head -1 | grep -q "^# Commented out before version 11\. FEX_ENTRYHEADERLOOKUP=1 is on without this line now, so this keeps it off\." && ! grep -q "^FEX_DISPATCHERL1LOOKUP=" "$DEVF"'
+cp "$SANDBOX/devf.now11" "$DEVF"
 
 # A release: no file, its defaults; a file there anyway changes nothing
 out=$(rg install steam 2>&1) && rc=0 || rc=$?
@@ -3433,6 +3447,19 @@ cp "$DEVF" "$RDEVF"
 check "  dev-switches.conf there by hand: the rules, status and a dry run of Play don't read it" \
   eval '[ "$(rg rules)" = "$rules_before" ] && [ -z "$(rg status | sed -n "s/^dev_switches=//p")" ] && ! GW2_ON_MAC_DRY_RUN=1 rg play 2>&1 | grep -q -e MY_OWN_SWITCH -e "dev-switches.conf"'
 rm -f "$RDEVF"
+# (the sampler in a release too: my FEX chosen, its record naming FEX_ENTRYHEADERLOOKUP, and
+# WINE_HEAT_PROF=on in compatdb.local; then all back)
+if fexb; then
+  rg set fex mine >/dev/null 2>&1
+  dev_switches_line fex FEX_INITIALCODEBUFFERMB FEX_ENTRYHEADERLOOKUP
+  printf 'exe=Gw2-64.exe;env=WINE_HEAT_PROF=on\n' >"$RAD/compatdb.local"
+  rg rules >"$SANDBOX/rel-rules.txt" 2>&1
+  check "  with my FEX and WINE_HEAT_PROF=on in compatdb.local: FEX_ENTRYHEADERLOOKUP=0 in the game's rule, as in a development build" \
+    eval 'sed -n 1p "$SANDBOX/rel-rules.txt" | grep -qE ";env=FEX_ENTRYHEADERLOOKUP=0\$"'
+  rm -f "$RAD/compatdb.local"
+  dev_switches_line fex FEX_INITIALCODEBUFFERMB
+  rg set fex engine >/dev/null 2>&1
+fi
 # The release's install, rows off and no file, updated by a development build
 rg set rawmouse off >/dev/null
 out=$(dgr repair 2>&1)
