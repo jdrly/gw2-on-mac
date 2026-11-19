@@ -4960,6 +4960,7 @@ install_bottle() {
     say "The game's bottle is there (the game and its settings in it are kept)"
   fi
   [ -f "$SETTINGS" ] || CREATED="$CREATED settings.conf"
+  [ -f "$DXMT_CONF" ] || CREATED="$CREATED dxmt.conf"
   [ -z "$DEV_ON" ] || [ -f "$DEV_FILE" ] || CREATED="$CREATED dev-switches.conf"
   dev_update
   write_settings
