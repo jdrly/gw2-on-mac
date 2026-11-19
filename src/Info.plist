@@ -36,7 +36,7 @@
 	<!-- The macOS the app opens on. The macOS the engine needs is src/gw2om.sh's MACOS_MIN, and the
 	     update feed's item names that one (scripts/release.sh), not this. -->
 	<key>LSMinimumSystemVersion</key>
-	<string>26.4</string>
+	<string>26.0</string>
 	<key>NSDesktopFolderUsageDescription</key>
 	<string>Collect Logs saves its zip file to your Desktop.</string>
 	<key>NSHighResolutionCapable</key>

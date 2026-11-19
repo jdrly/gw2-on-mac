@@ -142,7 +142,8 @@ final class Installer {
   // dropped (checked by gw2om.sh check-setup)
   var route: Route = Route(rawValue: UserDefaults.standard.string(forKey: "route") ?? "") ?? .steam {
     didSet {
-      UserDefaults.standard.set(route.rawValue, forKey: "route")
+      // (kept only once status says this Mac runs the engine: nothing writes before that)
+      if macosChecked { UserDefaults.standard.set(route.rawValue, forKey: "route") }
       if route == .existing && oldValue != .existing { scanGames() }
     }
   }
@@ -172,6 +173,9 @@ final class Installer {
   var sessionEnded = Date.distantPast
   // an operation has ended (a held app update may go ahead)
   var onIdle: (() -> Void)?
+  // the first status, before the window and the menus read it (GW2onMacApp starts Sparkle there)
+  // (with whether this Mac runs the engine, status macos_ok=yes)
+  var onFirstStatus: ((Bool) -> Void)?
 
   private var process: Process?
   let script = Brand.resources.appendingPathComponent("gw2om.sh")
@@ -186,6 +190,12 @@ final class Installer {
   var isBusy: Bool { isOperating }
   var loaded: Bool { !status.isEmpty }
   var macosOK: Bool { status["macos_ok"] != "no" }
+  // Below the engine's macOS (status macos_ok=no) the app opens only to show the popup that sends
+  // the player to the last 0.1.x (RollbackSheet's gate): no move, no install, no Sparkle, and the
+  // window calls nothing but status (docs/adr/0021)
+  var gated: Bool { status["macos_ok"] == "no" }
+  // status has said this Mac runs the engine: what writes (Collect Logs) waits for it
+  var macosChecked: Bool { status["macos_ok"] == "yes" }
   var appleSilicon: Bool { status["arch"].map { $0 == "arm64" } ?? true }
   // the setup (engine, bottle and graphics) is in place
   var installed: Bool { status["installed"] == "yes" }
@@ -299,7 +309,10 @@ final class Installer {
   }
 
   private func applyStatus(_ values: [String: String]) {
+    // (a status without macos_ok, from a backend that failed, waits for the next one)
+    if let first = onFirstStatus, let ok = values["macos_ok"] { onFirstStatus = nil; first(ok == "yes") }
     status = values
+    guard values["macos_ok"] != "no" else { return }
     // a session runs (the window opened while the game starts or runs, or Steam closes after it):
     // follow it. (Not for Steam alone, which may just idle after a session; nor right after a
     // session ended.)
@@ -786,10 +799,11 @@ struct AppCommands: Commands {
         openWindow(id: "settings")
       }
       .keyboardShortcut(",")
-      // (before an install too while 0.1 has one: Troubleshooting's Start fresh)
-      .disabled(!installer.installed && installer.status["old_install"] != "yes")
+      // (before an install too while 0.1 has one: Troubleshooting's Start fresh; never below the
+      // engine's macOS)
+      .disabled(installer.gated || !installer.installed && installer.status["old_install"] != "yes")
       Button(logs.busy ? "Collecting Logs…" : "Collect Logs…") { logs.collect() }
-        .disabled(logs.busy)
+        .disabled(logs.busy || !installer.macosChecked)
     }
     CommandGroup(replacing: .newItem) {}
     CommandGroup(replacing: .help) {
@@ -844,16 +858,23 @@ struct GW2onMacApp: App {
           updates.sheetOpen = { [installer] in installer.sheetOpen }
           updates.closeSheets = { [installer] in installer.closeSheets += 1 }
           installer.onIdle = { [updates] in updates.installerIdle() }
-          updates.start()
+          // (Sparkle once the first status says this Mac runs the engine: below its macOS, no update
+          // check, and Check for Updates… stays disabled; the settings after it, since they set its
+          // automatic checks)
+          installer.onFirstStatus = { [updates, settings] runs in
+            if runs { updates.start() }
+            settings.reload()
+          }
           installer.refresh()
-          settings.reload()
           NSApp.activate()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
           installer.refresh()
         }
         // Settings › Troubleshooting's Collect…
-        .onReceive(NotificationCenter.default.publisher(for: .collectLogs)) { _ in logs.collect() }
+        .onReceive(NotificationCenter.default.publisher(for: .collectLogs)) { _ in
+          if installer.macosChecked { logs.collect() }
+        }
     }
     .windowStyle(.hiddenTitleBar)
     .windowResizability(.contentMinSize)
@@ -870,5 +891,7 @@ struct GW2onMacApp: App {
     .defaultSize(width: SettingsView.designSize.width, height: SettingsView.designSize.height)
     .defaultLaunchBehavior(.suppressed)
     .restorationBehavior(.disabled)
+    // (not in the Window menu: Settings… is the one way in, disabled below the engine's macOS)
+    .commandsRemoved()
   }
 }

@@ -42,6 +42,8 @@ struct MainView: View {
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         RightColumn(installer: installer, actions: actions)
+          // (nothing to choose before status says what this Mac can do)
+          .allowsHitTesting(installer.loaded)
           .frame(width: 392)
       }
       .padding(.top, 6)
@@ -59,6 +61,14 @@ struct MainView: View {
     .sheet(isPresented: $showLogSheet) { LogSheet(installer: installer) }
     .sheet(isPresented: $showRollbackSheet) {
       RollbackSheet(version: installer.rollbackVersion, dmg: installer.rollbackDMG, isPresented: $showRollbackSheet)
+    }
+    // below the engine's macOS: the popup that sends the player to the last 0.1.x, at every start,
+    // with no way past it but Quit
+    .sheet(isPresented: .constant(installer.gated)) {
+      RollbackSheet(version: installer.rollbackVersion, dmg: installer.rollbackDMG, isPresented: .constant(true),
+                    gate: .init(macos: installer.status["macos"] ?? "?", needs: installer.status["macos_min"] ?? "26.4",
+                                appVersion: installer.appVersion))
+        .interactiveDismissDisabled()
     }
     .onChange(of: installer.closeSheets) { _, _ in
       showLogSheet = false

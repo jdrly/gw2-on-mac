@@ -232,8 +232,9 @@ ENGINE_FEX_SO_SHA256=0a3e7ea4b76a3acc634993ec98f2ef7e4d52b3806a871856e8f80809957
 # another wineserver protocol.
 ENGINE_PIN_SHA256=$ENGINE_SHA256
 ENGINE_0_3_1_SHA256=90aff9a897ed0ff9aac44d0e06f0aecd3ee985afb38037f3f915451e51fa974e
-# The loader's entitlements need macOS 26.4 (wine.app's own Info.plist says so too). The update
-# feed's item names this value (scripts/release.sh reads it from this line).
+# The loader's entitlements need macOS 26.4 (wine.app's own Info.plist says so too). The one place
+# that says it: the app itself opens on 26.0 (build.sh) and gates itself below this (macos_gate), and
+# the update feed's item names this value (scripts/release.sh reads it from this line).
 MACOS_MIN=26.4
 # Valve's Steam installer, from Valve's CDN (Valve updates it in place: not pinned, its sha256
 # goes to the log)
@@ -4862,10 +4863,16 @@ on_install_exit() {
   unlock
 }
 
+# macos_gate: below MACOS_MIN, stop (every command that writes, at the dispatcher, before it opens a
+# log; and preflight)
+macos_gate() {
+  macos_ok || die "$APP_NAME needs macOS $MACOS_MIN or later for its Wine engine. This Mac has macOS $(macos_version). Update macOS in System Settings › General › Software Update, then try again."
+}
+
 # preflight [import]: (an import checks the space its copy needs itself)
 preflight() {
   [ "$(uname -m)" = arm64 ] || die "$APP_NAME needs a Mac with Apple silicon."
-  macos_ok || die "$APP_NAME needs macOS $MACOS_MIN or later for its Wine engine. This Mac has macOS $(macos_version). Update macOS in System Settings › General › Software Update, then try again."
+  macos_gate
   check_not_running
   local avail
   avail=$(free_kb)
@@ -6149,6 +6156,14 @@ cmd_fetch_engine() {
   fetch "$ENGINE_URL" "$ENGINE_SHA256" "$ENGINE_SIZE" "Wine engine" "$ENGINE_API_URL"
   echo "@done $FETCHED"
 }
+
+# The app opens on macOS 26.0 so it can say why it can't run there (docs/adr/0021). Below MACOS_MIN
+# only the commands that just read run: nothing of this app's folders or of 0.1.x's is written, not
+# even a log, and status's recover is refused too.
+case "${1:-}" in
+  status|session-status|settings|scan|check-game|env|rules) ;;
+  *) macos_gate ;;
+esac
 
 case "${1:-}" in
   status) status ;;

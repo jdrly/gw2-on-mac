@@ -46,9 +46,11 @@ is for building, testing and releasing the app.
 
 ## What you need
 
-- A Mac with Apple silicon and macOS 26.4 or later. The engine's loader needs 26.4, and the install
-  refuses to start on an earlier macOS, naming both versions. On macOS 26.0 to 26.3, GW2 on Mac
-  0.1.x offers no update and stays as it is.
+- A Mac with Apple silicon and macOS 26.4 or later. The engine's loader needs 26.4. On macOS 26.0
+  to 26.3, take [GW2 on Mac 0.1.4](https://github.com/jdrly/gw2-on-mac/releases/tag/v0.1.4), the
+  last 0.1.x, which runs there. 0.1.x offers no update there and stays as it is. If you open 0.2
+  there anyway, it shows one window that says so and downloads 0.1.4's DMG. It changes nothing on
+  the Mac, an install of 0.1.x included, and the window closes only with Quit.
 - No Rosetta. Wine, its Mac driver and DXMT run as arm64 code, and FEX runs the game's and Steam's
   x86_64 code inside Wine.
 - About 75 GB of free space for the game, plus about 3 GB for the engine and Steam. The install
@@ -1385,7 +1387,9 @@ and how long `vmmap` took, which is the longest the game can have stood still.
 
 ## Building
 
-You need Xcode 27, for the macOS 27 SDK. The app targets macOS 26.4, as the engine does.
+You need Xcode 27, for the macOS 27 SDK. The app targets macOS 26.0, as 0.1.x does, so that it
+opens below the engine's 26.4 and says why it can't run there (ADR 0021). The engine's minimum is
+`MACOS_MIN` in `src/gw2om.sh`, and nothing else says 26.4.
 
 ```sh
 scripts/stage-components.sh    # copy my DXMT fork, my ntdll.so, winemac.so and FEX and the addon into prebuilt/

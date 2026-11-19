@@ -922,12 +922,81 @@ struct InterfaceWarning: View {
 // After Rollback: how to play on GW2 on Mac 0.1.x again. Download opens the release's DMG in the
 // browser, which downloads it (0.1.x's releases are notarized); version and URL come from
 // gw2om.sh's LAST_01, the last 0.1.x release.
+// With a gate (below the engine's macOS, Installer.gated): why this Mac needs that release, with
+// Quit and Download, then after Download the steps to install it (docs/adr/0021).
 struct RollbackSheet: View {
+  // this Mac's macOS, the engine's minimum (gw2om.sh's MACOS_MIN) and this app's version
+  struct Gate { let macos: String; let needs: String; let appVersion: String }
+
   let version: String
   let dmg: URL?
   @Binding var isPresented: Bool
+  var gate: Gate?
+  @State private var downloaded: Bool
 
-  var body: some View {
+  init(version: String, dmg: URL?, isPresented: Binding<Bool>, gate: Gate? = nil, downloaded: Bool = false) {
+    self.version = version
+    self.dmg = dmg
+    _isPresented = isPresented
+    self.gate = gate
+    _downloaded = State(initialValue: downloaded)
+  }
+
+  @ViewBuilder var body: some View {
+    if let gate { gateBody(gate) } else { rollbackBody }
+  }
+
+  private func gateBody(_ gate: Gate) -> some View {
+    VStack(alignment: .leading, spacing: 14) {
+      HStack(spacing: 10) {
+        LucideIcon(name: downloaded ? "download" : "triangle-alert", size: 22).foregroundStyle(Brand.accent)
+        Text(downloaded ? "Install \(appName) \(version)" : "This Mac needs \(appName) \(version)")
+          .font(.head(19)).foregroundStyle(Brand.fg)
+      }
+      VStack(alignment: .leading, spacing: 8) {
+        if downloaded {
+          paragraph("Your browser is downloading \(dmg?.lastPathComponent ?? "\(appName) \(version)").")
+          ForEach(Array(["Quit this app.", "Open the downloaded file.",
+                         "Drag \(appName) to Applications and choose Replace.",
+                         "Open \(appName) from Applications."].enumerated()), id: \.offset) { n, text in
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+              Text("\(n + 1).").font(.body(13, .semibold)).foregroundStyle(Brand.accent).frame(width: 16, alignment: .trailing)
+              Text(text).font(.body(13)).bodyBox(13).foregroundStyle(Brand.fg2).fixedSize(horizontal: false, vertical: true)
+            }
+          }
+        } else {
+          paragraph("\(appName) \(gate.appVersion) needs macOS \(gate.needs) or later for its Wine engine, and this Mac "
+                    + "has macOS \(gate.macos). \(appName) \(version) runs on this macOS and plays the same game.")
+          paragraph("You can also update macOS in System Settings › General › Software Update. This version works from "
+                    + "macOS \(gate.needs).")
+        }
+      }
+      HStack {
+        Spacer()
+        if downloaded {
+          Button("Download again") { if let dmg { NSWorkspace.shared.open(dmg) } }
+          Button("Quit") { NSApp.terminate(nil) }.keyboardShortcut(.defaultAction).tint(Brand.accent)
+        } else {
+          Button("Quit") { NSApp.terminate(nil) }
+          Button("Download \(version)") {
+            if let dmg { NSWorkspace.shared.open(dmg) }
+            downloaded = true
+          }
+          .keyboardShortcut(.defaultAction).tint(Brand.accent)
+          .disabled(dmg == nil)
+        }
+      }
+    }
+    .padding(22)
+    .frame(width: 460)
+    .background(Brand.bg)
+  }
+
+  private func paragraph(_ text: String) -> some View {
+    Text(text).font(.body(13)).bodyBox(13).foregroundStyle(Brand.fg2).fixedSize(horizontal: false, vertical: true)
+  }
+
+  private var rollbackBody: some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack(spacing: 10) {
         LucideIcon(name: "undo-2", size: 22).foregroundStyle(Brand.accent)
