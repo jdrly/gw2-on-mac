@@ -218,7 +218,7 @@ func installer(_ state: String) -> Installer {
   case "imported":
     // Ready after an import (the summary under the panel)
     st["origin"] = "import"
-    i.phase = .succeeded(.install, "Guild Wars 2 is ready: its files were cloned from CrossOver · Steam (no extra space), "
+    i.phase = .succeeded(.install, "Guild Wars 2 is ready: its files were cloned from CrossOver · Steam, "
                          + "with your game settings. Steam may check the files at the first Play. Press Play.")
   case "uninstalling":
     i.operation = .uninstall
