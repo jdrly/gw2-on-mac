@@ -755,7 +755,7 @@ dev_version() {
 }
 # dev_dropped <key>: a release build, and <key> a row of DEV_ROWS that a development build set
 # (settings.conf has a dev_version= line)
-dev_dropped() { [ "$CHANNEL" != dev ] && in_list "$1" "$DEV_ROW_KEYS" && [ "$(dev_version)" != 0 ]; }
+dev_dropped() { [ "$CHANNEL" != dev ] && in_list "$1" "$DEV_ROW_KEYS" && grep -q '^dev_version=' "$SETTINGS" 2>/dev/null; }
 # dev_row <key>: the value DEV_ROWS gives <key> while settings.conf is older than its row, or
 # nothing
 dev_row() {

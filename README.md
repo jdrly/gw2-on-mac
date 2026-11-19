@@ -196,7 +196,10 @@ by a line `dev_version=` in `settings.conf` (`DEV_ROWS` in `gw2om.sh`, read the 
 `SETTINGS_RESETS` is), it turns on *Job wakes*, *Event pool*, *Faster locks*, *Launcher frames*,
 *Shader warming*, *MetalFX for Subsample*, *Raw mouse-look* and `fex=mine`, which takes effect in a
 build that carries my FEX. A row I turn off afterwards stays off. The switches without a row are in
-`dev-switches.conf` ([The game's environment](#the-games-environment)). A release reads neither.
+`dev-switches.conf` ([The game's environment](#the-games-environment)). A release reads neither: a
+dev build and the release share the folders, so a release that finds the `dev_version=` line reads
+those rows at their defaults, and its next write drops the line. A dev build after it turns them on
+again.
 
 Four keys have no row: `dxmt`, `wine` and `macdrv` pick my DXMT fork, my `ntdll.so` and my
 `winemac.so` (`fork`, `mine`, `mine`) or the engine's own (`engine`), and `fex` picks my FEX
@@ -1530,22 +1533,23 @@ delta updates and checks it with `scripts/check-appcast.swift`.
 - The appcast's item names the app's `LSMinimumSystemVersion` as `sparkle:minimumSystemVersion`,
   26.4 on this branch, or the script stops. Sparkle on an older macOS then offers nothing.
 
-**The update from 0.1.x, tested on my Mac.** `release.sh` builds a feed only for a plain version,
+**The update from 0.1.x, a test still to run on my Mac.** `release.sh` builds a feed only for a plain version,
 never for `X.Y.Z-dev.N`, so the test build is 0.2.0 itself, with the feed and key 0.1.x has, its
 feed served from `127.0.0.1` and never uploaded. With 0.1.4's DMG in
-`release/updates/`, the feed gets a delta from it:
+`release/updates/`, the feed gets a delta from it, or the script says it made none:
 
 ```sh
 key="$(plutil -extract SUPublicEDKey raw "/Applications/GW2 on Mac.app/Contents/Info.plist")"
 GW2_ON_MAC_VERSION=0.2.0 GW2_ON_MAC_ED_PUBLIC_KEY="$key" \
   GW2_ON_MAC_FEED_URL=https://github.com/jdrly/gw2-on-mac/releases/latest/download/appcast.xml ./build.sh
 gh release download v0.1.4 -R jdrly/gw2-on-mac -p 'GW2-on-Mac-0.1.4.dmg' -D release/updates
-DOWNLOAD_URL_PREFIX=http://127.0.0.1:8000/ RELEASE_NOTES=<notes.md> scripts/release.sh --no-release
-(cd release/0.2.0 && python3 -m http.server 8000 --bind 127.0.0.1)
+DOWNLOAD_URL_PREFIX=http://127.0.0.1:8000/ RELEASE_NOTES=work/0.2.0-test.md scripts/release.sh --no-release
+(cd release/0.2.0 && python3 -m http.server 8000 --bind 127.0.0.1)   # in a second window, left running
 defaults write cz.jandrly.gw2onmac GW2UpdateFeedURL http://127.0.0.1:8000/appcast.xml
 ```
 
-Then *Check for Updates…* in 0.1.4. Afterwards `defaults delete cz.jandrly.gw2onmac
+`work/0.2.0-test.md` is the notes the update window shows. Then I quit 0.1.4, open it again so it
+reads the test feed, and click *Check for Updates…*. Afterwards `defaults delete cz.jandrly.gw2onmac
 GW2UpdateFeedURL`, because 0.2 reads the same domain.
 - `--dev` makes `GW2-on-Mac-<version>.dmg` with `GW2 on Mac.app` in it and publishes
   it as a GitHub pre-release with no feed, so `releases/latest` stays on 0.1.x. A release
