@@ -3796,13 +3796,15 @@ addons_links() {
 # addons_restore <game dir> <folder> <root>: ADDON_FILES as addons_save found them: each file put
 # back (cp -p: its content, mode and time), one that wasn't there removed, a link left as it is;
 # then the folders of ADDON_DIRS that weren't there, if empty. Only inside <root>, the renamed
-# folder, once links are resolved: nothing if the game folder leads out of it.
+# folder, once links are resolved. A game folder that leads out of it gets nothing, and that is no
+# failure: the move and Move in refuse such a folder (move_links, move_inside) before their first
+# write into it, so nothing of theirs is there to undo.
 addons_restore() {
   local g=$1 d=$2 r f
   if [ -n "$DRY" ]; then echo "[dry-run] put back the addon files of $g from $d"; return 0; fi
   [ -f "$d/list" ] || return 1
   r=$(cd "$3" 2>/dev/null && pwd -P) || return 1
-  case "$(cd "$g" 2>/dev/null && pwd -P)/" in "$r/"*) ;; *) log "$g leads out of $3: its addon files stay as they are"; return 1 ;; esac
+  case "$(cd "$g" 2>/dev/null && pwd -P)/" in "$r/"*) ;; *) log "$g leads out of $3: nothing was written there, and nothing is put back"; return 0 ;; esac
   for f in $ADDON_FILES; do
     if grep -qxF "file $f" "$d/list"; then
       addon_real "$g" "$f" || continue
@@ -5533,7 +5535,8 @@ cmd_play() {
   game_state
   # (an install that waits for Steam's download, a move's too, with no Steam running: Play starts
   # Steam on the game's install page, and the window follows the download)
-  if [ "$(state stage)" = waiting_game ] && [ "$(state route)" = steam ] && [ "$GAME" != yes ] && [ "$(move_game)" != 01 ]; then
+  # (not in a dry run, which shows what a Play of the finished install would do, as before)
+  if [ -z "$DRY" ] && [ "$(state stage)" = waiting_game ] && [ "$(state route)" = steam ] && [ "$GAME" != yes ] && [ "$(move_game)" != 01 ]; then
     # (under the session's lock, as a Rollback takes it: the stage, the route, Steam in this
     # bottle, the game and Wine checked again there. Steam doesn't inherit the lock, which goes once
     # this engine's Wine shows, so a Rollback after it sees Steam running)
