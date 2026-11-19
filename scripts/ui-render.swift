@@ -10,6 +10,7 @@
 //                                                exports, compare-*.png: the design | the render
 
 import AppKit
+import Sparkle
 import SwiftUI
 
 @main
@@ -495,4 +496,52 @@ func renderAll(_ dir: URL, exports: URL?) async {
     write(await render(SettingsView(settings: s), size: SettingsView.designSize, dark: dark),
           dir.appendingPathComponent("settings-interface-reshade-\(name)-\(dark ? "dark" : "light").png"))
   }
+  // The update window when Sparkle finds no update, on macOS 26.3: the usual line, and the one for
+  // a newer version that needs macOS 26.4 (a model check: without the reason "system is too old",
+  // the feed's item or its minimum, the usual line stays)
+  let macOS = OperatingSystemVersion(majorVersion: 26, minorVersion: 3, patchVersion: 0)
+  let usual = UserDriver.notFound(version: "0.1.5", reason: .onLatestVersion, latest: "0.1.5", minimum: "26.0", macOS: macOS)
+  let tooOld = UserDriver.notFound(version: "0.1.5", reason: .systemIsTooOld, latest: "0.2.0", minimum: "26.4", macOS: macOS)
+  let fallbacks = [
+    UserDriver.notFound(version: "0.1.5", reason: nil, latest: "0.2.0", minimum: "26.4", macOS: macOS),
+    UserDriver.notFound(version: "0.1.5", reason: .systemIsTooOld, latest: nil, minimum: "26.4", macOS: macOS),
+    UserDriver.notFound(version: "0.1.5", reason: .systemIsTooOld, latest: "0.2.0", minimum: nil, macOS: macOS),
+    UserDriver.notFound(version: "0.1.5", reason: .systemIsTooOld, latest: "0.2.0", minimum: "", macOS: macOS),
+  ]
+  let patch = UserDriver.notFound(version: "0.1.5", reason: .systemIsTooOld, latest: "0.2.0", minimum: "26.4",
+                                  macOS: OperatingSystemVersion(majorVersion: 26, minorVersion: 3, patchVersion: 1))
+  guard usual.title == nil, usual.message == "GW2 on Mac 0.1.5 is the latest version.",
+        fallbacks.allSatisfy({ $0 == usual }),
+        tooOld.title == "The update needs a newer macOS",
+        tooOld.message == "GW2 on Mac 0.2.0 needs macOS 26.4 or later, and this Mac has macOS 26.3. "
+          + "Version 0.1.5 keeps working here.",
+        patch.message.contains("this Mac has macOS 26.3.1.") else {
+    print("FAIL the update window's no-update line: \(usual), \(tooOld), \(fallbacks), \(patch)")
+    exit(1)
+  }
+  let icon = NSImage(contentsOf: Brand.resources.appendingPathComponent("AppIcon.icns"))
+    ?? NSImage(named: NSImage.applicationIconName)!
+  let updates: [(String, (title: String?, message: String), Bool)] = [
+    ("update-latest-light", usual, false), ("update-too-old-light", tooOld, false), ("update-too-old-dark", tooOld, true)]
+  for (name, shown, dark) in updates {
+    let model = UpdateModel(currentVersion: "0.1.5", icon: icon)
+    model.phase = .upToDate(shown.message)
+    model.upToDateTitle = shown.title
+    model.onAcknowledge = {}
+    // ImageRenderer, not render(): cacheDisplay leaves out the glass button, and the text too on a
+    // view without a background of its own
+    NSApp.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+    let renderer = ImageRenderer(content: UpdateView(model: model)
+      .background(Color(nsColor: .windowBackgroundColor))
+      .environment(\.colorScheme, dark ? .dark : .light))
+    renderer.scale = 2
+    guard let tiff = renderer.nsImage?.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else {
+      print("FAIL the update window \(name) did not render")
+      exit(1)
+    }
+    let size = CGSize(width: rep.pixelsWide / 2, height: rep.pixelsHigh / 2)
+    rep.size = size
+    write(windowChrome(rep, size: size, dark: dark), dir.appendingPathComponent(name + ".png"))
+  }
+  NSApp.appearance = nil
 }
