@@ -3545,8 +3545,11 @@ section "Move GW2 on Mac 0.1's install (install move)"
 # as d3d11.dll or with ReShade, then at ReShade's chain path; the ReShade folder outside the bottle,
 # its ini naming 0.1's folders, and the record of the compiler 0.1 placed.
 OC="$H/Library/Caches/GW2 on Mac"
-# (this app's folder empty, as on a Mac that had only 0.1: the sections before leave files in it)
+# (this app's folder empty, as on a Mac that had only 0.1: the sections before leave files in it;
+# and install.log begun anew, since an import before may have cloned these same 0.1 folders, which
+# no_cp_of must not count against the move)
 rm -rf "$AD"
+: >"$LOGS/install.log"
 O1B="$O1/bottle" O1ST="$O1/bottle/drive_c/Program Files (x86)/Steam" O1U="$O1/bottle/drive_c/users/crossover"
 O1RS="$O1/ReShade"
 winp() { printf 'Z:%s' "$1" | tr / '\\'; }
