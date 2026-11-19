@@ -10,22 +10,10 @@ which have switches for the game. The engine's own DXMT, `ntdll.so` and `winemac
 them, and a setting switches back to each. A build can also carry my build of FEX, which goes in
 only when I choose it from Terminal. It changes nothing you already have installed.
 
-> **This is the `arm64` branch.** It builds GW2 on Mac 0.2, which moves the game to an arm64 Wine
-> engine. 0.1.x runs CrossOver 26.3 under Rosetta with my
-> DXMT fork and my Wine pieces. This app puts my DXMT fork, built for the arm64 engine, into its
-> engine, and my Wine pieces for it: an `ntdll.so` with job wakes, the event pool, the msync fix
-> and fast locks, and a `winemac.so` with the launcher's frame copies. A build made without one of
-> those files leaves the engine's own in place. It is the same app as 0.1.x to macOS and to
-> Sparkle: `GW2 on Mac.app`, bundle id `cz.jandrly.gw2onmac`, 0.1.x's feed, so a 0.1.x install
-> updates to it (ADR 0018). Every build of this branch has that identity, a dev build too, and
-> replaces whatever `GW2 on Mac.app` is in `/Applications`. Its folders in `~/Library` keep their
-> own name, *GW2 on Mac arm64*, and 0.1.x's folders are only ever read: at its first start it moves
-> 0.1.x's install into them ([Moving from GW2 on Mac 0.1](#moving-from-gw2-on-mac-01)). A text that names one of
-> its folders gives the folder's real name. The app's name and file name are `APP_NAME` at the top
-> of `src/gw2om.sh` and `collect-logs.sh` and `appName` in `src/native/App.swift`; the folders'
-> name is `APP_FOLDER` in those two scripts and `session-report.sh`, and `appFolder` in
-> `App.swift`. A dev build has no updates, and 0.1.x stays the release on `main` until 0.2.0 is
-> out. The paths below are this app's.
+0.2 is GW2 on Mac without Rosetta. 0.1.x ran CrossOver 26.3's Wine under Rosetta, and 0.1.x
+installs update to 0.2, which keeps its own folders, named *GW2 on Mac arm64*, and moves 0.1.x's
+install into them at its first start ([Moving from GW2 on Mac 0.1](#moving-from-gw2-on-mac-01),
+ADR 0018).
 
 Website: [gw2onmac.com](https://gw2onmac.com). Download: the
 [latest release](https://github.com/jdrly/gw2-on-mac/releases/latest).
@@ -59,7 +47,10 @@ is for building, testing and releasing the app.
 ## What you need
 
 - A Mac with Apple silicon and macOS 26.4 or later. The engine's loader needs 26.4, and the install
-  refuses to start on an earlier macOS, naming both versions.
+  refuses to start on an earlier macOS, naming both versions. On macOS 26.0 to 26.3, GW2 on Mac
+  0.1.x offers no update and stays as it is.
+- No Rosetta. Wine, its Mac driver and DXMT run as arm64 code, and FEX runs the game's and Steam's
+  x86_64 code inside Wine.
 - About 75 GB of free space for the game, plus about 3 GB for the engine and Steam. The install
   refuses to start under 3 GB and warns under 75 GB.
 - Guild Wars 2 on Steam, or an ArenaNet account.
@@ -174,9 +165,6 @@ Steam may ask you to sign in once in the new bottle. I haven't tested yet whethe
 login survives the move, so the first Play after it shows Steam's window, even with *Start Steam in
 the background* on.
 
-Going back is 0.1's app from its release page, dragged over this one. It finds its install as it
-was on the day of the move.
-
 *Start fresh* in Settings › Troubleshooting installs anew instead. While the move waits or after it
 failed, it stops the move. After a move it removes the moved install, as Uninstall does, and
 never another install. Either
@@ -187,6 +175,34 @@ Uninstall leaves, so uninstalling a moved install doesn't move 0.1's again.
 The app moves an install when 0.1's folder has its manifest, a bottle and a complete game where
 0.1's state says: in Steam's own library, or in the folder ArenaNet's route used. A game in
 another Steam library isn't moved, and *Game files I already have* can still import it.
+
+## Going back to 0.1.x
+
+The move only reads 0.1.x's folders, so 0.1.x is still there. To go back, download
+[0.1.4's DMG](https://github.com/jdrly/gw2-on-mac/releases/tag/v0.1.4) and drag its GW2 on Mac
+over this one. It finds its engine, bottle, settings, addons and ReShade folder as they were on the
+day of the move.
+
+- What you changed on 0.2 stays on 0.2: graphics settings, key binds, new ReShade presets,
+  arcdps's settings. Your characters and everything else on ArenaNet's servers are the same on
+  both.
+- 0.1.x's copy of the game is as old as the move. Steam patches it at its next start, which
+  downloads the patches since then, not the game.
+- Steam's login in 0.1.x's bottle is as it was. Steam may still ask for it, if signing in from the
+  new bottle ended the old session. I don't know whether it does.
+- 0.1.4 offers 0.2.0 again at every update check. *Skip This Version* ends that.
+- 0.2's folders, *GW2 on Mac arm64*, stay. Delete them by hand with the commands under
+  [Uninstall](#uninstall) if you don't come back.
+
+0.1.x's folders are `GW2 on Mac` in `~/Library/Application Support`, `~/Library/Caches` and
+`~/Library/Logs`, without "arm64". They stay until you delete them, and then the way back is gone:
+
+```sh
+rm -rf ~/Library/"Application Support/GW2 on Mac" ~/Library/Caches/"GW2 on Mac" ~/Library/Logs/"GW2 on Mac"
+```
+
+On the same disk they share most of their space with this app's clones, so deleting them frees only
+what the game patched apart since the move.
 
 ## Playing
 
@@ -534,6 +550,7 @@ nothing in `/Applications` besides itself.
 | `~/Library/Caches/GW2 on Mac arm64/dxmt/Gw2-64.exe/` | the engine's own DXMT's shader cache for the game, where 0.2.0-dev.1 kept it, apart from my fork's, which translates shaders differently. Other processes keep theirs where the engine's DXMT puts it by default | removed, and emptied by *Reset the shader cache* |
 | `~/Library/Caches/GW2 on Mac arm64/reshade/` | ReShade's compiled effects | removed. *Reset the shader cache* empties it too |
 | `~/Library/Logs/GW2 on Mac arm64/` | `install.log`, `wine.log`, DXMT's `Gw2-64_d3d11.log`, `session.env`, the heat logs, and `.lock-claim` for the install lock | kept |
+| `~/Library/Application Support/GW2 on Mac/`, `~/Library/Caches/GW2 on Mac/`, `~/Library/Logs/GW2 on Mac/` | GW2 on Mac 0.1.x's folders, not this app's. The move reads them, and nothing writes them. They are the way back ([Going back to 0.1.x](#going-back-to-01x)) | kept |
 
 In the game folder, `version.dll` and `gw2-ui-scale.ini` exist only while *Larger interface* is on,
 arcdps's `d3d11.dll`, or `addons\arcdps\chain\d3d11.dll` next to ReShade, only while *arcdps* is
@@ -585,7 +602,7 @@ Storage, stays where it is.
   of the game on the same Mac. Caches an older build left in
   `$(getconf DARWIN_USER_CACHE_DIR)dxmt/Gw2-64.exe/` stay where they are, since another setup may
   use them. Your first sessions build the app's cache from scratch.
-- Blish HUD and macOS 28's Rosetta changes aren't covered.
+- Blish HUD isn't covered.
 - For *Game files I already have*, GameHub's location is a guess. *Choose folder…* always works.
 
 # How it works
@@ -1335,6 +1352,13 @@ On this branch the app bundles five components: my DXMT fork built for the arm64
 `ntdll.so`, my `winemac.so` and my FEX built for it when there is one of each, and the interface
 addon. 0.1.x's Wine pieces stay on
 `main`; `build.sh` doesn't need them and `stage-components.sh` doesn't stage them.
+
+Every build of this branch, a dev build and a release candidate too, is `GW2 on Mac.app` with the
+bundle id `cz.jandrly.gw2onmac`, as 0.1.x is, and replaces whatever `GW2 on Mac.app` is in
+`/Applications`. Keep 0.1.4's DMG at hand. The app's name and file name are `APP_NAME` at the top
+of `src/gw2om.sh` and `collect-logs.sh` and `appName` in `src/native/App.swift`. The folders' name,
+*GW2 on Mac arm64*, is `APP_FOLDER` in those two scripts and `session-report.sh`, and `appFolder`
+in `App.swift`. A text that names one of the folders gives the folder's real name.
 
 **Where DXMT comes from.** The fork's CI builds it for this engine
 ([jdrly/dxmt#182](https://github.com/jdrly/dxmt/issues/182)): `aarch64-windows/` and
