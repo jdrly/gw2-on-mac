@@ -3793,18 +3793,26 @@ addons_links() {
   done
 }
 
+# move_game_real <game dir>: the game folder 0.1.x's install names has no link on the way from the
+# home folder (no_link): what the move writes into it, and what an undo puts back, stays inside the
+# folder that is renamed. Checked before the rename.
+move_game_real() {
+  [ -n "$DRY" ] || no_link "$1" ||
+    die "$1 is a link or reached through one, so $APP_NAME doesn't move this install: what it writes there would reach files outside the folder it moves. Start fresh in Settings › Troubleshooting installs anew."
+}
+
 # addons_restore <game dir> <folder> <root>: ADDON_FILES as addons_save found them: each file put
 # back (cp -p: its content, mode and time), one that wasn't there removed, a link left as it is;
 # then the folders of ADDON_DIRS that weren't there, if empty. Only inside <root>, the renamed
-# folder, once links are resolved. A game folder that leads out of it gets nothing, and that is no
-# failure: the move and Move in refuse such a folder (move_links, move_inside) before their first
-# write into it, so nothing of theirs is there to undo.
+# folder, once links are resolved: a game folder that isn't there, or leads out of it, is a failure.
+# (The move and Move in refuse a game folder reached through a link before they rename anything,
+# move_game_real.)
 addons_restore() {
   local g=$1 d=$2 r f
   if [ -n "$DRY" ]; then echo "[dry-run] put back the addon files of $g from $d"; return 0; fi
   [ -f "$d/list" ] || return 1
   r=$(cd "$3" 2>/dev/null && pwd -P) || return 1
-  case "$(cd "$g" 2>/dev/null && pwd -P)/" in "$r/"*) ;; *) log "$g leads out of $3: nothing was written there, and nothing is put back"; return 0 ;; esac
+  case "$(cd "$g" 2>/dev/null && pwd -P)/" in "$r/"*) ;; *) log "$g isn't there, or leads out of $3: its addon files stay as they are"; return 1 ;; esac
   for f in $ADDON_FILES; do
     if grep -qxF "file $f" "$d/list"; then
       addon_real "$g" "$f" || continue
@@ -4277,6 +4285,7 @@ install_moved() {
   # (the profile's folders are replaced below: the game must not be under them)
   ! path_under "$dst" "$u/AppData" || die "$OLD_LABEL's game folder is inside its profile ($OLD_GAME), so $APP_NAME doesn't move this install. Start fresh in Settings › Troubleshooting installs anew."
   # (the addon files 0.1.x has in the game folder, for a failure and for Rollback)
+  move_game_real "$OLD_GAME"
   addons_links "$OLD_GAME"
   CREATED="$CREATED 0.1-addons"
   addons_save "$OLD_GAME" "$MOVE_ADDONS"
@@ -4368,7 +4377,10 @@ rollback_game() {
   # may have moved it to another library in this app's bottle, and then that holds the only copy)
   [ -n "$DRY" ] || [ -n "$(find "$n" -xdev -type f -iname Gw2.dat -print -quit 2>/dev/null)" ] ||
     die "Guild Wars 2 isn't in the folder that came from $OLD_LABEL any more ($n), so $APP_NAME doesn't give that folder back. Move the game back into $n${g:+/$g} in Steam (Properties › Installed Files › Move install folder), then try again."
-  # (this app's addon files are kept for an undo: none may be a link)
+  # (the game folder the move recorded, there and with no link on the way: 0.1.x's addon files go
+  # back into it. This app's addon files are kept for an undo: none may be a link)
+  [ -n "$DRY" ] || no_link "$n${g:+/$g}" ||
+    die "The game's folder isn't where the move put it ($n${g:+/$g}), or is reached through a link, so $APP_NAME can't put $OLD_LABEL's addon files back. Move the game back there in Steam (Properties › Installed Files › Move install folder), then try again."
   addons_links "$n${g:+/$g}"
   MOVE_MADE=""
   addons_save "$n${g:+/$g}" "$MOVE_SNAP"
@@ -4430,6 +4442,7 @@ cmd_move_in() {
   o=$(record_key old) n=$(record_key new) g=$(record_key game)
   move_session
   move_check "$o" "$n" "$g"
+  move_game_real "$o${g:+/$g}"
   addons_links "$o${g:+/$g}"
   addons_save "$o${g:+/$g}" "$MOVE_ADDONS"
   move_journal move-in "$o" "$n" "$g" "$MOVE_ADDONS"

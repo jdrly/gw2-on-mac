@@ -3782,13 +3782,13 @@ check "a ReShade.ini in the game folder that is a link: refused, nothing left, 0
   eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error .*ReShade.ini is a link, so GW2 on Mac couldn.t put GW2 on Mac 0.1.s addon files back" && nothing_made && o1_same && [ "$(ino "$O1ST")" = "$O1INO" ]'
 rm "$O1GAME/ReShade.ini" && mv "$O1GAME/Mine.ini" "$O1GAME/ReShade.ini"
 O1SNAP=$(o1snap)
-# a game folder that is a link (out of 0.1's bottle): refused once renamed, renamed back, nothing
-# written through it
+# a game folder that is a link (out of 0.1's bottle): refused before the rename, nothing written
+# through it
 mv "$O1GAME" "$SANDBOX/linked-game" && ln -s "$SANDBOX/linked-game" "$O1GAME"
 LSNAP=$(find "$SANDBOX/linked-game" -exec stat -f '%N %z %m %p' {} + | LC_ALL=C sort)
 out=$(g install move 2>&1) && rc=0 || rc=$?
 check "a game folder that is a link: refused, nothing written through it, nothing left" \
-  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error .*Guild Wars 2 is a link to a folder or out of the files the move brought" && nothing_made && [ "$(find "$SANDBOX/linked-game" -exec stat -f "%N %z %m %p" {} + | LC_ALL=C sort)" = "$LSNAP" ]'
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error .*Guild Wars 2 is a link or reached through one, so GW2 on Mac doesn.t move this install" && nothing_made && [ "$(find "$SANDBOX/linked-game" -exec stat -f "%N %z %m %p" {} + | LC_ALL=C sort)" = "$LSNAP" ]'
 rm "$O1GAME" && mv "$SANDBOX/linked-game" "$O1GAME"
 # a link into 0.1's ReShade folder inside its Steam folder: refused after the rename, nothing left
 ln -s "$O1RS" "$O1ST/linked-reshade"
@@ -3878,6 +3878,14 @@ check "  Start fresh refuses too, and Uninstall; the game stays" \
   eval '[ "$rc" != 0 ] && ! g uninstall >/dev/null 2>&1 && [ -f "$SL/common/Guild Wars 2/Gw2.dat" ] && [ "$(st installed)" = yes ]'
 mv "$SL/common/Guild Wars 2" "$STEAM/steamapps/common/" && mv "$SL/appmanifest_1284210.acf" "$STEAM/steamapps/" &&
   rm "$STEAM/steamapps/libraryfolders.vdf" && rm -r "$BOTTLE/drive_c/SteamLibrary"
+# Steam moved the game to another folder inside the Steam folder: a Gw2.dat is in what would go
+# back, but the game folder the move recorded isn't there, so 0.1's addon files can't go back:
+# Rollback refuses, nothing changed
+mv "$GM" "$STEAM/steamapps/common/Elsewhere"
+out=$(g rollback 2>&1) && rc=0 || rc=$?
+check "Rollback with the game moved elsewhere inside Steam's folder: refused, nothing changed" \
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error The game.s folder isn.t where the move put it" && [ "$(ino "$STEAM")" = "$O1INO" ] && [ -f "$STEAM/steamapps/common/Elsewhere/Gw2.dat" ] && [ ! -e "$AD/move-undo" ]'
+mv "$STEAM/steamapps/common/Elsewhere" "$GM"
 # Repair with the bottle's system.reg gone: it would make the bottle anew, but the game is in it
 mv "$BOTTLE/system.reg" "$SANDBOX/system.reg"
 out=$(g repair 2>&1) && rc=0 || rc=$?
