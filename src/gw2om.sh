@@ -159,6 +159,8 @@
 #                              (test_pause: locked, lock-owner-read, lock-stale-checked, arcdps-moved,
 #                              move-renamed, rollback-renamed)
 #   GW2_ON_MAC_LOCK_WAIT      how long a contender waits for the install lock's claim (5 s)
+#   GW2_ON_MAC_LAUNCH_WAIT=<n>  how long Play's resume of a Steam download waits for Steam to show
+#                              (tenths of a second, 1200)
 #   GW2_ON_MAC_ALLOW_WINE=1    let the real engine's Wine run in a sandbox (never in the tests)
 #   GW2_ON_MAC_IMPORT_COPY=1   install import copies even on the same disk (the other-disk path),
 #                              and install move refuses as from another disk
@@ -343,6 +345,9 @@ MOVE_ADDONS="$APPDIR/0.1-addons"
 MOVE_UNDO="$APPDIR/move-undo"
 MOVE_SNAP="$APPDIR/move-undo.addons"
 MOVING="" UNINSTALL_WITH=""
+# how long Play's resume of a Steam download waits for Steam to show, in tenths of a second
+LAUNCH_POLLS=1200
+[ -z "$ROOT" ] || LAUNCH_POLLS="${GW2_ON_MAC_LAUNCH_WAIT:-$LAUNCH_POLLS}"
 # the last 0.1.x release: Rollback's version, and its DMG (a release asset, notarized)
 LAST_01=0.1.4
 LAST_01_DMG="https://github.com/jdrly/gw2-on-mac/releases/download/v$LAST_01/GW2-on-Mac-$LAST_01.dmg"
@@ -5543,24 +5548,33 @@ cmd_play() {
       game|installer|session) registry_unlock; die "$(busy_message "$k" "$(proc_list)")" ;;
     esac
     # (a starter that keeps the session's lock, on its fd 8, until this engine's Steam or wineserver
-    # shows, or the process that becomes Wine is gone (after 2 minutes it is ended): a Rollback
-    # can't take the lock while the launch is pending, a Play killed meanwhile included. Wine itself
-    # doesn't get the lock: Steam would hold it for its whole run, and the next Play needs it.)
+    # shows, or the process that becomes Wine has ended and is reaped. At LAUNCH_POLLS (2 minutes)
+    # that process gets SIGKILL and is reaped. Every way out of the starter, a failure included,
+    # runs that same cleanup (its EXIT trap, set -e off), so the lock never goes while a launch is
+    # pending, a Play killed meanwhile included. Wine itself doesn't get the lock: Steam would hold
+    # it for its whole run, and the next Play needs it. A start that shows nothing is a failure.)
     if [ -z "$DRY" ]; then
-      ( LAUNCH_WAIT=yes
-        launch "$STEAM_EXE" "steam://install/$GW2_APPID"
+      ( set +e
+        LAUNCH_WAIT=yes LAUNCH_PID="" seen=""
+        trap '[ -n "$seen" ] || [ -z "$LAUNCH_PID" ] || { kill -KILL "$LAUNCH_PID" 2>/dev/null; wait "$LAUNCH_PID" 2>/dev/null; }' EXIT
+        launch "$STEAM_EXE" "steam://install/$GW2_APPID" || exit 1
+        [ -n "$LAUNCH_PID" ] || exit 1
         k=0
-        while [ $k -lt 1200 ]; do
-          case "$(busy_of "$(proc_list)")" in steam|session) exit 0 ;; esac
-          kill -0 "$LAUNCH_PID" 2>/dev/null || exit 0
+        while [ $k -lt "$LAUNCH_POLLS" ]; do
+          case "$(busy_of "$(proc_list)")" in steam|session) seen=yes; exit 0 ;; esac
+          # (ended, a zombie until reaped: what it started would show by now)
+          case "$(ps -o stat= -p "$LAUNCH_PID" 2>/dev/null)" in
+            ""|Z*) case "$(busy_of "$(proc_list)")" in steam|session) seen=yes; exit 0 ;; esac; exit 1 ;;
+          esac
           sleep 0.1; k=$((k + 1))
         done
-        kill "$LAUNCH_PID" 2>/dev/null || true ) </dev/null >/dev/null 2>&1 &
-      wait $! || true
+        exit 1 ) </dev/null >/dev/null 2>&1 &
+      k=0; wait $! || k=$?
+      registry_unlock
+      [ "$k" = 0 ] || die "Steam didn't start (details in $LOGS/wine.log). Try Play again."
     else
       launch "$STEAM_EXE" "steam://install/$GW2_APPID"
     fi
-    registry_unlock
     echo "@done Steam is starting: it finishes the game's download, and this window follows it."
     return 0
   fi
