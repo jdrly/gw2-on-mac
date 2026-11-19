@@ -763,10 +763,10 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   switch it reads is a string. That tree can be an earlier build while Steam still runs with it.
   `FEX_DYNAMICL1CACHE` is FEX's own and goes in with either FEX. While the rule can start my
   `ntdll.so`'s sampler (`WINE_HEAT_PROF=on` or `=1`, or `WINE_HEAT_CONTROL`, whose file can say
-  `prof=on` in a session, in a line of the file or of a `compatdb.local` rule for the game) and my
+  `prof=on` in a session, in a line of the file or of any rule of `compatdb.local`) and my
   FEX, whose `VERSION` names `FEX_ENTRYHEADERLOOKUP`, is in the engine, the game's rule ends with
-  `FEX_ENTRYHEADERLOOKUP=0`, in a release too. A `compatdb.local` rule that sets it comes later and
-  wins. With that switch
+  `FEX_ENTRYHEADERLOOKUP=0`, in a release too. A `compatdb.local` rule for `Gw2-64.exe` that sets
+  it comes after the app's rule and wins; one for `exe=*` comes before it and doesn't. With that switch
   on, which my FEX's default is since #266, FEX no longer stores the block a thread entered last,
   which the sampler reads. A `FEX_ENTRYHEADERLOOKUP` line of the file stays out then. Version 6 adds
   `FEX_LEA32BITADDS=1`, `FEX_SIGNEXTENDINGLOADS=1` (#164), `FEX_ENTRYCOMPILELOCK=1` (#165),
@@ -1178,7 +1178,7 @@ downloads Sparkle at a pinned version and sha256, and compiles the Icon Composer
   0.2.0-rc.1" and the release's title "(release candidate)". Its `CFBundleVersion` sorts above
   every development build of the version and below the release (0.2.0-dev.23 is 0.1.9999.1023,
   0.2.0-rc.1 is 0.1.9999.2001). A plain `X.Y.Z` is a release. Any other form stops the build, and
-  so do leading zeros, a Y or Z of 10000 or more, and a dev build or release candidate of 0.0.0.
+  so do leading zeros, an X, Y or Z of 10000 or more, and a dev build or release candidate of 0.0.0.
 - `GW2_ON_MAC_FEED_URL` and `GW2_ON_MAC_ED_PUBLIC_KEY` turn updates on. Without them Sparkle stays
   off, which is normal for local builds.
 
