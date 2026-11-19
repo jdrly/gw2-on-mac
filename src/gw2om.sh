@@ -865,9 +865,11 @@ reshade kept off ReShade
 # development build and the release share the app's folders, so a release build that finds a
 # dev_version= line reads the keys of DEV_ROWS as their defaults, and its next write drops the line
 # with those values (dev_dropped). A development build after it turns them on again. The switches
-# without a row are in dev-switches.conf (DEV_SWITCHES).
+# without a row are in dev-switches.conf (DEV_SWITCHES). Row 2: Debug logging, whose default is
+# already on in a development build, also over a file that says off (a diagnostic build).
 DEV_ROWS="
 1 jobwakes=on eventpool=on fastlocks=on launcherframes=on warm=on metalfx=on rawmouse=on fex=mine
+2 debug=on
 "
 DEV_ROWS_VERSION=$(printf '%s\n' "$DEV_ROWS" | awk 'NF { v = $1 } END { print v + 0 }')
 DEV_ROW_KEYS=$(printf '%s\n' "$DEV_ROWS" | awk '{ for (i = 2; i <= NF; i++) { sub(/=.*/, "", $i); print $i } }')
