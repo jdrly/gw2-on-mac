@@ -193,6 +193,8 @@ final class Installer {
   // the player to the last 0.1.x (RollbackSheet's gate): no move, no install, no Sparkle, and the
   // window calls nothing but status (docs/adr/0021)
   var gated: Bool { status["macos_ok"] == "no" }
+  // status has said this Mac runs the engine: what writes (Collect Logs) waits for it
+  var macosChecked: Bool { status["macos_ok"] == "yes" }
   var appleSilicon: Bool { status["arch"].map { $0 == "arm64" } ?? true }
   // the setup (engine, bottle and graphics) is in place
   var installed: Bool { status["installed"] == "yes" }
@@ -800,7 +802,7 @@ struct AppCommands: Commands {
       // engine's macOS)
       .disabled(installer.gated || !installer.installed && installer.status["old_install"] != "yes")
       Button(logs.busy ? "Collecting Logs…" : "Collect Logs…") { logs.collect() }
-        .disabled(logs.busy || installer.gated)
+        .disabled(logs.busy || !installer.macosChecked)
     }
     CommandGroup(replacing: .newItem) {}
     CommandGroup(replacing: .help) {
@@ -869,7 +871,9 @@ struct GW2onMacApp: App {
           installer.refresh()
         }
         // Settings › Troubleshooting's Collect…
-        .onReceive(NotificationCenter.default.publisher(for: .collectLogs)) { _ in logs.collect() }
+        .onReceive(NotificationCenter.default.publisher(for: .collectLogs)) { _ in
+          if installer.macosChecked { logs.collect() }
+        }
     }
     .windowStyle(.hiddenTitleBar)
     .windowResizability(.contentMinSize)
@@ -886,5 +890,7 @@ struct GW2onMacApp: App {
     .defaultSize(width: SettingsView.designSize.width, height: SettingsView.designSize.height)
     .defaultLaunchBehavior(.suppressed)
     .restorationBehavior(.disabled)
+    // (not in the Window menu: Settings… is the one way in, disabled below the engine's macOS)
+    .commandsRemoved()
   }
 }

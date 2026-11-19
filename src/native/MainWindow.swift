@@ -42,6 +42,8 @@ struct MainView: View {
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         RightColumn(installer: installer, actions: actions)
+          // (nothing to choose before status says what this Mac can do)
+          .allowsHitTesting(installer.loaded)
           .frame(width: 392)
       }
       .padding(.top, 6)
