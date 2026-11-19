@@ -2892,7 +2892,7 @@ refused() {
   grep -q "^@error .*$want" "$SANDBOX/rs.txt" && [ "$(gdsnap)" = "$before" ] && [ ! -e "$RSF" ]
 }
 rm -f "$GD/d3d11.dll" "$GD/dxgi.dll"; rm -rf "$GD/addons"
-check "ReShade off by default: reshade=off, reshade_state=off, version 6.8.0, the folder named" eval '[ "$(st reshade reshade_state reshade_version)/$(sett reshade reshade_folder)" = "off/off/6.8.0/off/$RSF" ]'
+check "ReShade off by default: reshade=off, reshade_state=off, version 6.8.0, the folder named" eval 'SET_OUT=$(g settings); [ "$(st reshade reshade_state reshade_version)/$(kv "$SET_OUT" reshade)" = off/off/6.8.0/off ] && [ "$(kv "$SET_OUT" reshade_folder)" = "$RSF" ]'
 # what's in the way (arcdps only in the exclusive layout: "arcdps and ReShade together" below)
 cp "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll"
 check "arcdps as d3d11.dll, the exclusive layout: reshade_state=blocked, reshade_blocker=d3d11.dll" eval '[ "$(GW2_ON_MAC_ADDONS_LAYOUT=exclusive g status | sed -n "s/^reshade_state=//p; s/^reshade_blocker=//p" | tr "\n" /)" = blocked/d3d11.dll/ ]'
@@ -3716,7 +3716,7 @@ backup_kept() { local f; for f in "$BS"/"$APP_FOLDER backup "*/Local.dat; do has
 out=$(gi "$WRAP" 2>&1) && rc=0 || rc=$?
 check "install import of the wrapper's (ArenaNet) into the earlier bottle exits 0" [ "$rc" = 0 ]
 check "  the phases 1-4 (engine, bottle, the files, finishing)" [ "$(echo "$out" | grep '^@phase' | tr '\n' ' ')" = "@phase 1 @phase 2 @phase 3 @phase 4 " ]
-check "  route=arenanet origin=import game=yes, in Program Files" [ "$(st route origin game game_dir)" = "arenanet/import/yes/$BOTTLE/drive_c/Program Files/Guild Wars 2" ]
+check "  route=arenanet origin=import game=yes, in Program Files" eval 'ST_OUT=$(g status); [ "$(kv "$ST_OUT" route origin game)" = arenanet/import/yes ] && [ "$(kv "$ST_OUT" game_dir)" = "$BOTTLE/drive_c/Program Files/Guild Wars 2" ]'
 check "  its settings in the bottle" same "$WRS/Local.dat" "$BS/Local.dat"
 check "  its lone ReShade.ini stayed behind, and the summary says so" eval '[ ! -e "$BOTTLE/drive_c/Program Files/Guild Wars 2/ReShade.ini" ] && has <(echo "$out") "^@done .*ReShade stayed behind"'
 check "  the bottle's own kept in a backup folder" backup_kept
@@ -4126,7 +4126,7 @@ check "  in it steam.exe, the login, config, userdata, the record of the game, t
 check "  no step copied or cloned Steam's or the game's folder (install.log), and no line of gw2om.sh does" \
   eval 'no_cp_of "$O1ST" "$O1GAME" && ! grep -nE "(clone_tree|cp )[^#]*[$][{]?OLD_(STEAM|GAME)" "$APP/Contents/Resources/gw2om.sh"'
 check "  the record names both places; status: the game is here, Rollback names 0.1.4" \
-  eval '[ "$(cat "$AD/moved-from-0.1")" = "$(printf "moved\nold=%s\nnew=%s\ngame=steamapps/common/Guild Wars 2\ninode=%s" "$O1ST" "$STEAM" "$O1INO")" ] && [ "$(st move_game rollback_dmg)/$(sett move_game rollback_version)" = here/https://github.com/jdrly/gw2-on-mac/releases/download/v0.1.4/GW2-on-Mac-0.1.4.dmg/here/0.1.4 ] && [ ! -e "$AD/move-undo" ]'
+  eval 'ST_OUT=$(g status); [ "$(cat "$AD/moved-from-0.1")" = "$(printf "moved\nold=%s\nnew=%s\ngame=steamapps/common/Guild Wars 2\ninode=%s" "$O1ST" "$STEAM" "$O1INO")" ] && [ "$(kv "$ST_OUT" move_game)/$(sett move_game rollback_version)" = here/here/0.1.4 ] && [ "$(kv "$ST_OUT" rollback_dmg)" = https://github.com/jdrly/gw2-on-mac/releases/download/v0.1.4/GW2-on-Mac-0.1.4.dmg ] && [ ! -e "$AD/move-undo" ]'
 check "  the profile's Steam files in place of the new Steam's, and the game's settings folder whole" \
   eval 'same "$O1U/AppData/Local/Steam/local.vdf" "$U/AppData/Local/Steam/local.vdf" && [ ! -e "$U/AppData/Local/Steam/htmlcache.txt" ] && [ ! -e "$U/AppData/Local/Steam/Steam" ] && same "$O1U/AppData/Roaming/Guild Wars 2/Local.dat" "$U/AppData/Roaming/Guild Wars 2/Local.dat" && same "$O1U/AppData/Roaming/Guild Wars 2/GFXSettings.Gw2-64.exe.xml" "$U/AppData/Roaming/Guild Wars 2/GFXSettings.Gw2-64.exe.xml" && has "$U/AppData/Roaming/Guild Wars 2/Screens/gw001.jpg" JPG'
 check "  arcdps at ReShade's chain path, its settings with it; ReShade as d3d11.dll with the compiler and its record" \
@@ -4154,7 +4154,7 @@ sessions_reset
 SL="$BOTTLE/drive_c/SteamLibrary/steamapps"
 mkdir -p "$SL/common" && mv "$GM" "$SL/common/" && mv "$STEAM/steamapps/appmanifest_1284210.acf" "$SL/" &&
   printf '"libraryfolders"\n{\n\t"1"\n\t{\n\t\t"path"\t\t"C:\\\\SteamLibrary"\n\t}\n}\n' >"$STEAM/steamapps/libraryfolders.vdf"
-check "Steam's game in another library of the bottle: status follows it" [ "$(st game_dir game)" = "$SL/common/Guild Wars 2/yes" ]
+check "Steam's game in another library of the bottle: status follows it" eval 'ST_OUT=$(g status); [ "$(kv "$ST_OUT" game_dir)" = "$SL/common/Guild Wars 2" ] && [ "$(kv "$ST_OUT" game)" = yes ]'
 out=$(g rollback 2>&1) && rc=0 || rc=$?
 check "  Rollback refuses: the game isn't in the folder that came from 0.1; nothing moved" \
   eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error Guild Wars 2 isn.t in the folder that came from GW2 on Mac 0.1" && [ "$(ino "$STEAM")" = "$O1INO" ] && [ -f "$SL/common/Guild Wars 2/Gw2.dat" ] && [ ! -e "$AD/move-undo" ]'
@@ -4306,7 +4306,7 @@ GA="$BOTTLE/drive_c/Program Files/Guild Wars 2"
 check "install move (ArenaNet, ReShade with arcdps) exits 0, the phases 1-4, no Steam" \
   eval '[ "$rc" = 0 ] && [ "$(echo "$out" | grep "^@phase" | tr "\n" " ")" = "@phase 1 @phase 2 @phase 3 @phase 4 " ] && [ "$(st steam)" = no ] && ! grep -q SteamSetup "$STANDIN_LOG"'
 check "  route=arenanet origin=move game=yes, the game in Program Files" \
-  eval '[ "$(st route origin game game_dir)" = "arenanet/move/yes/$GA" ] && [ "$(stat -f %z "$GA/Gw2.dat")" = 1153433600 ]'
+  eval 'ST_OUT=$(g status); [ "$(kv "$ST_OUT" route origin game)" = arenanet/move/yes ] && [ "$(kv "$ST_OUT" game_dir)" = "$GA" ] && [ "$(stat -f %z "$GA/Gw2.dat")" = 1153433600 ]'
 check "  the game's settings; no Steam files in the profile" \
   eval 'same "$O1U/AppData/Roaming/Guild Wars 2/Local.dat" "$BOTTLE/drive_c/users/crossover/AppData/Roaming/Guild Wars 2/Local.dat" && [ ! -e "$BOTTLE/drive_c/users/crossover/AppData/Local/Steam" ]'
 check "  arcdps at the chain path, ReShade in, both inis name only this app's folders, the linked one's file too" \
@@ -5044,9 +5044,9 @@ check "  raw mouse-look off afterwards stays off" eval 'grep -qx rawmouse=off "$
 # A release build over it (a development build and the release share the folders, ADR 0018): the
 # rows read as their defaults while the dev_version= line is there, and its next write drops the
 # line and writes those defaults
-rsett() { rg settings | sed -n "s/^$1=//p"; }
+rsett() { kv "$(rg settings)" "$@"; }
 check "a release build over it reads the rows at their defaults: fex engine, fast locks off, raw mouse-look on, Debug logging off" \
-  eval 'grep -qx dev_version=2 "$RAD/settings.conf" && grep -qx fex=mine "$RAD/settings.conf" && [ "$(rsett fex)" = engine ] && [ "$(rsett fastlocks)" = off ] && [ "$(rsett rawmouse)" = on ] && [ "$(rsett debug)" = off ] && grep -qx dev_version=2 "$RAD/settings.conf"'
+  eval 'grep -qx dev_version=2 "$RAD/settings.conf" && grep -qx fex=mine "$RAD/settings.conf" && [ "$(rsett fex fastlocks rawmouse debug)" = engine/off/on/off ] && grep -qx dev_version=2 "$RAD/settings.conf"'
 rg set quitsteam off >/dev/null
 check "  its next write: no dev_version line, the rows at their defaults, my change in" \
   eval '! grep -q "^dev_version=" "$RAD/settings.conf" && grep -qx fex=engine "$RAD/settings.conf" && grep -qx fastlocks=off "$RAD/settings.conf" && grep -qx rawmouse=on "$RAD/settings.conf" && grep -qx debug=off "$RAD/settings.conf" && grep -qx quitsteam=off "$RAD/settings.conf"'
