@@ -159,7 +159,7 @@
 #   GW2_ON_MAC_ADDONS_LAYOUT   exclusive: arcdps and ReShade refuse each other (ADDONS_LAYOUT)
 #   GW2_ON_MAC_TEST_PAUSE, GW2_ON_MAC_TEST_PAUSE_AT   wait at a point while that file is there
 #                              (test_pause: locked, lock-owner-read, lock-stale-checked, arcdps-moved,
-#                              move-renamed, rollback-renamed)
+#                              move-renamed, rollback-renamed, rules-written)
 #   GW2_ON_MAC_LOCK_WAIT      how long a contender waits for the install lock's claim (5 s)
 #   GW2_ON_MAC_LAUNCH_WAIT=<n>  how long Play's resume of a Steam download waits for Steam to show
 #                              (tenths of a second, 1200)
@@ -3785,6 +3785,7 @@ install_imported() {
     echo "@done Guild Wars 2 is ready: its files were $how$([ "$SETTINGS_IMPORTED" = yes ] && echo ", with your game settings").$([ -z "$ADDONS" ] || echo " Addons that came along: $ADDONS; $APP_NAME leaves them as they are.")$LEFT$([ -z "$RESHADE_LEFT" ] || echo " ReShade stayed behind: turn it on in Settings › Interface.")$([ "$route" = steam ] && echo " Steam may check the files at the first Play.") Press Play."
   else
     step "Steam opens: sign in, and it brings Guild Wars 2 up to date"
+    own_rules
     launch "$STEAM_EXE" "steam://install/$GW2_APPID"
     set_state stage waiting_game
     IMPORT_DST="" IMPORT_ACF=""
@@ -4948,6 +4949,10 @@ preflight() {
 
 # The bottle: created once (wineboot), then its settings (registry, dxmt.conf)
 install_bottle() {
+  # (a folder or a link where dxmt.conf goes isn't mine: the write would go into it or replace it)
+  if [ -d "$DXMT_CONF" ] || [ -L "$DXMT_CONF" ]; then
+    die "$DXMT_CONF is a folder or a link, where $APP_NAME writes DXMT's options as a file. Move it away, then try again."
+  fi
   if [ ! -f "$BOTTLE/system.reg" ]; then
     say "Creating the game's bottle (wineboot, about a minute)"
     safe_rm "$BOTTLE" || die "The game's bottle has no system.reg, and a game is in it ($BOTTLE), so $APP_NAME doesn't make it anew. Move the game out of it first (details in $LOGS/install.log)."
@@ -4962,6 +4967,7 @@ install_bottle() {
     say "The game's bottle is there (the game and its settings in it are kept)"
   fi
   [ -f "$SETTINGS" ] || CREATED="$CREATED settings.conf"
+  [ -e "$DXMT_CONF" ] || [ -L "$DXMT_CONF" ] || CREATED="$CREATED dxmt.conf"
   [ -z "$DEV_ON" ] || [ -f "$DEV_FILE" ] || CREATED="$CREATED dev-switches.conf"
   dev_update
   write_settings
@@ -4995,6 +5001,10 @@ rotate_logs() {
   done
 }
 
+# own_rules: the game's rules count as made by this install (CREATED) if none are there right
+# before its launch writes them, so a failure or Cancel after it takes them back
+own_rules() { [ -e "$RULES" ] || [ -L "$RULES" ] || CREATED="$CREATED compatdb.rules"; }
+
 # launch <program> <args...>: a program in the bottle with the game's environment and its compatdb
 # rules (written first), detached; the session's environment and rules go to logs/session.env
 # (Collect Logs, the session report), with ReShade's keys (reshade_lines), arcdps (on, off) and the
@@ -5004,6 +5014,7 @@ launch() {
   local e k f dev
   game_env
   write_rules
+  test_pause rules-written
   # (a development build's switches: those that stay out, once in the log; those in, for
   # session.env)
   dev=$(dev_lines)
@@ -5509,6 +5520,7 @@ cmd_install() {
   [ -n "$DRY" ] || { set_state route "$route"; set_state origin download; }
   write_manifest
   phase 4
+  own_rules
   if [ "$route" = steam ]; then
     step "Steam opens: sign in, then install Guild Wars 2"
     launch "$STEAM_EXE" "steam://install/$GW2_APPID"

@@ -3498,6 +3498,37 @@ GW2_ON_MAC_STEAMSETUP_URL="file://$SANDBOX/missing.exe" "$G" install steam >"$SA
 check "install fails at Steam's download" eval '[ "$rc" != 0 ] && has "$SANDBOX/failed.txt" "@error The download of SteamSetup.exe"'
 check "the engine, bottle, settings, state and manifest it made are gone" sh -c "[ ! -e '$AD/engine' ] && [ ! -e '$AD/bottle' ] && [ ! -e '$AD/settings.conf' ] && [ ! -e '$AD/state' ] && [ ! -e '$AD/install-manifest.json' ]"
 check "no lock left" [ ! -e "$AD/.lock" ]
+check "nothing else left in the app's folder, dxmt.conf neither" [ -z "$(ad_list)" ]
+# a folder or a link where dxmt.conf goes: refused before the write, and it stays as it was
+mkdir -p "$AD/dxmt.conf" && echo mine >"$AD/dxmt.conf/sentinel"
+out=$(g install steam 2>&1) && rc=0 || rc=$?
+check "a folder at dxmt.conf: refused, the folder as it was, nothing else left" \
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error $AD/dxmt.conf is a folder or a link" && [ "$(ls -A "$AD/dxmt.conf")" = sentinel ] && [ "$(ad_list)" = dxmt.conf ]'
+rm -rf "$AD/dxmt.conf"
+ln -s "$SANDBOX/dxmt-elsewhere.conf" "$AD/dxmt.conf"
+out=$(g install steam 2>&1) && rc=0 || rc=$?
+check "a link at dxmt.conf to nothing: refused, the link as it was, nothing where it leads" \
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error $AD/dxmt.conf is a folder or a link" && [ "$(readlink "$AD/dxmt.conf")" = "$SANDBOX/dxmt-elsewhere.conf" ] && [ ! -e "$SANDBOX/dxmt-elsewhere.conf" ] && [ "$(ad_list)" = dxmt.conf ]'
+rm -f "$AD/dxmt.conf"
+# Cancel once Steam's start wrote the game's rules (phase 4): they go too
+RP="$SANDBOX/pause-rules"
+touch "$RP"
+GW2_ON_MAC_TEST_PAUSE="$RP" GW2_ON_MAC_TEST_PAUSE_AT=rules-written "$GW2OM" install steam >"$SANDBOX/cancelled.txt" 2>&1 & ip=$!
+i=0; until [ -e "$RP.at" ] || [ $i -ge 600 ]; do sleep 0.1; i=$((i + 1)); done
+at=no; [ ! -e "$RP.at" ] || at=yes
+kill -TERM "$ip"; wait "$ip"; rc=$?; rm -f "$RP" "$RP.at"
+check "Cancel after Steam's start wrote the rules: the install stops, nothing left, compatdb.rules neither" \
+  eval '[ "$at" = yes ] && [ "$rc" != 0 ] && has "$SANDBOX/cancelled.txt" "^@phase 4" && [ -z "$(ad_list)" ]'
+# rules that appear once this install has started (another start wrote them): its failure before
+# its own launch keeps them
+LP="$SANDBOX/pause-lock"
+touch "$LP"
+GW2_ON_MAC_STEAMSETUP_URL="file://$SANDBOX/missing.exe" GW2_ON_MAC_TEST_PAUSE="$LP" GW2_ON_MAC_TEST_PAUSE_AT=locked g install steam >"$SANDBOX/rules-kept.txt" 2>&1 & lp=$!
+i=0; until [ -e "$LP.at" ] || [ $i -ge 100 ]; do sleep 0.1; i=$((i + 1)); done
+echo "rules of another start" >"$AD/compatdb.rules"; rm -f "$LP"; wait "$lp"; rc=$?; rm -f "$LP.at"
+check "rules written after this install started: its failure at Steam's download keeps them, and only them" \
+  eval '[ "$rc" != 0 ] && has "$SANDBOX/rules-kept.txt" "@error The download of SteamSetup.exe" && [ "$(cat "$AD/compatdb.rules")" = "rules of another start" ] && [ "$(ad_list)" = compatdb.rules ]'
+rm -f "$AD/compatdb.rules"
 
 section "Stop waiting keeps the engine and the bottle"
 g install steam >/dev/null 2>&1
@@ -3635,10 +3666,8 @@ GW2_ON_MAC_TEST_PAUSE="$IP" GW2_ON_MAC_TEST_PAUSE_AT=locked gi "$WHG" >"$SANDBOX
 i=0; until [ -e "$IP.at" ] || [ $i -ge 100 ]; do sleep 0.1; i=$((i + 1)); done
 echo "patched" >"$WHG/patch.txt"; rm -f "$IP"; wait "$ip"; rc=$?; rm -f "$IP.at" "$WHG/patch.txt"
 check "the folder changed after the yes: refused under the lock before the copy, nothing left" \
-  eval '[ "$rc" != 0 ] && has "$SANDBOX/import-changed.txt" "^@error $WHG isn.t the folder you said yes to, or it changed since" && [ ! -e "$AD/engine" ] && [ ! -e "$BOTTLE" ]'
-# (a failed first install leaves the small files it doesn't count as made, such as dxmt.conf: this
-# app's folder emptied for the checks below, which expect nothing in it)
-rm -rf "$AD"
+  eval '[ "$rc" != 0 ] && has "$SANDBOX/import-changed.txt" "^@error $WHG isn.t the folder you said yes to, or it changed since" && [ -z "$(ad_list)" ]'
+# (the folder changed and came back: the sources' snapshot again, for the checks below)
 snap >"$SANDBOX/sources-before.txt"
 
 # a Guild Wars 2 that runs (in another app): its files may change, so nothing is copied
