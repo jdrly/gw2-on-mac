@@ -36,9 +36,13 @@ from one file I can take lines out of.
   turned on by default left in #243 (PR #244). A line I had commented out to turn one of them off
   now sets it to `0`. On 2026-11-17 `DXMT_MTL4_SHOWN_WAIT=write` left the same way (#258), after
   jdrly/dxmt #332 made `write` the default. Its off value is `next`, not `0`, so a line I had
-  commented out becomes `DXMT_MTL4_SHOWN_WAIT=next`.
-- `FEX_ENTRYHEADERLOOKUP` stays out of the rule while the rule can start my Wine fork's sampler
-  (#170).
+  commented out becomes `DXMT_MTL4_SHOWN_WAIT=next`. On 2026-11-19 `FEX_DISPATCHERL1LOOKUP=1` and
+  `FEX_ENTRYHEADERLOOKUP=1` left the same way (#267), after my FEX fork made both its defaults
+  (#266). Their off value is `0`.
+- `FEX_ENTRYHEADERLOOKUP` is off while the rule can start my Wine fork's sampler (#170). Until #267
+  the app left the table's line out. Since my FEX has it on by default, the game's rule says
+  `FEX_ENTRYHEADERLOOKUP=0` while my FEX, whose `VERSION` names the switch, is in the engine, in a
+  release too.
 
 ## Alternatives I rejected
 
@@ -49,7 +53,7 @@ from one file I can take lines out of.
 
 ## Evidence
 
-- #129 (PR #137, `2c24b37`), #170, #178, #202, #212, #243 (PR #244, `5d957c3`), #258.
+- #129 (PR #137, `2c24b37`), #170, #178, #202, #212, #243 (PR #244, `5d957c3`), #258, #266, #267.
 - The dispatcher's note `dev-builds-everything-on` (what I said on 2026-11-12 and 2026-11-15).
 - GW2 on Mac workspace `plans/night/2026-11-11-plan.md`, 2026-11-12 22:10 and 22:40 (the four taken
   out), 2026-11-15 23:50.

@@ -750,6 +750,10 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   `QueryPerformanceCounter`). It takes `DXMT_MTL4_SHOWN_WAIT=write` out, because `write` is my DXMT
   fork's default now (jdrly/dxmt#332). That line as the table wrote it goes with its comment. One I
   commented out becomes `DXMT_MTL4_SHOWN_WAIT=next` under a comment, so it stays off.
+  Version 11 takes `FEX_DISPATCHERL1LOOKUP=1` (#161) and `FEX_ENTRYHEADERLOOKUP=1` (#162) out,
+  which version 5 added, because my FEX has both on by default now (#266). A line as the table
+  wrote it goes with its comment. One I commented out becomes `NAME=0` under a comment, so it
+  stays off.
   A row whose variable a line of the file sets, *Faster locks* with the file's
   `WINE_HEAT_SPIN`, is greyed while that line is there, since the file's entry wins. A line of the table goes in only while the file of mine that
   reads it is in place and has the switch: the `switches:` line of my `ntdll.so`'s,
@@ -757,11 +761,14 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   lines need it in place with my `winemac.so`, as one set. My DXMT fork's build has no such
   record: the app looks for the name in the DLLs of the fork's tree in the engine, where each
   switch it reads is a string. That tree can be an earlier build while Steam still runs with it.
-  `FEX_DYNAMICL1CACHE` is FEX's own and goes in with either FEX. `FEX_ENTRYHEADERLOOKUP=1`
-  (#162, version 5 with `FEX_DISPATCHERL1LOOKUP=1`, #161) also stays out while the rule can start
-  my `ntdll.so`'s sampler: `WINE_HEAT_PROF=on` or `=1`, or `WINE_HEAT_CONTROL`, whose file can say
-  `prof=on` in a session, in a line of the file or of `compatdb.local`. With that switch FEX no
-  longer stores the block a thread entered last, which the sampler reads. Version 6 adds
+  `FEX_DYNAMICL1CACHE` is FEX's own and goes in with either FEX. While the rule can start my
+  `ntdll.so`'s sampler (`WINE_HEAT_PROF=on` or `=1`, or `WINE_HEAT_CONTROL`, whose file can say
+  `prof=on` in a session, in a line of the file or of any rule of `compatdb.local`) and my
+  FEX, whose `VERSION` names `FEX_ENTRYHEADERLOOKUP`, is in the engine, the game's rule ends with
+  `FEX_ENTRYHEADERLOOKUP=0`, in a release too. A `compatdb.local` rule for `Gw2-64.exe` that sets
+  it comes after the app's rule and wins; one for `exe=*` comes before it and doesn't. With that switch
+  on, which my FEX's default is since #266, FEX no longer stores the block a thread entered last,
+  which the sampler reads. A `FEX_ENTRYHEADERLOOKUP` line of the file stays out then. Version 6 adds
   `FEX_LEA32BITADDS=1`, `FEX_SIGNEXTENDINGLOADS=1` (#164), `FEX_ENTRYCOMPILELOCK=1` (#165),
   `FEX_HOSTFEATURES=disableavx` (#118) and `DXMT_RENAME_TRIM=600` (jdrly/dxmt#265). My FEX's
   `VERSION` names the last FEX one as `FEX_HOSTFEATURES=disableavx`, and the name is what counts.
@@ -1166,7 +1173,12 @@ downloads Sparkle at a pinned version and sha256, and compiles the Icon Composer
 `src/AppIcon.icon` with actool into `Assets.car` and a fallback `AppIcon.icns`.
 
 - `GW2_ON_MAC_VERSION` sets the version, 0.2.0-dev.5 by default. `X.Y.Z-dev.N` makes a development build,
-  as in SWTOR on Mac.
+  as in SWTOR on Mac, and `X.Y.Z-rc.N` a release candidate, N below 1000 in both. A release
+  candidate is a development build in everything but its name: the chip says "Release candidate ·
+  0.2.0-rc.1" and the release's title "(release candidate)". Its `CFBundleVersion` sorts above
+  every development build of the version and below the release (0.2.0-dev.23 is 0.1.9999.1023,
+  0.2.0-rc.1 is 0.1.9999.2001). A plain `X.Y.Z` is a release. Any other form stops the build, and
+  so do leading zeros, an X, Y or Z of 10000 or more, and a dev build or release candidate of 0.0.0.
 - `GW2_ON_MAC_FEED_URL` and `GW2_ON_MAC_ED_PUBLIC_KEY` turn updates on. Without them Sparkle stays
   off, which is normal for local builds.
 
@@ -1278,11 +1290,13 @@ Without one, those checks are skipped. It covers:
 - a development build's switches, last. The checks above run with them off
   (`GW2_ON_MAC_DEV_SWITCHES=off`). These run two copies of the app's `Resources`, one with
   `channel=dev` and one without a channel, in roots of their own: a development build's fresh
-  install with every switch of the table in `dev-switches.conf` and the rows on, the rule with
+  install with every switch of the table in `dev-switches.conf` and the rows on, `build.sh`'s
+  versions (0.2.0-rc.1 between 0.2.0's dev builds and 0.2.0, a malformed version refused) and a
+  release candidate's install, whose status shows its version, the rule with
   each line whose file has the switch and none whose file hasn't, status, `session.env`, the log
-  and the session report, my FEX's two lookup lines in and out (`FEX_ENTRYHEADERLOOKUP` out with
-  each of the sampler's lines, in `dev-switches.conf` or `compatdb.local`, also through a third
-  root's install to the session report), version 6's four FEX lines and `DXMT_RENAME_TRIM` in and
+  and the session report, `FEX_ENTRYHEADERLOOKUP=0` in the rule with each of the sampler's lines,
+  in `dev-switches.conf` or `compatdb.local` (a line of mine turning it on left out, none with the
+  engine's own FEX, and in a release too), version 6's four FEX lines and `DXMT_RENAME_TRIM` in and
   out, `FEX_HOSTFEATURES` joined with a line of mine, `enableavx` after `disableavx`, and out under
   a `compatdb.local` rule for the game but not one for another program, a file at version 5
   updated (with a `FEX_HOSTFEATURES` line of mine, and with AVX already decided there), version
@@ -1291,7 +1305,8 @@ Without one, those checks are skipped. It covers:
   at version 7 updated (version 8's three lines gone, a changed or commented-out one kept), a file
   at version 8 updated (version 9's three lines gone, a commented-out one kept off), a file at
   version 9 with `DXMT_MTL4_SHOWN_WAIT=write` updated (the line gone, a changed one kept, a
-  commented-out one kept off with `=next`), a line commented out or added, the engine's own DXMT, a second start
+  commented-out one kept off with `=next`), a file at version 10 updated (version 11's two FEX
+  lines gone, a commented-out one kept off with `=0`), a line commented out or added, the engine's own DXMT, a second start
   that changes nothing, an update that adds a newer switch and keeps the rest, a row turned off
   that stays off, a release that writes no file and reads none, and a release's install updated
   by a development build
@@ -1336,7 +1351,9 @@ delta updates and checks it with `scripts/check-appcast.swift`.
 - The feed needs an app built with `GW2_ON_MAC_FEED_URL` and `GW2_ON_MAC_ED_PUBLIC_KEY`.
 - `--sign-only` and `--no-notarize` run locally without touching GitHub.
 - `--dev` makes `GW2-on-Mac-arm64-<version>.dmg` with `GW2 on Mac arm64.app` in it and publishes
-  it as a GitHub pre-release with no feed, so `releases/latest` stays on 0.1.x.
+  it as a GitHub pre-release with no feed, so `releases/latest` stays on 0.1.x. A release
+  candidate goes out the same way, titled "(release candidate)" where a development build's says
+  "(development build)".
 - `--adhoc` does the same without my Developer ID, for the Dev build workflow. It keeps
   `build.sh`'s ad hoc signatures and only verifies them, makes an unsigned DMG, and doesn't
   notarize. It refuses a version below `build.sh`'s, a tag that exists and the stand-in DXMT,
@@ -1348,7 +1365,8 @@ delta updates and checks it with `scripts/check-appcast.swift`.
 
 **Dev builds come from GitHub's runners.** The Dev build workflow
 ([`.github/workflows/devbuild.yml`](.github/workflows/devbuild.yml)) builds one from `arm64` and
-publishes it as the pre-release `v<version>`:
+publishes it as the pre-release `v<version>`. A release candidate (`-f version=0.2.0-rc.1`) takes
+the same way ([ADR 0017](docs/adr/0017-a-release-candidate-is-a-dev-build-by-another-name.md)):
 
 ```sh
 gh workflow run devbuild.yml --ref arm64                    # DXMT's newest green commit, build.sh's version
@@ -1398,8 +1416,8 @@ ID on the runner is a later step.
 - I haven't tested `wineserver` under the hardened runtime yet.
 
 Release notes live in [`release-notes/`](release-notes), one file per version, in SWTOR on Mac's
-format. Releases are `X.Y.Z`, development builds `X.Y.Z-dev.N`, with SWTOR on Mac's bundle-version
-scheme. Git ignores the `release/` output.
+format. Releases are `X.Y.Z`, development builds `X.Y.Z-dev.N` and release candidates
+`X.Y.Z-rc.N`, with SWTOR on Mac's bundle-version scheme. Git ignores the `release/` output.
 
 ## Layout
 

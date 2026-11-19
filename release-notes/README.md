@@ -43,7 +43,7 @@ Rules for the notes:
 - Put technical references in inline code, like `` `684f428` ``. Code blocks only belong in
   development builds, because the update window doesn't format them.
 - Development builds, `<version>-dev.N`, use the same structure with `(development build)` after
-  the version in the title.
+  the version in the title, and release candidates, `<version>-rc.N`, with `(release candidate)`.
 - The support section links both [Discord](https://discord.gg/AnV3fZWz2b) and the GitHub issues.
   The Discord server is the one SWTOR on Mac and gw2onmac.com use, and not everybody who plays has
   a GitHub account.

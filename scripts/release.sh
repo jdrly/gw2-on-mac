@@ -34,13 +34,15 @@
 #                                    GitHub release (local dry runs and update tests)
 #   scripts/release.sh --no-release  sign, notarize, staple and build the feed, without a GitHub
 #                                    release (before the repository exists, or to look first)
-#   scripts/release.sh --dev         development builds (version X.Y.Z-dev.N, build.sh): sign,
+#   scripts/release.sh --dev         development builds (version X.Y.Z-dev.N, build.sh) and release
+#                                    candidates (X.Y.Z-rc.N), published the same way: sign,
 #                                    notarize and staple the DMG, then a GitHub pre-release with
 #                                    the DMG only. No feed: releases/latest (the appcast every
 #                                    install reads) stays on the last release.
 #   scripts/release.sh --dev --no-release   the same without the pre-release
-#   scripts/release.sh --adhoc       development builds from GitHub's runners (.github/workflows/
-#                                    devbuild.yml), without my Developer ID: the app as build.sh
+#   scripts/release.sh --adhoc       development builds and release candidates from GitHub's
+#                                    runners (.github/workflows/devbuild.yml), without my
+#                                    Developer ID: the app as build.sh
 #                                    signed it (ad hoc, verified, never re-signed), an unsigned DMG,
 #                                    no notarization, then a GitHub pre-release with the DMG and the
 #                                    build's record. The version may not be lower than build.sh's.
@@ -103,15 +105,19 @@ if [ "$MODE" = --feed ]; then
 else
   VERSION="$(plutil -extract CFBundleShortVersionString raw "$SRC/Contents/Info.plist")"
 fi
-# Development builds never go into a feed or a regular release, and releases are never dev builds.
+# Development builds and release candidates never go into a feed or a regular release, and releases
+# are never either. A release candidate is a pre-release as a development build is; only its name
+# differs (KIND, in the release's title).
 case "$VERSION:$MODE" in
-  *-dev.*:--dev|*-dev.*:--adhoc|*-dev.*:--sign-only) ;;
-  *-*:*) echo "$VERSION is a development build: use --dev (or --sign-only)" >&2; exit 1 ;;
-  *:--dev|*:--adhoc) echo "$VERSION is not a development build (X.Y.Z-dev.N)" >&2; exit 1 ;;
+  *-dev.*:--dev|*-dev.*:--adhoc|*-dev.*:--sign-only|*-rc.*:--dev|*-rc.*:--adhoc|*-rc.*:--sign-only) ;;
+  *-*:*) echo "$VERSION is a development build or release candidate: use --dev (or --sign-only)" >&2; exit 1 ;;
+  *:--dev|*:--adhoc) echo "$VERSION is not a development build (X.Y.Z-dev.N) or release candidate (X.Y.Z-rc.N)" >&2; exit 1 ;;
 esac
+case "$VERSION" in *-rc.*) KIND="release candidate" ;; *) KIND="development build" ;; esac
 APP_ID="$(sed -n 's/^APP_ID=//p' build.sh)"
 if [ "$MODE" = --adhoc ]; then
-  # Never below the version build.sh builds by default, so a dev number isn't used twice
+  # Never below the version build.sh builds by default, so a dev number isn't used twice (sort -V
+  # puts X.Y.Z-dev.N before X.Y.Z-rc.N)
   base="$(sed -n 's/^APP_VERSION=${GW2_ON_MAC_VERSION:-\(.*\)}$/\1/p' build.sh)"
   [ -n "$base" ] && [ -n "$APP_ID" ] || { echo "No APP_VERSION or APP_ID line in build.sh" >&2; exit 1; }
   [ "$(printf '%s\n' "$base" "$VERSION" | sort -V | head -1)" = "$base" ] ||
@@ -389,7 +395,7 @@ case "$MODE" in
     latest="$(gh api "repos/$REPO/releases/latest" --jq .tag_name)"
     echo "[release] creating the GitHub pre-release v$VERSION (DMG and record, no feed; releases/latest is $latest)"
     gh release create "v$VERSION" --repo "$REPO" --prerelease --latest=false --target "$head" \
-      --title "$APP_NAME $VERSION (development build)" --notes-file "$OUT/notes.md" "$DMG" "$record"
+      --title "$APP_NAME $VERSION ($KIND)" --notes-file "$OUT/notes.md" "$DMG" "$record"
     now="$(gh api "repos/$REPO/releases/latest" --jq .tag_name)"
     [ "$now" = "$latest" ] || { echo "releases/latest moved from $latest to $now" >&2; exit 1; }
     echo "[release] $DMG ($(du -h "$DMG" | cut -f1)); pre-release v$VERSION; releases/latest still $latest"
@@ -406,7 +412,7 @@ case "$MODE" in
     head=$(git rev-parse HEAD)
     git branch -r --contains "$head" | grep -q . || { echo "Push $head first" >&2; exit 1; }
     gh release create "v$VERSION" --repo "$REPO" --prerelease --target "$head" \
-      --title "$APP_NAME $VERSION (development build)" --notes-file "$NOTES" "$DMG"
+      --title "$APP_NAME $VERSION ($KIND)" --notes-file "$NOTES" "$DMG"
     echo "[release] $DMG ($(du -h "$DMG" | cut -f1)); pre-release v$VERSION"
     exit 0 ;;
   --ci)

@@ -34,7 +34,7 @@
 #   ./build.sh                   build into dist/, ad-hoc signed
 #
 # Signing for distribution (Developer ID, hardened runtime, notarization) is scripts/release.sh,
-# which re-signs a copy of dist/ inside out. GW2_ON_MAC_VERSION=X.Y.Z[-dev.N] sets the version;
+# which re-signs a copy of dist/ inside out. GW2_ON_MAC_VERSION=X.Y.Z[-dev.N|-rc.N] sets the version;
 # GW2_ON_MAC_FEED_URL and GW2_ON_MAC_ED_PUBLIC_KEY turn updates on; a build without them has them off.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -43,22 +43,26 @@ ROOT="$PWD"
 # GW2_ON_MAC_VERSION overrides the version for test builds.
 APP_VERSION=${GW2_ON_MAC_VERSION:-0.2.0-dev.5}
 
-# Development builds: X.Y.Z-dev.N, as SWTOR on Mac's. CFBundleShortVersionString is the version as
-# is; CFBundleVersion (what Sparkle compares) is numeric and sorts above the previous release and
-# below X.Y.Z: 0.1.1-dev.N -> 0.1.0.(1000+N), 0.2.0-dev.N -> 0.1.9999.(1000+N). Releases:
-# CFBundleVersion = the version.
+# Development builds: X.Y.Z-dev.N, as SWTOR on Mac's, and release candidates X.Y.Z-rc.N, N below
+# 1000 in both. CFBundleShortVersionString is the version as is; CFBundleVersion (what Sparkle
+# compares) is numeric and sorts above the previous release and below X.Y.Z, each rc above every
+# dev build: 0.1.1-dev.N -> 0.1.0.(1000+N), 0.2.0-dev.N -> 0.1.9999.(1000+N), 0.2.0-rc.N ->
+# 0.1.9999.(2000+N). Releases: CFBundleVersion = the version. X, Y and Z stay below 10000 and the
+# numbers have no leading zeros, so no two versions get the same CFBundleVersion.
 bundle_version() {
-  local v=$1 core n x y z
-  case "$v" in
-    *-dev.*) core=${v%%-*}; n=${v##*-dev.} ;;
-    *-*) echo "Unsupported version $v (X.Y.Z or X.Y.Z-dev.N)" >&2; return 1 ;;
+  local v=$1 x y z n
+  [[ $v =~ ^(0|[1-9][0-9]?[0-9]?[0-9]?)\.(0|[1-9][0-9]?[0-9]?[0-9]?)\.(0|[1-9][0-9]?[0-9]?[0-9]?)(-(dev|rc)\.(0|[1-9][0-9]?[0-9]?))?$ ]] &&
+    [[ $v != 0.0.0-* ]] ||
+    { echo "Unsupported version $v (X.Y.Z, X.Y.Z-dev.N or X.Y.Z-rc.N, above 0.0.0, no leading zeros, X, Y and Z below 10000, N below 1000)" >&2; return 1; }
+  x=${BASH_REMATCH[1]} y=${BASH_REMATCH[2]} z=${BASH_REMATCH[3]}
+  case "${BASH_REMATCH[5]}" in
+    dev) n=$((1000 + ${BASH_REMATCH[6]})) ;;
+    rc) n=$((2000 + ${BASH_REMATCH[6]})) ;;
     *) echo "$v"; return ;;
   esac
-  IFS=. read -r x y z <<<"$core"
-  case "$x$y$z$n" in *[!0-9]*|'') echo "Unsupported version $v" >&2; return 1 ;; esac
-  if [ "$z" -gt 0 ]; then echo "$x.$y.$((z - 1)).$((1000 + n))"
-  elif [ "$y" -gt 0 ]; then echo "$x.$((y - 1)).9999.$((1000 + n))"
-  else echo "$((x - 1)).9999.9999.$((1000 + n))"; fi
+  if [ "$z" -gt 0 ]; then echo "$x.$y.$((z - 1)).$n"
+  elif [ "$y" -gt 0 ]; then echo "$x.$((y - 1)).9999.$n"
+  else echo "$((x - 1)).9999.9999.$n"; fi
 }
 BUNDLE_VERSION=$(bundle_version "$APP_VERSION")
 case "$APP_VERSION" in *-*) CHANNEL=dev ;; *) CHANNEL=release ;; esac

@@ -595,7 +595,7 @@ enum AppActions {
       text.append(NSAttributedString(string: url.replacingOccurrences(of: "https://", with: ""), attributes: attributes))
     }
     #if GW2_DEV
-    let devSuffix = " (development build)"
+    let devSuffix = (credits["version"] ?? "").contains("-rc.") ? " (release candidate)" : " (development build)"
     #else
     let devSuffix = ""
     #endif

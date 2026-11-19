@@ -258,10 +258,12 @@ struct Header: View {
 }
 
 #if GW2_DEV
+// "Dev build · 0.2.0-dev.23", or "Release candidate · 0.2.0-rc.1" for a release candidate, which is
+// a development build in every other way (build.sh, docs/adr/0017)
 struct DevBuildBadge: View {
   private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?" }
   var body: some View {
-    Text("Dev build · \(version)")
+    Text("\(version.contains("-rc.") ? "Release candidate" : "Dev build") · \(version)")
       .font(.body(12, .semibold)).bodyBox(12)
       .foregroundStyle(Brand.headerText)
       .padding(.vertical, 5).padding(.horizontal, 10)
