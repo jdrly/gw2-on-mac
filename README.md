@@ -183,14 +183,16 @@ The move only reads 0.1.x's folders, so 0.1.x is still there. To go back, downlo
 over this one. It finds its engine, bottle, settings, addons and ReShade folder as they were on the
 day of the move.
 
-- What you changed on 0.2 stays on 0.2: graphics settings, key binds, new ReShade presets,
-  arcdps's settings. Your characters and everything else on ArenaNet's servers are the same on
-  both.
-- 0.1.x's copy of the game is as old as the move. Steam patches it at its next start, which
-  downloads the patches since then, not the game.
-- Steam's login in 0.1.x's bottle is as it was. Steam may still ask for it, if signing in from the
-  new bottle ended the old session. I don't know whether it does.
-- 0.1.4 offers 0.2.0 again at every update check. *Skip This Version* ends that.
+- What you changed in the game and its addons on 0.2 stays on 0.2: graphics settings, key binds,
+  new ReShade presets, arcdps's settings. Your characters and everything else on ArenaNet's servers
+  are the same on both. The app's own preferences, such as *Quit GW2 on Mac after launching*, are
+  shared by both, since both are the same app to macOS.
+- 0.1.x's copy of the game is as old as the move. Steam, or on ArenaNet's route the game's
+  launcher, patches it at its next start, which downloads the patches since then, not the game.
+- On Steam's route, Steam's login in 0.1.x's bottle is as it was. Steam may still ask for it, if
+  signing in from the new bottle ended the old session. I don't know whether it does.
+- 0.1.4's automatic update checks offer 0.2.0 again. *Skip This Version* ends that. *Check for
+  Updates…* still shows it.
 - 0.2's folders, *GW2 on Mac arm64*, stay. Delete them by hand with the commands under
   [Uninstall](#uninstall) if you don't come back.
 
@@ -201,8 +203,8 @@ day of the move.
 rm -rf ~/Library/"Application Support/GW2 on Mac" ~/Library/Caches/"GW2 on Mac" ~/Library/Logs/"GW2 on Mac"
 ```
 
-On the same disk they share most of their space with this app's clones, so deleting them frees only
-what the game patched apart since the move.
+On the same disk the game in them shares its space with this app's clone, so deleting them frees
+0.1.x's engine and caches, and of the game only what was patched apart since the move.
 
 ## Playing
 
@@ -564,8 +566,9 @@ apps' bottles are only ever read, and so are GW2 on Mac 0.1's folders.
 ## Uninstall
 
 *Uninstall…* in the window asks first and tells you the game's files go with the bottle. Close the
-game and Steam before you run it. It removes everything in the table above except the logs and
-the ReShade folder and the move's record. To do it by hand:
+game and Steam before you run it. It removes everything in the table above except the logs, the
+ReShade folder, the move's record and GW2 on Mac 0.1.x's folders, which it never touches. To do it
+by hand:
 
 ```sh
 rm -rf ~/Library/"Application Support/GW2 on Mac arm64" ~/Library/Caches/"GW2 on Mac arm64"   # the ReShade folder too
