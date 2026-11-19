@@ -159,7 +159,7 @@
 #   GW2_ON_MAC_ADDONS_LAYOUT   exclusive: arcdps and ReShade refuse each other (ADDONS_LAYOUT)
 #   GW2_ON_MAC_TEST_PAUSE, GW2_ON_MAC_TEST_PAUSE_AT   wait at a point while that file is there
 #                              (test_pause: locked, lock-owner-read, lock-stale-checked, arcdps-moved,
-#                              move-renamed, rollback-renamed)
+#                              move-renamed, rollback-renamed, rules-written)
 #   GW2_ON_MAC_LOCK_WAIT      how long a contender waits for the install lock's claim (5 s)
 #   GW2_ON_MAC_LAUNCH_WAIT=<n>  how long Play's resume of a Steam download waits for Steam to show
 #                              (tenths of a second, 1200)
@@ -5007,6 +5007,7 @@ launch() {
   local e k f dev
   game_env
   write_rules
+  test_pause rules-written
   # (a development build's switches: those that stay out, once in the log; those in, for
   # session.env)
   dev=$(dev_lines)

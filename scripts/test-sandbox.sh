@@ -3476,12 +3476,15 @@ out=$(g install steam 2>&1) && rc=0 || rc=$?
 check "a link at dxmt.conf to nothing: refused, the link as it was, nothing where it leads" \
   eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error $AD/dxmt.conf is a folder or a link" && [ "$(readlink "$AD/dxmt.conf")" = "$SANDBOX/dxmt-elsewhere.conf" ] && [ ! -e "$SANDBOX/dxmt-elsewhere.conf" ] && [ "$(ad_list)" = dxmt.conf ]'
 rm -f "$AD/dxmt.conf"
-# a failure after Steam's start wrote the game's rules (session.env can't be written): they go too
-mkdir -p "$LOGS/session.env"
-out=$(g install steam 2>&1) && rc=0 || rc=$?
-check "an install that fails after the rules are written leaves nothing, compatdb.rules neither" \
-  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@phase 4" && has <(echo "$out") "session.env: Is a directory" && [ -z "$(ad_list)" ]'
-rmdir "$LOGS/session.env"
+# Cancel once Steam's start wrote the game's rules (phase 4): they go too
+RP="$SANDBOX/pause-rules"
+touch "$RP"
+GW2_ON_MAC_TEST_PAUSE="$RP" GW2_ON_MAC_TEST_PAUSE_AT=rules-written "$GW2OM" install steam >"$SANDBOX/cancelled.txt" 2>&1 & ip=$!
+i=0; until [ -e "$RP.at" ] || [ $i -ge 600 ]; do sleep 0.1; i=$((i + 1)); done
+at=no; [ ! -e "$RP.at" ] || at=yes
+kill -TERM "$ip"; wait "$ip"; rc=$?; rm -f "$RP" "$RP.at"
+check "Cancel after Steam's start wrote the rules: the install stops, nothing left, compatdb.rules neither" \
+  eval '[ "$at" = yes ] && [ "$rc" != 0 ] && has "$SANDBOX/cancelled.txt" "^@phase 4" && [ -z "$(ad_list)" ]'
 
 section "Stop waiting keeps the engine and the bottle"
 g install steam >/dev/null 2>&1
