@@ -3705,7 +3705,7 @@ check "  the settings, key by key as SETTINGS_FROM_01 says, at this version; Vsy
   eval 'settings_moved && grep -q "^settings_version=" "$AD/settings.conf" && ! grep -q -e "^coolworkers=" -e "^gamemode=" "$AD/settings.conf" && [ "$(sett vsync)" = on ]'
 check "  no DXMT or ReShade cache of 0.1's came along" eval '[ -z "$(find "$CACHE" -type f \( -name shaders.bin -o -name effect.bin \) 2>/dev/null)" ]'
 check "  the summary: what came along, what changed, Steam's login, 0.1 as it was" \
-  eval 'has <(mv_done) "^Your install moved from GW2 on Mac 0.1: Steam with Guild Wars 2 in its library (cloned, no extra space), your game settings, your addons as they were (arcdps, ReShade with your presets, the larger interface) and your settings\. Changed from GW2 on Mac 0\.1: Cooler job workers don.t exist on this engine; Faster locks is off, this version.s default; Game Mode is always on here\. Steam may ask you to sign in once\. GW2 on Mac 0\.1 stays as it was\. Press Play\.$" || { mv_done; false; }'
+  eval 'has <(mv_done) "^Your install moved from GW2 on Mac 0.1: Steam with Guild Wars 2 in its library (cloned, no extra space), your game settings, your addons as they were (arcdps, ReShade with your presets, the larger interface) and your settings\. Changed from GW2 on Mac 0\.1: Cooler job workers isn.t a setting on this engine; Faster locks is off, this version.s default; Game Mode is always on here\. Steam may ask you to sign in once\. GW2 on Mac 0\.1 stays as it was\. Press Play\.$" || { mv_done; false; }'
 check "  0.1's folders as they were" o1_same
 c=$(play_cmd)
 check "  Play: Steam as crossover" eval 'every_wine_as crossover && [[ "$c" == *"steam.exe -applaunch 1284210"* ]]'
@@ -3728,7 +3728,7 @@ check "  arcdps as d3d11.dll, no ReShade, no ReShade folder made" \
 check "  the keys the file lacks read as 0.1's defaults (uiscale_cinema on), the rest as kept, ncpu=99 as this Mac's 8; coolworkers dropped" \
   eval '[ "$(sett fpscap) $(sett uiscale_cinema) $(sett steambg) $(sett fastlocks) $(sett ncpu)" = "60 on on off 8" ] && ! grep -q "^coolworkers=" "$AD/settings.conf"'
 check "  the summary names Cooler job workers, Faster locks and the CPUs" \
-  has <(mv_done) "Changed from GW2 on Mac 0.1: Cooler job workers don.t exist on this engine; Faster locks is off, this version.s default; CPUs the game sees is 8, not 99\."
+  has <(mv_done) "Changed from GW2 on Mac 0.1: Cooler job workers isn.t a setting on this engine; Faster locks is off, this version.s default; CPUs the game sees is 8: 99 isn.t a choice here\."
 c=$(play_cmd)
 check "  the first Play shows Steam's window though Steam remembers a login" \
   eval '[[ "$c" == *"steam.exe -applaunch 1284210"* && "$c" != *-silent* ]] && [ "$(st origin)" = moved ]'

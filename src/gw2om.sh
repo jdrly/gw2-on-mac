@@ -994,11 +994,13 @@ EOF
 }
 
 # move_changes: MOVE_LOST, the move's sentence for each setting that doesn't run as 0.1.x ran it,
-# in SETTINGS_FROM_01's order: a dropped one 0.1.x had off its default, one at this version's
-# default, a value this Mac or this version doesn't take, a development build's switch
+# in SETTINGS_FROM_01's order, with why: a dropped one 0.1.x had off its default, one at this
+# version's default, a development build's switch (DEV_ROWS), a value this Mac or this version
+# doesn't take. None in a dry run, which writes no settings to compare with.
 move_changes() {
   local k how def label old new gone=""
   MOVE_LOST=""
+  [ -z "$DRY" ] || return 0
   while read -r k how def label; do
     [ -n "$k" ] || continue
     [ "$def" != - ] || def=""
@@ -1007,12 +1009,14 @@ move_changes() {
       dropped)
         [ "$old" != "$def" ] || continue
         if [ "$k" = gamemode ]; then gone="${gone:+$gone; }$label is always on here"
-        else gone="${gone:+$gone; }$label doesn't exist on this engine"
+        else gone="${gone:+$gone; }$label isn't a setting on this engine"
         fi ;;
       *)
         new=$(setting "$k")
         [ "$new" != "$old" ] || continue
-        if [ "$how" = default ]; then gone="${gone:+$gone; }$label is ${new:-none}, this version's default"
+        if [ -n "$DEV_ON" ] && in_list "$k" "$DEV_ROW_KEYS"; then gone="${gone:+$gone; }$label is ${new:-none}, as a development build starts"
+        elif [ "$how" = default ]; then gone="${gone:+$gone; }$label is ${new:-none}, this version's default"
+        elif ! setting_valid "$k" "$old"; then gone="${gone:+$gone; }$label is ${new:-none}: ${old:-none} isn't a choice here"
         else gone="${gone:+$gone; }$label is ${new:-none}, not ${old:-none}"
         fi ;;
     esac
