@@ -3925,13 +3925,19 @@ kill "$sp" 2>/dev/null; wait "$sp" 2>/dev/null; mv -f "$ENG/bin/wineserver.heat"
 check "Rollback while this app's Wine runs: refused, the game stays here" \
   eval '[ "$rc" != 0 ] && [ "$(st move_game)" = here ] && [ ! -e "$O1ST" ] && [ "$(ino "$STEAM")" = "$O1INO" ]'
 # (a file 0.1's addon list names, missing from what was kept: refused, nothing changed, the
-# snapshot of this app's put back by the undo)
+# snapshot of this app's put back by the undo. gw2-ui-scale.ini comes after version.dll, which
+# differs between the two (0.1's has its own mark), so the restore has really changed a file first)
 GSNAP0=$(find "$GD" -path "$GD/Gw2.dat" -prune -o -type f -exec shasum -a 256 {} + | LC_ALL=C sort)
-mv "$AD/0.1-addons/files/d3d11.dll" "$SANDBOX/kept-d3d11"
+mv "$AD/0.1-addons/files/gw2-ui-scale.ini" "$SANDBOX/kept-ini"
 out=$(g rollback 2>&1) && rc=0 || rc=$?
-check "Rollback with one of 0.1's kept addon files missing: refused, the game here, its addon files as they were" \
+check "Rollback with one of 0.1's kept addon files missing, after another went back: refused, the game here, its addon files as they were" \
   eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac couldn.t put back GW2 on Mac 0.1.s addon files" && [ "$(ino "$STEAM")" = "$O1INO" ] && [ ! -e "$AD/move-undo" ] && [ "$(find "$GD" -path "$GD/Gw2.dat" -prune -o -type f -exec shasum -a 256 {} + | LC_ALL=C sort)" = "$GSNAP0" ]'
-mv "$SANDBOX/kept-d3d11" "$AD/0.1-addons/files/d3d11.dll"
+mv "$SANDBOX/kept-ini" "$AD/0.1-addons/files/gw2-ui-scale.ini"
+mv "$AD/0.1-addons/list" "$SANDBOX/kept-list"
+out=$(g rollback 2>&1) && rc=0 || rc=$?
+check "Rollback without the list of 0.1's kept addon files: refused, nothing changed" \
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac didn.t find GW2 on Mac 0.1.s addon files" && [ "$(ino "$STEAM")" = "$O1INO" ] && [ ! -e "$AD/move-undo" ] && [ "$(find "$GD" -path "$GD/Gw2.dat" -prune -o -type f -exec shasum -a 256 {} + | LC_ALL=C sort)" = "$GSNAP0" ]'
+mv "$SANDBOX/kept-list" "$AD/0.1-addons/list"
 # (0.1's place taken: refused before anything changes, this app's addon files as they were)
 gsnap() { find "$GD" -path "$GD/Gw2.dat" -prune -o -type f -exec shasum -a 256 {} + | LC_ALL=C sort; }
 GSNAP=$(gsnap)

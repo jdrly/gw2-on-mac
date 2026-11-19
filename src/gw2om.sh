@@ -4353,6 +4353,10 @@ rollback_game() {
   [ -f "$OLD_BOTTLE/system.reg" ] || die "$OLD_LABEL's bottle isn't there any more ($OLD_BOTTLE), so the game stays in $APP_NAME."
   move_session
   move_check "$n" "$o" "$g"
+  # (0.1.x's addon files, kept at the move, must be there to go back: without their list, that is a
+  # failed restore, and nothing changes)
+  [ -n "$DRY" ] || [ -f "$MOVE_ADDONS/list" ] ||
+    die "$APP_NAME didn't find $OLD_LABEL's addon files it kept ($MOVE_ADDONS/list), so the game stays here."
   # (the game itself must be in the folder that goes back, its resolved tree on its volume: Steam
   # may have moved it to another library in this app's bottle, and then that holds the only copy)
   [ -n "$DRY" ] || [ -n "$(find "$n" -xdev -type f -iname Gw2.dat -print -quit 2>/dev/null)" ] ||
@@ -4363,9 +4367,7 @@ rollback_game() {
   addons_save "$n${g:+/$g}" "$MOVE_SNAP"
   move_journal rollback "$n" "$o" "$g" "$MOVE_SNAP"
   # (if they can't all go back, nothing goes: the undo puts this app's back from its snapshot)
-  if [ -f "$MOVE_ADDONS/list" ]; then
-    addons_restore "$n${g:+/$g}" "$MOVE_ADDONS" "$n" || die "$APP_NAME couldn't put back $OLD_LABEL's addon files, so the game stays here (details in $LOGS/install.log)."
-  fi
+  addons_restore "$n${g:+/$g}" "$MOVE_ADDONS" "$n" || die "$APP_NAME couldn't put back $OLD_LABEL's addon files, so the game stays here (details in $LOGS/install.log)."
   move_rename "$n" "$o"
   test_pause rollback-renamed
   [ -n "$DRY" ] || rm -f "$MOVE_UNDO"
@@ -4961,8 +4963,15 @@ launch() {
     mv -f "$LOGS/session.env.new.$$" "$LOGS/session.env"
   fi
   echo "=== $(date '+%F %T') $*" >>"$LOGS/wine.log"
-  ( cd "$BOTTLE" && env -u WINELOADER -u WINESERVER -u WINEDLLPATH -u DYLD_FALLBACK_LIBRARY_PATH "${COMPATDB_UNSET[@]}" "${E[@]}" \
-      nohup "$ENG/bin/wine" "$@" </dev/null >>"$LOGS/wine.log" 2>&1 9>&- & )
+  if [ -n "${LAUNCH_WAIT:-}" ]; then
+    # (the caller follows it: LAUNCH_PID is the process that becomes Wine; neither lock goes with it)
+    ( cd "$BOTTLE" && exec env -u WINELOADER -u WINESERVER -u WINEDLLPATH -u DYLD_FALLBACK_LIBRARY_PATH "${COMPATDB_UNSET[@]}" "${E[@]}" \
+        nohup "$ENG/bin/wine" "$@" </dev/null >>"$LOGS/wine.log" 2>&1 8>&- 9>&- ) &
+    LAUNCH_PID=$!
+  else
+    ( cd "$BOTTLE" && env -u WINELOADER -u WINESERVER -u WINEDLLPATH -u DYLD_FALLBACK_LIBRARY_PATH "${COMPATDB_UNSET[@]}" "${E[@]}" \
+        nohup "$ENG/bin/wine" "$@" </dev/null >>"$LOGS/wine.log" 2>&1 9>&- & )
+  fi
   log "started: $*"
 }
 
@@ -5533,12 +5542,24 @@ cmd_play() {
       steam) registry_unlock; echo "@done Steam is running: it is bringing Guild Wars 2 up to date."; return 0 ;;
       game|installer|session) registry_unlock; die "$(busy_message "$k" "$(proc_list)")" ;;
     esac
-    launch "$STEAM_EXE" "steam://install/$GW2_APPID" 8>&-
-    k=0
-    while [ -z "$DRY" ] && [ $k -lt 100 ]; do
-      case "$(busy_of "$(proc_list)")" in steam|session) break ;; esac
-      sleep 0.1; k=$((k + 1))
-    done
+    # (a starter that keeps the session's lock, on its fd 8, until this engine's Steam or wineserver
+    # shows, or the process that becomes Wine is gone (after 2 minutes it is ended): a Rollback
+    # can't take the lock while the launch is pending, a Play killed meanwhile included. Wine itself
+    # doesn't get the lock: Steam would hold it for its whole run, and the next Play needs it.)
+    if [ -z "$DRY" ]; then
+      ( LAUNCH_WAIT=yes
+        launch "$STEAM_EXE" "steam://install/$GW2_APPID"
+        k=0
+        while [ $k -lt 1200 ]; do
+          case "$(busy_of "$(proc_list)")" in steam|session) exit 0 ;; esac
+          kill -0 "$LAUNCH_PID" 2>/dev/null || exit 0
+          sleep 0.1; k=$((k + 1))
+        done
+        kill "$LAUNCH_PID" 2>/dev/null || true ) </dev/null >/dev/null 2>&1 &
+      wait $! || true
+    else
+      launch "$STEAM_EXE" "steam://install/$GW2_APPID"
+    fi
     registry_unlock
     echo "@done Steam is starting: it finishes the game's download, and this window follows it."
     return 0
