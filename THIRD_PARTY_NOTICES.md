@@ -15,7 +15,8 @@ carries them.
 The app bundles a few components and downloads the Wine engine at install time. On this line it
 bundles my DXMT fork built for the engine and, in builds that have them, two files of Wine, my
 `ntdll.so` and my Mac driver's `winemac.so`, and my build of FEX's x86_64 half, all built for the
-engine. It never bundles
+engine. ReShade and its effects, and Microsoft's shader compiler when the game has none, are
+downloaded only when you turn ReShade on (below). The app never bundles
 Guild Wars 2, its installer, its launcher, its files or Steam, and never downloads them from
 anywhere but their publishers. Steam's installer comes from Valve's CDN. The game comes from Steam,
 or from ArenaNet's own installer, which you download from ArenaNet's site.
@@ -75,6 +76,22 @@ each. After `set fex mine` it does the same with FEX's
 `lib/wine/aarch64-windows/xtajit64.dll`, `libarm64ecfex.dll` and
 `lib/wine/aarch64-unix/libarm64ecfex.so`. It changes nothing else in the engine, and nothing
 inside `wine.app` is touched.
+
+## ReShade, downloaded only when you turn it on
+
+The app doesn't contain or redistribute these either. The *ReShade* switch in Settings › Interface
+downloads them onto your Mac, from their publishers, only after you turn it on and confirm:
+
+| Component | Source | License |
+|---|---|---|
+| **ReShade** 6.8.0 by crosire (Patrick Mours), the signed build: the app downloads `ReShade_Setup_6.8.0.exe`, checks its size and sha256, and takes `ReShade64.dll` out of it, checked by sha256 too. The installer never runs | `https://reshade.me/downloads/ReShade_Setup_6.8.0.exe`, built from [crosire/reshade](https://github.com/crosire/reshade) `v6.8.0` | BSD-3-Clause, copyright 2014 Patrick Mours ([`LICENSE.md`](https://github.com/crosire/reshade/blob/v6.8.0/LICENSE.md)) |
+| **Microsoft's `d3dcompiler_47.dll`**, the shader compiler ReShade needs. The app copies the game's own from `bin64/cef` when the game has one, and downloads this copy (10.0.17134.12, Microsoft-signed, pinned by sha256) only when it doesn't | [mozilla/fxc2 `9aba9b1`](https://github.com/mozilla/fxc2/tree/9aba9b11079303d5577e0e3eb455f4d00f3b5946/dll), `dll/d3dcompiler_47.dll` | Microsoft's |
+| **ReShade's standard effects** by crosire and contributors, downloaded by the ReShade switch | [crosire/reshade-shaders `fd00221`](https://github.com/crosire/reshade-shaders/tree/fd0022170615ce0d8162d219bff07232fa6dd84f) (the `slim` branch) | no license file for the pack; each file carries its own notice, if any. `ReShade.fxh` is CC0-1.0 |
+| **SweetFX** by CeeJayDK, downloaded by the ReShade switch | [CeeJayDK/SweetFX `93ddf39`](https://github.com/CeeJayDK/SweetFX/tree/93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361) | MIT, copyright 2014 CeeJayDK. Some files carry their own notices, such as SMAA's and NVIDIA's FXAA |
+
+GW2 on Mac doesn't change these files. ReShade's settings, presets and shaders live in
+`~/Library/Application Support/GW2 on Mac arm64/ReShade`, and presets or shaders you add there keep
+their own licenses.
 
 ## Trademarks
 

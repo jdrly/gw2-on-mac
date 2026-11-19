@@ -188,7 +188,7 @@ jobs:
       # The refusals change the files this job has finished with. A dev build has no archive, my
       # ntdll.so only with its wine_commit, my winemac.so only with its macdrv_commit and my FEX only
       # with its fex_commit.
-      - name: build.sh refuses a changed component, stage-components.sh a changed archive
+      - name: build.sh refuses a changed component or an addon older than its source, stage-components.sh a changed archive
         env:
           ARCHIVE: ${{ inputs.components == '' }}
         run: |
@@ -222,6 +222,15 @@ jobs:
             grep 'prebuilt/fex does not match its record' "$RUNNER_TEMP/build.txt"
             rm -rf prebuilt/fex && cp -R "$RUNNER_TEMP/fex" prebuilt/fex
           fi
+          cp prebuilt/ui-scale/gw2-ui-scale.ini "$RUNNER_TEMP/gw2-ui-scale.ini"
+          printf 'zz_new_setting=1\n' >>addon/ui-scale/gw2-ui-scale.ini
+          if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took a version.dll without a new setting"; exit 1; fi
+          grep 'version.dll has no zz_new_setting setting' "$RUNNER_TEMP/build.txt"
+          git checkout -- addon/ui-scale/gw2-ui-scale.ini
+          sed -i '' 's/^csspin=/; csspin=/' prebuilt/ui-scale/gw2-ui-scale.ini
+          if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took an ini with csspin only in a comment"; exit 1; fi
+          grep 'gw2-ui-scale.ini has no csspin=' "$RUNNER_TEMP/build.txt"
+          cp "$RUNNER_TEMP/gw2-ui-scale.ini" prebuilt/ui-scale/gw2-ui-scale.ini
           printf 'not the addon' >prebuilt/ui-scale/version.dll
           if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took a changed version.dll"; exit 1; fi
           grep 'version.dll is not the addon' "$RUNNER_TEMP/build.txt"
