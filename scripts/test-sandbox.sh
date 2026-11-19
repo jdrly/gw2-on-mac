@@ -3485,6 +3485,16 @@ at=no; [ ! -e "$RP.at" ] || at=yes
 kill -TERM "$ip"; wait "$ip"; rc=$?; rm -f "$RP" "$RP.at"
 check "Cancel after Steam's start wrote the rules: the install stops, nothing left, compatdb.rules neither" \
   eval '[ "$at" = yes ] && [ "$rc" != 0 ] && has "$SANDBOX/cancelled.txt" "^@phase 4" && [ -z "$(ad_list)" ]'
+# rules that appear once this install has started (another start wrote them): its failure before
+# its own launch keeps them
+LP="$SANDBOX/pause-lock"
+touch "$LP"
+GW2_ON_MAC_STEAMSETUP_URL="file://$SANDBOX/missing.exe" GW2_ON_MAC_TEST_PAUSE="$LP" GW2_ON_MAC_TEST_PAUSE_AT=locked g install steam >"$SANDBOX/rules-kept.txt" 2>&1 & lp=$!
+i=0; until [ -e "$LP.at" ] || [ $i -ge 100 ]; do sleep 0.1; i=$((i + 1)); done
+echo "rules of another start" >"$AD/compatdb.rules"; rm -f "$LP"; wait "$lp"; rc=$?; rm -f "$LP.at"
+check "rules written after this install started: its failure at Steam's download keeps them, and only them" \
+  eval '[ "$rc" != 0 ] && has "$SANDBOX/rules-kept.txt" "@error The download of SteamSetup.exe" && [ "$(cat "$AD/compatdb.rules")" = "rules of another start" ] && [ "$(ad_list)" = compatdb.rules ]'
+rm -f "$AD/compatdb.rules"
 
 section "Stop waiting keeps the engine and the bottle"
 g install steam >/dev/null 2>&1
