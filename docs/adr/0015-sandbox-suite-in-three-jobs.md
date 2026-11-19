@@ -9,8 +9,8 @@ half left. Now `GROUP` cuts `scripts/test-sandbox.sh` there too, and the second 
 install. `settings` is the dry runs to Collect Logs on one Steam install. `sessions` is Steam in
 the background to `Uninstall`, and when it runs alone it starts with `fixture_install`. `rest` is
 unchanged: what starts from nothing after `Uninstall`. The Checks workflow runs the three as a
-matrix of three jobs, each with a 15-minute limit. Without `GROUP` the suite runs as it always did
-and never calls the fixture.
+matrix of three jobs with a limit of 15 minutes, 20 for `sessions` since #269. Without `GROUP` the
+suite runs as it always did and never calls the fixture.
 
 `fixture_install` is the install from "Install through Steam" and "Steam downloads the game", then
 the few lines the first half's other sections leave behind and the session checks read: launch
@@ -33,9 +33,9 @@ build dry run of the same commit the three groups took 254, 270 and 411 s.
   full run's.
 - The dev build calls the same jobs through `checks.yml`, and its `package` job waits for all
   three.
-- On 2026-11-19 `sessions` got 20 minutes (#269). After #278 brought ReShade's sections from
-  `main` it took 13 min 58 s (Checks run 44448554814), about 226 s of that in ReShade's sections.
-  `settings` and `rest` keep 15. Whether a fourth group is better is a later decision.
+- On 2026-11-19 I gave `sessions` 20 minutes and kept 15 for `settings` and `rest` (#269). After
+  #278 brought ReShade's sections from `main`, `sessions` took 13 min 58 s (Checks run
+  44448554814), about 226 s of that in ReShade's sections.
 - 0012's rule for a new section still holds: it goes into the group whose install it uses, and a
   section that starts from nothing goes into `rest`, or into a group of its own once `rest` passes
   8 minutes.

@@ -160,7 +160,8 @@ Some details:
   with other settings, Play asks you to quit Steam first, because the game inherits Steam's
   environment.
 - If the game's own Frame Limiter is set while vertical sync is on, the window suggests
-  *Unlimited* with vsync. *Don't show again* hides the tip.
+  *Unlimited* with vsync. *Don't show again* hides the tip. With *Vsync* off in Settings it doesn't
+  show, since the steady 60 it promises comes from my DXMT fork's display sync.
 
 **Repair** puts the engine, the bottle's settings and Steam back in place. It unpacks the engine
 again when its files aren't the expected ones. It keeps the game and your settings. Use it when the
@@ -211,17 +212,17 @@ chosen, and the main window's *Engine* and *Graphics* checks name the files in p
 | Pane | Setting | Key | Default | What it does |
 |---|---|---|---|---|
 | Graphics | Retina | `retina` | on | draws at your display's full resolution, at some cost in frame rate |
-| | Frame cap | `fpscap` | off | a steady cap paced by Metal at 30, 40, 60 or 120, for a display above 60 Hz or for a lower steady rate. With *Vsync* on, a cap at or above the display's refresh does nothing |
-| | Vsync | `vsync` | on | my DXMT fork's display sync (`CAMetalLayer`'s vsync). With the game's own Vertical Sync on, each frame waits for the display's next refresh. Off, the game's rule gets `DXMT_DISPLAY_SYNC=0` and DXMT spaces the frames itself, one refresh apart or the frame cap's interval, see [The game's environment](#the-games-environment). Greyed while the engine's own DXMT is chosen |
+| | Frame cap | `fpscap` | off | a steady cap paced by Metal at 30, 40, 60 or 120, for a display above 60 Hz or for a lower steady rate. With *Vsync* and the game's own Vertical Sync on, a cap at or above the display's refresh does nothing |
+| | Vsync | `vsync` | on | my DXMT fork's display sync (`CAMetalLayer`'s vsync). With the game's own Vertical Sync on, each frame waits for the display's next refresh. Off, the game's rule gets `DXMT_DISPLAY_SYNC=0`, and DXMT asks Metal for a minimum time between frames instead: one refresh, or the frame cap's interval. With the game's Vertical Sync off the row changes nothing, see [The game's environment](#the-games-environment). The frame-limiter tip shows only while it is on. Greyed while the engine's own DXMT is chosen |
 | | Metal | `metal` | 4 | Metal 3 or Metal 4 for my DXMT fork (`DXMT_METAL4=0` or `=1` in the game's rule; at Metal 4 with `DXMT_MTL4_PRESENT=mtl3` too, see [The game's environment](#the-games-environment)). Metal 4 is the newer path. Switch to Metal 3 for better backwards compatibility. A `settings.conf` without the key reads 4, and one with `metal=3` keeps it: Install and Repair wrote the key into every file while Metal 3 was the default. Greyed while the engine's own DXMT is chosen |
 | | MetalFX for Subsample | `metalfx` | off | MetalFX upscales the 3D scene and the interface stays sharp. It works only with the game's Render Sampling set to Subsample, and does nothing at Native. Greyed while the engine's own DXMT is chosen |
 | | Metal HUD | `hud` | off | Apple's overlay with frame rate and frame times, over the game only and not over Steam's windows |
-| | Launcher frames | `launcherframes` | off | the launcher's window gets a copy of each frame, and a frame equal to the last is skipped (`WINE_MACDRV_SURFACE=copy,skip`). Against a launcher that flickers. Experimental: off until I've looked at the launcher on three starts (#105). Greyed while the engine's own `winemac.so` is chosen |
+| | Launcher frames | `launcherframes` | off | the launcher's window gets a copy of each frame, and a frame equal to the last is skipped (`WINE_MACDRV_SURFACE=copy,skip`). Against a launcher that flickers. Experimental. It stays off until I've looked at the launcher on three starts (#105). Greyed while the engine's own `winemac.so` is chosen |
 | Performance | Shader warming | `warm` | on | builds the pipelines the last sessions used before the game asks for them. Experimental, as my DXMT fork's table calls `DXMT_WARM`. Greyed while the engine's own DXMT is chosen |
 | | CPUs the game sees | `ncpu` | 8 | from 2 up to your Mac's logical CPUs, or all. The game starts one job worker per CPU, minus one |
 | | Job wakes | `jobwakes` | on | a job the game hands out wakes one sleeping worker, and none when no worker sleeps (`WINE_HEAT_WAKE=one,skip`). Greyed while the engine's own `ntdll.so` is chosen |
 | | Event pool | `eventpool` | on | closed events are kept and handed out again, without a request to the Wine server (`WINE_HEAT_EVPOOL=1`). Greyed while the engine's own `ntdll.so` is chosen |
-| | Faster locks | `fastlocks` | off | short spins before the game thread sleeps on a busy lock, a job group or an event (`WINE_HEAT_SPIN=lock=20:game,event=30:game`). Experimental: off until a session of mine shows more hits than misses (#105). Greyed while the engine's own `ntdll.so` is chosen |
+| | Faster locks | `fastlocks` | off | short spins before the game thread sleeps on a busy lock, a job group or an event (`WINE_HEAT_SPIN=lock=20:game,event=30:game`). Experimental. It stays off until a session of mine shows more hits than misses (#105). Greyed while the engine's own `ntdll.so` is chosen |
 | Interface | Larger interface | `uiscale` | off | my interface addon, see below |
 | | Interface Size "Larger" | `uiscale_size` | 1.75 | the addon's scale: 1.5, 1.75, 1.8 or 2.0 |
 | | Small text in Cronos | `uiscale_sans` | on | chat, the tracker and labels have no larger font, so the addon draws them in Cronos at the larger size |
@@ -825,9 +826,11 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   it. Display sync acts only on a present with a sync interval, which the game asks for while its
   own Vertical Sync is on. Then, with display sync on, a frame cap at or above the refresh rate
   does nothing, a cap that is a whole number of refreshes keeps a minimum duration, and any other
-  is kept by a frame limiter (`DXMT_CAP_LIMITER`). With it off, every present waits at least one
-  refresh, or the cap's interval when there is a cap, even above the refresh rate, without
-  `CAMetalLayer`'s vsync. `CefHost.exe` gets it removed.
+  is kept by a frame limiter (`DXMT_CAP_LIMITER`). With it off, a present asks Metal for a minimum
+  presentation interval instead (`presentDrawable:afterMinimumDuration:`): one refresh without a
+  cap, the cap's interval with one, so 120 on a 60 Hz display asks for 8.3 ms. Without a cap that
+  needs DXMT to know the refresh rate; when it doesn't, there is no minimum. At interval 0 display
+  sync is off either way, and a cap gives the same minimum interval. `CefHost.exe` gets it removed.
 - The `WINE_HEAT_*` entries are my `ntdll.so`'s switches, which it acts on in `Gw2-64.exe` only.
   They follow the cache path, one `env=` field each, and only while my file is in place. The table
   `HEAT_SWITCHES` in `gw2om.sh` has one row per setting, `<key> <entry>`: *Job wakes* writes

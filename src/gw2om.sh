@@ -877,7 +877,7 @@ write_dxmt_conf() {
   {
     echo "# DXMT options for Guild Wars 2, written by $APP_NAME from its settings (DXMT_CONFIG_FILE)."
     if [ "$cap" != off ]; then
-      echo "# Frame cap: paced by Metal. With display sync on (Vsync), only a cap below the display's refresh acts"
+      echo "# Frame cap: paced by Metal. While display sync paces the game (Vsync and the game's vsync on), only a cap below the refresh acts"
       echo "d3d11.preferredMaxFrameRate = $cap"
     fi
   } | put "$DXMT_CONF" 644
@@ -4635,15 +4635,16 @@ etime_seconds() {
 }
 
 # The game's own Frame Limiter at a value together with vsync: under Wine it lands just under the
-# display's rate (58 instead of 60); Unlimited with vsync keeps a steady 60. Sets LIMIT (the
-# Frame Limiter's value, or empty) and LIMIT_HINT (yes|no). The game's settings file is only read.
+# display's rate (58 instead of 60); Unlimited with vsync keeps a steady 60. That steady 60 is my
+# DXMT fork's display sync, so no hint while the Vsync row is off. Sets LIMIT (the Frame Limiter's
+# value, or empty) and LIMIT_HINT (yes|no). The game's settings file is only read.
 limiter_state() {
   local gfx vsync
   gfx="$BOTTLE/drive_c/users/$(bottle_user)/AppData/Roaming/Guild Wars 2/GFXSettings.Gw2-64.exe.xml"
   LIMIT=$(sed -n 's/.*<OPTION Name="frameLimit"[^>]*Value="\([^"]*\)".*/\1/p' "$gfx" 2>/dev/null | head -1 || true)
   vsync=$(sed -n 's/.*<OPTION Name="verticalSync"[^>]*Value="\([^"]*\)".*/\1/p' "$gfx" 2>/dev/null | head -1 || true)
   LIMIT_HINT=no
-  if [ -n "$LIMIT" ] && [ "$LIMIT" != unlimited ] && [ "$vsync" = true ]; then LIMIT_HINT=yes; fi
+  if [ -n "$LIMIT" ] && [ "$LIMIT" != unlimited ] && [ "$vsync" = true ] && [ "$(setting vsync)" = on ]; then LIMIT_HINT=yes; fi
 }
 
 # Steam updating or verifying itself (logs/bootstrap_log.txt since <stamp>): sets UPD (no, update

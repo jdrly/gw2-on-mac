@@ -449,11 +449,11 @@ struct SettingsView: View {
         SettingRow("Retina", "Draws the game at your display's full resolution (Wine's High Resolution Mode). Sharper, at some cost in frame rate.") {
           InkSwitch(isOn: settings.toggle("retina"))
         }
-        SettingRow("Frame cap", "A steady cap paced by Metal, for a display above 60 Hz or for a lower steady rate. With Vsync on, a cap at or above your display's refresh does nothing.") {
+        SettingRow("Frame cap", "A steady cap paced by Metal, for a display above 60 Hz or for a lower steady rate. With Vsync and the game's own Vertical Sync on, a cap at or above your display's refresh does nothing.") {
           InkPopup(selection: settings.choice("fpscap", "off"), options: GameSettings.frameCaps)
         }
         // (my DXMT fork's display sync: DXMT_DISPLAY_SYNC=0 in the game's rule when off)
-        SettingRow("Vsync", "With the game's own Vertical Sync on, each frame waits for your display's next refresh (Metal's display sync). Off, DXMT spaces the frames itself, one refresh apart or the frame cap's interval.", off: off("vsync")) {
+        SettingRow("Vsync", "With the game's own Vertical Sync on, each frame waits for your display's next refresh (Metal's display sync). Off, DXMT asks Metal for a minimum time between frames instead: one refresh, or the frame cap's interval.", off: off("vsync")) {
           InkSwitch(isOn: settings.toggle("vsync"))
         }
       }
