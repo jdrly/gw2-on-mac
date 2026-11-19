@@ -3610,14 +3610,22 @@ o1_same() { [ "$(o1snap)" = "$O1SNAP" ]; }
 o1_rest_same() { [ "$(o1snap "$1")" = "$(printf '%s\n' "$O1SNAP" | awk -v x="$1" '!index($0, x)')" ]; }
 # ino <path>: its inode (a rename keeps it, a copy doesn't)
 ino() { stat -f %i "$1"; }
-# no_cp_of <folder>...: install.log has no cp of these folders (a clone or a copy), only renames
+# no_cp_of <folder>...: install.log (or NOCP_LOG) has no cp or mv of these folders, which could be a
+# copy, only renames (the log's "+ cp", "+ mv" lines quote paths as printf %q does)
 no_cp_of() {
-  local f q
+  local f
   for f in "$@"; do
-    q=$(printf '%q' "$f")
-    awk -v q=" $q" '/^\+ cp / && (index($0, q " ") || substr($0, length($0) - length(q) + 1) == q) { f = 1 } END { exit f }' "$LOGS/install.log" || return 1
+    Q=" $(printf '%q' "$f")" awk '/^\+ (cp|mv) / && (index($0, ENVIRON["Q"] " ") || substr($0, length($0) - length(ENVIRON["Q"]) + 1) == ENVIRON["Q"]) { f = 1 } END { exit f }' "${NOCP_LOG:-$LOGS/install.log}" || return 1
   done
 }
+# (the check itself: a cp of 0.1's Steam folder in a log is found, at the end of a line or not)
+NOCP_LOG="$SANDBOX/nocp.log"
+printf '+ cp -Rpc %q %q\n' "$H/Library/Application Support/GW2 on Mac/bottle/drive_c/Program Files (x86)/Steam" /x >"$NOCP_LOG"
+check "no_cp_of finds a logged cp of a folder with spaces and parentheses in its path" \
+  eval '! no_cp_of "$H/Library/Application Support/GW2 on Mac/bottle/drive_c/Program Files (x86)/Steam" && no_cp_of "$H/Library/Application Support/GW2 on Mac/bottle/drive_c/Program Files (x86)/Stea"'
+printf '+ mv /y %q\n' "$H/a b/(c)" >"$NOCP_LOG"
+check "  and a logged mv at the end of a line" eval '! no_cp_of "$H/a b/(c)"'
+unset NOCP_LOG
 nothing_made() { [ -z "$(ls -A "$AD" 2>/dev/null)" ]; }
 # ini_clean <file>: no line names 0.1's folders (Application Support's or Caches' GW2 on Mac)
 ini_clean() { ! grep -iqF -e "$(winp "$O1")\\" -e "$(winp "$OC")\\" "$1" && ! grep -iqE "$(winp "$O1" | sed 's/\\/\\\\/g')$" "$1"; }
@@ -3680,22 +3688,24 @@ for p in engine settings bottle steam files profile reshade finish; do
 done
 PAUSE="$SANDBOX/pause"
 # move_paused <signal> <command...>: the command stopped by <signal> where the rename is done
+# (paused: yes when it got to the pause before the signal)
 move_paused() {
   local sig=$1; shift
   touch "$PAUSE"
   GW2_ON_MAC_TEST_PAUSE="$PAUSE" "$@" >"$SANDBOX/cancel.txt" 2>&1 & mp=$!
   i=0; until [ -e "$PAUSE.at" ] || [ $i -ge 100 ]; do sleep 0.1; i=$((i + 1)); done
+  if [ -e "$PAUSE.at" ]; then paused=yes; else paused=no; fi
   kill "-$sig" "$mp" 2>/dev/null; rm -f "$PAUSE"; wait "$mp"; rc=$?
   rm -f "$PAUSE.at"
 }
 move_paused TERM env GW2_ON_MAC_TEST_PAUSE_AT=move-renamed "$GW2OM" install move
 check "a move cancelled after the rename (TERM) renames it back, leaves nothing, 0.1 as it was" \
-  eval '[ "$rc" = 143 ] && nothing_made && o1_same && [ "$(ino "$O1ST")" = "$O1INO" ]'
+  eval '[ "$paused" = yes ] && [ "$rc" = 143 ] && nothing_made && o1_same && [ "$(ino "$O1ST")" = "$O1INO" ]'
 # killed (a crash, the Mac switched off) after the rename: undone at the next status, or the next
 # command that takes the install lock, before it removes anything
 move_paused KILL env GW2_ON_MAC_TEST_PAUSE_AT=move-renamed "$GW2OM" install move
 check "a move killed after the rename: Steam's folder is in the new bottle, the rename's record beside it" \
-  eval '[ ! -e "$O1ST" ] && [ "$(ino "$BOTTLE/drive_c/Program Files (x86)/Steam")" = "$O1INO" ] && [ -f "$AD/move-undo" ]'
+  eval '[ "$paused" = yes ] && [ ! -e "$O1ST" ] && [ "$(ino "$BOTTLE/drive_c/Program Files (x86)/Steam")" = "$O1INO" ] && [ -f "$AD/move-undo" ]'
 check "  the next status renames it back and removes what the move made: 0.1 as it was, the move ready again" \
   eval '[ "$(st move)" = yes ] && nothing_made && o1_same && [ "$(ino "$O1ST")" = "$O1INO" ]'
 move_paused KILL env GW2_ON_MAC_TEST_PAUSE_AT=move-renamed "$GW2OM" install move
@@ -3703,16 +3713,44 @@ out=$(g uninstall 2>&1) || true
 check "a move killed after the rename, then Uninstall: the game goes back first, 0.1 as it was" \
   eval 'o1_same && [ "$(ino "$O1ST")" = "$O1INO" ] && [ ! -e "$AD/move-undo" ] && [ ! -e "$BOTTLE" ]'
 rm -rf "$AD"
-# another disk (forced), and a Steam folder that is a link: refused before anything is written
+# another disk (forced, then a real one), and a Steam folder that is a link: refused before anything
+# is written, the logs untouched too
+logstamp() { stat -f '%z %m' "$LOGS/install.log" 2>/dev/null; }
+LST=$(logstamp)
 out=$(GW2_ON_MAC_IMPORT_COPY=1 g install move 2>&1) && rc=0 || rc=$?
-check "0.1's Steam folder on another disk: refused, nothing written, 0.1 as it was" \
-  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac 0.1.s Steam folder is on another disk .* never by copying it, so nothing changed" && nothing_made && o1_same'
+check "0.1's Steam folder on another disk (forced): refused, nothing written, 0.1 as it was" \
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac 0.1.s Steam folder is on another disk .* never by copying it, so nothing changed" && nothing_made && [ "$(logstamp)" = "$LST" ] && o1_same'
+# (a disk image: 0.1's Program Files (x86) linked to a copy there, the game's Gw2.dat made anew)
+O1VOL="$SANDBOX/o1vol" PF="$O1B/drive_c/Program Files (x86)"
+if hdiutil create -quiet -size 4g -type SPARSE -fs APFS -volname gw2om-o1 "$SANDBOX/o1vol" >/dev/null 2>&1 &&
+  mkdir -p "$O1VOL" && hdiutil attach -quiet -nobrowse -noautoopen -mountpoint "$O1VOL" "$SANDBOX/o1vol.sparseimage" >/dev/null 2>&1; then
+  trap 'hdiutil detach -quiet -force "$O1VOL" 2>/dev/null' EXIT
+  mv "$PF" "$PF.away" && rsync -a --exclude Gw2.dat "$PF.away/" "$O1VOL/pf86/" &&
+    mkfile -n 2g "$O1VOL/pf86/Steam/steamapps/common/Guild Wars 2/Gw2.dat" && ln -s "$O1VOL/pf86" "$PF"
+  out=$(g install move 2>&1) && rc=0 || rc=$?
+  check "0.1's Steam folder on another volume (a disk image, through a linked parent): refused, nothing written" \
+    eval '[ "$(st old_install)" = yes ] && [ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac 0.1.s Steam folder is on another disk" && nothing_made && [ "$(logstamp)" = "$LST" ] && [ -f "$O1VOL/pf86/Steam/steam.exe" ]'
+  rm "$PF" && mv "$PF.away" "$PF"
+  hdiutil detach -quiet -force "$O1VOL" >/dev/null 2>&1; trap - EXIT
+else
+  echo "  skip the disk image (hdiutil could not attach one); the forced refusal above covers the branch"
+fi
+check "  0.1 as it was" o1_same
 mv "$O1ST" "$SANDBOX/linked-steam" && ln -s "$SANDBOX/linked-steam" "$O1ST"
 out=$(g install move 2>&1) && rc=0 || rc=$?
 check "0.1's Steam folder as a link: refused, nothing written" \
   eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac 0.1.s Steam folder is on another disk .*or reached through a link" && nothing_made'
 rm "$O1ST" && mv "$SANDBOX/linked-steam" "$O1ST"
 check "  0.1 as it was" o1_same
+# the game folder's ReShade.ini as a link to a file beside it: refused before the rename (Rollback
+# couldn't put the file it leads to back), 0.1 as it was
+mv "$O1GAME/ReShade.ini" "$O1GAME/Mine.ini" && ln -s Mine.ini "$O1GAME/ReShade.ini"
+O1SNAP=$(o1snap)
+out=$(g install move 2>&1) && rc=0 || rc=$?
+check "a ReShade.ini in the game folder that is a link: refused, nothing left, 0.1 as it was" \
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error .*ReShade.ini is a link, so GW2 on Mac couldn.t put GW2 on Mac 0.1.s addon files back" && nothing_made && o1_same && [ "$(ino "$O1ST")" = "$O1INO" ]'
+rm "$O1GAME/ReShade.ini" && mv "$O1GAME/Mine.ini" "$O1GAME/ReShade.ini"
+O1SNAP=$(o1snap)
 # a game folder that is a link (out of 0.1's bottle): refused once renamed, renamed back, nothing
 # written through it
 mv "$O1GAME" "$SANDBOX/linked-game" && ln -s "$SANDBOX/linked-game" "$O1GAME"
@@ -3747,6 +3785,13 @@ O1SNAP=$(o1snap)
 
 : >"$STANDIN_LOG"
 GDINO=$(ino "$O1GAME/Gw2.dat")
+# (the move cancelled once it is done: it stays done; then Rollback and Uninstall, for the move below)
+move_paused TERM env GW2_ON_MAC_TEST_PAUSE_AT=move-done "$GW2OM" install move
+check "a move cancelled (TERM) after its record is written keeps the move: installed, the game here" \
+  eval '[ "$paused" = yes ] && [ "$(st installed) $(st move_game)" = "yes here" ] && [ ! -e "$AD/move-undo" ] && [ "$(ino "$STEAM")" = "$O1INO" ]'
+g rollback >/dev/null 2>&1; g uninstall >/dev/null 2>&1; rm -rf "$AD"
+check "  Rollback, Uninstall: 0.1 as it was" eval 'o1_same && [ "$(ino "$O1ST")" = "$O1INO" ]'
+: >"$STANDIN_LOG"
 out=$(g install move 2>&1) && rc=0 || rc=$?
 GM="$GD" U="$BOTTLE/drive_c/users/crossover"
 check "install move (Steam, ReShade with arcdps) exits 0, the phases 1-5" \
@@ -3787,6 +3832,11 @@ sessions_reset
 out=$(g start-fresh --before-move 2>&1) && rc=0 || rc=$?
 check "Start fresh confirmed before the move, with the move finished meanwhile: refused, the install stays" \
   eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error The move from GW2 on Mac 0.1 has finished meanwhile" && [ "$(st installed) $(st move_record)" = "yes moved" ]'
+cp "$AD/moved-from-0.1" "$SANDBOX/record" && echo moved >"$AD/moved-from-0.1"
+out=$(g start-fresh --moved 2>&1) && rc=0 || rc=$?
+check "Start fresh with a record that names no folder: refused, the game stays here" \
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac can.t tell whether the game in its bottle is GW2 on Mac 0.1.s only copy" && [ "$(st installed)" = yes ] && [ "$(ino "$STEAM")" = "$O1INO" ]'
+cp "$SANDBOX/record" "$AD/moved-from-0.1"
 out=$(g start-fresh --moved 2>&1) && rc=0 || rc=$?
 check "Start fresh: the game goes back first (the same inode, 0.1's addon files), this app's install goes, the move doesn't start by itself again; 0.1 as it was" \
   eval '[ "$rc" = 0 ] && has <(echo "$out") "^@done .*Guild Wars 2 went back to GW2 on Mac 0.1.s folder first" && [ "$(st installed) $(st move) $(st move_record) $(st old_install)" = "no no skipped yes" ] && [ "$(ls -A "$AD" | LC_ALL=C sort | tr "\n" " ")" = "ReShade moved-from-0.1 " ] && [ "$(ino "$O1ST")" = "$O1INO" ] && o1_same'

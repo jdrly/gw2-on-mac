@@ -22,21 +22,29 @@ double space, not even for a moment.
   its Steam or game folder and writes nothing else". Before the rename the app copies the few addon
   files 0.1.x has in the game folder (`version.dll`, `ReShade.ini`, arcdps and ReShade at either
   name, the compiler, the chain path) into `0.1-addons`.
-- **A failure renames it back.** `move-undo` names the rename before it happens, with the folder's
-  inode. A failed or cancelled move puts 0.1.x's addon files back, renames the folder back, and only
-  then removes the bottle. If the folder isn't where the rename left it, nothing is removed. A
-  `move-undo` left by a run that was killed is undone under the next install lock: `status` takes
-  it at the window's start, and so does every command that takes the lock, before it removes
-  anything.
+- **A failure renames it back.** From the move's first write, `move-undo` names what it made, and
+  before the rename it names the rename too, with the folder's inode, flushed to disk. A failed or
+  cancelled move puts 0.1.x's addon files back inside the bottle, renames the folder back, and only
+  then removes the bottle. If the folder isn't where the rename left it, nothing is removed. Once
+  the move's record is written the move is done, and a cancel after it removes nothing. A
+  `move-undo` left by a run that was killed is undone under the next install lock: `status` starts
+  `gw2om.sh recover` at the window's start, and every command that takes the lock does the same
+  before it removes anything.
+- **The rename is the kernel's.** `rename(2)` through macOS's `perl`, which fails on another volume
+  and never moves a folder into one that is there. `mv` would copy across volumes and nest. The
+  volume checks resolve links (`stat -L`), so a linked parent on another disk is refused before
+  anything is written.
 - **Rollback to 0.1.4 in Troubleshooting (decision 8 replaced).** No copy is kept for 0.1.x.
-  Rollback refuses while 0.2's Wine runs, renames the folder back to where 0.1.x had it, puts back
-  0.1.x's addon files, and shows a window with a button that opens 0.1.4's DMG in the browser
+  Rollback refuses while 0.2's Wine runs and holds the session's lock over the rename, so no Play
+  starts in the middle. It puts back 0.1.x's addon files, renames the folder back to where 0.1.x
+  had it, and shows a window with a button that opens 0.1.4's DMG in the browser
   (0.1.x releases are notarized) and says to quit this app and drag 0.1.4 over it. The version and
   the URL come from one line of `gw2om.sh`, `LAST_01`, so when 0.1.5 ships the row and the window
   name it and fetch its DMG. This app keeps its install without the game, and its main window
   offers *Move it in again*, the same rename the other way.
 - **Start fresh after a move gives the game back first**, as Rollback does, then removes the moved
-  install. Uninstall stays as it was: it removes the bottle with the game, and its confirmation says
+  install. Without a record that names the moved folder it removes nothing, unless 0.1.x still has
+  its own game (a move that cloned, before 0.2.0). Uninstall stays as it was: it removes the bottle with the game, and its confirmation says
   to choose Rollback first.
 - **#282 is superseded.** With the game moved, 0.1.x's leftovers are its engine, its bottle without
   Steam or the game, and its small files. A row that removes them can come later. It isn't needed

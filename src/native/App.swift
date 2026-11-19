@@ -208,7 +208,11 @@ final class Installer {
   var installedVersion: String { status["installed_version"] ?? appVersion }
   var installedOtherVersion: Bool { installed && installedVersion != appVersion }
   var diskFree: Int64 { Int64(status["disk_free"] ?? "") ?? 0 }
-  var diskNeeded: Int64 { Int64(status["disk_needed"] ?? "") ?? 75_000_000_000 }
+  // (a move from 0.1 or Move in renames the game: only the engine and the bottle need room)
+  var diskNeeded: Int64 {
+    let key = status["move"] == "yes" || status["move_game"] == "01" ? "move_disk_needed" : "disk_needed"
+    return Int64(status[key] ?? "") ?? 75_000_000_000
+  }
   var diskLow: Bool { loaded && !gameInstalled && diskFree > 0 && diskFree < diskNeeded }
   // What runs (gw2om.sh status "busy"): game, steam, installer (ArenaNet's), session (the
   // bottle's Wine), leftovers, none
@@ -307,7 +311,8 @@ final class Installer {
     // the app restarts; once the game is there, the finishing touches run (once: a failed finish
     // waits for Install or Repair)
     guard !isOperating else { return }
-    if values["stage"] == "waiting_game" {
+    // (after Rollback the game is in 0.1's folder: nothing to follow until Move in)
+    if values["stage"] == "waiting_game" && values["move_game"] != "01" {
       if values["game"] == "yes" {
         if phase != .failed(.finish, lastFinishError) { start(.finish) }
       } else {

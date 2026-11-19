@@ -37,6 +37,8 @@
 #                              game (status: move_game=01); refused while Wine runs
 #   gw2om.sh move-in           the main window after a rollback: the game moved in again, as the
 #                              move did
+#   gw2om.sh recover           a rename a killed install, Rollback or Move in left (move-undo)
+#                              undone under the install lock; status runs it
 #   gw2om.sh scan              the Guild Wars 2 installs of other Wine apps on this Mac (GW2 on Mac
 #                              0.1, CrossOver, Whisky, app wrappers, Heroic, GameHub, ~/.wine), one
 #                              "game" line each
@@ -3457,7 +3459,7 @@ game_ok() { [ -f "$1/Gw2-64.exe" ] && [ "$(stat -f %z "$1/Gw2.dat" 2>/dev/null |
 # else arenanet
 game_route_of() { if [ -f "$1/../../appmanifest_$GW2_APPID.acf" ]; then echo steam; else echo arenanet; fi; }
 folder_bytes() { find "$1" -type f -exec stat -f %z {} + 2>/dev/null | awk '{ s += $1 } END { printf "%.0f\n", s }'; }
-volume_of() { local d=$1; while [ ! -d "$d" ] && [ "$d" != / ]; do d=$(dirname "$d"); done; stat -f %d "$d"; }
+volume_of() { local d=$1; while [ ! -d "$d" ] && [ "$d" != / ]; do d=$(dirname "$d"); done; stat -L -f %d "$d"; }
 # the game folder is on the disk of the app's folder (it can be cloned)
 same_volume() { [ -z "$IMPORT_COPY" ] && [ "$(volume_of "$1")" = "$(volume_of "$APPDIR")" ]; }
 # settings_source <game dir>: the newest users/*/AppData/Roaming/Guild Wars 2 of its bottle that has
@@ -3769,15 +3771,30 @@ addons_save() {
   for f in $ADDON_DIRS; do [ ! -d "$g/$f" ] || [ -L "$g/$f" ] || echo "dir $f"; done >>"$d/list"
 }
 
-# addons_restore <game dir> <folder>: ADDON_FILES as addons_save found them: each file put back
-# (cp -p: its content, mode and time), one that wasn't there removed, a link left as it is; then
-# the folders of ADDON_DIRS that weren't there, if empty. Nothing if the game folder is reached
-# through a link.
+# addons_links <game dir>: no ADDON_FILES name in the game folder is a link or behind a linked
+# folder. Rollback and a failed move put back the files 0.1.x had at those names, and a link's file
+# (which the move may rewrite, ReShade.ini) would not come back with them.
+addons_links() {
+  local f
+  [ -z "$DRY" ] || return 0
+  for f in $ADDON_FILES; do
+    if [ -L "$1/$f" ] || ! addon_real "$1" "$f"; then
+      { [ -e "$1/$f" ] || [ -L "$1/$f" ]; } || continue
+      die "$1/$f is a link, so $APP_NAME couldn't put $OLD_LABEL's addon files back exactly, and doesn't move this install. Start fresh in Settings › Troubleshooting installs anew."
+    fi
+  done
+}
+
+# addons_restore <game dir> <folder> <root>: ADDON_FILES as addons_save found them: each file put
+# back (cp -p: its content, mode and time), one that wasn't there removed, a link left as it is;
+# then the folders of ADDON_DIRS that weren't there, if empty. Only inside <root>, the renamed
+# folder, once links are resolved: nothing if the game folder leads out of it.
 addons_restore() {
-  local g=$1 d=$2 f
+  local g=$1 d=$2 r f
   if [ -n "$DRY" ]; then echo "[dry-run] put back the addon files of $g from $d"; return 0; fi
   [ -f "$d/list" ] || return 1
-  [ ! -L "$g" ] || return 0
+  r=$(cd "$3" 2>/dev/null && pwd -P) || return 1
+  case "$(cd "$g" 2>/dev/null && pwd -P)/" in "$r/"*) ;; *) log "$g leads out of $3: its addon files stay as they are"; return 1 ;; esac
   for f in $ADDON_FILES; do
     if grep -qxF "file $f" "$d/list"; then
       addon_real "$g" "$f" || continue
@@ -3791,7 +3808,7 @@ addons_restore() {
     fi
   done
   for f in $ADDON_DIRS; do
-    grep -qxF "dir $f" "$d/list" || [ -L "$g/$f" ] || rmdir "$g/$f" 2>/dev/null || true
+    grep -qxF "dir $f" "$d/list" || [ -L "$g/$f" ] || ! addon_real "$g" "$f/x" || rmdir "$g/$f" 2>/dev/null || true
   done
   log "the addon files of $g as $OLD_LABEL had them ($d)"
 }
@@ -3808,18 +3825,37 @@ move_pair() {
   { in_drive_c "$1" "$OLD_BOTTLE" && in_drive_c "$2" "$BOTTLE"; } || { in_drive_c "$1" "$BOTTLE" && in_drive_c "$2" "$OLD_BOTTLE"; }
 }
 
-# same_disk <folder> <folder>: both on one volume, so a rename moves between them (not in the
-# sandbox's other-disk test, GW2_ON_MAC_IMPORT_COPY)
-same_disk() { [ -z "$IMPORT_COPY" ] && [ "$(stat -f %d "$1")" = "$(stat -f %d "$2")" ]; }
+# same_disk <folder> <folder>: both on one volume once links are resolved (stat -L), so a rename
+# moves between them (not in the sandbox's other-disk test, GW2_ON_MAC_IMPORT_COPY)
+same_disk() { [ -z "$IMPORT_COPY" ] && [ "$(stat -L -f %d "$1")" = "$(stat -L -f %d "$2")" ]; }
 
-# move_rename <from> <to> <game> <addons>: the folder renamed (rename(2): instant, no space, the same
-# inode), never copied. A link, another disk or a <to> that exists stops it before it starts.
-# MOVE_UNDO says what is renamed before it is, so a failure (on_install_exit, on_move_exit), or
-# the next install lock after a kill (move_recover), renames it back. <game>: the game folder's
-# path inside it, empty for the folder itself; <addons> yes: the undo puts back 0.1.x's addon files
-# (MOVE_ADDONS) first.
+# rename_dir <from> <to>: rename(2) itself, through macOS's perl. Unlike mv it never copies (another
+# volume fails with EXDEV) and never moves a folder into one that is there (rename fails, or
+# replaces an empty folder). Logged as "+ rename".
+rename_dir() {
+  { printf '+ rename'; printf ' %q' "$1" "$2"; printf '\n'; } >>"$LOGFILE"
+  /usr/bin/perl -e 'rename($ARGV[0], $ARGV[1]) or die "rename: $!\n"' "$1" "$2" 2>>"$LOGFILE"
+}
+
+# move_journal <from> <to> <inode> <game> <addons>: MOVE_UNDO written, then flushed to disk (sync), so
+# a Mac that loses its power finds it at the next start. created= is what the run made (CREATED, or
+# MOVE_MADE for an install move: also what it will make), removed when the run is undone.
+move_journal() {
+  [ -z "$DRY" ] || return 0
+  printf 'from=%s\nto=%s\ninode=%s\ngame=%s\naddons=%s\ncreated=%s\n' "$1" "$2" "$3" "$4" "$5" "${MOVE_MADE:-}" |
+    put "$MOVE_UNDO" 644
+  sync
+}
+
+# move_rename <from> <to> <game> <addons>: the folder renamed (rename_dir: instant, no space, the
+# same inode), never copied. Only between the two bottles (move_pair); a link, another disk once
+# links are resolved, or a <to> that exists stops it before it starts. MOVE_UNDO says what is renamed
+# before it is, so a failure (on_install_exit, on_move_exit), or the next install lock after a kill
+# (move_recover), renames it back. <game>: the game folder's path inside it, empty for the folder
+# itself; <addons> yes: the undo puts back 0.1.x's addon files (MOVE_ADDONS) first.
 move_rename() {
   local from=$1 to=$2 ino
+  move_pair "$from" "$to" "$3" || die "$APP_NAME moves the game only between $OLD_LABEL's bottle and its own, not $from to $to."
   [ -d "$from" ] && [ ! -L "$from" ] || die "$from isn't a folder (a link?), so $APP_NAME doesn't move it."
   if [ -n "$DRY" ]; then echo "[dry-run] rename $from to $to"; return 0; fi
   { [ ! -e "$to" ] && [ ! -L "$to" ]; } || die "$to is there already, so $APP_NAME doesn't move $from there."
@@ -3827,59 +3863,62 @@ move_rename() {
   same_disk "$from" "${to%/*}" ||
     die "$from is on another disk than ${to%/*}. $APP_NAME moves the game only by renaming it, never by copying it, so nothing changed."
   ino=$(stat -f %i "$from")
-  printf 'from=%s\nto=%s\ninode=%s\ngame=%s\naddons=%s\ncreated=%s\n' "$from" "$to" "$ino" "$3" "$4" "${CREATED:-}" |
-    put "$MOVE_UNDO" 644
+  move_journal "$from" "$to" "$ino" "$3" "$4"
   say "Moving $from to $to: a rename on the same disk, so it takes no extra space"
-  run mv "$from" "$to"
+  rename_dir "$from" "$to" || die "$APP_NAME couldn't rename $from to $to, so nothing changed (details in $LOGS/install.log)."
   [ "$(stat -f %i "$to")" = "$ino" ] || die "$to isn't the folder $APP_NAME renamed (details in $LOGS/install.log)."
 }
 
-# move_undo: the rename in MOVE_UNDO undone: the folder renamed back (with 0.1.x's addon files first,
-# when it says so) if it is where the rename put it, the same inode, and nothing took its old place;
-# nothing to do if it was never renamed. MOVE_UNDO goes once the folders are as before. Else it
-# stays, and so do they: 1.
+# move_undo: the rename in MOVE_UNDO undone, if there is one: when the folder is where the rename put
+# it (the same inode) and nothing took its old place, 0.1.x's addon files go back into it first
+# (when it says so, best effort, inside the folder only), then it is renamed back. Nothing to do if
+# it was never renamed. Else the folders stay as they are: 1. MOVE_UNDO stays either way; the
+# caller removes it once the rest of its cleanup is done.
 move_undo() {
-  local from to ino game g
+  local from to ino game
   [ -f "$MOVE_UNDO" ] || return 0
   from=$(undo_key from) to=$(undo_key to) ino=$(undo_key inode) game=$(undo_key game)
+  # (written before the run's first change: nothing was renamed)
+  [ -n "$from$to$ino" ] || return 0
   [ -n "$ino" ] && move_pair "$from" "$to" "$game" || { log "$MOVE_UNDO doesn't name a rename between the two bottles; it stays"; return 1; }
   if [ -d "$to" ] && [ ! -L "$to" ] && [ ! -e "$from" ] && [ ! -L "$from" ] && [ "$(stat -f %i "$to")" = "$ino" ]; then
-    same_disk "$to" "${from%/*}" && mv "$to" "$from" || { log "$to couldn't be renamed back to $from; $MOVE_UNDO stays"; return 1; }
-    log "renamed $to back to $from"
-    # (then 0.1.x's addon files, the folder already safe where it was: a file that can't be put
-    # back is logged, and stays as this app left it)
-    g="$from${game:+/$game}"
     if [ "$(undo_key addons)" = yes ]; then
-      addons_restore "$g" "$MOVE_ADDONS" || log "the addon files of $g couldn't all be put back as $OLD_LABEL had them"
+      addons_restore "$to${game:+/$game}" "$MOVE_ADDONS" "$to" || log "the addon files of $to${game:+/$game} couldn't all be put back as $OLD_LABEL had them"
     fi
+    same_disk "$to" "${from%/*}" && rename_dir "$to" "$from" || { log "$to couldn't be renamed back to $from; $MOVE_UNDO stays"; return 1; }
+    log "renamed $to back to $from"
   elif [ -d "$from" ] && [ ! -L "$from" ] && [ ! -e "$to" ] && [ "$(stat -f %i "$from")" = "$ino" ]; then
     log "$from was not renamed yet"
   else
     log "neither $to nor $from is as the rename left it; $MOVE_UNDO stays, and so do they"
     return 1
   fi
-  rm -f "$MOVE_UNDO"
 }
 
 # move_recover (lock, with the install lock held): a MOVE_UNDO here belongs to a run that was killed
-# or lost its Mac's power mid-move, since a running one would hold the lock. Its rename is undone,
-# then what that install made goes (its created= list, the bottle among them), as a failure would
-# have done. If the folders aren't as the rename left them, nothing changes and nothing else runs:
-# a removal of the bottle could take the game with it.
+# or lost its Mac's power, since a running one would hold the lock. Its Wine is stopped, its rename
+# undone, then what that install made goes (its created= list: names an install move makes, the
+# bottle among them), as a failure would have done, and MOVE_UNDO last, so a kill in the middle of
+# this runs it again. If the folders aren't as the rename left them, nothing changes and nothing
+# else runs: a removal of the bottle could take the game with it.
+MOVE_MADE_NAMES="state install-manifest.json moved-from-0.1 settings.conf dxmt.conf compatdb.rules .session.lock ReShade reshade-compiler engine bottle dev-switches.conf 0.1-addons"
 move_recover() {
   local c created
   [ -z "$DRY" ] && [ -f "$MOVE_UNDO" ] || return 0
   created=$(undo_key created)
-  log "a rename of a run that was stopped is still open ($MOVE_UNDO): undoing it"
+  log "a run that was stopped left $MOVE_UNDO: undoing it"
+  stop_wine >/dev/null 2>&1 || true
   if ! move_undo; then
     unlock
     die "A move of Guild Wars 2 didn't finish, and its folders aren't where it left them ($(undo_key to), $(undo_key from)). $APP_NAME changes nothing until they are: details in $LOGS/install.log."
   fi
+  set -f
   for c in $created; do
-    # (names of this app's folder only, as an install's CREATED has them)
-    case "$c" in ""|.|..|*/*) continue ;; esac
+    in_list "$c" "$MOVE_MADE_NAMES" || continue
     if [ -e "$APPDIR/$c" ] || [ -L "$APPDIR/$c" ]; then rm -rf "${APPDIR:?}/$c"; log "removed $c (the stopped install)"; fi
   done
+  set +f
+  rm -f "$MOVE_UNDO"
 }
 
 # move_game: where the folder a move renamed is now: here (this app's bottle), 01 (back in 0.1.x's
@@ -3937,6 +3976,9 @@ move_lines() {
   echo "move_busy=$OLD_BUSY"
   echo "move_wait=$OLD_WAIT"
   echo "move_game=$(move_game)"
+  # (the room a move or Move in needs: the engine and the bottle, as preflight checks; the game
+  # moves by a rename)
+  echo "move_disk_needed=3000000000"
   echo "rollback_version=$LAST_01"
   echo "rollback_dmg=$LAST_01_DMG"
 }
@@ -4070,9 +4112,11 @@ install_moved() {
   MOVE_GAME=""
   [ "$route" != steam ] || MOVE_GAME=${OLD_GAME#"$OLD_STEAM/"}
   # (the addon files 0.1.x has in the game folder, for a failure and for Rollback)
+  addons_links "$OLD_GAME"
   CREATED="$CREATED 0.1-addons"
   addons_save "$OLD_GAME" "$MOVE_ADDONS"
   if [ "$route" = steam ]; then run rm -rf "$STEAM_DIR"; else run mkdir -p "${dst%/*}"; fi
+  MOVE_DST=$dst
   move_rename "$src" "$dst" "$MOVE_GAME" yes
   test_pause move-renamed
   move_fail files
@@ -4110,9 +4154,12 @@ install_moved() {
     launch "$STEAM_EXE" "steam://install/$GW2_APPID"
     set_state stage waiting_game
   fi
-  # (the record names both places of the renamed folder; once it is written the rename stays)
+  # (the record names both places of the renamed folder. Once it is written the move is done: a
+  # failure or a cancel from here on removes nothing, and MOVE_UNDO goes last)
   printf 'moved\nold=%s\nnew=%s\ngame=%s\n' "$src" "$dst" "$MOVE_GAME" | put "$MOVE_RECORD" 644
+  CREATED="" MOVE_DST="" IMPORT_DST=""
   [ -n "$DRY" ] || rm -f "$MOVE_UNDO"
+  test_pause move-done
   log "install move complete ($src renamed to $dst)"
   # (what came along: the addons as the game folder has them now)
   arcdps_state
@@ -4132,31 +4179,44 @@ install_moved() {
 }
 
 # rollback_game (with the install lock held): the folder the move renamed goes back where 0.1.x had
-# it, a rename again, and the game folder gets back the addon files 0.1.x had (MOVE_ADDONS), so
-# 0.1.x finds its install as on the day of the move, with the game as this app left it. Refused while
-# anything of 0.1.x runs, or without 0.1.x's bottle. A failure renames it in again (on_move_exit).
+# it, a rename again, with the addon files 0.1.x had (MOVE_ADDONS) put back in the game folder first,
+# inside this app's bottle, so 0.1.x finds its install as on the day of the move, with the game as
+# this app left it. Refused while anything of 0.1.x runs, or without 0.1.x's bottle. The session's
+# lock is held over the rename, so no Play starts Wine in the middle (move_session). A failure renames
+# it in again (on_move_exit).
 rollback_game() {
   local o n g
   old_busy
   [ "$OLD_BUSY" = none ] || die "Something of $OLD_LABEL is running ($OLD_BUSY), so $APP_NAME doesn't move the game now. Quit it, then try again."
   o=$(record_key old) n=$(record_key new) g=$(record_key game)
   [ -f "$OLD_BOTTLE/system.reg" ] || die "$OLD_LABEL's bottle isn't there any more ($OLD_BOTTLE), so the game stays in $APP_NAME."
-  move_rename "$n" "$o" "$g" no
-  test_pause rollback-renamed
+  move_session
+  MOVE_MADE=""
   if [ -f "$MOVE_ADDONS/list" ]; then
-    addons_restore "$o${g:+/$g}" "$MOVE_ADDONS" || die "$APP_NAME couldn't put back $OLD_LABEL's addon files, so the game stays here (details in $LOGS/install.log)."
+    addons_restore "$n${g:+/$g}" "$MOVE_ADDONS" "$n" || warn "$APP_NAME couldn't put back all of $OLD_LABEL's addon files (details in $LOGS/install.log). $OLD_LABEL puts arcdps and ReShade in order at its next Play."
   fi
+  move_rename "$n" "$o" "$g" no
+  registry_unlock
+  test_pause rollback-renamed
   [ -n "$DRY" ] || rm -f "$MOVE_UNDO"
   log "rollback: $n renamed back to $o"
 }
 
+# move_session: the session's lock (registry_lock) taken and nothing of this app's Wine running under
+# it: a Play can't start Wine until registry_unlock, after the rename
+move_session() {
+  stop_watcher
+  registry_lock || die "A session of Guild Wars 2 is starting or ending, so $APP_NAME doesn't move the game now. Quit the game and Steam, then try again."
+  check_not_running
+}
+
 # on_move_exit: Rollback's, Move in's and Start fresh's EXIT trap: after a failure or a cancel the
-# rename in flight is undone (MOVE_UNDO), then the lock goes
+# rename in flight is undone (MOVE_UNDO goes once it is), then the lock goes
 on_move_exit() {
   local st=$?
   if [ $st -ne 0 ] && [ -z "$DRY" ] && [ -f "$MOVE_UNDO" ]; then
     stop_wine >/dev/null 2>&1 || true
-    move_undo || log "the renamed folder isn't where it was left; $MOVE_UNDO stays for the next start"
+    if move_undo; then rm -f "$MOVE_UNDO"; else log "the renamed folder isn't where it was left; $MOVE_UNDO stays for the next start"; fi
   fi
   unlock
 }
@@ -4173,20 +4233,20 @@ cmd_rollback() {
   trap on_move_exit EXIT
   trap 'exit 143' TERM INT HUP
   [ "$(move_game)" = here ] || die "There is no game moved from $OLD_LABEL in $APP_NAME's bottle, so Rollback changed nothing."
-  stop_watcher
   rollback_game
   echo "@done Guild Wars 2 is back in $OLD_LABEL's folder. To play on it, download GW2 on Mac $LAST_01, quit $APP_NAME, and drag GW2 on Mac $LAST_01 to Applications over it."
 }
 
 # move-in (the main window after a rollback): the folder renamed into this app's bottle again, as
 # the move did it: 0.1.x's addon files kept first, the links checked, ReShade's ini in the game
-# folder naming this app's folders, the finishing touches. Refused while anything runs, here or in
-# 0.1.x. A failure renames it back (on_move_exit).
+# folder naming this app's folders, the finishing touches, or on Steam's route with a game Steam
+# hadn't finished, Steam to bring it up to date. Refused while anything runs, here or in 0.1.x. A
+# failure renames it back (on_move_exit).
 cmd_move_in() {
   local o n g
   open_log
   log "---- move-in $VERSION root=${ROOT:-/} dry=${DRY:-0}"
-  CREATED=""
+  CREATED="" MOVE_MADE=""
   check_not_running
   old_busy
   [ "$OLD_BUSY" = none ] || die "Something of $OLD_LABEL is running ($OLD_BUSY), so $APP_NAME doesn't move the game now. Quit it, then try again."
@@ -4196,17 +4256,31 @@ cmd_move_in() {
   [ -f "$MANIFEST" ] || die "$APP_NAME is not installed."
   [ "$(move_game)" = 01 ] || die "The game isn't waiting in $OLD_LABEL's folder, so Move in changed nothing."
   o=$(record_key old) n=$(record_key new) g=$(record_key game)
+  move_session
+  addons_links "$o${g:+/$g}"
   addons_save "$o${g:+/$g}" "$MOVE_ADDONS"
   move_rename "$o" "$n" "$g" yes
+  registry_unlock
   move_links "$n"
   game_state
   [ -n "$DRY" ] || [ -n "$GAME_DIR" ] || die "The game's folder isn't where $APP_NAME's Steam says it is, so it goes back to $OLD_LABEL."
+  [ -n "$DRY" ] || [ "$GAME" = yes ] || [ "$(state route)" = steam ] || die "The game in $OLD_LABEL's folder isn't complete, so it goes back there. Let $OLD_LABEL's launcher finish it first."
   move_inside "$GAME_DIR" "$BOTTLE"
   move_paths "$GAME_DIR/ReShade.ini" || die "$APP_NAME couldn't change $GAME_DIR/ReShade.ini. Try again (details in $LOGS/install.log)."
-  if [ "$GAME" = yes ] || [ -n "$DRY" ]; then finish_touches; fi
-  [ -n "$DRY" ] || rm -f "$MOVE_UNDO"
-  log "move-in: $o renamed to $n"
-  echo "@done Guild Wars 2 moved in from $OLD_LABEL again (on this disk, no extra space). Press Play."
+  if [ "$GAME" = yes ] || [ -n "$DRY" ]; then
+    finish_touches
+    [ -n "$DRY" ] || rm -f "$MOVE_UNDO"
+    log "move-in: $o renamed to $n"
+    echo "@done Guild Wars 2 moved in from $OLD_LABEL again (on this disk, no extra space). Press Play."
+  else
+    # (Steam's record says the game isn't complete: Steam brings it up to date, the window follows)
+    rm -f "$MOVE_UNDO"
+    log "move-in: $o renamed to $n; Steam brings the game up to date"
+    step "Steam opens: it brings Guild Wars 2 up to date"
+    launch "$STEAM_EXE" "steam://install/$GW2_APPID"
+    set_state stage waiting_game
+    echo "@done Guild Wars 2 moved in from $OLD_LABEL again. Steam is starting: it brings the game up to date; this window follows it."
+  fi
 }
 
 # --- check-setup: ArenaNet's Gw2Setup-64.exe, checked without new tools (macOS's own openssl):
@@ -4296,9 +4370,10 @@ cmd_check_setup() {
 
 status() {
   local free b l k f installed=no
-  # (a rename that a killed install, Rollback or Move in left open is undone under the install lock
-  # before anything is reported: move_recover. A run that holds the lock is still at work.)
-  if [ -f "$MOVE_UNDO" ] && [ -z "$DRY" ]; then (open_log; lock; unlock) >/dev/null 2>&1 </dev/null || true; fi
+  # (a rename that a killed install, Rollback or Move in left open is undone under the install lock,
+  # in a process of its own (the lock's owner is its pid), before anything is reported:
+  # move_recover. A run that holds the lock is still at work.)
+  if [ -f "$MOVE_UNDO" ] && [ -z "$DRY" ]; then /bin/bash "$0" recover >/dev/null 2>&1 </dev/null || true; fi
   echo "version=$VERSION"
   echo "engine=$ENGINE_NAME"
   echo "engine_title=$ENGINE_TITLE"
@@ -4569,8 +4644,8 @@ on_install_exit() {
     stop_wine >/dev/null 2>&1 || true
     # (the folder the move renamed goes back first, before the bottle it is in goes; if it can't,
     # everything stays, MOVE_UNDO with it, for the next start)
-    if ! move_undo; then
-      log "install failed (status $st); the renamed folder isn't where the move left it, so everything stays"
+    if ! move_undo || { [ -n "${MOVE_DST:-}" ] && { [ -e "$MOVE_DST" ] || [ -L "$MOVE_DST" ]; }; }; then
+      log "install failed (status $st); the renamed folder isn't back where the move found it, so everything stays"
       unlock
       return
     fi
@@ -4584,6 +4659,7 @@ on_install_exit() {
     if [ -n "${IMPORT_ACF:-}" ] && [ -e "$IMPORT_ACF" ]; then rm -f "$IMPORT_ACF"; fi
     rm -rf "$APPDIR"/*.new 2>/dev/null || true
     rm -f "$APPDIR"/*.new.$$ 2>/dev/null || true
+    rm -f "$MOVE_UNDO"
     log "install failed (status $st)"
   fi
   unlock
@@ -5027,7 +5103,7 @@ cmd_watch_session() {
 
 cmd_install() {
   local route=${1:-} setup=${2:-} want src="" with_settings=yes moving=""
-  CREATED="" FETCH_PID="" IMPORT_DST="" IMPORT_ACF=""
+  CREATED="" FETCH_PID="" IMPORT_DST="" IMPORT_ACF="" MOVE_MADE="" MOVE_DST=""
   # a first install's state and manifest go too if it fails
   [ -f "$MANIFEST" ] || CREATED="state install-manifest.json"
   case "$route" in steam|arenanet|import|move) ;; *) echo "@error Usage: gw2om.sh install steam | install arenanet <Gw2Setup-64.exe> | install import <game folder> [--no-settings] | install move"; exit 2 ;; esac
@@ -5085,6 +5161,13 @@ cmd_install() {
     for c in settings.conf dxmt.conf compatdb.rules .session.lock ReShade reshade-compiler; do
       [ -e "$APPDIR/$c" ] || [ -L "$APPDIR/$c" ] || CREATED="$CREATED $c"
     done
+    # (MOVE_UNDO from the first write on: what this move makes and will make, for the next start
+    # if this run is killed before it is done; the rename joins it, move_rename)
+    MOVE_MADE=$CREATED
+    for c in engine bottle dev-switches.conf 0.1-addons; do
+      [ -e "$APPDIR/$c" ] || [ -L "$APPDIR/$c" ] || MOVE_MADE="$MOVE_MADE $c"
+    done
+    [ -n "$DRY" ] || { mkdir -p "$APPDIR"; move_journal "" "" "" "" ""; }
   fi
   [ -n "$DRY" ] || mkdir -p "$APPDIR"
   step "The Wine engine"
@@ -5701,11 +5784,16 @@ cmd_start_fresh() {
   fi
   if [ "$have" = yes ]; then
     case "$(state origin)" in move|moved) ;; *) die "This install isn't the one moved from $OLD_LABEL, so Start fresh leaves it. Uninstall removes it." ;; esac
-    if [ "$(move_game)" = here ]; then
-      stop_watcher
-      rollback_game
-      back=" Guild Wars 2 went back to $OLD_LABEL's folder first."
-    fi
+    case "$(move_game)" in
+      here)
+        rollback_game
+        back=" Guild Wars 2 went back to $OLD_LABEL's folder first." ;;
+      01) ;;
+      *)
+        # (no record of where the game came from, or one this app can't read: only a move that
+        # cloned, from before 0.2.0, leaves 0.1.x its own game, and then 0.1.x still has it)
+        old_install || die "$APP_NAME can't tell whether the game in its bottle is $OLD_LABEL's only copy ($MOVE_RECORD names no folder it moved), so Start fresh changed nothing. Uninstall removes the install with the game in it." ;;
+    esac
     uninstall_files
   fi
   [ -n "$DRY" ] || mkdir -p "$APPDIR"
@@ -5804,6 +5892,7 @@ case "${1:-}" in
   uninstall) cmd_uninstall ;;
   start-fresh) shift; cmd_start_fresh "$@" ;;
   rollback) cmd_rollback ;;
+  recover) open_log; lock; unlock ;;
   move-in) cmd_move_in ;;
   play) cmd_play ;;
   watch-session) shift; cmd_watch_session "$@" ;;
