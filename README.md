@@ -190,11 +190,11 @@ through macOS's `perl`, which fails rather than copy to another volume or move i
 holds the install lock, and from the rename's checks to the record the session's lock too, so no
 Play starts in between.
 
-On the first start after the move, Steam may show "steamwebhelper is not responding". Try
-*Restart Steam with GPU Acceleration disabled*. In my test on 0.2.0-rc.3 that got past it, and
-Steam started logged in. If Steam asks you to sign in, sign in once. The first Play after the move
-shows Steam's window, even with *Start Steam in the background* on. I'm tracking it in
-[#264](https://github.com/jdrly/gw2-on-mac/issues/264).
+The first Play after the move shows Steam's window, even with *Start Steam in the background* on.
+If Steam asks you to sign in, sign in once. If Steam ever shows "steamwebhelper is not
+responding", *Restart Steam with GPU Acceleration disabled* gets past it. The deadlock in my Wine
+build that caused it is fixed ([#304](https://github.com/jdrly/gw2-on-mac/issues/304)), so please tell me on Discord or in
+[#264](https://github.com/jdrly/gw2-on-mac/issues/264) if you see it.
 
 *Start fresh* in Settings › Troubleshooting installs anew instead. While the move waits or after it
 failed, it stops the move. After a move it first gives the game back to 0.1, as *Rollback* does,
