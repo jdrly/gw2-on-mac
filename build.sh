@@ -15,7 +15,10 @@
 #                                      its build has one, the same; only if staged), which it puts
 #                                      into the engine next to the engine's own, fex/ (my FEX,
 #                                      jdrly/FEX, built for the engine; only if staged), which it
-#                                      puts there after `set fex mine`, and
+#                                      puts there after `set fex mine`, kosmickrisp/ (my
+#                                      KosmicKrisp, the Vulkan driver from jdrly/mesa, built for the
+#                                      engine; only if staged), which it puts into the engine next
+#                                      to the engine's own, and
 #                                      ui-scale/ (the interface addon), which it puts into the game
 #                                      folder, staged in prebuilt/ by scripts/stage-components.sh
 #   Contents/Resources/helpers/procpaths  every process's real executable (gw2om.sh's process
@@ -27,7 +30,8 @@
 # The Wine engine is not bundled: gw2om.sh downloads athei's Mach9 release at install time (an arm64
 # Wine with FEX and his DXMT build; pinned URL, size and sha256 in src/gw2om.sh) and uses it as it
 # ships, but for its DXMT tree, its ntdll.so and its winemac.so (mine, the engine's own kept next
-# to each), and its FEX after `set fex mine`. Steam and the game come from Valve or ArenaNet.
+# to each), its FEX after `set fex mine`, and its KosmicKrisp. Steam and the game come from Valve or
+# ArenaNet.
 #
 # Built with the macOS 27 SDK (Xcode 27) for macOS 26.0 and later, as 0.1.x: below 26.5, what the
 # engine's loader needs (gw2om.sh's MACOS_MIN), the app opens only to say so (docs/adr/0021).
@@ -185,6 +189,19 @@ if [ -d "$P/fex" ]; then
   [ -n "$FEX_COMMIT" ] || { echo "$P/fex/VERSION names no commit (a line commit: <full sha>)" >&2; exit 1; }
   FEX_BUILD="$FEX_COMMIT $(sha "$P/fex/aarch64-windows/libarm64ecfex.dll")"
 fi
+# My KosmicKrisp, optional too (prebuilt/kosmickrisp: the Vulkan driver, VERSION, LICENSE.rst):
+# KK_BUILD is "<commit> <libvulkan_kosmickrisp.dylib's sha256>", or nothing
+KK_FILES="libvulkan_kosmickrisp.dylib VERSION LICENSE.rst"
+KK_BUILD=""
+if [ -d "$P/kosmickrisp" ]; then
+  for f in $KK_FILES SHA256SUMS; do
+    [ -f "$P/kosmickrisp/$f" ] || { echo "Missing $P/kosmickrisp/$f; run scripts/stage-components.sh" >&2; exit 1; }
+  done
+  check_record "$P/kosmickrisp"
+  KK_COMMIT="$(sed -n 's/^commit: \([0-9a-f]\{40\}\)$/\1/p' "$P/kosmickrisp/VERSION")"
+  [ -n "$KK_COMMIT" ] || { echo "$P/kosmickrisp/VERSION names no commit (a line commit: <full sha>)" >&2; exit 1; }
+  KK_BUILD="$KK_COMMIT $(sha "$P/kosmickrisp/libvulkan_kosmickrisp.dylib")"
+fi
 # The engine gw2om.sh downloads, for the licences and VERSIONS
 engine_pin() { sed -n "s/^$1=\([^ ]*\).*/\1/p" src/gw2om.sh; }
 ENGINE_NAME="$(engine_pin ENGINE_NAME)" ENGINE_URL="$(engine_pin ENGINE_URL)"
@@ -265,6 +282,11 @@ if [ -n "$FEX_BUILD" ]; then
   for f in $FEX_FILES; do mkdir -p "$C/fex/$(dirname "$f")" && cp "$P/fex/$f" "$C/fex/$f" && chmod 644 "$C/fex/$f"; done
   chmod 755 "$C/fex/aarch64-unix/libarm64ecfex.so"
 fi
+if [ -n "$KK_BUILD" ]; then
+  mkdir -p "$C/kosmickrisp"
+  for f in $KK_FILES; do cp "$P/kosmickrisp/$f" "$C/kosmickrisp/$f" && chmod 644 "$C/kosmickrisp/$f"; done
+  chmod 755 "$C/kosmickrisp/libvulkan_kosmickrisp.dylib"
+fi
 
 # The process lister gw2om.sh tells its own Wine processes by (proc_pidpath)
 mkdir -p "$R/helpers"
@@ -305,6 +327,15 @@ FEX fork jdrly/FEX (a fork of athei/FEX) for the engine below,
 https://github.com/jdrly/FEX/tree/${FEX_BUILD%% *}: MIT (fex/LICENSE), with the code it links
 under the licences in fex/NOTICES. Its complete source is that commit of the fork."
 fi
+KK_NOTE="This build has no KosmicKrisp of mine: the engine's own stays in place."
+if [ -n "$KK_BUILD" ]; then
+  mkdir -p "$L/kosmickrisp"
+  cp "$P/kosmickrisp/LICENSE.rst" "$P/kosmickrisp/VERSION" "$L/kosmickrisp/"
+  KK_NOTE="components/kosmickrisp: KosmicKrisp (libvulkan_kosmickrisp.dylib), Mesa's Vulkan driver on Metal,
+built from my Mesa fork jdrly/mesa (a fork of athei/mesa) for the engine below,
+https://github.com/jdrly/mesa/tree/${KK_BUILD%% *}: MIT and the other licences Mesa's
+kosmickrisp/LICENSE.rst lists. Its complete source is that commit of the fork."
+fi
 cp "$SPARKLE/LICENSE" "$L/sparkle/LICENSE"
 cp src/fonts/*-OFL.txt "$L/fonts/"
 cp src/icons/LICENSE.txt "$L/lucide/LICENSE.txt"
@@ -325,6 +356,8 @@ $MACDRV_NOTE
 
 $FEX_NOTE
 
+$KK_NOTE
+
 Sparkle $SPARKLE_VERSION (app updates), https://sparkle-project.org: MIT-style licence, see
 sparkle/LICENSE.
 
@@ -337,9 +370,9 @@ licence, see lucide/LICENSE.txt.
 Not included in this app: the Wine engine, athei's Mach9 ($ENGINE_NAME: Wine with his patches,
 FEX, DXMT, Mesa, vkd3d-proton, GStreamer and the rest its release page lists, each under its own
 licence), is downloaded at install time from $ENGINE_URL
-and used as it ships, but for its DXMT tree, its ntdll.so, its winemac.so and its FEX:
-components/dxmt, components/ntdll and components/macdrv go there, and components/fex once I choose
-it, the engine's own next to each. Its sources and that list: https://github.com/athei/mach9/releases.
+and used as it ships, but for its DXMT tree, its ntdll.so, its winemac.so, its FEX and its
+KosmicKrisp: components/dxmt, components/ntdll, components/macdrv and components/kosmickrisp go
+there, and components/fex once I choose it, the engine's own next to each. Its sources and that list: https://github.com/athei/mach9/releases.
 Steam comes from Valve, Guild Wars 2 from Valve (Steam) or ArenaNet.
 ReShade (by crosire, BSD-3-Clause), two effect packs and, when the game has none, Microsoft's
 d3dcompiler_47.dll are downloaded from their publishers only when the ReShade switch is turned on:
@@ -349,11 +382,11 @@ EOF
 # channel: release, or dev (development build; gw2om.sh and the app read it)
 printf 'version=%s\nbuild=%s\nchannel=%s\nauthor=%s\ngithub=%s\nrepo=%s\nfeed=%s\n' "$APP_VERSION" "$BUNDLE_VERSION" \
   "$CHANNEL" "$APP_AUTHOR" "$GITHUB_URL" "$REPO_URL" "$(plutil -extract SUFeedURL raw "$APP/Contents/Info.plist" 2>/dev/null || true)" >"$R/app.properties"
-# (ntdll, macdrv and fex: my ntdll.so's, my winemac.so's and my libarm64ecfex.dll's commit and
-# sha256 as built, or none)
-printf 'app %s\ndxmt %s %s\nntdll %s\nmacdrv %s\nfex %s\nengine %s wine %s fex %s dxmt %s\nui-scale %s\nsparkle %s\nsdk %s\n' \
-  "$APP_VERSION" "$DXMT_COMMIT" "$DXMT_VERSION" "${NTDLL_BUILD:-none}" "${MACDRV_BUILD:-none}" "${FEX_BUILD:-none}" \
-  "$ENGINE_NAME" "$(engine_pin ENGINE_WINE)" "$(engine_pin ENGINE_FEX)" "$(engine_pin ENGINE_DXMT)" \
+# (ntdll, macdrv, fex and kosmickrisp: my ntdll.so's, my winemac.so's, my libarm64ecfex.dll's and my
+# libvulkan_kosmickrisp.dylib's commit and sha256 as built, or none)
+printf 'app %s\ndxmt %s %s\nntdll %s\nmacdrv %s\nfex %s\nkosmickrisp %s\nengine %s wine %s fex %s dxmt %s mesa %s\nui-scale %s\nsparkle %s\nsdk %s\n' \
+  "$APP_VERSION" "$DXMT_COMMIT" "$DXMT_VERSION" "${NTDLL_BUILD:-none}" "${MACDRV_BUILD:-none}" "${FEX_BUILD:-none}" "${KK_BUILD:-none}" \
+  "$ENGINE_NAME" "$(engine_pin ENGINE_WINE)" "$(engine_pin ENGINE_FEX)" "$(engine_pin ENGINE_DXMT)" "$(engine_pin ENGINE_MESA)" \
   "$(sha "$P/ui-scale/version.dll" | cut -c1-12)" "$SPARKLE_VERSION" "$sdk" >"$R/VERSIONS"
 
 # The Liquid Glass icon from Icon Composer's document (Assets.car, CFBundleIconName), plus the

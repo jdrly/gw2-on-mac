@@ -9,7 +9,9 @@
 # window has no row for them). A fourth,
 # my FEX (components/fex), goes in only after `set fex mine` from Terminal, the engine's own kept
 # next to it too; a development build sets it once, with every other switch of mine (DEV_ROWS,
-# dev-switches.conf). Nothing goes inside wine.app.
+# dev-switches.conf). A fifth, my KosmicKrisp (components/kosmickrisp, the engine's Vulkan driver
+# built from my Mesa fork, #339), goes in whenever the app carries it, with no setting: the
+# engine's own crashes the game on macOS 26. Nothing goes inside wine.app.
 #
 #   gw2om.sh status            KEY=VALUE lines describing this Mac (what the window shows)
 #   gw2om.sh install steam     phases 1-4: engine, bottle, Steam from Valve, then Steam starts
@@ -139,8 +141,9 @@
 #   GW2_ON_MAC_ENGINE_LOADER_SHA256, GW2_ON_MAC_ENGINE_NTDLL_SHA256, GW2_ON_MAC_ENGINE_WINEMAC_SHA256,
 #   GW2_ON_MAC_ENGINE_WIN32U_SHA256, GW2_ON_MAC_ENGINE_D3D11_SHA256,
 #   GW2_ON_MAC_ENGINE_WINEMETAL_SHA256,
-#   GW2_ON_MAC_ENGINE_FEX_DLL_SHA256, GW2_ON_MAC_ENGINE_FEX_SO_SHA256   a stand-in engine's own
-#                              files (engine_matches, graphics, unix_lib, fex_file)
+#   GW2_ON_MAC_ENGINE_FEX_DLL_SHA256, GW2_ON_MAC_ENGINE_FEX_SO_SHA256,
+#   GW2_ON_MAC_ENGINE_KK_SHA256   a stand-in engine's own files (engine_matches, graphics,
+#                              unix_lib, fex_file, kk_file)
 #   GW2_ON_MAC_FEX_SWITCHES    rows for FEX_SWITCHES, whose table is empty until a switch of mine
 #                              has one (the rules check's fork and any rows)
 #   GW2_ON_MAC_MACOS           the macOS version preflight sees
@@ -227,6 +230,10 @@ ENGINE_WINEMETAL_SHA256=1ad9bf4d38726c00c7484aae70ea253f3b73976a20e06fc9c5894612
 # xtajit64.dll and libarm64ecfex.dll (one file under two names) and aarch64-unix/libarm64ecfex.so
 ENGINE_FEX_DLL_SHA256=cd6803d9ad0733c43c31aebca84203aac5256779093bc3d0b71324d2d564a429
 ENGINE_FEX_SO_SHA256=0a3e7ea4b76a3acc634993ec98f2ef7e4d52b3806a871856e8f808099577bc4b
+# KosmicKrisp, the engine's Vulkan driver (lib/external/libvulkan_kosmickrisp.dylib), which tells the
+# engine's own from mine (kk_file), and the athei/mesa commit it was built from
+ENGINE_KK_SHA256=e707e5e0a8891c91a13f8d52c9dfd6185d47167b6c339c61b9648077fa70f99f
+ENGINE_MESA=d62ee13d18
 # My files in components/ are built for one engine, and their records (each VERSION) name it:
 # "engine: Mach9 v0.4.0 (wine-v0.4.0-macos-arm64.tar.xz, sha256 <its sha256>)". A record without
 # that line counts as built for Mach9 0.3.1, the engine before 0.4.0. They go into the engine only
@@ -273,6 +280,7 @@ if [ -n "$ROOT" ]; then
   ENGINE_WINEMETAL_SHA256="${GW2_ON_MAC_ENGINE_WINEMETAL_SHA256:-$ENGINE_WINEMETAL_SHA256}"
   ENGINE_FEX_DLL_SHA256="${GW2_ON_MAC_ENGINE_FEX_DLL_SHA256:-$ENGINE_FEX_DLL_SHA256}"
   ENGINE_FEX_SO_SHA256="${GW2_ON_MAC_ENGINE_FEX_SO_SHA256:-$ENGINE_FEX_SO_SHA256}"
+  ENGINE_KK_SHA256="${GW2_ON_MAC_ENGINE_KK_SHA256:-$ENGINE_KK_SHA256}"
   MACOS="${GW2_ON_MAC_MACOS:-}"
   STEAM_SETUP_URL="${GW2_ON_MAC_STEAMSETUP_URL:-$STEAM_SETUP_URL}"
   SIGNER="${GW2_ON_MAC_SIGNER:-ArenaNet}"
@@ -1688,10 +1696,10 @@ engine_refusal() {
     echo "The engine here is $(engine_label "$(cat "$ENG/.gw2om-source" 2>/dev/null || true)"), and my files are built for $ENGINE_TITLE, so they stay out of it. Click Repair to put $ENGINE_TITLE in place."
     return
   fi
-  for d in dxmt ntdll macdrv fex; do
+  for d in dxmt ntdll macdrv fex kosmickrisp; do
     [ -f "$COMP/$d/VERSION" ] || continue
     [ "$(record_engine "$COMP/$d/VERSION")" != "$ENGINE_PIN_SHA256" ] || continue
-    case $d in dxmt) n="My DXMT fork" ;; ntdll) n="My ntdll.so" ;; macdrv) n="My Mac driver" ;; *) n="My FEX" ;; esac
+    case $d in dxmt) n="My DXMT fork" ;; ntdll) n="My ntdll.so" ;; macdrv) n="My Mac driver" ;; fex) n="My FEX" ;; *) n="My KosmicKrisp" ;; esac
     echo "$n in this app is built for $(engine_label "$(record_engine "$COMP/$d/VERSION")"), not for $ENGINE_TITLE, so none of my files go into the engine."
     return
   done
@@ -1699,8 +1707,9 @@ engine_refusal() {
 
 # engine_matches <dir>: the unpacked engine is the expected build: its loader's sha256, the
 # engine's own ntdll.so, winemac.so and win32u.so (in place, or next to mine as <file>.engine: every
-# file of unix_lib's rows) and FEX's three files (the same, FEX_FILES), and wine.app's signature
-# (codesign reads it and starts nothing): valid, by Mach9's team, with the loader's identifier
+# file of unix_lib's rows), FEX's three files and KosmicKrisp (the same, FEX_FILES and KK_FILE), and
+# wine.app's signature (codesign reads it and starts nothing): valid, by Mach9's team, with the
+# loader's identifier
 engine_matches() {
   local app="$1/$ENGINE_LOADER_APP" info k f u="$1/lib/wine/aarch64-unix"
   [ "$(sha256 "$app/Contents/MacOS/wine" 2>/dev/null)" = "$ENGINE_LOADER_SHA256" ] || return 1
@@ -1713,6 +1722,7 @@ engine_matches() {
   for k in $FEX_FILES; do
     [ "$(sha256 "$1/lib/wine/$k" 2>/dev/null)" = "$(fex_pin "$k")" ] || [ "$(sha256 "$1/lib/wine/$k.engine" 2>/dev/null)" = "$(fex_pin "$k")" ] || return 1
   done
+  [ "$(sha256 "$1/$KK_FILE" 2>/dev/null)" = "$ENGINE_KK_SHA256" ] || [ "$(sha256 "$1/$KK_FILE.engine" 2>/dev/null)" = "$ENGINE_KK_SHA256" ] || return 1
   codesign --verify --strict "$app" >>"$LOGFILE" 2>&1 || return 1
   info=$(codesign -dv "$app" 2>&1) || return 1
   printf '%s\n' "$info" | grep -qx "Identifier=$ENGINE_LOADER_ID" &&
@@ -2136,7 +2146,90 @@ fex_switch() {
   say "FEX: $(fex_label mine) is in the engine, the engine's own kept next to each of its three files as <file>.engine"
 }
 
-# apply_engine_files: dxmt_switch, lib_switch for each of UNIX_LIBS and fex_switch while no session
+# --- KosmicKrisp: my build (components/kosmickrisp, jdrly/mesa built for this engine) or the
+# engine's own
+#
+# KosmicKrisp is the engine's Vulkan driver, one file (KK_FILE) that Vulkan's loader opens by the
+# path in share/vulkan/icd.d/kosmickrisp_mesa_icd.aarch64.json, which stays the engine's. The
+# engine's own asks Metal for sparseBufferTier, which throws on macOS 26 and ends the game a few
+# seconds after Play (#339); mine never asks. It has no setting: mine goes in whenever this app
+# carries it, and an app without it leaves the engine's own. As for unix_lib's files, the engine's
+# own moves aside once as KK_FILE.engine, and only when its sha256 is the pin's; mine is copied in
+# from the components, only while no session runs or starts (apply_engine_files).
+KK_FILE=lib/external/libvulkan_kosmickrisp.dylib
+KK_COMP="$COMP/kosmickrisp"
+KK_PATH="$ENG/$KK_FILE"
+# kk_bundled: this app carries my KosmicKrisp
+kk_bundled() { [ -f "$KK_COMP/libvulkan_kosmickrisp.dylib" ]; }
+# kk_commit: the commit of my KosmicKrisp in this app (its VERSION's "commit:" line)
+kk_commit() { sed -n 's/^commit: //p' "$KK_COMP/VERSION" 2>/dev/null | head -1; }
+# kk_file <path>: what <path> is: mine (this app's build), engine (the engine's own, by the pin),
+# other (another build of mine, from an earlier version of the app, or anything else), none
+kk_file() {
+  if [ ! -f "$1" ]; then echo none
+  elif kk_bundled && cmp -s "$KK_COMP/libvulkan_kosmickrisp.dylib" "$1"; then echo mine
+  elif [ "$(sha256 "$1")" = "$ENGINE_KK_SHA256" ]; then echo engine
+  else echo other
+  fi
+}
+# kk_want: mine when this app carries it, else the engine's own
+kk_want() { if kk_bundled; then echo mine; else echo engine; fi; }
+# kk_in_use: the KosmicKrisp the next process loads (the file in the engine; without an engine, or
+# between the renames, the one it will be)
+kk_in_use() {
+  local f
+  f=$(kk_file "$KK_PATH")
+  if [ ! -x "$ENG/bin/wine" ] || [ "$f" = none ]; then kk_want; else echo "$f"; fi
+}
+# kk_label <mine|engine|other>: what the window and the log call it
+kk_label() {
+  case "$1" in
+    mine) echo "my KosmicKrisp (jdrly/mesa $(kk_commit | cut -c1-11))" ;;
+    engine) echo "the engine's own KosmicKrisp (athei/mesa $ENGINE_MESA)" ;;
+    *) echo "another KosmicKrisp" ;;
+  esac
+}
+# kk_kept: the engine's own file is in place or next to it as KK_FILE.engine
+kk_kept() { [ "$(kk_file "$KK_PATH")" = engine ] || [ "$(kk_file "$KK_PATH.engine")" = engine ]; }
+# kk_state: yes (the KosmicKrisp kk_want names is in place), switch (it is not, and the engine's own
+# file is there to make it from: apply_engine_files puts it in at the next chance), other (the
+# engine's own is nowhere: Repair unpacks the engine again), no (no engine)
+kk_state() {
+  [ -x "$ENG/bin/wine" ] || { echo no; return; }
+  if [ "$(kk_file "$KK_PATH")" = "$(kk_want)" ]; then echo yes
+  elif kk_kept; then echo switch
+  else echo other
+  fi
+}
+# kk_switch: the KosmicKrisp kk_want names into place (the caller has made sure that no session runs
+# or starts). To mine: my file copied next to theirs (KK_FILE.new) first, then the engine's own
+# aside as KK_FILE.engine when it is the one in place, and mine in. To the engine's own: a rename.
+kk_switch() {
+  local want cur
+  want=$(kk_want)
+  cur=$(kk_file "$KK_PATH")
+  # (a copy a switch to mine cut short left, whichever way this one goes)
+  [ ! -e "$KK_PATH.new" ] || run rm -f "$KK_PATH.new"
+  [ "$cur" != "$want" ] || return 0
+  if ! kk_kept; then
+    # (kk_state says other: Play and Repair say so)
+    log "KosmicKrisp: the engine's own is neither in place nor next to it; $(kk_label "$want") waits for Repair"
+    return 0
+  fi
+  if [ "$want" = engine ]; then
+    run mv -f "$KK_PATH.engine" "$KK_PATH"
+    say "KosmicKrisp: $(kk_label engine) is in the engine"
+    return 0
+  fi
+  run cp -p "$KK_COMP/libvulkan_kosmickrisp.dylib" "$KK_PATH.new"
+  # (cp -p copies the quarantine attribute of an app copied out of a browser's download)
+  [ -n "$DRY" ] || xattr -d com.apple.quarantine "$KK_PATH.new" 2>/dev/null || true
+  [ "$cur" != engine ] || run mv -f "$KK_PATH" "$KK_PATH.engine"
+  run mv -f "$KK_PATH.new" "$KK_PATH"
+  say "KosmicKrisp: $(kk_label mine) is in the engine, the engine's own kept next to it as ${KK_FILE##*/}.engine"
+}
+
+# apply_engine_files: dxmt_switch, lib_switch for each of UNIX_LIBS, fex_switch and kk_switch while no session
 # runs or starts (the session's lock, as apply_registry takes it), else at the next game start that
 # finds none (Play). Nothing while engine_refusal says why not: the engine's files stay as they are.
 apply_engine_files() {
@@ -2146,6 +2239,7 @@ apply_engine_files() {
       echo "[dry-run] $(dxmt_label "$(setting dxmt)") as the engine's DXMT tree"
       for k in $UNIX_LIBS; do echo "[dry-run] $(lib_label "$k" "$(lib_want "$k")") in the engine"; done
       echo "[dry-run] $(fex_label "$(fex_want)") in the engine"
+      echo "[dry-run] $(kk_label "$(kk_want)") in the engine"
     fi
     return 0
   fi
@@ -2155,17 +2249,18 @@ apply_engine_files() {
     return 0
   fi
   if ! registry_lock; then
-    log "The engine's DXMT tree, unix libraries and FEX wait for the next start without a running session (its lock is held, or its helper missing)"
+    log "The engine's DXMT tree, unix libraries, FEX and KosmicKrisp wait for the next start without a running session (its lock is held, or its helper missing)"
     return 0
   fi
   if session_running; then
     registry_unlock
-    log "The engine's DXMT tree, unix libraries and FEX wait for the next start without a running session"
+    log "The engine's DXMT tree, unix libraries, FEX and KosmicKrisp wait for the next start without a running session"
     return 0
   fi
   dxmt_switch
   for k in $UNIX_LIBS; do lib_switch "$k"; done
   fex_switch
+  kk_switch
   registry_unlock
 }
 
@@ -4687,6 +4782,15 @@ status() {
   if [ "$f" = mine ]; then b=$(fex_commit); elif [ "$f" = engine ]; then b=$ENGINE_FEX; fi
   echo "fex_commit=$b"
   echo "fex_build=$(fex_commit)"
+  # (KosmicKrisp: its state, the one in the engine now (mine, engine, other) with its commit, and my
+  # build's commit in this app; no setting)
+  f=$(kk_in_use)
+  echo "kosmickrisp_ready=$(kk_state)"
+  echo "kosmickrisp_file=$f"
+  b=""
+  if [ "$f" = mine ]; then b=$(kk_commit); elif [ "$f" = engine ]; then b=$ENGINE_MESA; fi
+  echo "kosmickrisp_commit=$b"
+  echo "kosmickrisp_build=$(kk_commit)"
   # (a development build's switches from dev-switches.conf: those the game's rule has now, and
   # those it leaves out, each with why; both empty in a release build)
   b=$(dev_lines)
@@ -5053,6 +5157,11 @@ launch() {
       else
         echo "LIB_fex=$(fex_in_place)"
       fi
+      # (the KosmicKrisp it loads: <mine|engine|other|none> <commit> <sha256 of the file in the engine>)
+      f=$(kk_file "$KK_PATH")
+      b=""
+      if [ "$f" = mine ]; then b=$(kk_commit); elif [ "$f" = engine ]; then b=$ENGINE_MESA; fi
+      echo "LIB_kosmickrisp=$f $b $(sha256 "$KK_PATH" 2>/dev/null || true)"
       for k in $SETTING_KEYS; do echo "SETTING_$k=$(setting "$k")"; done
       # (ReShade and arcdps as the session starts with them: the session report's ReShade line)
       reshade_lines; arcdps_state; echo "arcdps=$([ "$ARC" = on ] && echo on || echo off)"; echo "arcdps_dll=$ARC_DLL"
@@ -5612,12 +5721,13 @@ cmd_repair() {
   log "repair complete"
   echo "@done Repaired: the engine and the bottle's settings are set up again. The game draws with $(dxmt_label "$(dxmt_in_use)")$(for k in $UNIX_LIBS; do printf ', with %s' "$(lib_label "$k" "$(lib_in_use "$k")")"; done), and runs on $(fex_label "$(fex_in_use)")."
 }
-# libs_other: one of my unix libraries or FEX has lost the engine's own file (lib_state or
-# fex_state other)
+# libs_other: one of my unix libraries, FEX or KosmicKrisp has lost the engine's own file
+# (lib_state, fex_state or kk_state other)
 libs_other() {
   local k
   for k in $UNIX_LIBS; do [ "$(lib_state "$k")" != other ] || return 0; done
-  [ "$(fex_state)" = other ]
+  [ "$(fex_state)" != other ] || return 0
+  [ "$(kk_state)" = other ]
 }
 
 cmd_reinstall_engine() {
@@ -5799,6 +5909,16 @@ cmd_play() {
       */mix) die "The engine's FEX files are a mix of mine and its own. Click Repair." ;;
       */other) die "The engine's FEX is neither its own nor mine. Click Repair." ;;
       switch/*) echo "@notice Steam is still running with $(fex_label "$(fex_in_place)"); quit Steam to switch to $(fex_label "$(fex_want)")." ;;
+    esac
+    # (KosmicKrisp: never a session on a file that is neither the engine's own nor this app's, and
+    # never one on the engine's own while this app carries mine: the engine's own ends the game on
+    # macOS 26, #339. Steam started before the update keeps the engine's files until it quits.)
+    case "$(kk_state)/$(kk_file "$KK_PATH")" in
+      */other|other/*) die "The engine's KosmicKrisp is neither its own nor mine. Click Repair." ;;
+      switch/none) die "The engine's KosmicKrisp is missing, a switch cut short. Quit Steam, then click Play again to finish it." ;;
+      switch/*)
+        [ "$(kk_want)" != mine ] || die "Steam is still running with the engine's own KosmicKrisp, which crashes the game on macOS 26. Quit Steam, then click Play again to put mine in."
+        echo "@notice Steam is still running with $(kk_label "$(kk_file "$KK_PATH")"); quit Steam to switch to $(kk_label "$(kk_want)")." ;;
     esac
   fi
   # A running session keeps the settings it started with: Steam passes its own environment on

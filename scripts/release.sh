@@ -56,8 +56,10 @@
 #                                    WINE_COMMIT and MACDRV_COMMIT, if set, the commit the
 #                                    bundled ntdll.so's and winemac.so's VERSION names, with the
 #                                    file's sha256 (and win32u.so's when that VERSION names one),
-#                                    and FEX_COMMIT, if set, the commit my bundled
-#                                    FEX's VERSION names, with its DLL's sha256.
+#                                    FEX_COMMIT, if set, the commit my bundled
+#                                    FEX's VERSION names, with its DLL's sha256, and KK_COMMIT,
+#                                    if set, the commit my bundled KosmicKrisp's VERSION names,
+#                                    with its dylib's sha256.
 #   scripts/release.sh --adhoc --no-release the same without the pre-release
 #   scripts/release.sh --feed-min <appcast.xml>  only what the feed's build does to its item's
 #                                    minimum macOS, on that file (the Checks workflow runs it on
@@ -299,6 +301,8 @@ package() {
     { echo "The app bundles the stand-in winemac.so (scripts/stage-components.sh --standin); stage the real one or none" >&2; exit 1; }
   ! grep -q '^stand-in' "$APP/Contents/Resources/components/fex/VERSION" 2>/dev/null ||
     { echo "The app bundles the stand-in FEX (scripts/stage-components.sh --standin); stage the real one or none" >&2; exit 1; }
+  ! grep -q '^stand-in' "$APP/Contents/Resources/components/kosmickrisp/VERSION" 2>/dev/null ||
+    { echo "The app bundles the stand-in KosmicKrisp (scripts/stage-components.sh --standin); stage the real one or none" >&2; exit 1; }
   if [ "$MODE" = --adhoc ]; then
     # build.sh's ad hoc signatures, verified and kept: nothing is signed again
     codesign --verify --strict --deep "$APP"
@@ -308,7 +312,7 @@ package() {
     # Inside out: the process lister and the session's lock (helpers/procpaths, sessionlock), my
     # DXMT fork's winemetal.so (gw2om.sh puts it into the engine's DXMT tree, where Wine loads it;
     # every Mach-O of a notarized app is signed; the PE DLLs are not Mach-O), my ntdll.so,
-    # winemac.so, win32u.so and FEX's libarm64ecfex.so if the app has them (the engine's loader has
+    # winemac.so, win32u.so, FEX's libarm64ecfex.so and my KosmicKrisp if the app has them (the engine's loader has
     # library validation off, so it loads them with my signature too; the app tells each from the
     # engine's own by its bytes, not by the fork's hash), Sparkle in its
     # documented order (Autoupdate, Updater.app, the framework, each with the hardened runtime and
@@ -322,6 +326,7 @@ package() {
     [ ! -f "$APP/Contents/Resources/components/macdrv/winemac.so" ] || sign "$APP/Contents/Resources/components/macdrv/winemac.so"
     [ ! -f "$APP/Contents/Resources/components/macdrv/win32u.so" ] || sign "$APP/Contents/Resources/components/macdrv/win32u.so"
     [ ! -f "$APP/Contents/Resources/components/fex/aarch64-unix/libarm64ecfex.so" ] || sign "$APP/Contents/Resources/components/fex/aarch64-unix/libarm64ecfex.so"
+    [ ! -f "$APP/Contents/Resources/components/kosmickrisp/libvulkan_kosmickrisp.dylib" ] || sign "$APP/Contents/Resources/components/kosmickrisp/libvulkan_kosmickrisp.dylib"
     fw="$APP/$FW_REL"
     sign "$fw/Versions/B/Autoupdate"
     sign "$fw/Versions/B/Updater.app"
@@ -354,8 +359,8 @@ package() {
 
 # --adhoc: the app in the finished DMG is the one build.sh made, file for file, with a valid
 # signature, and it is a dev build of this app: its bundle id, the dev channel, no feed. With
-# DXMT_COMMIT, WINE_COMMIT, MACDRV_COMMIT and FEX_COMMIT, it bundles those commits' DXMT,
-# ntdll.so, winemac.so and FEX.
+# DXMT_COMMIT, WINE_COMMIT, MACDRV_COMMIT, FEX_COMMIT and KK_COMMIT, it bundles those commits' DXMT,
+# ntdll.so, winemac.so, FEX and KosmicKrisp.
 check_dmg() {
   local mnt a n err=""
   echo "[release] checking the app in the disk image"
@@ -390,6 +395,11 @@ check_dmg() {
     { grep -qx "commit: $FEX_COMMIT" "$n/VERSION" 2>/dev/null && [ -f "$n/aarch64-windows/libarm64ecfex.dll" ] &&
       grep -qx "aarch64-windows/libarm64ecfex.dll: sha256 $(shasum -a 256 "$n/aarch64-windows/libarm64ecfex.dll" | cut -d' ' -f1)" "$n/VERSION"; } ||
     err="The DMG's app bundles no FEX of commit $FEX_COMMIT with the sha256 its VERSION names"
+  n="$a/Contents/Resources/components/kosmickrisp"
+  [ -n "$err" ] || [ -z "${KK_COMMIT:-}" ] ||
+    { grep -qx "commit: $KK_COMMIT" "$n/VERSION" 2>/dev/null && [ -f "$n/libvulkan_kosmickrisp.dylib" ] &&
+      grep -qx "libvulkan_kosmickrisp.dylib: sha256 $(shasum -a 256 "$n/libvulkan_kosmickrisp.dylib" | cut -d' ' -f1)" "$n/VERSION"; } ||
+    err="The DMG's app bundles no KosmicKrisp of commit $KK_COMMIT with the sha256 its VERSION names"
   detach "$mnt"
   rmdir "$mnt"
   [ -z "$err" ] || { echo "$err" >&2; exit 1; }

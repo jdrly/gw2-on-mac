@@ -108,6 +108,12 @@ MYFEX_COMMIT="$(sed -n 's/^commit: //p' "$COMP/fex/VERSION" 2>/dev/null || true)
 ENGINE_FEX=597e7ccbedd
 fexb() { [ "$MYFEX" = yes ]; }
 skipfex() { echo "  skip   $* (this app has no FEX of mine)"; }
+# My KosmicKrisp (components/kosmickrisp): in the app or not. No setting: mine is in the engine
+# whenever the app carries it (#339)
+if [ -f "$COMP/kosmickrisp/libvulkan_kosmickrisp.dylib" ]; then MYKK=yes; else MYKK=no; fi
+MYKK_COMMIT="$(sed -n 's/^commit: //p' "$COMP/kosmickrisp/VERSION" 2>/dev/null || true)"
+ENGINE_MESA=d62ee13d18
+kkb() { [ "$MYKK" = yes ]; }
 mkdir -p "$H"
 # Another DXMT setup's caches in the per-user cache folder, which the app must never touch: a
 # stand-in getconf on PATH points DARWIN_USER_CACHE_DIR at the sandbox's usercache/
@@ -330,6 +336,18 @@ win32u_is() { unix_is win32u.so macdrv "$1"; }
 FW="$ENG/lib/wine"
 FEXF="aarch64-windows/xtajit64.dll aarch64-windows/libarm64ecfex.dll aarch64-unix/libarm64ecfex.so"
 fex_src_of() { case "$1" in *.dll) echo "$COMP/fex/aarch64-windows/libarm64ecfex.dll" ;; *) echo "$COMP/fex/$1" ;; esac; }
+# kk_is mine|engine: KosmicKrisp as the app leaves it. mine: the app's
+# components/kosmickrisp/libvulkan_kosmickrisp.dylib, the engine's own next to it as <file>.engine.
+# engine: the engine's own, nothing next to it. Never an unfinished <file>.new
+KKF="$ENG/lib/external/libvulkan_kosmickrisp.dylib"
+kk_is() {
+  [ ! -e "$KKF.new" ] || return 1
+  if [ "$1" = engine ]; then
+    same "$S/lib/external/libvulkan_kosmickrisp.dylib" "$KKF" && [ ! -e "$KKF.engine" ]
+    return
+  fi
+  same "$COMP/kosmickrisp/libvulkan_kosmickrisp.dylib" "$KKF" && same "$S/lib/external/libvulkan_kosmickrisp.dylib" "$KKF.engine"
+}
 fex_is() {
   local f
   same "$S/lib/wine/aarch64-windows/xtajit.dll" "$FW/aarch64-windows/xtajit.dll" || return 1
@@ -344,9 +362,9 @@ fex_is() {
 }
 
 # (the engine as it ships: every file the stand-in's, minus the SDK, plus the app's record of the
-# archive; nothing of the app's in it but its DXMT trees, ntdll.so, winemac.so and win32u.so, which
-# dxgi_is, ntdll_is, winemac_is and win32u_is check)
-engine_diff() { diff -rq -x dxgi -x 'ntdll.so*' -x 'winemac.so*' -x 'win32u.so*' "$S" "$ENG" 2>&1 | sed -e "s|$S|S|g" -e "s|$ENG|E|g" | LC_ALL=C sort | tr '\n' '|'; }
+# archive; nothing of the app's in it but its DXMT trees, ntdll.so, winemac.so, win32u.so and
+# KosmicKrisp, which dxgi_is, ntdll_is, winemac_is, win32u_is and kk_is check)
+engine_diff() { diff -rq -x dxgi -x 'ntdll.so*' -x 'winemac.so*' -x 'win32u.so*' -x 'libvulkan_kosmickrisp.dylib*' "$S" "$ENG" 2>&1 | sed -e "s|$S|S|g" -e "s|$ENG|E|g" | LC_ALL=C sort | tr '\n' '|'; }
 SDK_DIFF="Only in E: .gw2om-source|Only in S/lib/wine: tests|Only in S/lib/wine: x86_64-windows|Only in S/share: man|Only in S: include|"
 # the game's folder in the bottle
 GD="$STEAM/steamapps/common/Guild Wars 2"
@@ -397,6 +415,9 @@ echo "engine's libarm64ecfex.dll" >"$S/lib/wine/aarch64-windows/libarm64ecfex.dl
 cp "$S/lib/wine/aarch64-windows/libarm64ecfex.dll" "$S/lib/wine/aarch64-windows/xtajit64.dll"
 echo "engine's libarm64ecfex.so" >"$S/lib/wine/aarch64-unix/libarm64ecfex.so"
 echo "engine's xtajit.dll" >"$S/lib/wine/aarch64-windows/xtajit.dll"
+# (KosmicKrisp, the engine's Vulkan driver)
+mkdir -p "$S/lib/external"
+echo "engine's libvulkan_kosmickrisp.dylib" >"$S/lib/external/libvulkan_kosmickrisp.dylib"
 echo "<plist/>" >"$S/lib/wine/aarch64-unix/wine.app/Contents/Info.plist"
 ln -s ../lib/wine/aarch64-unix/wine.app/Contents/MacOS/wine "$S/bin/wine"
 ln -s wine.app/Contents/MacOS/wine "$S/lib/wine/aarch64-unix/wine"
@@ -459,6 +480,8 @@ export GW2_ON_MAC_ENGINE_NTDLL_SHA256 GW2_ON_MAC_ENGINE_WINEMAC_SHA256 GW2_ON_MA
 GW2_ON_MAC_ENGINE_FEX_DLL_SHA256="$(shasum -a 256 "$S/lib/wine/aarch64-windows/libarm64ecfex.dll" | cut -d' ' -f1)"
 GW2_ON_MAC_ENGINE_FEX_SO_SHA256="$(shasum -a 256 "$S/lib/wine/aarch64-unix/libarm64ecfex.so" | cut -d' ' -f1)"
 export GW2_ON_MAC_ENGINE_FEX_DLL_SHA256 GW2_ON_MAC_ENGINE_FEX_SO_SHA256
+GW2_ON_MAC_ENGINE_KK_SHA256="$(shasum -a 256 "$S/lib/external/libvulkan_kosmickrisp.dylib" | cut -d' ' -f1)"
+export GW2_ON_MAC_ENGINE_KK_SHA256
 export GW2_ON_MAC_STEAMSETUP_URL="file://$SANDBOX/SteamSetup.exe"
 unset GW2_ON_MAC_DRY_RUN GW2_ON_MAC_ALLOW_WINE GW2_ON_MAC_SIGNER GW2_ON_MAC_MACOS GW2_ON_MAC_ENGINE_LOADER_SHA256 GW2_ON_MAC_FEX_SWITCHES
 # the session's watcher (play starts it), with its times shortened: a 2 s grace, 2 s for Steam to
@@ -740,12 +763,21 @@ check "the engine's own FEX in place (fex=engine by default), nothing next to it
 check "  status names it and the engine's FEX commit, and my build's commit in this app" \
   [ "$(st fex fex_ready fex_file fex_commit fex_build)" = "engine/yes/engine/$ENGINE_FEX/$MYFEX_COMMIT" ]
 check "  the install says nothing of FEX (nothing switched)" eval '! echo "$out" | grep -q "^FEX:"'
+if kkb; then
+  check "my KosmicKrisp in the engine, the engine's own next to it as libvulkan_kosmickrisp.dylib.engine" kk_is mine
+  check "  status names it and its commit" [ "$(st kosmickrisp_ready kosmickrisp_file kosmickrisp_commit kosmickrisp_build)" = "yes/mine/$MYKK_COMMIT/$MYKK_COMMIT" ]
+  check "  the install says so" has <(echo "$out") "^KosmicKrisp: my KosmicKrisp (jdrly/mesa ${MYKK_COMMIT:0:11}) is in the engine, the engine's own kept next to it as libvulkan_kosmickrisp.dylib.engine$"
+else
+  check "no KosmicKrisp of mine in this app: the engine's own stays in place" kk_is engine
+  check "  status names it and the engine's Mesa" [ "$(st kosmickrisp_ready kosmickrisp_file kosmickrisp_commit kosmickrisp_build)" = "yes/engine/$ENGINE_MESA/" ]
+fi
 check "gamemode=engine" [ "$(st gamemode)" = engine ]
 check "steam=yes" [ "$(st steam)" = yes ]
 check "stage=waiting_game" [ "$(st stage)" = waiting_game ]
 check "route=steam" [ "$(st route)" = steam ]
 check "game=no yet" [ "$(st game)" = no ]
 check "the engine is the stand-in as it ships, without its SDK (include, tests, x86_64-windows, man)" [ "$(engine_diff)" = "$SDK_DIFF" ]
+check "  and its KosmicKrisp is $(kkb && echo mine || echo "the engine's own")" kk_is "$(kkb && echo mine || echo engine)"
 check "  wine.app's files have the stand-in's hashes" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
 check "  bin/wine and lib/wine/aarch64-unix/wine still link to the loader in wine.app" \
   eval '[ "$(readlink "$ENG/bin/wine")" = ../$LOADER ] && [ "$(readlink "$ENG/lib/wine/aarch64-unix/wine")" = wine.app/Contents/MacOS/wine ]'
@@ -1605,6 +1637,8 @@ else
     eval '[ "$(sed -n "s/^LIB_macdrv=//p" "$LOGS/session.env")" = "winemac.so engine $ENGINE_WINE $GW2_ON_MAC_ENGINE_WINEMAC_SHA256" ] && ! grep -q WINE_MACDRV_ "$LOGS/session.env"'
 fi
 check "  and which FEX: the engine's own (fex=engine by default)" eval '[ "$(sed -n "s/^LIB_fex=//p" "$LOGS/session.env")" = engine ]'
+check "  and which KosmicKrisp: $(kkb && echo mine || echo "the engine's own"), with its commit and the sha256 of the file in the engine" \
+  eval '[ "$(sed -n "s/^LIB_kosmickrisp=//p" "$LOGS/session.env")" = "$(kkb && echo "mine $MYKK_COMMIT" || echo "engine $ENGINE_MESA") $(shasum -a 256 "$KKF" | cut -d" " -f1)" ]'
 
 section "Collect Logs (redaction and the leak check)"
 mkdir -p "$STEAM/config" "$STEAM/logs" "$BOTTLE/drive_c/users/$BUSER/AppData/Roaming/Guild Wars 2"
@@ -1896,6 +1930,8 @@ fi
 # (compatdb.local's FEX_HOSTFEATURES is in the game's rule: a FEX switch the session ran)
 check "  and which FEX ran: the engine's own, with compatdb.local's switch" \
   eval '[ "$(grep -A1 "^FEX that ran: " "$Z/session-report.txt" | tr "\n" "|")" = "FEX that ran: the engine'"'"'s own, athei/FEX $ENGINE_FEX|Its switches: FEX_HOSTFEATURES=disableavx|" ]'
+check "  system-info names my KosmicKrisp in the app (or none) and the one in the engine" \
+  eval 'has "$Z/system-info.txt" "^Versions: .* kosmickrisp $(kkb && echo "$MYKK_COMMIT" || echo none) " && has "$Z/system-info.txt" "^  KosmicKrisp libvulkan_kosmickrisp.dylib: [0-9a-f]\{12\}.* (the engine.s own [0-9a-f]\{12\}, this app.s " && grep -q "^kosmickrisp " "$Z/VERSIONS"'
 check "  system-info names my FEX build in the app (or none) and FEX's files in the engine" \
   eval 'has "$Z/system-info.txt" "^Versions: .* fex $(fexb && echo "$MYFEX_COMMIT" || echo none) " && has "$Z/system-info.txt" "^  FEX xtajit64.dll: ${GW2_ON_MAC_ENGINE_FEX_DLL_SHA256:0:12} (the engine.s own " && [ -f "$Z/VERSIONS" ] && grep -q "^fex " "$Z/VERSIONS"'
 # (DXMT's wait field is count, the window's total and its longest: two windows with waits and one
@@ -2117,6 +2153,23 @@ if drv; then
   g set macdrv mine >/dev/null
 else
   skipdrv "set macdrv engine while a session runs"
+fi
+# An update from 0.2.0 while Steam still runs with the engine's own KosmicKrisp (it crashes the game
+# on macOS 26, #339): Play refuses and starts no Wine; once Steam has quit, Play puts mine in
+if kkb; then
+  mv -f "$KKF.engine" "$KKF"
+  mv "$ENG/bin/wineserver" "$ENG/bin/wineserver.heat" && cp "$SANDBOX/sleeper" "$ENG/bin/wineserver"
+  "$ENG/bin/wineserver" 60 & sp=$!
+  sleep 0.3
+  : >"$STANDIN_LOG"; out=$(GW2_ON_MAC_WATCH_GRACE=0 g play 2>&1) && rc=0 || rc=$?
+  check "Play while Steam runs with the engine's own KosmicKrisp: refused, no Wine started" \
+    eval '[ "$rc" != 0 ] && echo "$out" | grep -qxF "@error Steam is still running with the engine'"'"'s own KosmicKrisp, which crashes the game on macOS 26. Quit Steam, then click Play again to put mine in." && ! has "$STANDIN_LOG" "^wine " && kk_is engine && [ "$(st kosmickrisp_ready)" = switch ]'
+  kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
+  mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
+  : >"$STANDIN_LOG"; out=$(GW2_ON_MAC_WATCH_GRACE=0 g play 2>&1) && rc=0 || rc=$?; started
+  check "  once it has ended, the next Play puts mine in before Wine starts" \
+    eval '[ "$rc" = 0 ] && has "$STANDIN_LOG" "^wine " && kk_is mine && has "$LOGS/session.env" "^LIB_kosmickrisp=mine $MYKK_COMMIT "'
+  watch_done
 fi
 # A mix of my Mac driver's two files and the engine's own (a switch cut short): Play refuses it
 # while Steam runs, finishes the switch once Steam has quit, and refuses one it can't finish
@@ -2803,7 +2856,7 @@ out=$(g reinstall-engine 2>&1) && rc=0 || rc=$?
 check "reinstall-engine from it: the verified download, unpacked again" eval '[ "$rc" = 0 ] && echo "$out" | grep -q "^@done" && echo "$out" | grep -q "using the verified download"'
 check "  no file of the engine has the quarantine attribute (my DXMT tree, ntdll.so and winemac.so, copied from the components, included)" sh -c "! xattr -r '$ENG' | grep -q com.apple.quarantine"
 check "  graphics=yes after it, the engine as it ships with my DXMT in its tree, the ntdll.so and winemac.so Settings asks for and the engine's own FEX" \
-  eval '[ "$(st graphics)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ] && dxgi_is fork && ntdll_is $MYWINE && winemac_is $MYDRV && win32u_is $W32U && fex_is engine'
+  eval '[ "$(st graphics)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ] && dxgi_is fork && ntdll_is $MYWINE && winemac_is $MYDRV && win32u_is $W32U && fex_is engine && kk_is $(kkb && echo mine || echo engine)'
 if fexb; then
   check "  set fex mine from quarantined components: none of FEX's files in the engine has the attribute" \
     eval 'g set fex mine >/dev/null && fex_is mine && ! xattr -r "$FW" | grep -q com.apple.quarantine && g set fex engine >/dev/null && fex_is engine'

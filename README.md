@@ -8,7 +8,9 @@ Metal through my DXMT fork, built for this engine, which the app puts into the e
 and every Wine process loads my builds of Wine's `ntdll.so` and of its Mac driver, `winemac.so`,
 which have switches for the game. The engine's own DXMT, `ntdll.so` and `winemac.so` stay next to
 them, and a setting switches back to each. A build can also carry my build of FEX, which goes in
-only when I choose it from Terminal. It changes nothing you already have installed.
+only when I choose it from Terminal, and my build of KosmicKrisp, the engine's Vulkan driver, which
+goes in whenever the build carries it: the engine's own crashes the game on macOS 26. It changes
+nothing you already have installed.
 
 0.2 is GW2 on Mac without Rosetta. 0.1.x ran CrossOver 26.3's Wine under Rosetta, and 0.1.x
 installs update to 0.2, which keeps its own folders, named *GW2 on Mac arm64*, and moves 0.1.x's
@@ -861,6 +863,18 @@ and `fex_ready` (`yes`, `switch` or `other`, as for `wine_ready`). The *This Mac
 cell adds `· FEX bff3f7c` while my FEX is in place. `session.env` gets `LIB_fex`: `mine <commit>
 <sha256 of xtajit64.dll>` or `engine`, and the session report prints which FEX ran.
 
+**KosmicKrisp.** The engine's Vulkan driver, `lib/external/libvulkan_kosmickrisp.dylib`, asks
+Metal for `sparseBufferTier`, which throws on macOS 26 and ends the game a few seconds after Play
+(#339). My build from jdrly/mesa decides that from how it made the buffer and never asks
+([ADR 0023](docs/adr/0023-0.2-ships-kosmickrisp-from-my-mesa-fork.md)). It has no setting: a build
+that carries it (`components/kosmickrisp`) puts it into the engine at install, Play and Repair, the
+engine's own kept next to it as `libvulkan_kosmickrisp.dylib.engine`, as for `ntdll.so`. The
+engine's ICD manifest stays its own, since it names the same path. Play refuses a file that is
+neither the engine's own nor this app's and says to Repair. `status` prints `kosmickrisp_file`,
+`kosmickrisp_commit`, `kosmickrisp_build` and `kosmickrisp_ready`, `session.env` gets
+`LIB_kosmickrisp`, `VERSIONS` its line `kosmickrisp <commit> <sha256>`, and Collect Logs's
+`system-info.txt` the file in the engine against the engine's own and the app's.
+
 FEX's options are `FEX_*` variables, and a rule's `env=` sets them for the game. The table
 `FEX_SWITCHES` in `gw2om.sh` has one row per setting, `<key> <entry> <needs>`, where `<needs>` is
 `fork` for an option only my FEX has and `any` for one the engine's FEX has too. An entry goes into
@@ -1466,6 +1480,17 @@ another engine than `ENGINE_SHA256` or on another base than `ENGINE_FEX`, a file
 its `VERSION` names, a `libarm64ecfex.so` without a valid signature, and with `FEX_COMMIT` set, a
 build of another commit or none. `build.sh` refuses a `prebuilt/fex` that doesn't match its record.
 
+**Where my KosmicKrisp comes from.** My Mesa fork's `GW2` workflow builds it for this engine and
+publishes each push to its `gw2-on-mac` as the asset `kosmickrisp-arm64-<commit>.tar.xz` of
+jdrly/mesa's pre-release `arm64-builds`: the dylib, its ICD manifest, `LICENSE.rst` and `VERSION`,
+with `commit:`, `base: <the engine's Mesa commit>`, `engine: … sha256 <the engine tarball's>` and
+`libvulkan_kosmickrisp.dylib: sha256 <the file's>`. `stage-components.sh` copies the dylib,
+`VERSION` and `LICENSE.rst` from `work/kosmickrisp-arm64/install` (`KK_BUILD`) into
+`prebuilt/kosmickrisp`, or fetches the asset `prebuilt.lock` pins with `kosmickrisp_url=` and
+`kosmickrisp_sha256=`. It refuses another engine, another base than `ENGINE_MESA`, a dylib that
+isn't the one its `VERSION` names or has no valid signature, and with `KK_COMMIT` set, a build of
+another commit or none.
+
 **Where the addon comes from.** `stage-components.sh` copies `version.dll` and
 `gw2-ui-scale.ini` from `GW2_ON_MAC_WORKSPACE`, by default `../gw2-on-mac` next to this checkout,
 at `work/ui-scale/build`. `UISCALE_BUILD` overrides that. The DLL must carry the addon's marker
@@ -1479,11 +1504,12 @@ pins its tag, file name and sha256, and the script refuses a download or cached 
 sha256 before it unpacks anything. My `ntdll.so` is a download of its own: with `ntdll_url=` and
 `ntdll_sha256=` in `prebuilt.lock`, the script fetches jdrly/wine's asset, checks its sha256 the
 same way and stages it as from the workspace. My `winemac.so` is the same with `macdrv_url=` and
-`macdrv_sha256=`, and my FEX with `fex_url=` and `fex_sha256=`. `prebuilt.lock` pins none of them
-today. `build.sh` then checks `prebuilt/` like any other.
+`macdrv_sha256=`, my FEX with `fex_url=` and `fex_sha256=`, and my KosmicKrisp with
+`kosmickrisp_url=` and `kosmickrisp_sha256=`. `prebuilt.lock` pins only my KosmicKrisp today. `build.sh` then checks `prebuilt/` like any other.
 
-`--pack <tag>` makes such an archive from `prebuilt/` without `ntdll/`, `macdrv/` and `fex/` and
-writes `prebuilt.lock` for it, keeping its `ntdll_`, `macdrv_` and `fex_` lines; README.md on
+`--pack <tag>` makes such an archive from `prebuilt/` without `ntdll/`, `macdrv/`, `fex/` and
+`kosmickrisp/` and writes `prebuilt.lock` for it, keeping its `ntdll_`, `macdrv_`, `fex_` and
+`kosmickrisp_` lines; README.md on
 `main` says how I publish one.
 
 **In a dev build.** The Dev build workflow ([Releasing](#releasing)) takes neither my workspace nor
@@ -1807,6 +1833,10 @@ gh release download v0.2.0-dev.5 -R jdrly/gw2-on-mac -p '*.dmg' -D ~/Downloads
   `fex-arm64-<commit>.tar.xz` of jdrly/FEX's `arm64-builds`, checked against GitHub's digest.
   Without it the app has no FEX of mine. With it the app still starts on the engine's own FEX until
   `gw2om.sh set fex mine`.
+- My KosmicKrisp comes with `kosmickrisp_commit`, a commit on my Mesa fork's `gw2-on-mac`, or
+  without it the one `prebuilt.lock` pins: the release asset `kosmickrisp-arm64-<commit>.tar.xz`
+  of jdrly/mesa's `arm64-builds`, checked against GitHub's digest and refused on copies as my FEX
+  is. A build with it puts it into the engine; one without it leaves the engine's own.
 - The addon is built on the runner from the commit, with Homebrew's mingw-w64.
 - Checks' jobs run on that build: `lint`, `compatdb`, `build`, `sandbox` and `renders`, and
   `addon` builds the addon a second time, as on a pull request. Then `release.sh --adhoc` packages

@@ -4,8 +4,13 @@
 # My ntdll.so is a download of its own when ntdll_url= and ntdll_sha256= are here: jdrly/wine's
 # asset https://github.com/jdrly/wine/releases/download/arm64-builds/ntdll-arm64-<commit>.tar.xz
 # and its sha256. My winemac.so the same with macdrv_url= and macdrv_sha256=, the asset
-# macdrv-arm64-<commit>.tar.xz. Without them the checks add a stand-in for each
+# macdrv-arm64-<commit>.tar.xz. My FEX the same with fex_url= and fex_sha256=, and my KosmicKrisp
+# with kosmickrisp_url= and kosmickrisp_sha256=: jdrly/mesa's asset
+# https://github.com/jdrly/mesa/releases/download/arm64-builds/kosmickrisp-arm64-<commit>.tar.xz and
+# its sha256, as GitHub reports it. Without them the checks add a stand-in for each
 # (scripts/stage-components.sh --standin).
 tag=components-2026-11-16
 file=gw2-on-mac-components-2026-11-16.tar.xz
 sha256=f89e06724e26ac886e6ac634e99f1aad2f5c87b50872a4d48d403b303cd9709f
+kosmickrisp_url=https://github.com/jdrly/mesa/releases/download/arm64-builds/kosmickrisp-arm64-9d08aebd96a01203d1a086fbbbfdf5e5e8db6d75.tar.xz
+kosmickrisp_sha256=4bc3d7c4ea5c06ef0398da7a65410fc44257329dba3197d78fcc6cd6ac551a47

@@ -14,8 +14,8 @@ carries them.
 
 The app bundles a few components and downloads the Wine engine at install time. On this line it
 bundles my DXMT fork built for the engine and, in builds that have them, two files of Wine, my
-`ntdll.so` and my Mac driver's `winemac.so`, and my build of FEX's x86_64 half, all built for the
-engine. ReShade and its effects, and Microsoft's shader compiler when the game has none, are
+`ntdll.so` and my Mac driver's `winemac.so`, my build of FEX's x86_64 half and my build of
+KosmicKrisp, the engine's Vulkan driver, all built for the engine. ReShade and its effects, and Microsoft's shader compiler when the game has none, are
 downloaded only when you turn ReShade on (below). The app never bundles
 Guild Wars 2, its installer, its launcher, its files or Steam, and never downloads them from
 anywhere but their publishers. Steam's installer comes from Valve's CDN. The game comes from Steam,
@@ -29,6 +29,7 @@ or from ArenaNet's own installer, which you download from ArenaNet's site.
 | **Wine's `ntdll.so`**, my build from my fork [jdrly/wine](https://github.com/jdrly/wine) of [athei/wine](https://github.com/athei/wine), the Wine Mach9 0.4.0's engine is built from, for that engine; only in builds that have it. `VERSION` names the commit, whose source is the complete corresponding source. `gw2om.sh` puts it into the engine's `lib/wine/aarch64-unix`, the engine's own kept next to it | `Contents/Resources/components/ntdll` | LGPL-2.1-or-later | `Resources/Licenses/wine/COPYING.LIB`, `LICENSE`, `VERSION` |
 | **Wine's Mac driver, `winemac.so`**, my build from the same fork for the same engine, with my `win32u.so` when that build has one; only in builds that have it. `VERSION` names the commit, whose source is the complete corresponding source. `gw2om.sh` puts them into the engine's `lib/wine/aarch64-unix` as one set, the engine's own kept next to each | `Contents/Resources/components/macdrv` | LGPL-2.1-or-later | `Resources/Licenses/macdrv/COPYING.LIB`, `LICENSE`, `VERSION` |
 | **FEX**, my build from my fork [jdrly/FEX](https://github.com/jdrly/FEX) of [athei/FEX](https://github.com/athei/FEX), the FEX Mach9 0.4.0's engine is built from, for that engine: its x86_64 half, `libarm64ecfex.dll` and `libarm64ecfex.so`; only in builds that have it. `VERSION` names the commit, whose source is the complete corresponding source. `gw2om.sh` puts it into the engine's `lib/wine` after `set fex mine` from Terminal, the engine's own kept next to it. It includes or links statically the code listed below this table | `Contents/Resources/components/fex` | MIT, with the licences below | `Resources/Licenses/fex/LICENSE`, `NOTICES`, `VERSION` |
+| **KosmicKrisp**, Mesa's Vulkan driver on Metal, my build from my fork [jdrly/mesa](https://github.com/jdrly/mesa) of [athei/mesa](https://github.com/athei/mesa), the Mesa Mach9 0.4.0's engine is built from, for that engine: `libvulkan_kosmickrisp.dylib`; only in builds that have it. `VERSION` names the commit, whose source is the complete corresponding source. `gw2om.sh` puts it into the engine's `lib/external`, the engine's own kept next to it | `Contents/Resources/components/kosmickrisp` | MIT, and the other licences Mesa's `LICENSE.rst` lists | `Resources/Licenses/kosmickrisp/LICENSE.rst`, `VERSION` |
 | **Sparkle** 2.10.0, <https://sparkle-project.org> (app updates, off in builds without a feed; with bsdiff, sais, and other notices) | `Contents/Frameworks/Sparkle.framework` | MIT | `Resources/Licenses/sparkle/LICENSE` |
 | **Cinzel** (variable, `wght` 400 to 900), copyright 2020 The Cinzel Project Authors, <https://github.com/NDISCOVER/Cinzel>, from [google/fonts `ofl/cinzel`](https://github.com/google/fonts/tree/main/ofl/cinzel) (`Cinzel[wght].ttf`, sha256 `f4d83d34…2a4e0f34`), unmodified | `Contents/Resources/Fonts/Cinzel-Variable.ttf` | SIL Open Font License 1.1 | `Resources/Licenses/fonts/Cinzel-OFL.txt` |
 | **Marcellus**, copyright 2012 Brian J. Bonislawsky DBA Astigmatic (AOETI), from [google/fonts `ofl/marcellus`](https://github.com/google/fonts/tree/main/ofl/marcellus) (`Marcellus-Regular.ttf`, sha256 `1cf0cd10…4abb2f81`), unmodified | `Contents/Resources/Fonts/Marcellus-Regular.ttf` | SIL Open Font License 1.1 | `Resources/Licenses/fonts/Marcellus-OFL.txt` |
@@ -44,7 +45,7 @@ conditions), tiny-json (MIT), unordered_dense (MIT) and xxHash (BSD-2-Clause).
 The artwork is my design's own, made for GW2 on Mac. That's the ink strokes behind the header,
 the painting and the app icon's ensō. The app has no ArenaNet or NCSOFT logo, font or art in it.
 
-DXMT's, `ntdll.so`'s, `winemac.so`'s, FEX's and the addon's binaries aren't in this repository.
+DXMT's, `ntdll.so`'s, `winemac.so`'s, FEX's, KosmicKrisp's and the addon's binaries aren't in this repository.
 `scripts/stage-components.sh` copies them from my development workspace's `work/` folder into the
 ignored `prebuilt/`, or takes them from the downloads that `prebuilt.lock` pins. The workspace is
 `GW2_ON_MAC_WORKSPACE`, by default `../gw2-on-mac`. DXMT is the fork's CI build for this engine,
@@ -53,7 +54,9 @@ the release asset `ntdll-arm64-<commit>.tar.xz` of jdrly/wine's `arm64-builds`, 
 the commit its `VERSION` names. `winemac.so` is the same, from the asset
 `macdrv-arm64-<commit>.tar.xz`. FEX is my FEX fork's CI build, the release asset
 `fex-arm64-<commit>.tar.xz` of jdrly/FEX's `arm64-builds`, and its source is the commit its
-`VERSION` names. The addon's source is [`addon/ui-scale`](addon/ui-scale), and
+`VERSION` names. KosmicKrisp is my Mesa fork's CI build, the release asset
+`kosmickrisp-arm64-<commit>.tar.xz` of jdrly/mesa's `arm64-builds`, and its source is the commit
+its `VERSION` names. The addon's source is [`addon/ui-scale`](addon/ui-scale), and
 `scripts/build-addon.sh` builds it. `build.sh` downloads Sparkle at a pinned version and sha256.
 
 ## Downloaded at install time
@@ -74,8 +77,10 @@ unchanged as `ntdll.so.engine` and `winemac.so.engine` and puts mine in their pl
 `win32u.so` as `win32u.so.engine` when my driver's build has one; a setting switches back to
 each. After `set fex mine` it does the same with FEX's
 `lib/wine/aarch64-windows/xtajit64.dll`, `libarm64ecfex.dll` and
-`lib/wine/aarch64-unix/libarm64ecfex.so`. It changes nothing else in the engine, and nothing
-inside `wine.app` is touched.
+`lib/wine/aarch64-unix/libarm64ecfex.so`. In a build that carries my KosmicKrisp it moves the
+engine's `lib/external/libvulkan_kosmickrisp.dylib` aside unchanged as
+`libvulkan_kosmickrisp.dylib.engine` and puts mine in its place, with no setting. It changes
+nothing else in the engine, and nothing inside `wine.app` is touched.
 
 ## ReShade, downloaded only when you turn it on
 

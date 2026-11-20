@@ -30,6 +30,13 @@
 #                       add), LICENSE and NOTICES, and SHA256SUMS, the record this script writes.
 #                       gw2om.sh puts it into the engine after `set fex mine`, the engine's own
 #                       kept next to it. Its WoW64 half is not staged. Optional, as ntdll/ is.
+#   prebuilt/kosmickrisp/  my KosmicKrisp (jdrly/mesa, MIT and the licences Mesa lists), the engine's
+#                       Vulkan driver built for this line's engine (#339): libvulkan_kosmickrisp.dylib,
+#                       VERSION (its "commit:", "base:", "engine:" and "libvulkan_kosmickrisp.dylib:
+#                       sha256" lines name the fork's commit, the engine's Mesa commit it starts
+#                       from, the engine's tarball and the file as built) and LICENSE.rst, and
+#                       SHA256SUMS, the record this script writes. gw2om.sh puts it into the engine,
+#                       the engine's own kept next to it. Optional, as ntdll/ is.
 #   prebuilt/ui-scale/  the interface-scale addon, version.dll and gw2-ui-scale.ini (the app's
 #                       own code, addon/ui-scale; scripts/build-addon.sh builds the same thing)
 #
@@ -41,26 +48,31 @@
 # without it no ntdll/), MACDRV_BUILD=work/macdrv-arm64/install (its asset
 # macdrv-arm64-<commit>.tar.xz, unpacked; without it no macdrv/) and
 # FEX_BUILD=work/fex-arm64/install (jdrly/FEX's asset fex-arm64-<commit>.tar.xz, unpacked; without
-# it no fex/) and UISCALE_BUILD=work/ui-scale/build (relative to the workspace, or absolute). It
-# refuses a DXMT build, a Wine build or a FEX build of mine for another engine than
+# it no fex/), KK_BUILD=work/kosmickrisp-arm64/install (jdrly/mesa's asset
+# kosmickrisp-arm64-<commit>.tar.xz, unpacked; without it no kosmickrisp/) and
+# UISCALE_BUILD=work/ui-scale/build (relative to the workspace, or absolute). It
+# refuses a DXMT build, a Wine build, a FEX build or a KosmicKrisp build of mine for another engine than
 # src/gw2om.sh's ENGINE_SHA256 (its VERSION's engine: line; without one, Mach9 0.3.1), a Wine
-# build on another base than its ENGINE_WINE, a FEX build on another base than its ENGINE_FEX,
-# a winemetal.so, ntdll.so, winemac.so or libarm64ecfex.so without a valid signature, an ntdll.so, winemac.so or FEX file that isn't the file its VERSION
-# names, and, with DXMT_COMMIT, WINE_COMMIT (ntdll.so), MACDRV_COMMIT (winemac.so) or FEX_COMMIT
-# set, a build of another commit (or, for the Wine and FEX ones, none). STAGED_FROM replaces "the development workspace" in the first line of
+# build on another base than its ENGINE_WINE, a FEX build on another base than its ENGINE_FEX, a
+# KosmicKrisp build on another base than its ENGINE_MESA,
+# a winemetal.so, ntdll.so, winemac.so, libarm64ecfex.so or libvulkan_kosmickrisp.dylib without a valid signature, an ntdll.so, winemac.so, FEX or KosmicKrisp file that isn't the file its VERSION
+# names, and, with DXMT_COMMIT, WINE_COMMIT (ntdll.so), MACDRV_COMMIT (winemac.so), FEX_COMMIT or
+# KK_COMMIT set, a build of another commit (or, for the Wine, FEX and KosmicKrisp ones, none). STAGED_FROM replaces "the development workspace" in the first line of
 # prebuilt/STAGED (the dev build workflow names the fork's commit and where its files came from).
 #
 # Without the workspace (GitHub's runners), or with --fetch, it downloads the files instead, each
 # checked against its sha256 in prebuilt.lock before anything is unpacked: one archive, a
 # pre-release of this repository pinned by tag, file name and sha256, of which only ui-scale/ and
 # an arm64 dxmt/ are kept (0.1.x's archives have an x86_64 dxmt/, which isn't), and the archives of
-# my ntdll.so, my Mac driver and my FEX, pinned by ntdll_url and ntdll_sha256, macdrv_url and
-# macdrv_sha256, fex_url and fex_sha256 when prebuilt.lock has them, checked as above. --pack <tag>
-# makes that one archive from prebuilt/ as staged, without ntdll/, macdrv/ and fex/, into
-# release/<tag>/, and writes prebuilt.lock for it, keeping its ntdll_, macdrv_ and fex_ lines;
+# my ntdll.so, my Mac driver, my FEX and my KosmicKrisp, pinned by ntdll_url and ntdll_sha256,
+# macdrv_url and macdrv_sha256, fex_url and fex_sha256, kosmickrisp_url and kosmickrisp_sha256 when
+# prebuilt.lock has them, checked as above. --pack <tag>
+# makes that one archive from prebuilt/ as staged, without ntdll/, macdrv/, fex/ and kosmickrisp/,
+# into release/<tag>/, and writes prebuilt.lock for it, keeping its ntdll_, macdrv_, fex_ and
+# kosmickrisp_ lines;
 # README.md (Building) says how I publish it.
 #
-# --standin adds a stand-in for each of dxmt/, ntdll/, macdrv/ and fex/ that prebuilt/ lacks (files
+# --standin adds a stand-in for each of dxmt/, ntdll/, macdrv/, fex/ and kosmickrisp/ that prebuilt/ lacks (files
 # in the layout of the fork's build that only name themselves, and a VERSION whose engine: line
 # names src/gw2om.sh's engine, as gw2om.sh asks of my files before they go into it), for the
 # checks and the sandbox until prebuilt.lock pins the real ones. build.sh takes them;
@@ -186,6 +198,34 @@ copy_fex() {
 }
 # fex_line <dir>: its line in STAGED
 fex_line() { echo "fex $(sed -n 's/^commit: //p' "$1/VERSION") libarm64ecfex.dll $(sha "$1/aarch64-windows/libarm64ecfex.dll")"; }
+# My KosmicKrisp: jdrly/mesa's archive kosmickrisp-arm64-<commit>.tar.xz has the driver, its ICD
+# manifest (the engine's own stays, so it isn't staged), Mesa's licence and VERSION
+KK_FILES="libvulkan_kosmickrisp.dylib"
+KK_META="VERSION LICENSE.rst"
+engine_mesa="$(sed -n 's/^ENGINE_MESA=\([0-9a-f]*\).*/\1/p' "$ROOT/src/gw2om.sh")"
+[ -n "$engine_mesa" ] || die "no ENGINE_MESA in src/gw2om.sh"
+# check_kk <dir>: my KosmicKrisp build in <dir> (jdrly/mesa's archive, unpacked) is for this engine
+# and on its Mesa, of KK_COMMIT if that is set, its dylib is the one its VERSION names and has a
+# valid signature (ad hoc, as the engine's own: nothing signs it again before the engine loads it)
+check_kk() {
+  local f
+  for f in $KK_FILES $KK_META; do need "$1/$f"; done
+  check_engine "$1/VERSION"
+  grep -Eq "^base: ${engine_mesa}[0-9a-f]{30}( |$)" "$1/VERSION" || die "$1/VERSION names another base than ENGINE_MESA ($engine_mesa)"
+  [ -z "${KK_COMMIT:-}" ] || grep -qx "commit: $KK_COMMIT" "$1/VERSION" || die "$1/VERSION is not commit $KK_COMMIT"
+  grep -qx "libvulkan_kosmickrisp.dylib: sha256 $(sha "$1/libvulkan_kosmickrisp.dylib")" "$1/VERSION" ||
+    die "$1/libvulkan_kosmickrisp.dylib is not the file its VERSION names"
+  codesign --verify "$1/libvulkan_kosmickrisp.dylib" || die "$1/libvulkan_kosmickrisp.dylib has no valid signature"
+}
+# copy_kk <from> <to>: its files and their record
+copy_kk() {
+  local f
+  mkdir -p "$2"
+  for f in $KK_FILES $KK_META; do cp "$1/$f" "$2/$f"; done
+  record "$2"
+}
+# kk_line <dir>: its line in STAGED
+kk_line() { echo "kosmickrisp $(sed -n 's/^commit: //p' "$1/VERSION") libvulkan_kosmickrisp.dylib $(sha "$1/libvulkan_kosmickrisp.dylib")"; }
 # fetch_pinned <url> <sha256>: the download, from .cache/<sha256>/ if it is there, checked against
 # the sha256 before anything uses it; prints its path
 fetch_pinned() {
@@ -208,10 +248,11 @@ if [ "${1:-}" = --pack ]; then
   ! grep -q '^stand-in' "$P/dxmt/VERSION" 2>/dev/null || die "$P/dxmt is the stand-in; stage the real one first"
   file="gw2-on-mac-$tag.tar.xz"
   mkdir -p "$ROOT/release/$tag"
-  # (my Wine builds and my FEX are downloads of their own: the ntdll_, macdrv_ and fex_ lines stay)
-  wine_lines="$(grep -E '^(ntdll|macdrv|fex)_' "$LOCK" 2>/dev/null || true)"
+  # (my Wine builds, my FEX and my KosmicKrisp are downloads of their own: the ntdll_, macdrv_, fex_
+  # and kosmickrisp_ lines stay)
+  wine_lines="$(grep -E '^(ntdll|macdrv|fex|kosmickrisp)_' "$LOCK" 2>/dev/null || true)"
   COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs --uid 0 --gid 0 --uname root --gname wheel \
-    --exclude ./ntdll --exclude ./macdrv --exclude ./fex -cJf "$ROOT/release/$tag/$file" -C "$P" .
+    --exclude ./ntdll --exclude ./macdrv --exclude ./fex --exclude ./kosmickrisp -cJf "$ROOT/release/$tag/$file" -C "$P" .
   { sed -n '/^#/p' "$LOCK" 2>/dev/null || true
     echo "tag=$tag"
     echo "file=$file"
@@ -266,6 +307,18 @@ if [ "${1:-}" = --standin ]; then
     mv "$P/fex.new" "$P/fex"
     echo "fex stand-in by scripts/stage-components.sh --standin" >>"$P/STAGED"
   fi
+  if [ ! -d "$P/kosmickrisp" ]; then
+    rm -rf "$P/kosmickrisp.new" && mkdir -p "$P/kosmickrisp.new"
+    for f in $KK_FILES $KK_META; do echo "stand-in $f" >"$P/kosmickrisp.new/$f"; done
+    { echo "stand-in (not a build: scripts/stage-components.sh --standin)"
+      echo "commit: 0000000000000000000000000000000000000000"
+      echo "base: $engine_mesa"
+      echo "$engine_line"
+      for f in $KK_FILES; do echo "$f: sha256 $(sha "$P/kosmickrisp.new/$f")"; done; } >"$P/kosmickrisp.new/VERSION"
+    record "$P/kosmickrisp.new"
+    mv "$P/kosmickrisp.new" "$P/kosmickrisp"
+    echo "kosmickrisp stand-in by scripts/stage-components.sh --standin" >>"$P/STAGED"
+  fi
   cat "$P/STAGED"
   exit 0
 fi
@@ -274,7 +327,7 @@ if [ "${1:-}" = --fetch ] || [ ! -d "$WS" ]; then
   [ -f "$LOCK" ] || die "no workspace at $WS and no prebuilt.lock"
   tag="$(lock_get tag)" file="$(lock_get file)" want="$(lock_get sha256)"
   [ -n "$tag" ] && [ -n "$file" ] && [ -n "$want" ] || die "prebuilt.lock needs tag=, file= and sha256="
-  for k in $WINE_KINDS fex; do
+  for k in $WINE_KINDS fex kosmickrisp; do
     url="$(lock_get "${k}_url")" sum="$(lock_get "${k}_sha256")"
     { [ -z "$url" ] && [ -z "$sum" ]; } || { [ -n "$url" ] && [ -n "$sum" ]; } ||
       die "prebuilt.lock needs ${k}_url= and ${k}_sha256= together"
@@ -308,6 +361,21 @@ if [ "${1:-}" = --fetch ] || [ ! -d "$WS" ]; then
     echo "$(fex_line "$P.fex"), fetched ${url##*/} ($sum)" >>"$P.new/STAGED"
     rm -rf "$P.fex"
   fi
+  url="$(lock_get kosmickrisp_url)" sum="$(lock_get kosmickrisp_sha256)"
+  if [ -n "$url" ]; then
+    # (the commit the asset's name says, which its VERSION has to name too)
+    named="$(echo "${url##*/}" | sed -n 's/^kosmickrisp-arm64-\([0-9a-f]\{40\}\)\.tar\.xz$/\1/p')"
+    [ -n "$named" ] || die "kosmickrisp_url names no kosmickrisp-arm64-<full sha>.tar.xz: $url"
+    [ -z "${KK_COMMIT:-}" ] || [ "$KK_COMMIT" = "$named" ] || die "kosmickrisp_url is commit $named, not KK_COMMIT $KK_COMMIT"
+    KK_COMMIT=$named
+    kk_archive="$(fetch_pinned "$url" "$sum")"
+    rm -rf "$P.kk" && mkdir -p "$P.kk"
+    tar -xJf "$kk_archive" -C "$P.kk"
+    check_kk "$P.kk"
+    copy_kk "$P.kk" "$P.new/kosmickrisp"
+    echo "$(kk_line "$P.kk"), fetched ${url##*/} ($sum)" >>"$P.new/STAGED"
+    rm -rf "$P.kk"
+  fi
   rm -rf "$P" && mv "$P.new" "$P"
   cat "$P/STAGED"
   [ -d "$P/dxmt" ] || echo "stage-components: $file has no arm64 DXMT; scripts/stage-components.sh --standin adds a stand-in" >&2
@@ -316,6 +384,7 @@ if [ "${1:-}" = --fetch ] || [ ! -d "$WS" ]; then
     [ -d "$P/$k" ] || echo "stage-components: prebuilt.lock pins no $WK_FILE; scripts/stage-components.sh --standin adds a stand-in" >&2
   done
   [ -d "$P/fex" ] || echo "stage-components: prebuilt.lock pins no FEX of mine; scripts/stage-components.sh --standin adds a stand-in" >&2
+  [ -d "$P/kosmickrisp" ] || echo "stage-components: prebuilt.lock pins no KosmicKrisp of mine; scripts/stage-components.sh --standin adds a stand-in" >&2
   exit 0
 fi
 
@@ -324,6 +393,7 @@ in_ws() { case "$1" in /*) echo "$1" ;; *) echo "$WS/$1" ;; esac; }
 DXMT_BUILD="$(in_ws "${DXMT_BUILD:-work/dxmt-arm64/install}")"
 UISCALE_BUILD="$(in_ws "${UISCALE_BUILD:-work/ui-scale/build}")"
 FEX_BUILD="$(in_ws "${FEX_BUILD:-work/fex-arm64/install}")"
+KK_BUILD="$(in_ws "${KK_BUILD:-work/kosmickrisp-arm64/install}")"
 
 # DXMT: the PE DLLs and winemetal.so of one build always go together
 for f in $DXMT_FILES; do need "$DXMT_BUILD/$f"; done
@@ -348,6 +418,10 @@ done
 if [ -e "$FEX_BUILD" ]; then check_fex "$FEX_BUILD"
 elif [ -n "${FEX_COMMIT:-}" ]; then die "no FEX build at $FEX_BUILD for commit $FEX_COMMIT"
 fi
+# My KosmicKrisp, if there is a build of it (KK_COMMIT asks for one)
+if [ -e "$KK_BUILD" ]; then check_kk "$KK_BUILD"
+elif [ -n "${KK_COMMIT:-}" ]; then die "no KosmicKrisp build at $KK_BUILD for commit $KK_COMMIT"
+fi
 
 rm -rf "$P.new" && mkdir -p "$P.new/dxmt"
 for f in $DXMT_FILES; do mkdir -p "$P.new/dxmt/$(dirname "$f")" && cp "$DXMT_BUILD/$f" "$P.new/dxmt/$f"; done
@@ -358,6 +432,7 @@ for k in $WINE_KINDS; do
   [ ! -e "$b" ] || copy_wine "$k" "$b" "$P.new/$k"
 done
 [ ! -e "$FEX_BUILD" ] || copy_fex "$FEX_BUILD" "$P.new/fex"
+[ ! -e "$KK_BUILD" ] || copy_kk "$KK_BUILD" "$P.new/kosmickrisp"
 mkdir -p "$P.new/ui-scale" && cp "$UISCALE_BUILD"/{version.dll,gw2-ui-scale.ini} "$P.new/ui-scale/"
 # The record names the sources relative to the workspace (no home folder in it)
 rel() { echo "${1#"$WS"/}"; }
@@ -374,6 +449,9 @@ rel() { echo "${1#"$WS"/}"; }
   done
   if [ -e "$FEX_BUILD" ]; then echo "$(fex_line "$FEX_BUILD") from $(rel "$FEX_BUILD")"
   else echo "fex none (no $(rel "$FEX_BUILD")): the app leaves the engine's own FEX in place"
+  fi
+  if [ -e "$KK_BUILD" ]; then echo "$(kk_line "$KK_BUILD") from $(rel "$KK_BUILD")"
+  else echo "kosmickrisp none (no $(rel "$KK_BUILD")): the app leaves the engine's own KosmicKrisp in place"
   fi
   echo "ui-scale $(sha "$UISCALE_BUILD/version.dll") from $(rel "$UISCALE_BUILD")"; } >"$P.new/STAGED"
 rm -rf "$P" && mv "$P.new" "$P"
