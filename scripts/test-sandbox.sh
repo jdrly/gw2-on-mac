@@ -235,8 +235,12 @@ finish() {
   [ "$fail" = 0 ]
 }
 g() { "$G" "$@"; }
-st() { g status | sed -n "s/^$1=//p"; }
-sett() { g settings | sed -n "s/^$1=//p"; }
+# st/sett <key>...: those fields of one status or settings call, joined by /. A check that reads
+# several fields of one state reads them from one call: a call takes about 1 s on a runner.
+# kv <output> <key>...: the same from a call's output a check keeps in ST_OUT or SET_OUT
+kv() { local o=$1 k v=""; shift; for k; do v="$v/$(printf '%s\n' "$o" | sed -n "s/^$k=//p")"; done; printf '%s\n' "${v#/}"; }
+st() { kv "$(g status)" "$@"; }
+sett() { kv "$(g settings)" "$@"; }
 has() { grep -q -- "$2" "$1" 2>/dev/null; }
 # play starts Wine detached: wait (up to 5 s) for the stand-in's log of that start
 started() { local i=0; while ! grep -q '^wine ' "$STANDIN_LOG" 2>/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done; }
@@ -458,7 +462,9 @@ export GW2_ON_MAC_ENGINE_FEX_DLL_SHA256 GW2_ON_MAC_ENGINE_FEX_SO_SHA256
 export GW2_ON_MAC_STEAMSETUP_URL="file://$SANDBOX/SteamSetup.exe"
 unset GW2_ON_MAC_DRY_RUN GW2_ON_MAC_ALLOW_WINE GW2_ON_MAC_SIGNER GW2_ON_MAC_MACOS GW2_ON_MAC_ENGINE_LOADER_SHA256 GW2_ON_MAC_FEX_SWITCHES
 # the session's watcher (play starts it), with its times shortened: a 2 s grace, 2 s for Steam to
-# quit, a look every 0.2 s (the 15 minutes for the game to appear only in the timeout check)
+# quit, a look every 0.2 s (the 15 minutes for the game to appear only in the timeout check). A
+# Play whose checks end before Wine starts, with no Steam and no second Play after it, runs with
+# GW2_ON_MAC_WATCH_GRACE=0: its watcher gives up at its first look, not 2 s later (watch_done)
 export GW2_ON_MAC_WATCH_GRACE=2 GW2_ON_MAC_WATCH_QUITWAIT=2 GW2_ON_MAC_WATCH_POLL=0.2 GW2_ON_MAC_WATCH_TIMEOUT=60
 # A development build's switches (the rows on once, dev-switches.conf) off for every check but those
 # of their own section at the end: the others check the app as a release sets it up, apart from
@@ -657,7 +663,7 @@ check "dry-run creates nothing" eval '[ -z "$(ad_list)" ] && [ ! -e "$CACHE" ]'
 check "fresh status: not installed" [ "$(st installed)" = no ]
 check "fresh status: no engine" [ "$(st engine_installed)" = no ]
 check "fresh status: the engine's pins (Mach9 0.4.0: Wine, FEX, DXMT commits)" \
-  [ "$(st engine)/$(st engine_wine)/$(st engine_fex)/$(st engine_dxmt)" = mach9-v0.4.0/501796b0ed1/597e7ccbedd/10e27aed3f5 ]
+  [ "$(st engine engine_wine engine_fex engine_dxmt)" = mach9-v0.4.0/501796b0ed1/597e7ccbedd/10e27aed3f5 ]
 check "fresh status: gamemode=engine (the engine's loader)" [ "$(st gamemode)" = engine ]
 check "fresh status: disk_free is a number" [ "$(st disk_free)" -gt 0 ]
 out=$(env -u GW2_ON_MAC_ENGINE_URL -u GW2_ON_MAC_ENGINE_SHA256 -u GW2_ON_MAC_ENGINE_SIZE GW2_ON_MAC_DRY_RUN=1 "$G" install steam 2>&1)
@@ -706,31 +712,31 @@ check "the phases 1-4 in order" [ "$(echo "$out" | grep '^@phase' | tr '\n' ' ')
 check "@progress lines for the engine" has <(echo "$out") "@progress Wine engine"
 check "installed=yes" [ "$(st installed)" = yes ]
 check "engine_installed=yes" [ "$(st engine_installed)" = yes ]
-check "graphics=yes: my DXMT fork, as Settings asks by default" [ "$(st graphics)/$(st dxmt)/$(st dxmt_tree)" = yes/fork/fork ]
-check "  status names the fork's build and its release" eval '[ "$(st dxmt_version)" = "$(head -1 "$COMP/dxmt/VERSION")" ] && [ -n "$(st dxmt_commit)" ] && [ -n "$(st dxmt_release)" ] && head -1 "$COMP/dxmt/VERSION" | grep -qF "v$(st dxmt_release)-"'
+check "graphics=yes: my DXMT fork, as Settings asks by default" [ "$(st graphics dxmt dxmt_tree)" = yes/fork/fork ]
+check "  status names the fork's build and its release" eval 'ST_OUT=$(g status); [ "$(kv "$ST_OUT" dxmt_version)" = "$(head -1 "$COMP/dxmt/VERSION")" ] && [ -n "$(kv "$ST_OUT" dxmt_commit)" ] && [ -n "$(kv "$ST_OUT" dxmt_release)" ] && head -1 "$COMP/dxmt/VERSION" | grep -qF "v$(kv "$ST_OUT" dxmt_release)-"'
 check "  the install says so" has <(echo "$out") "^DXMT: my DXMT fork ($(head -1 "$COMP/dxmt/VERSION")) draws the game"
 check "  the engine's DXMT tree is mine, the engine's own next to it as it ships" dxgi_is fork
 if mine; then
   check "my ntdll.so in the engine, the engine's own next to it as ntdll.so.engine" ntdll_is mine
-  check "  status names it, its commit and its Wine release" [ "$(st wine)/$(st wine_ready)/$(st wine_file)/$(st wine_commit)/$(st wine_build)/$(st wine_release)" = "mine/yes/mine/$MYWINE_COMMIT/$MYWINE_COMMIT/11.21" ]
+  check "  status names it, its commit and its Wine release" [ "$(st wine wine_ready wine_file wine_commit wine_build wine_release)" = "mine/yes/mine/$MYWINE_COMMIT/$MYWINE_COMMIT/11.21" ]
   check "  the install says so" has <(echo "$out") "^ntdll.so: my ntdll.so (jdrly/wine ${MYWINE_COMMIT:0:11}) is in the engine, the engine's own kept next to it as ntdll.so.engine$"
 else
   check "no ntdll.so of mine in this app: the engine's own stays in place" ntdll_is engine
-  check "  status names it and the engine's Wine" [ "$(st wine_ready)/$(st wine_file)/$(st wine_commit)/$(st wine_build)/$(st wine_release)" = "yes/engine/$ENGINE_WINE//" ]
+  check "  status names it and the engine's Wine" [ "$(st wine_ready wine_file wine_commit wine_build wine_release)" = "yes/engine/$ENGINE_WINE//" ]
 fi
 if drv; then
   check "my winemac.so in the engine, the engine's own next to it as winemac.so.engine" winemac_is mine
   check "  win32u.so: mine with it if its build has one ($W32U), the engine's own otherwise" \
-    eval 'win32u_is $W32U && [ "$(st win32u_bundled)/$(st win32u_file)" = "$([ $W32U = mine ] && echo yes || echo no)/$W32U" ]'
-  check "  status names it, its commit and its Wine release" [ "$(st macdrv)/$(st macdrv_ready)/$(st macdrv_file)/$(st macdrv_commit)/$(st macdrv_build)/$(st macdrv_release)" = "mine/yes/mine/$MYDRV_COMMIT/$MYDRV_COMMIT/11.21" ]
+    eval 'win32u_is $W32U && [ "$(st win32u_bundled win32u_file)" = "$([ $W32U = mine ] && echo yes || echo no)/$W32U" ]'
+  check "  status names it, its commit and its Wine release" [ "$(st macdrv macdrv_ready macdrv_file macdrv_commit macdrv_build macdrv_release)" = "mine/yes/mine/$MYDRV_COMMIT/$MYDRV_COMMIT/11.21" ]
   check "  the install says so" eval 'echo "$out" | grep -qxF "$(drvsays mine)"'
 else
   check "no winemac.so of mine in this app: the engine's own stays in place" winemac_is engine
-  check "  status names it and the engine's Wine" [ "$(st macdrv_ready)/$(st macdrv_file)/$(st macdrv_commit)/$(st macdrv_build)/$(st macdrv_release)" = "yes/engine/$ENGINE_WINE//" ]
+  check "  status names it and the engine's Wine" [ "$(st macdrv_ready macdrv_file macdrv_commit macdrv_build macdrv_release)" = "yes/engine/$ENGINE_WINE//" ]
 fi
 check "the engine's own FEX in place (fex=engine by default), nothing next to it" fex_is engine
 check "  status names it and the engine's FEX commit, and my build's commit in this app" \
-  [ "$(st fex)/$(st fex_ready)/$(st fex_file)/$(st fex_commit)/$(st fex_build)" = "engine/yes/engine/$ENGINE_FEX/$MYFEX_COMMIT" ]
+  [ "$(st fex fex_ready fex_file fex_commit fex_build)" = "engine/yes/engine/$ENGINE_FEX/$MYFEX_COMMIT" ]
 check "  the install says nothing of FEX (nothing switched)" eval '! echo "$out" | grep -q "^FEX:"'
 check "gamemode=engine" [ "$(st gamemode)" = engine ]
 check "steam=yes" [ "$(st steam)" = yes ]
@@ -770,7 +776,7 @@ section "Steam downloads the game (played by the test)"
 m="$STEAM/steamapps/appmanifest_1284210.acf"
 printf '"AppState"\n{\n\t"appid"\t\t"1284210"\n\t"installdir"\t\t"Guild Wars 2"\n\t"StateFlags"\t\t"1026"\n\t"BytesToDownload"\t\t"58900000000"\n\t"BytesDownloaded"\t\t"21400000000"\n}\n' >"$m"
 check "game=no while downloading" [ "$(st game)" = no ]
-check "game_bytes/game_total from the appmanifest" [ "$(st game_bytes)/$(st game_total)" = 21400000000/58900000000 ]
+check "game_bytes/game_total from the appmanifest" [ "$(st game_bytes game_total)" = 21400000000/58900000000 ]
 mkdir -p "$STEAM/steamapps/common/Guild Wars 2"
 echo "stand-in game" >"$STEAM/steamapps/common/Guild Wars 2/Gw2-64.exe"
 sed -i '' 's/"1026"/"4"/' "$m"
@@ -785,7 +791,7 @@ check "DXMT's cache folder" [ -d "$DXMT_CACHE" ]
 
 section "Settings"
 check "defaults: warm on, fastlocks off, ncpu 8, uiscale off, cinematic dialogue off" \
-  [ "$(sett warm)$(sett fastlocks)$(sett ncpu)$(sett uiscale)$(sett uiscale_cinema)" = onoff8offoff ]
+  [ "$(sett warm fastlocks ncpu uiscale uiscale_cinema)" = on/off/8/off/off ]
 check "  settings.conf of a fresh install: settings_version=2, fastlocks off, dxmt fork, wine and macdrv mine, fex engine" \
   eval 'grep -qx settings_version=2 "$AD/settings.conf" && grep -qx fastlocks=off "$AD/settings.conf" && grep -qx dxmt=fork "$AD/settings.conf" && grep -qx wine=mine "$AD/settings.conf" && grep -qx macdrv=mine "$AD/settings.conf" && grep -qx fex=engine "$AD/settings.conf"'
 
@@ -805,13 +811,13 @@ check "  off: ${OFF:-none}" \
   [ "$(g settings | sed -n 's/^\([a-z_]*\)_state=off:.*/\1/p' | tr '\n' ' ')" = "$OFF" ]
 if mine; then
   check "  wine=mine, jobwakes and eventpool on and fastlocks off by default, all ok" \
-    [ "$(sett wine)/$(sett wine_state)/$(sett jobwakes)/$(sett jobwakes_state)/$(sett eventpool)/$(sett eventpool_state)/$(sett fastlocks)/$(sett fastlocks_state)" = mine/ok/on/ok/on/ok/off/ok ]
+    [ "$(sett wine wine_state jobwakes jobwakes_state eventpool eventpool_state fastlocks fastlocks_state)" = mine/ok/on/ok/on/ok/off/ok ]
 else
   check "  with their reasons; set wine engine and set jobwakes, eventpool and fastlocks refused" \
-    eval '[ "$(sett wine_state)" = "off:This build of the app has no Wine build of mine." ] && [ "$(sett jobwakes_state)" = "off:Needs my Wine build, which this build of the app doesn'"'"'t have." ] && [ "$(sett eventpool_state)" = "$(sett jobwakes_state)" ] && [ "$(sett fastlocks_state)" = "$(sett jobwakes_state)" ] && ! "$G" set wine engine >/dev/null 2>&1 && ! "$G" set jobwakes off >/dev/null 2>&1 && ! "$G" set eventpool off >/dev/null 2>&1 && ! "$G" set fastlocks on >/dev/null 2>&1'
+    eval 'SET_OUT=$(g settings); [ "$(kv "$SET_OUT" wine_state)" = "off:This build of the app has no Wine build of mine." ] && [ "$(kv "$SET_OUT" jobwakes_state)" = "off:Needs my Wine build, which this build of the app doesn'"'"'t have." ] && [ "$(kv "$SET_OUT" eventpool_state)" = "$(kv "$SET_OUT" jobwakes_state)" ] && [ "$(kv "$SET_OUT" fastlocks_state)" = "$(kv "$SET_OUT" jobwakes_state)" ] && ! "$G" set wine engine >/dev/null 2>&1 && ! "$G" set jobwakes off >/dev/null 2>&1 && ! "$G" set eventpool off >/dev/null 2>&1 && ! "$G" set fastlocks on >/dev/null 2>&1'
 fi
 if drv; then
-  check "  macdrv=mine and launcherframes=off by default, both ok; mousespeed=1" [ "$(sett macdrv)/$(sett macdrv_state)/$(sett launcherframes)/$(sett launcherframes_state)/$(sett mousespeed)" = mine/ok/off/ok/1 ]
+  check "  macdrv=mine and launcherframes=off by default, both ok; mousespeed=1" [ "$(sett macdrv macdrv_state launcherframes launcherframes_state mousespeed)" = mine/ok/off/ok/1 ]
   if scale; then
     check "  mousespeed ok" [ "$(sett mousespeed_state)" = ok ]
   else
@@ -820,7 +826,7 @@ if drv; then
   fi
 else
   check "  with their reasons; set macdrv engine, set launcherframes on and set mousespeed 1.5 refused" \
-    eval '[ "$(sett macdrv_state)" = "off:This build of the app has no Mac driver of mine." ] && [ "$(sett launcherframes_state)" = "off:Needs my Mac driver, which this build of the app doesn'"'"'t have." ] && [ "$(sett mousespeed_state)" = "$(sett launcherframes_state)" ] && ! "$G" set macdrv engine >/dev/null 2>&1 && ! "$G" set launcherframes on >/dev/null 2>&1 && ! "$G" set mousespeed 1.5 >/dev/null 2>&1'
+    eval 'SET_OUT=$(g settings); [ "$(kv "$SET_OUT" macdrv_state)" = "off:This build of the app has no Mac driver of mine." ] && [ "$(kv "$SET_OUT" launcherframes_state)" = "off:Needs my Mac driver, which this build of the app doesn'"'"'t have." ] && [ "$(kv "$SET_OUT" mousespeed_state)" = "$(kv "$SET_OUT" launcherframes_state)" ] && ! "$G" set macdrv engine >/dev/null 2>&1 && ! "$G" set launcherframes on >/dev/null 2>&1 && ! "$G" set mousespeed 1.5 >/dev/null 2>&1'
 fi
 # settings.conf's version (SETTINGS_RESETS): a file from before version 1 holds the fastlocks=on
 # and coolworkers=3 the arm64 line wrote while both rows were greyed; fastlocks reads off, and
@@ -831,7 +837,7 @@ sed -i '' -e '/^settings_version=/d' -e 's/^fastlocks=.*/fastlocks=on/' "$AD/set
 printf 'coolworkers=3\ngamemode=on\n' >>"$AD/settings.conf"
 out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
 check "a settings.conf without settings_version, fastlocks=on, coolworkers=3 and gamemode=on: fastlocks reads off" \
-  eval '[ "$(sett fastlocks)" = off ] && ! g settings | grep -q -e coolworkers -e "^gamemode" && ! g rules | grep -q WINE_HEAT_SPIN && ! echo "$out" | grep -q WINE_HEAT_SPIN'
+  eval 'SET_OUT=$(g settings); [ "$(kv "$SET_OUT" fastlocks)" = off ] && ! echo "$SET_OUT" | grep -q -e coolworkers -e "^gamemode" && ! g rules | grep -q WINE_HEAT_SPIN && ! echo "$out" | grep -q WINE_HEAT_SPIN'
 g set hud on >/dev/null; g set hud off >/dev/null
 check "  the next write keeps that, writes settings_version=2 and leaves coolworkers and gamemode out" \
   eval 'grep -qx settings_version=2 "$AD/settings.conf" && grep -qx fastlocks=off "$AD/settings.conf" && ! grep -q -e coolworkers -e gamemode "$AD/settings.conf"'
@@ -843,7 +849,7 @@ cp "$SANDBOX/settings.fresh" "$AD/settings.conf"
 sed -i '' -e 's/^settings_version=.*/settings_version=1/' -e 's/^dxmt=.*/dxmt=engine/' -e 's/^wine=.*/wine=engine/' -e 's/^macdrv=.*/macdrv=engine/' "$AD/settings.conf"
 echo coolworkers=off >>"$AD/settings.conf"
 check "settings_version=1 with dxmt, wine and macdrv engine and a coolworkers line: read fork, mine, mine" \
-  [ "$(sett dxmt)/$(sett wine)/$(sett macdrv)/$(st graphics)" = fork/mine/mine/yes ]
+  [ "$(sett dxmt wine macdrv)/$(st graphics)" = fork/mine/mine/yes ]
 g set hud on >/dev/null; g set hud off >/dev/null
 check "  the next write keeps them, writes settings_version=2 and leaves coolworkers out" \
   eval 'grep -qx settings_version=2 "$AD/settings.conf" && grep -qx dxmt=fork "$AD/settings.conf" && grep -qx wine=mine "$AD/settings.conf" && grep -qx macdrv=mine "$AD/settings.conf" && ! grep -q coolworkers "$AD/settings.conf"'
@@ -864,7 +870,7 @@ check "  rawmouse off: mousespeed greyed, saying so first; set mousespeed 1.5 re
   eval '[ "$(sett mousespeed_state)" = "off:Needs Raw mouse-look, which is off." ] && ! "$G" set mousespeed 1.5 >/dev/null 2>&1'
 g set rawmouse on >/dev/null
 check "  ok for the ones my DXMT fork brings back: metal, metalfx, warm, vsync; dxmt=fork and vsync on by default" \
-  [ "$(sett metal_state)/$(sett metalfx_state)/$(sett warm_state)/$(sett vsync_state)/$(sett dxmt)/$(sett vsync)" = ok/ok/ok/ok/fork/on ]
+  [ "$(sett metal_state metalfx_state warm_state vsync_state dxmt vsync)" = ok/ok/ok/ok/fork/on ]
 check "  metal: 4 by default, in settings.conf and status; set metal 5 refused" \
   eval '[ "$(sett metal)/$(st metal)" = 4/4 ] && grep -qx metal=4 "$AD/settings.conf" && ! "$G" set metal 5 >/dev/null 2>&1'
 # (a settings.conf from before the row: no metal= line)
@@ -889,7 +895,7 @@ g set rawmouse off >/dev/null
 sed -i '' 's/^mousespeed=.*/mousespeed=1.5/' "$AD/settings.conf"
 g set hud on >/dev/null; g set hud off >/dev/null
 check "  a greyed key keeps what settings.conf says (mousespeed=1.5 by hand while Raw mouse-look is off)" \
-  eval '[ "$(sett mousespeed)" = 1.5 ] && grep -qx mousespeed=1.5 "$AD/settings.conf" && [ "$(sett mousespeed_state)" = "off:Needs Raw mouse-look, which is off." ]'
+  eval 'SET_OUT=$(g settings); [ "$(kv "$SET_OUT" mousespeed)" = 1.5 ] && grep -qx mousespeed=1.5 "$AD/settings.conf" && [ "$(kv "$SET_OUT" mousespeed_state)" = "off:Needs Raw mouse-look, which is off." ]'
 sed -i '' 's/^mousespeed=.*/mousespeed=1/' "$AD/settings.conf"
 g set rawmouse on >/dev/null
 check "warm on: DXMT_WARM=all; off: none" sh -c "'$G' env | grep -qx DXMT_WARM=all && '$G' set warm off >/dev/null && ! '$G' env | grep -q DXMT_WARM && '$G' set warm on >/dev/null"
@@ -897,10 +903,10 @@ check "set metalfx on: DXMT_SUBSAMPLE_METALFX=1" sh -c "'$G' set metalfx on >/de
 # the engine's own DXMT, and back (nothing runs: the tree swaps at once)
 out=$(g set dxmt engine 2>&1) && rc=0 || rc=$?
 check "set dxmt engine: the engine's own tree is the active one, mine waits next to it" \
-  eval '[ "$rc" = 0 ] && dxgi_is engine && [ -f "$ENG/lib/wine/dxgi/dxmt.fork/.gw2om-dxmt" ] && [ "$(st graphics)/$(st dxmt_tree)" = yes/engine ] && ! echo "$out" | grep -q Repair'
+  eval '[ "$rc" = 0 ] && dxgi_is engine && [ -f "$ENG/lib/wine/dxgi/dxmt.fork/.gw2om-dxmt" ] && [ "$(st graphics dxmt_tree)" = yes/engine ] && ! echo "$out" | grep -q Repair'
 check "  it says which" has <(echo "$out") "^DXMT: the engine's own DXMT (athei/dxmt 10e27aed3f5) draws the game"
 check "  warming, MetalFX, Metal and Vsync greyed with the reason; set warm, set metal and set vsync refused" \
-  eval '[ "$(sett warm_state)" = "off:Needs my DXMT fork, and the engine'"'"'s own DXMT is chosen." ] && [ "$(sett metalfx_state)" = "$(sett warm_state)" ] && [ "$(sett metal_state)" = "$(sett warm_state)" ] && [ "$(sett vsync_state)" = "$(sett warm_state)" ] && ! "$G" set warm off >/dev/null 2>&1 && ! "$G" set metal 4 >/dev/null 2>&1 && ! "$G" set vsync off >/dev/null 2>&1'
+  eval 'SET_OUT=$(g settings); [ "$(kv "$SET_OUT" warm_state)" = "off:Needs my DXMT fork, and the engine'"'"'s own DXMT is chosen." ] && [ "$(kv "$SET_OUT" metalfx_state)" = "$(kv "$SET_OUT" warm_state)" ] && [ "$(kv "$SET_OUT" metal_state)" = "$(kv "$SET_OUT" warm_state)" ] && [ "$(kv "$SET_OUT" vsync_state)" = "$(kv "$SET_OUT" warm_state)" ] && ! "$G" set warm off >/dev/null 2>&1 && ! "$G" set metal 4 >/dev/null 2>&1 && ! "$G" set vsync off >/dev/null 2>&1'
 check "  none of the fork's variables in the environment" sh -c "! '$G' env | grep -qE 'DXMT_(CACHE_DIR|WARM|DEPENDENCY_COMPRESSION|SUBSAMPLE|STATS)'"
 # (after the heat entries exactly FEX's that Debug logging adds: FEX_PROFILESTATS only with my
 # ntdll.so in place, FEX_SILENTLOG with either, neither with Debug logging off)
@@ -909,7 +915,7 @@ if [ "$(sett debug)" = on ]; then ! ntdll_is mine || fex_tail=";env=FEX_PROFILES
 check "  the game's shader cache: the engine's DXMT's own" has <(g rules) "^exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=$DXMT_CACHE_ENGINE\(;env=WINE_HEAT_[^;]*\)*$fex_tail$"
 check "  wine.app untouched" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
 out=$(g set dxmt fork 2>&1) && rc=0 || rc=$?
-check "set dxmt fork: mine again, the engine's own kept as it ships" eval '[ "$rc" = 0 ] && dxgi_is fork && [ "$(st graphics)/$(st dxmt_tree)" = yes/fork ] && ! echo "$out" | grep -q Repair'
+check "set dxmt fork: mine again, the engine's own kept as it ships" eval '[ "$rc" = 0 ] && dxgi_is fork && [ "$(st graphics dxmt_tree)" = yes/fork ] && ! echo "$out" | grep -q Repair'
 check "  wine.app untouched" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
 # My files go into the engine only when it is this app's and their records name its engine
 # (engine_refusal). First an engine an earlier version of the app left: its record of the archive
@@ -932,10 +938,10 @@ check "  its VERSION back: the tree is mine as it was, and the engine's own swap
 # during the copy an unfinished dxmt.fork.new; the next call puts the asked-for tree in
 DX="$ENG/lib/wine/dxgi"
 mv "$DX/dxmt" "$DX/dxmt.fork" && sed -i '' 's/^dxmt=.*/dxmt=engine/' "$AD/settings.conf"
-check "cut short on the way to the engine's own (no active tree): graphics=switch" [ "$(st graphics)/$(st dxmt_tree)" = switch/none ]
+check "cut short on the way to the engine's own (no active tree): graphics=switch" [ "$(st graphics dxmt_tree)" = switch/none ]
 check "  the next set dxmt engine puts it in" eval 'g set dxmt engine >/dev/null && dxgi_is engine && [ "$(st graphics)" = yes ]'
 mv "$DX/dxmt" "$DX/dxmt.engine" && sed -i '' 's/^dxmt=.*/dxmt=fork/' "$AD/settings.conf"
-check "cut short on the way to mine (no active tree): graphics=switch" [ "$(st graphics)/$(st dxmt_tree)" = switch/none ]
+check "cut short on the way to mine (no active tree): graphics=switch" [ "$(st graphics dxmt_tree)" = switch/none ]
 check "  the next set dxmt fork puts it in" eval 'g set dxmt fork >/dev/null && dxgi_is fork && [ "$(st graphics)" = yes ]'
 g set dxmt engine >/dev/null && rm -rf "$DX/dxmt.fork" && mkdir -p "$DX/dxmt.fork.new/aarch64-windows" && echo half >"$DX/dxmt.fork.new/aarch64-windows/d3d11.dll"
 check "cut short while making my tree (an unfinished dxmt.fork.new): set dxmt fork makes it again" \
@@ -946,26 +952,26 @@ check "  the engine's own tree, its link's target and wine.app as they ship thro
 if mine; then
   out=$(g set wine engine 2>&1) && rc=0 || rc=$?
   check "set wine engine: the engine's own ntdll.so in place, nothing next to it" \
-    eval '[ "$rc" = 0 ] && ntdll_is engine && [ "$(st wine_ready)/$(st wine_file)/$(st wine_commit)" = "yes/engine/$ENGINE_WINE" ] && ! echo "$out" | grep -q Repair'
+    eval '[ "$rc" = 0 ] && ntdll_is engine && [ "$(st wine_ready wine_file wine_commit)" = "yes/engine/$ENGINE_WINE" ] && ! echo "$out" | grep -q Repair'
   check "  it says which" has <(echo "$out") "^ntdll.so: the engine's own ntdll.so (athei/wine $ENGINE_WINE) is in the engine$"
   check "  job wakes greyed with the reason; set jobwakes refused" \
     eval '[ "$(sett jobwakes_state)" = "off:Needs my Wine build, and the engine'"'"'s own ntdll.so is chosen." ] && ! "$G" set jobwakes off >/dev/null 2>&1'
   check "  wine.app and the DXMT trees untouched" eval '[ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ] && dxgi_is fork'
   out=$(g set wine mine 2>&1) && rc=0 || rc=$?
   check "set wine mine: mine again, the engine's own next to it as it ships" \
-    eval '[ "$rc" = 0 ] && ntdll_is mine && [ "$(st wine_ready)/$(st wine_file)/$(st wine_commit)" = "yes/mine/$MYWINE_COMMIT" ] && [ "$(sett jobwakes_state)" = ok ]'
+    eval '[ "$rc" = 0 ] && ntdll_is mine && [ "$(st wine_ready wine_file wine_commit)" = "yes/mine/$MYWINE_COMMIT" ] && [ "$(sett jobwakes_state)" = ok ]'
   check "  wine.app untouched" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
   # A switch cut short: between the two renames on the way to mine no ntdll.so is there; an
   # unfinished copy (ntdll.so.new) may be left; an earlier build of mine may be in place
   mv "$NT/ntdll.so" "$NT/ntdll.so.new"
-  check "cut short between the renames (no ntdll.so): wine_ready=switch" [ "$(st wine_ready)/$(st wine_file)" = switch/none ]
+  check "cut short between the renames (no ntdll.so): wine_ready=switch" [ "$(st wine_ready wine_file)" = switch/none ]
   check "  the next set wine mine puts it in" eval 'g set wine mine >/dev/null && ntdll_is mine && [ "$(st wine_ready)" = yes ]'
   g set wine engine >/dev/null && mv "$NT/ntdll.so" "$NT/ntdll.so.engine" && echo half >"$NT/ntdll.so.new"
   sed -i '' 's/^wine=.*/wine=mine/' "$AD/settings.conf"
   check "cut short with an unfinished ntdll.so.new: set wine mine copies it again" \
     eval 'g set wine mine >/dev/null && ntdll_is mine && [ "$(st wine_ready)" = yes ]'
   echo "an earlier build of mine" >"$NT/ntdll.so"
-  check "an earlier build of mine in place: wine_ready=switch, wine_file=other" [ "$(st wine_ready)/$(st wine_file)/$(st wine_commit)" = switch/other/ ]
+  check "an earlier build of mine in place: wine_ready=switch, wine_file=other" [ "$(st wine_ready wine_file wine_commit)" = switch/other/ ]
   check "  set wine engine puts the engine's own back, set wine mine this build's" \
     eval 'g set wine engine >/dev/null && ntdll_is engine && g set wine mine >/dev/null && ntdll_is mine'
   check "  the engine's own ntdll.so and wine.app as they ship through all of it" \
@@ -978,24 +984,24 @@ fi
 if drv; then
   out=$(g set macdrv engine 2>&1) && rc=0 || rc=$?
   check "set macdrv engine: the engine's own winemac.so in place, nothing next to it, ntdll.so as it was" \
-    eval '[ "$rc" = 0 ] && winemac_is engine && ntdll_is $MYWINE && [ "$(st macdrv_ready)/$(st macdrv_file)/$(st macdrv_commit)/$(st wine_file)" = "yes/engine/$ENGINE_WINE/$MYWINE" ] && ! echo "$out" | grep -q Repair'
+    eval '[ "$rc" = 0 ] && winemac_is engine && ntdll_is $MYWINE && [ "$(st macdrv_ready macdrv_file macdrv_commit wine_file)" = "yes/engine/$ENGINE_WINE/$MYWINE" ] && ! echo "$out" | grep -q Repair'
   check "  it says which" eval 'echo "$out" | grep -qxF "$(drvsays engine)" && win32u_is engine'
   check "  launcher frames greyed with the reason; set launcherframes refused" \
     eval '[ "$(sett launcherframes_state)" = "off:Needs my Mac driver, and the engine'"'"'s own winemac.so is chosen." ] && ! "$G" set launcherframes on >/dev/null 2>&1'
   out=$(g set macdrv mine 2>&1) && rc=0 || rc=$?
   check "set macdrv mine: mine again, the engine's own next to it as it ships, ntdll.so as it was" \
-    eval '[ "$rc" = 0 ] && winemac_is mine && ntdll_is $MYWINE && [ "$(st macdrv_ready)/$(st macdrv_file)/$(st macdrv_commit)" = "yes/mine/$MYDRV_COMMIT" ] && [ "$(sett launcherframes_state)" = ok ]'
+    eval '[ "$rc" = 0 ] && winemac_is mine && ntdll_is $MYWINE && [ "$(st macdrv_ready macdrv_file macdrv_commit)" = "yes/mine/$MYDRV_COMMIT" ] && [ "$(sett launcherframes_state)" = ok ]'
   if mine; then
     check "set wine engine and back: my winemac.so stays through both" \
       eval 'g set wine engine >/dev/null && ntdll_is engine && winemac_is mine && g set wine mine >/dev/null && ntdll_is mine && winemac_is mine'
   fi
   mv "$NT/winemac.so" "$NT/winemac.so.new"
   check "cut short between the renames (no winemac.so): macdrv_ready=switch" \
-    [ "$(st macdrv_ready)/$(st macdrv_file)" = "switch/$([ $W32U = mine ] && echo mix || echo none)" ]
+    [ "$(st macdrv_ready macdrv_file)" = "switch/$([ $W32U = mine ] && echo mix || echo none)" ]
   check "  the next set macdrv mine puts it in" eval 'g set macdrv mine >/dev/null && winemac_is mine && [ "$(st macdrv_ready)" = yes ]'
   echo "an earlier build of mine" >"$NT/winemac.so"
   check "an earlier build of mine in place: macdrv_ready=switch, macdrv_file=other (mix next to this build's win32u.so)" \
-    [ "$(st macdrv_ready)/$(st macdrv_file)/$(st macdrv_commit)" = "switch/$([ $W32U = mine ] && echo mix || echo other)/" ]
+    [ "$(st macdrv_ready macdrv_file macdrv_commit)" = "switch/$([ $W32U = mine ] && echo mix || echo other)/" ]
   check "  set macdrv engine puts the engine's own back, set macdrv mine this build's" \
     eval 'g set macdrv engine >/dev/null && winemac_is engine && g set macdrv mine >/dev/null && winemac_is mine'
   check "  the engine's own winemac.so and wine.app as they ship through all of it" \
@@ -1018,15 +1024,15 @@ if drv; then
   cp "$COMP/macdrv/win32u.so" "$SANDBOX/win32u.keep"
   if [ "$W32U" = engine ]; then
     check "a build with win32u.so over one without: my winemac.so next to the engine's win32u.so is a mix, macdrv_ready=switch" \
-      [ "$(st macdrv_file)/$(st macdrv_ready)/$(st win32u_bundled)/$(st win32u_file)" = mix/switch/yes/engine ]
+      [ "$(st macdrv_file macdrv_ready win32u_bundled win32u_file)" = mix/switch/yes/engine ]
   fi
   out=$(g set macdrv mine 2>&1) && rc=0 || rc=$?
   check "set macdrv mine: my winemac.so and win32u.so in the engine, the engine's own next to each as <file>.engine" \
-    eval '[ "$rc" = 0 ] && winemac_is mine && win32u_is mine && [ "$(st macdrv_file)/$(st macdrv_ready)/$(st macdrv_commit)/$(st win32u_file)" = "mine/yes/$MYDRV_COMMIT/mine" ]'
+    eval '[ "$rc" = 0 ] && winemac_is mine && win32u_is mine && [ "$(st macdrv_file macdrv_ready macdrv_commit win32u_file)" = "mine/yes/$MYDRV_COMMIT/mine" ]'
   W32U=mine
   out=$(g set macdrv engine 2>&1) && rc=0 || rc=$?
   check "set macdrv engine: the engine's own winemac.so and win32u.so with the pinned hashes, nothing left over" \
-    eval '[ "$rc" = 0 ] && winemac_is engine && win32u_is engine && [ -z "$(W32LEFT)" ] && [ "$(st macdrv_file)/$(st macdrv_ready)/$(st win32u_file)" = engine/yes/engine ] &&
+    eval '[ "$rc" = 0 ] && winemac_is engine && win32u_is engine && [ -z "$(W32LEFT)" ] && [ "$(st macdrv_file macdrv_ready win32u_file)" = engine/yes/engine ] &&
       [ "$(shasum -a 256 "$NT/winemac.so" "$NT/win32u.so" | cut -d" " -f1 | tr "\n" " ")" = "$GW2_ON_MAC_ENGINE_WINEMAC_SHA256 $GW2_ON_MAC_ENGINE_WIN32U_SHA256 " ]'
   check "  it says so, naming both" eval 'echo "$out" | grep -qxF "$(drvsays engine)"'
   out=$(g set macdrv mine 2>&1)
@@ -1052,7 +1058,7 @@ if drv; then
     drv_cut mine $n
     want=mix; [ $n != 0 ] || want=engine
     check "cut short on the way to mine after $n of 4 renames: macdrv_file=$want, macdrv_ready=switch; set macdrv mine finishes it$([ $n = 0 ] || echo ", saying so")" \
-      eval '[ "$(st macdrv_file)/$(st macdrv_ready)" = "$want/switch" ] && out=$(g set macdrv mine 2>&1) && winemac_is mine && win32u_is mine && [ -z "$(W32LEFT | grep "\.new$")" ] && { [ $n = 0 ] || echo "$out" | grep -q "^winemac.so and win32u.so: a mix of mine and the engine.s own winemac.so and win32u.so in the engine, a switch cut short; finishing the switch to my winemac.so and win32u.so"; }'
+      eval '[ "$(st macdrv_file macdrv_ready)" = "$want/switch" ] && out=$(g set macdrv mine 2>&1) && winemac_is mine && win32u_is mine && [ -z "$(W32LEFT | grep "\.new$")" ] && { [ $n = 0 ] || echo "$out" | grep -q "^winemac.so and win32u.so: a mix of mine and the engine.s own winemac.so and win32u.so in the engine, a switch cut short; finishing the switch to my winemac.so and win32u.so"; }'
   done
   g set macdrv engine >/dev/null
   drv_cut mine 3
@@ -1061,16 +1067,16 @@ if drv; then
   g set macdrv mine >/dev/null
   drv_cut engine 1
   check "cut short on the way back after 1 of 2 renames: a mix; set macdrv engine finishes it, nothing left over" \
-    eval '[ "$(st macdrv_file)/$(st macdrv_ready)" = mix/switch ] && g set macdrv engine >/dev/null && winemac_is engine && win32u_is engine && [ -z "$(W32LEFT)" ]'
+    eval '[ "$(st macdrv_file macdrv_ready)" = mix/switch ] && g set macdrv engine >/dev/null && winemac_is engine && win32u_is engine && [ -z "$(W32LEFT)" ]'
   # A build without win32u.so after one with it: my winemac.so alone, and the engine's own win32u.so
   # back in place
   g set macdrv mine >/dev/null
   rm -f "$COMP/macdrv/win32u.so" && grep -v '^win32u\.so: ' "$SANDBOX/macdrv-VERSION.w32" >"$COMP/macdrv/VERSION"
   check "a build without win32u.so over one with it: a mix (this build's winemac.so, the earlier build's win32u.so)" \
-    [ "$(st macdrv_file)/$(st macdrv_ready)/$(st win32u_bundled)/$(st win32u_file)" = mix/switch/no/other ]
+    [ "$(st macdrv_file macdrv_ready win32u_bundled win32u_file)" = mix/switch/no/other ]
   out=$(g set macdrv mine 2>&1) && rc=0 || rc=$?
   check "  set macdrv mine: my winemac.so alone, the engine's own win32u.so back in place, nothing next to it" \
-    eval '[ "$rc" = 0 ] && winemac_is mine && win32u_is engine && [ "$(st macdrv_file)/$(st macdrv_ready)/$(st win32u_file)" = mine/yes/engine ]'
+    eval '[ "$rc" = 0 ] && winemac_is mine && win32u_is engine && [ "$(st macdrv_file macdrv_ready win32u_file)" = mine/yes/engine ]'
   # back to the app's own components, and the set its build asks for
   cp "$SANDBOX/macdrv-VERSION.w32" "$COMP/macdrv/VERSION"
   W32U=$W32U0
@@ -1086,13 +1092,13 @@ FEXLEFT() { find "$FW" \( -name 'xtajit64.dll.*' -o -name 'libarm64ecfex.*.*' \)
 if fexb; then
   out=$(g set fex mine 2>&1) && rc=0 || rc=$?
   check "set fex mine: my FEX's three files in the engine, the engine's own next to each as <file>.engine" \
-    eval '[ "$rc" = 0 ] && fex_is mine && [ "$(st fex)/$(st fex_ready)/$(st fex_file)/$(st fex_commit)/$(st fex_build)" = "mine/yes/mine/$MYFEX_COMMIT/$MYFEX_COMMIT" ] && ! echo "$out" | grep -q Repair'
+    eval '[ "$rc" = 0 ] && fex_is mine && [ "$(st fex fex_ready fex_file fex_commit fex_build)" = "mine/yes/mine/$MYFEX_COMMIT/$MYFEX_COMMIT" ] && ! echo "$out" | grep -q Repair'
   check "  it says so" has <(echo "$out") "^FEX: my FEX (jdrly/FEX ${MYFEX_COMMIT:0:11}) is in the engine, the engine's own kept next to each of its three files as <file>.engine$"
   check "  ntdll.so, winemac.so, the DXMT trees and wine.app as they were" \
     eval 'ntdll_is $MYWINE && winemac_is $MYDRV && dxgi_is fork && [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]'
   out=$(g set fex engine 2>&1) && rc=0 || rc=$?
   check "set fex engine: the engine's own three files with the pinned hashes, nothing left over" \
-    eval '[ "$rc" = 0 ] && fex_is engine && [ -z "$(FEXLEFT)" ] && [ "$(st fex_ready)/$(st fex_file)/$(st fex_commit)" = "yes/engine/$ENGINE_FEX" ] &&
+    eval '[ "$rc" = 0 ] && fex_is engine && [ -z "$(FEXLEFT)" ] && [ "$(st fex_ready fex_file fex_commit)" = "yes/engine/$ENGINE_FEX" ] &&
       [ "$(shasum -a 256 "$FW/aarch64-windows/xtajit64.dll" "$FW/aarch64-windows/libarm64ecfex.dll" "$FW/aarch64-unix/libarm64ecfex.so" | cut -d" " -f1 | tr "\n" " ")" = "$GW2_ON_MAC_ENGINE_FEX_DLL_SHA256 $GW2_ON_MAC_ENGINE_FEX_DLL_SHA256 $GW2_ON_MAC_ENGINE_FEX_SO_SHA256 " ]'
   check "  it says which" has <(echo "$out") "^FEX: the engine's own FEX (athei/FEX $ENGINE_FEX) is in the engine$"
   # A switch cut short (a kill, the Mac off) after any of its renames, done here by hand in the
@@ -1115,7 +1121,7 @@ if fexb; then
     fex_cut mine $n
     want=mix; [ $n != 0 ] || want=engine
     check "cut short on the way to mine after $n of 6 renames: fex_file=$want, fex_ready=switch; set fex mine finishes it$([ $n = 0 ] || echo ", saying so")" \
-      eval '[ "$(st fex_file)/$(st fex_ready)" = "$want/switch" ] && out=$(g set fex mine 2>&1) && fex_is mine && [ -z "$(FEXLEFT | grep "\.new$")" ] && { [ $n = 0 ] || echo "$out" | grep -q "^FEX: the engine.s FEX files are a mix of my FEX and the engine.s own, a switch cut short; finishing the switch to my FEX"; }'
+      eval '[ "$(st fex_file fex_ready)" = "$want/switch" ] && out=$(g set fex mine 2>&1) && fex_is mine && [ -z "$(FEXLEFT | grep "\.new$")" ] && { [ $n = 0 ] || echo "$out" | grep -q "^FEX: the engine.s FEX files are a mix of my FEX and the engine.s own, a switch cut short; finishing the switch to my FEX"; }'
     g set fex engine >/dev/null
   done
   # the other way after a cut on the way to mine: set fex engine puts the engine's own back and
@@ -1129,13 +1135,13 @@ if fexb; then
     g set fex mine >/dev/null
     fex_cut engine $n
     check "cut short on the way back after $n of 3 renames: a mix; set fex engine finishes it, nothing left over" \
-      eval '[ "$(st fex_file)/$(st fex_ready)" = "mix/switch" ] && g set fex engine >/dev/null && fex_is engine && [ -z "$(FEXLEFT)" ]'
+      eval '[ "$(st fex_file fex_ready)" = "mix/switch" ] && g set fex engine >/dev/null && fex_is engine && [ -z "$(FEXLEFT)" ]'
   done
   # an earlier build of mine (an older version of the app's) in place of all three
   g set fex mine >/dev/null
   for f in $FEXF; do echo "an earlier build of mine" >"$FW/$f"; done
   check "an earlier build of my FEX in place: fex_file=other, fex_ready=switch; set fex mine puts this build's in" \
-    eval '[ "$(st fex_file)/$(st fex_ready)/$(st fex_commit)" = other/switch/ ] && g set fex mine >/dev/null && fex_is mine'
+    eval '[ "$(st fex_file fex_ready fex_commit)" = other/switch/ ] && g set fex mine >/dev/null && fex_is mine'
   g set fex engine >/dev/null
   check "  the engine's own FEX and wine.app as they ship through all of it" eval 'fex_is engine && [ -z "$(FEXLEFT)" ] && [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]'
 else
@@ -1144,7 +1150,7 @@ else
     eval '[ "$rc" != 0 ] && [ "$out" = "@error This build carries no FEX of mine." ] && [ "$(sett fex_state)" = "off:This build carries no FEX of mine." ] && fex_is engine'
   sed -i '' 's/^fex=.*/fex=mine/' "$AD/settings.conf"
   g set dxmt engine >/dev/null; g set dxmt fork >/dev/null
-  check "  fex=mine in settings.conf by hand: the engine's own stays through the engine's switches" eval 'fex_is engine && [ "$(st fex_ready)/$(st fex_file)" = yes/engine ]'
+  check "  fex=mine in settings.conf by hand: the engine's own stays through the engine's switches" eval 'fex_is engine && [ "$(st fex_ready fex_file)" = yes/engine ]'
   sed -i '' 's/^fex=.*/fex=engine/' "$AD/settings.conf"
 fi
 check "set ncpu all: no WINENCPU" sh -c "'$G' set ncpu all >/dev/null && ! '$G' env | grep -q WINENCPU"
@@ -1171,7 +1177,7 @@ g set retina off >/dev/null; check "set retina off: RetinaMode=n" reg "$ALL_MAC"
 g set retina on >/dev/null; check "set retina on: RetinaMode=y" reg "$ALL_MAC" RetinaMode y
 check "  one value (not added twice)" [ "$(grep -c '^"RetinaMode"=' "$BOTTLE/user.reg")" = 1 ]
 check "status: gamemode=engine (nothing to switch)" [ "$(st gamemode)" = engine ]
-check "settings: rawmouse=on, mousespeed=1 by default" [ "$(sett rawmouse)/$(sett mousespeed)" = on/1 ]
+check "settings: rawmouse=on, mousespeed=1 by default" [ "$(sett rawmouse mousespeed)" = on/1 ]
 check "  no physkeys setting (refused, exit 2; not in the settings)" sh -c "'$G' set physkeys on >/dev/null; [ \$? = 2 ] && ! '$G' settings | grep -q '^physkeys='"
 check "  nothing of the mouse in the registry (this engine reads the mouse itself)" sh -c "! grep -q RawMouse '$BOTTLE/user.reg'"
 check "mousespeed 4 refused (exit 2)" sh -c "'$G' set mousespeed 4 >/dev/null; [ \$? = 2 ]"
@@ -1212,12 +1218,12 @@ check "  turning it off leaves it alone too" has "$GD/version.dll" "another addo
 rm -f "$GD/version.dll"
 
 section "arcdps (Settings › Interface)"
-check "arcdps off by default: status arcdps=off, arcdps_state=off" [ "$(st arcdps)/$(arcst)" = off/off ]
-check "  settings say so too, and settings.conf has no arcdps key" eval '[ "$(sett arcdps)/$(sett arcdps_state)" = off/off ] && ! grep -q "^arcdps=" "$AD/settings.conf"'
+check "arcdps off by default: status arcdps=off, arcdps_state=off" [ "$(st arcdps arcdps_state)" = off/off ]
+check "  settings say so too, and settings.conf has no arcdps key" eval '[ "$(sett arcdps arcdps_state)" = off/off ] && ! grep -q "^arcdps=" "$AD/settings.conf"'
 out=$(g set arcdps on 2>&1) && rc=0 || rc=$?
 check "set arcdps on: downloads it (with progress) and says so" eval '[ "$rc" = 0 ] && echo "$out" | grep -q "^@progress arcdps " && echo "$out" | grep -q "^@done arcdps is in the game folder"'
 check "  d3d11.dll next to Gw2-64.exe is the published file" same "$ARCSRV/d3d11.dll" "$GD/d3d11.dll"
-check "  arcdps=on, arcdps_state=on" [ "$(st arcdps)/$(arcst)" = on/on ]
+check "  arcdps=on, arcdps_state=on" [ "$(st arcdps arcdps_state)" = on/on ]
 check "  nothing left in the downloads, no temporary file in the game folder" eval '[ ! -e "$CACHE/downloads/arcdps" ] && ! ls -a "$GD" | grep -q gw2om-new'
 check "  and for rundll32.exe: d3d11 and dxgi native,builtin (arcdps's crash window and update)" rundll on
 check "set arcdps on again: already there" sh -c "'$G' set arcdps on | grep -q 'already in the game folder'"
@@ -1232,12 +1238,12 @@ check "  rundll32.exe's d3d11 and dxgi deleted" rundll off
 check "arcdps x maybe refused (exit 2)" sh -c "'$G' set arcdps maybe >/dev/null; [ \$? = 2 ]"
 # as dxgi.dll it counts too, and off removes it there
 cp "$SANDBOX/pe/arcdps.dll" "$GD/dxgi.dll"
-check "arcdps as dxgi.dll: on" [ "$(st arcdps)/$(arcst)" = on/on ]
+check "arcdps as dxgi.dll: on" [ "$(st arcdps arcdps_state)" = on/on ]
 g set arcdps off >/dev/null 2>&1
 check "  off removes that dxgi.dll" [ ! -e "$GD/dxgi.dll" ]
 # another addon's d3d11.dll (Nexus): foreign, never touched
 cp "$SANDBOX/pe/nexus.dll" "$GD/d3d11.dll"
-check "another addon's d3d11.dll (with arcdps's words outside its exports): arcdps_state=foreign, arcdps=off" [ "$(arcst)/$(st arcdps)" = foreign/off ]
+check "another addon's d3d11.dll (with arcdps's words outside its exports): arcdps_state=foreign, arcdps=off" [ "$(st arcdps_state arcdps)" = foreign/off ]
 check "  arcdps_foreign names it" [ "$(st arcdps_foreign)" = d3d11.dll ]
 g set rawmouse on >/dev/null
 check "  rundll32.exe gets d3d11 and dxgi native,builtin for it too" rundll on
@@ -1466,7 +1472,7 @@ if mine; then
       echo "switches: WINE_HEAT_COUNT WINE_HEAT_EXE WINE_HEAT_LOG WINE_HEAT_MSYNC_UNREG WINE_HEAT_WAKE"; } >"$COMP/ntdll/VERSION"
     check "from $from, a VERSION that lists WINE_HEAT_WAKE and WINE_HEAT_MSYNC_UNREG only: event pool and fast locks stay out" rules_are jobwakes
     check "  event pool and fast locks greyed, saying so; set refused" \
-      eval '[ "$(sett jobwakes_state)" = ok ] && [ "$(sett eventpool_state)" = "off:My Wine build in this app (jdrly/wine ${MYWINE_COMMIT:0:11}) doesn'"'"'t have this switch." ] && [ "$(sett fastlocks_state)" = "$(sett eventpool_state)" ] && ! "$G" set fastlocks off >/dev/null 2>&1'
+      eval 'SET_OUT=$(g settings); [ "$(kv "$SET_OUT" jobwakes_state)" = ok ] && [ "$(kv "$SET_OUT" eventpool_state)" = "off:My Wine build in this app (jdrly/wine ${MYWINE_COMMIT:0:11}) doesn'"'"'t have this switch." ] && [ "$(kv "$SET_OUT" fastlocks_state)" = "$(kv "$SET_OUT" eventpool_state)" ] && ! "$G" set fastlocks off >/dev/null 2>&1'
     cp "$SANDBOX/ntdll-VERSION.from" "$COMP/ntdll/VERSION"
     check "  $from again: all three" rules_are heat-all
   done
@@ -1516,7 +1522,7 @@ if drv; then
   # A build from before the factor names WINE_MACDRV_SURFACE alone
   drv_switches WINE_MACDRV_SURFACE
   check "a VERSION that lists WINE_MACDRV_SURFACE only: mouse-look speed greyed, saying so, set refused, its entry out" \
-    eval '[ "$(sett mousespeed_state)" = "off:My Mac driver in this app (jdrly/wine ${MYDRV_COMMIT:0:11}) doesn'"'"'t have this switch." ] && [ "$(sett launcherframes_state)" = ok ] && ! "$G" set mousespeed 2 >/dev/null 2>&1 && rules_are off'
+    eval 'SET_OUT=$(g settings); [ "$(kv "$SET_OUT" mousespeed_state)" = "off:My Mac driver in this app (jdrly/wine ${MYDRV_COMMIT:0:11}) doesn'"'"'t have this switch." ] && [ "$(kv "$SET_OUT" launcherframes_state)" = ok ] && ! "$G" set mousespeed 2 >/dev/null 2>&1 && rules_are off'
   drv_switches WINE_MACDRV_MOUSE_SCALE WINE_MACDRV_SURFACE
   check "  one that lists WINE_MACDRV_MOUSE_SCALE too: ok, and the entry back" eval '[ "$(sett mousespeed_state)" = ok ] && rules_are mousespeed'
   g set mousespeed 1 >/dev/null
@@ -1527,7 +1533,7 @@ if drv; then
   out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
   check "macdrv engine with launcher frames on and mouse-look speed 1.5: no WINE_MACDRV_* in the rules or in a dry run of Play" \
     eval 'rules_are off && ! echo "$out" | grep -q WINE_MACDRV_ && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=[^;]*;env=DXMT_METAL4=0$"'
-  check "  mouse-look speed greyed with launcher frames' reason" eval '[ "$(sett mousespeed_state)" = "off:Needs my Mac driver, and the engine'"'"'s own winemac.so is chosen." ] && [ "$(sett launcherframes_state)" = "$(sett mousespeed_state)" ]'
+  check "  mouse-look speed greyed with launcher frames' reason" eval 'SET_OUT=$(g settings); [ "$(kv "$SET_OUT" mousespeed_state)" = "off:Needs my Mac driver, and the engine'"'"'s own winemac.so is chosen." ] && [ "$(kv "$SET_OUT" launcherframes_state)" = "$(kv "$SET_OUT" mousespeed_state)" ]'
   if mine; then
     g set wine mine >/dev/null; g set jobwakes on >/dev/null
     check "  and my ntdll.so's switches stay, apart from it" rules_are jobwakes
@@ -2073,7 +2079,7 @@ check "set arcdps on while it runs: refused, nothing placed" eval '! "$G" set ar
 kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
 mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
 check "  once it has ended, the switch goes through" eval 'g set dxmt engine >/dev/null && dxgi_is engine && g set dxmt fork >/dev/null && dxgi_is fork'
-: >"$STANDIN_LOG"; g play >/dev/null 2>&1; started
+: >"$STANDIN_LOG"; GW2_ON_MAC_WATCH_GRACE=0 g play >/dev/null 2>&1; started
 check "  the next Play writes EmulateModeset=N" reg "$ALL_X11" EmulateModeset N
 check "    and leaves Gw2-64.exe's own Y alone (two values in all)" \
   eval 'reg "$GW2_X11" EmulateModeset Y && [ "$(grep -c "^\"EmulateModeset\"=" "$BOTTLE/user.reg")" = 2 ]'
@@ -2086,7 +2092,7 @@ if mine; then
     eval '"$G" set wine engine | grep -q "after Steam has quit" && [ "$(sett wine)" = engine ] && ntdll_is mine && [ "$(st wine_ready)" = switch ]'
   kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
   mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
-  : >"$STANDIN_LOG"; out=$(g play 2>&1); started
+  : >"$STANDIN_LOG"; out=$(GW2_ON_MAC_WATCH_GRACE=0 g play 2>&1); started
   check "  once it has ended, the next Play puts the engine's own in before Wine starts" \
     eval 'ntdll_is engine && has "$LOGS/session.env" "^LIB_wine=ntdll.so engine $ENGINE_WINE "'
   watch_done
@@ -2102,7 +2108,7 @@ if drv; then
     eval '"$G" set macdrv engine | grep -q "after Steam has quit" && [ "$(sett macdrv)" = engine ] && winemac_is mine && [ "$(st macdrv_ready)" = switch ]'
   kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
   mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
-  : >"$STANDIN_LOG"; out=$(g play 2>&1); started
+  : >"$STANDIN_LOG"; out=$(GW2_ON_MAC_WATCH_GRACE=0 g play 2>&1); started
   check "  once it has ended, the next Play puts the engine's own in before Wine starts" \
     eval 'winemac_is engine && has "$LOGS/session.env" "^LIB_macdrv=winemac.so engine $ENGINE_WINE "'
   watch_done
@@ -2134,7 +2140,7 @@ if drv; then
     eval '[ "$rc" != 0 ] && echo "$out" | grep -qxF "@error The engine'"'"'s winemac.so and win32u.so are a mix of mine and its own, a switch cut short. Quit Steam and click Play again to finish it." && ! has "$STANDIN_LOG" "^wine " && win32u_is mine'
   kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
   mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
-  : >"$STANDIN_LOG"; out=$(g play 2>&1); started
+  : >"$STANDIN_LOG"; out=$(GW2_ON_MAC_WATCH_GRACE=0 g play 2>&1); started
   check "  once Steam has quit, Play finishes the switch to the engine's own pair before Wine starts" \
     eval 'winemac_is engine && win32u_is engine && has "$LOGS/session.env" "^LIB_win32u=win32u.so engine $GW2_ON_MAC_ENGINE_WIN32U_SHA256$" && has "$STANDIN_LOG" "^wine "'
   watch_done
@@ -2148,10 +2154,10 @@ if drv; then
   sleep 0.3
   : >"$STANDIN_LOG"; out=$(g play 2>&1) && rc=0 || rc=$?
   check "an earlier build's winemac.so next to the engine's own win32u.so while Steam runs: macdrv_file=other, Play refuses and starts nothing" \
-    eval '[ "$(st macdrv_file)/$(st macdrv_ready)" = other/switch ] && [ "$rc" != 0 ] && echo "$out" | grep -qxF "@error The engine'"'"'s winemac.so is another build of mine, and nothing proves its win32u.so is that build'"'"'s. Quit Steam and click Play again to put this build'"'"'s in." && ! has "$STANDIN_LOG" "^wine "'
+    eval '[ "$(st macdrv_file macdrv_ready)" = other/switch ] && [ "$rc" != 0 ] && echo "$out" | grep -qxF "@error The engine'"'"'s winemac.so is another build of mine, and nothing proves its win32u.so is that build'"'"'s. Quit Steam and click Play again to put this build'"'"'s in." && ! has "$STANDIN_LOG" "^wine "'
   kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
   mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
-  : >"$STANDIN_LOG"; out=$(g play 2>&1); started
+  : >"$STANDIN_LOG"; out=$(GW2_ON_MAC_WATCH_GRACE=0 g play 2>&1); started
   check "  once Steam has quit, Play puts this build's pair in before Wine starts" \
     eval 'winemac_is mine && win32u_is mine && has "$STANDIN_LOG" "^wine "'
   watch_done
@@ -2160,7 +2166,7 @@ if drv; then
   cp "$COMP/macdrv/win32u.so" "$NT/win32u.so"
   : >"$STANDIN_LOG"; out=$(g play 2>&1) && rc=0 || rc=$?
   check "my win32u.so next to the engine's own winemac.so, the engine's win32u.so gone: macdrv_ready=other, Play refuses and starts nothing" \
-    eval '[ "$(st macdrv_ready)/$(st macdrv_file)" = other/mix ] && [ "$rc" != 0 ] && echo "$out" | grep -qxF "@error The engine'"'"'s winemac.so and win32u.so are a mix of mine and its own. Click Repair." && ! has "$STANDIN_LOG" "^wine "'
+    eval '[ "$(st macdrv_ready macdrv_file)" = other/mix ] && [ "$rc" != 0 ] && echo "$out" | grep -qxF "@error The engine'"'"'s winemac.so and win32u.so are a mix of mine and its own. Click Repair." && ! has "$STANDIN_LOG" "^wine "'
   out=$(g repair 2>&1) && rc=0 || rc=$?
   check "  repair unpacks the engine again and puts the engine's own pair in, as macdrv=engine asks" \
     eval '[ "$rc" = 0 ] && echo "$out" | grep -q "unpacking the engine again" && winemac_is engine && win32u_is engine && [ "$(st macdrv_ready)" = yes ]'
@@ -2180,7 +2186,7 @@ if fexb; then
     eval '"$G" set fex mine | grep -q "after Steam has quit" && [ "$(sett fex)" = mine ] && fex_is engine && [ "$(st fex_ready)" = switch ]'
   kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
   mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
-  : >"$STANDIN_LOG"; out=$(g play 2>&1); started
+  : >"$STANDIN_LOG"; out=$(GW2_ON_MAC_WATCH_GRACE=0 g play 2>&1); started
   check "  once it has ended, the next Play puts my FEX in before Wine starts, and says so" \
     eval 'fex_is mine && echo "$out" | grep -q "^FEX: my FEX (jdrly/FEX ${MYFEX_COMMIT:0:11}) is in the engine, the engine.s own kept next to each" && has "$STANDIN_LOG" "^wine "'
   check "  the session's record: LIB_fex=mine, its commit and the sha256 of xtajit64.dll in the engine" \
@@ -2197,7 +2203,7 @@ if fexb; then
   cp "$(fex_src_of aarch64-windows/xtajit64.dll)" "$FW/aarch64-windows/xtajit64.dll"
   : >"$STANDIN_LOG"; out=$(g play 2>&1) && rc=0 || rc=$?
   check "a mix of my FEX and the engine's own with one of its files gone: fex_ready=other, Play refuses and starts nothing" \
-    eval '[ "$(st fex_ready)/$(st fex_file)" = other/mix ] && [ "$rc" != 0 ] && echo "$out" | grep -qxF "@error The engine'"'"'s FEX files are a mix of mine and its own. Click Repair." && ! has "$STANDIN_LOG" "^wine "'
+    eval '[ "$(st fex_ready fex_file)" = other/mix ] && [ "$rc" != 0 ] && echo "$out" | grep -qxF "@error The engine'"'"'s FEX files are a mix of mine and its own. Click Repair." && ! has "$STANDIN_LOG" "^wine "'
   out=$(g repair 2>&1) && rc=0 || rc=$?
   check "  repair unpacks the engine again and puts the engine's own FEX in, as fex=engine asks" \
     eval '[ "$rc" = 0 ] && echo "$out" | grep -q "unpacking the engine again" && fex_is engine && [ "$(st fex_ready)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ]'
@@ -2208,7 +2214,7 @@ fi
 cp "$SANDBOX/sleeper" "$ENG/bin/Gw2-64.exe"
 "$ENG/bin/Gw2-64.exe" 60 & gp=$!
 sleep 0.3
-check "busy=game with a Gw2-64.exe of the engine running, game_pid its pid" eval '[ "$(st busy)/$(st game_pid)" = "game/$gp" ]'
+check "busy=game with a Gw2-64.exe of the engine running, game_pid its pid" eval '[ "$(st busy game_pid)" = "game/$gp" ]'
 check "play brings it up instead of starting another" sh -c "'$G' play | grep -q 'already running'"
 check "reset-shaders refused while the game runs" sh -c "! '$G' reset-shaders >/dev/null 2>&1"
 rm -f "$SANDBOX/vmmap.args"
@@ -2256,7 +2262,7 @@ sleep 0.3
 : >"$STANDIN_LOG"
 out=$(g play 2>&1) && rc=0 || rc=$?
 check "a Gw2-64.exe of another app running: play refuses, starts nothing" \
-  eval '[ "$rc" != 0 ] && echo "$out" | grep -qxF "@error Guild Wars 2 is running in another app. Quit it first." && [ ! -s "$STANDIN_LOG" ] && [ "$(st busy)/$(st game_pid)" = none/ ]'
+  eval '[ "$rc" != 0 ] && echo "$out" | grep -qxF "@error Guild Wars 2 is running in another app. Quit it first." && [ ! -s "$STANDIN_LOG" ] && [ "$(st busy game_pid)" = none/ ]'
 check "  vmmap leaves it alone: it isn't this app's game" \
   eval '[ "$(g vmmap)" = "@done Guild Wars 2 isn'"'"'t running, so there is no vmmap to take." ] && [ ! -e "$SANDBOX/vmmap.args" ] && ! ls "$LOGS" | grep -q "^vmmap-"'
 kill $op 2>/dev/null || true; wait $op 2>/dev/null || true
@@ -2277,7 +2283,7 @@ game_session() { local r=0; game_up; wait_stage playing || r=1; game_down; [ $r 
 watcher_up() { local i=0; until watcher_runs || [ $i -ge 20 ]; do sleep 0.1; i=$((i + 1)); done; }
 splay() { : >"$STANDIN_LOG"; g play >/dev/null 2>&1; started; watcher_up; }
 sessions_reset
-check "the Steam in the background is on, with a remembered login" [ "$(sett steambg)/$(sett steam_login)/$(sett quitsteam)" = on/yes/on ]
+check "the Steam in the background is on, with a remembered login" [ "$(sett steambg steam_login quitsteam)" = on/yes/on ]
 
 splay; steam_up
 check "Play starts Steam in the background: session started_steam=yes steam_window=hidden quit_steam=yes" [ "$(sess route)/$(sess started_steam)/$(sess steam_window)/$(sess quit_steam)" = steam/yes/hidden/yes ]
@@ -2582,7 +2588,7 @@ cp "$M" "$SANDBOX/acf.keep"
   printf '\t"BytesToDownload"\t\t"4000"\n\t"BytesDownloaded"\t\t"1000"\n}\n'; } >"$M"
 echo "$NEW AppID 1284210 update changed : Running Update,Downloading," >>"$SL/content_log.txt"
 check "Steam updates the game: checking_files with the appmanifest's progress (25%)" eval '[ "$(ss stage)/$(ss progress)" = checking_files/25 ] && [ "$(ss detail)" = "Steam updates Guild Wars 2 · 25%" ]'
-check "  status meanwhile: game=no (not fully installed), stage=finished, busy=steam, session=live (the window's model keeps the session)" eval '[ "$(st game)/$(st stage)/$(st busy)/$(st session)" = no/finished/steam/live ]'
+check "  status meanwhile: game=no (not fully installed), stage=finished, busy=steam, session=live (the window's model keeps the session)" eval '[ "$(st game stage busy session)" = no/finished/steam/live ]'
 cp "$SANDBOX/acf.keep" "$M"
 echo "$NEW AppID 1284210 finished update (BytesDownloaded=1000, BytesStaged=0)" >>"$SL/content_log.txt"
 check "  update finished: starting_game" [ "$(ss stage)" = starting_game ]
@@ -2644,7 +2650,7 @@ session_file waiting_game
 # (its sleep first: a TERM ends the stand-in's bash, not the sleep it waits on)
 pkill -P $wp; kill $wp 2>/dev/null; wait $wp 2>/dev/null
 check "a dead watcher's unfinished session is over: Steam on its own is stage=none" eval '[ "$(ss stage)/$(ss closing)/$(ss quit_steam)/$(ss watching)" = none/no/no/no ]'
-check "  status: session=none (busy=steam)" [ "$(st session)/$(st busy)" = none/steam ]
+check "  status: session=none (busy=steam)" [ "$(st session busy)" = none/steam ]
 kill $lp 2>/dev/null; wait $lp 2>/dev/null
 : >"$STANDIN_LOG"
 check "show-steam with Steam running, no watcher: steam.exe steam://open/main through the engine" eval 'g show-steam | grep -q "^@done" && started && has "$STANDIN_LOG" "steam.exe steam://open/main"'
@@ -2677,13 +2683,13 @@ section "Repair and Troubleshooting"
 sessions_reset
 T="$ENG/lib/wine/dxgi/dxmt"
 echo "something else" >"$T/aarch64-windows/d3d11.dll"
-check "another build of my DXMT in the engine (an earlier version's): graphics=switch" [ "$(st graphics)/$(st dxmt_tree)" = switch/oldfork ]
-: >"$STANDIN_LOG"; out=$(g play 2>&1); started
+check "another build of my DXMT in the engine (an earlier version's): graphics=switch" [ "$(st graphics dxmt_tree)" = switch/oldfork ]
+: >"$STANDIN_LOG"; out=$(GW2_ON_MAC_WATCH_GRACE=0 g play 2>&1); started
 check "  Play puts this version's in before Wine starts, and says so" eval 'dxgi_is fork && echo "$out" | grep -q "^DXMT: my DXMT fork" && has "$LOGS/session.env" "^DXMT_TREE=fork$"'
 watch_done
 rm "$T/.gw2om-dxmt"; echo "something else" >"$T/aarch64-windows/d3d11.dll"
 check "graphics=other: a DXMT tree that is neither the engine's own nor mine" [ "$(st graphics)" = other ]
-: >"$STANDIN_LOG"; out=$(g play 2>&1); started
+: >"$STANDIN_LOG"; out=$(GW2_ON_MAC_WATCH_GRACE=0 g play 2>&1); started
 check "  Play says Repair and leaves the engine as it is" eval 'echo "$out" | grep -q "^@warn .*Click Repair" && has "$T/aarch64-windows/d3d11.dll" "something else"'
 watch_done
 out=$(g repair 2>&1) && rc=0 || rc=$?
@@ -2703,8 +2709,8 @@ check "  repair puts the engine's own back" eval 'dxgi_is engine && [ "$(st grap
 g set dxmt fork >/dev/null
 # An ntdll.so that is neither the engine's own nor mine, and no engine's own next to it
 echo "something else" >"$NT/ntdll.so" && rm -f "$NT/ntdll.so.engine"
-check "wine_ready=other: an ntdll.so that is neither the engine's own nor mine, and none next to it" [ "$(st wine_ready)/$(st wine_file)" = other/other ]
-: >"$STANDIN_LOG"; out=$(g play 2>&1); started
+check "wine_ready=other: an ntdll.so that is neither the engine's own nor mine, and none next to it" [ "$(st wine_ready wine_file)" = other/other ]
+: >"$STANDIN_LOG"; out=$(GW2_ON_MAC_WATCH_GRACE=0 g play 2>&1); started
 check "  Play says Repair and leaves it as it is" eval 'echo "$out" | grep -q "^@warn The engine.s ntdll.so is neither its own nor mine. Click Repair." && has "$NT/ntdll.so" "something else"'
 watch_done
 if mine; then
@@ -2720,7 +2726,7 @@ check "  wine.app untouched" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")"
 # A winemac.so that is neither the engine's own nor mine, and no engine's own next to it
 echo "something else" >"$NT/winemac.so" && rm -f "$NT/winemac.so.engine"
 check "macdrv_ready=other: a winemac.so that is neither the engine's own nor mine, and none next to it (a mix next to my win32u.so)" \
-  [ "$(st macdrv_ready)/$(st macdrv_file)" = "other/$([ $W32U = mine ] && echo mix || echo other)" ]
+  [ "$(st macdrv_ready macdrv_file)" = "other/$([ $W32U = mine ] && echo mix || echo other)" ]
 out=$(g repair 2>&1) && rc=0 || rc=$?
 check "  repair unpacks the engine again and puts the winemac.so Settings asks for in: $MYDRV, and the ntdll.so: $MYWINE" \
   eval '[ "$rc" = 0 ] && echo "$out" | grep -q "unpacking the engine again" && winemac_is $MYDRV && ntdll_is $MYWINE && [ "$(st macdrv_ready)" = yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ]'
@@ -2771,7 +2777,7 @@ check "  B, resumed, finds A still there and is refused; A unlocks and ends: its
 g set launchopts -maploadinfo >/dev/null
 # an earlier version's manifest: the next Play brings it to this version
 sed -i '' -e 's/"version": "[^"]*"/"version": "0.2.0-dev.0"/' "$MF"
-out=$(g play 2>&1); started
+out=$(GW2_ON_MAC_WATCH_GRACE=0 g play 2>&1); started
 check "an earlier version's manifest: Play brings it to this version" [ "$(plutil -extract version raw -o - "$MF")" = "$(st version)" ]
 check "  the manifest names the engine's build" eval '[ "$(plutil -extract engine raw -o - "$MF")/$(plutil -extract engine_dxmt raw -o - "$MF")" = mach9-v0.4.0/10e27aed3f5 ]'
 watch_done
@@ -2811,7 +2817,7 @@ rm -rf "$SANDBOX/tar-check"
 # Repair replaces it, but not while the old engine's Wine runs, and a failed download keeps it.
 OLD_SHA=90aff9a897ed0ff9aac44d0e06f0aecd3ee985afb38037f3f915451e51fa974e
 echo "$OLD_SHA" >"$ENG/.gw2om-source"
-check "Mach9 0.3.1's engine in place: installed=yes, engine_installed=old" [ "$(st installed)/$(st engine_installed)" = yes/old ]
+check "Mach9 0.3.1's engine in place: installed=yes, engine_installed=old" [ "$(st installed engine_installed)" = yes/old ]
 : >"$STANDIN_LOG"; out=$(g play 2>&1) && rc=0 || rc=$?
 check "  Play refuses, naming both engines and Repair, and starts no Wine" \
   eval '[ "$rc" != 0 ] && echo "$out" | grep -qxF "@error The engine here is Mach9 0.3.1 · Wine 11.21, and this version of $APP_NAME runs on Mach9 0.4.0 · Wine 11.21. Click Repair to put it in place." && ! grep -q "^wine " "$STANDIN_LOG"'
@@ -2828,7 +2834,7 @@ check "  repair with a failed download: the old engine kept, and the error says 
   eval '[ "$rc" != 0 ] && echo "$out" | grep -q "^@error The download of the Wine engine.* The engine here, Mach9 0.3.1 · Wine 11.21, stays in place. Click Repair to try again.$" && [ "$(cat "$ENG/.gw2om-source")" = "$OLD_SHA" ] && [ -x "$ENG/bin/wine" ] && [ ! -e "$ENG.new" ]'
 out=$(g repair 2>&1) && rc=0 || rc=$?
 check "  repair once nothing runs: this app's engine replaces it, with my files in it, saying so" \
-  eval '[ "$rc" = 0 ] && echo "$out" | grep -qxF "The engine here is Mach9 0.3.1 · Wine 11.21; Mach9 0.4.0 · Wine 11.21 replaces it" && [ "$(st installed)/$(st engine_installed)" = yes/yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ] && dxgi_is fork && ntdll_is $MYWINE && winemac_is $MYDRV'
+  eval '[ "$rc" = 0 ] && echo "$out" | grep -qxF "The engine here is Mach9 0.3.1 · Wine 11.21; Mach9 0.4.0 · Wine 11.21 replaces it" && [ "$(st installed engine_installed)" = yes/yes ] && [ "$(engine_diff)" = "$SDK_DIFF" ] && dxgi_is fork && ntdll_is $MYWINE && winemac_is $MYDRV'
 mkdir "$AD/.lock"
 check "a second operation is refused while one runs (lock)" sh -c "'$G' repair 2>&1 | grep -q 'Another $APP_NAME'"
 rmdir "$AD/.lock"
@@ -2886,13 +2892,13 @@ refused() {
   grep -q "^@error .*$want" "$SANDBOX/rs.txt" && [ "$(gdsnap)" = "$before" ] && [ ! -e "$RSF" ]
 }
 rm -f "$GD/d3d11.dll" "$GD/dxgi.dll"; rm -rf "$GD/addons"
-check "ReShade off by default: reshade=off, reshade_state=off, version 6.8.0, the folder named" eval '[ "$(st reshade)/$(sett reshade)/$(rsst)/$(st reshade_version)" = off/off/off/6.8.0 ] && [ "$(sett reshade_folder)" = "$RSF" ]'
+check "ReShade off by default: reshade=off, reshade_state=off, version 6.8.0, the folder named" eval 'SET_OUT=$(g settings); [ "$(st reshade reshade_state reshade_version)/$(kv "$SET_OUT" reshade)" = off/off/6.8.0/off ] && [ "$(kv "$SET_OUT" reshade_folder)" = "$RSF" ]'
 # what's in the way (arcdps only in the exclusive layout: "arcdps and ReShade together" below)
 cp "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll"
 check "arcdps as d3d11.dll, the exclusive layout: reshade_state=blocked, reshade_blocker=d3d11.dll" eval '[ "$(GW2_ON_MAC_ADDONS_LAYOUT=exclusive g status | sed -n "s/^reshade_state=//p; s/^reshade_blocker=//p" | tr "\n" /)" = blocked/d3d11.dll/ ]'
 before=$(gdsnap)
 check "  set reshade on refused: turn arcdps off first; nothing placed" refused "arcdps is in the game folder as d3d11.dll. Turn arcdps off first" GW2_ON_MAC_ADDONS_LAYOUT=exclusive
-check "  the together layout: reshade_state=off, no blocker" [ "$(rsst)/$(st reshade_blocker)" = off/ ]
+check "  the together layout: reshade_state=off, no blocker" [ "$(st reshade_state reshade_blocker)" = off/ ]
 cp "$SANDBOX/pe/nexus.dll" "$GD/d3d11.dll"; before=$(gdsnap)
 check "another addon's d3d11.dll: blocked, refused, left alone" eval '[ "$(rsst)" = blocked ] && refused "another d3d11.dll (Nexus or another addon?)" && same "$SANDBOX/pe/nexus.dll" "$GD/d3d11.dll"'
 rm -f "$GD/d3d11.dll"
@@ -2917,7 +2923,7 @@ check "  the game folder: ReShade64.dll as d3d11.dll, fxc2's compiler, ReShade.i
 check "  the ReShade folder: Presets, Shaders, Textures, Screenshots and the starting ReShade.ini" eval '[ -d "$RSF/Presets" ] && [ -d "$RSF/Screenshots" ] && [ "$(cat "$RSF/ReShade.ini")" = "$RS_INI_WANT" ]'
 check "  both packs: each Shaders and Textures folder's contents under the pack's name" eval 'same "$S1/Shaders/ReShade.fxh" "$RSF/Shaders/Standard/ReShade.fxh" && [ -f "$RSF/Shaders/Standard/Deband.fx" ] && [ -f "$RSF/Textures/Standard/FontAtlas.png" ] && [ -f "$RSF/Shaders/SweetFX/SweetFX/CAS.fx" ] && [ -f "$RSF/Shaders/SweetFX/SweetFX/SMAA.fxh" ] && [ -f "$RSF/Textures/SweetFX/SweetFX/AreaTex.png" ]'
 check "  only effects and images: no README, LICENSE or notes.txt" eval '[ -z "$(find "$RSF" -name README.md -o -name LICENSE -o -name notes.txt)" ]'
-check "  reshade=on, reshade_state=on, reshade_dll=d3d11.dll, no blocker" eval '[ "$(sett reshade)/$(rsst)/$(st reshade_dll)/$(st reshade_blocker)" = on/on/d3d11.dll/ ] && grep -qx reshade=on "$AD/settings.conf"'
+check "  reshade=on, reshade_state=on, reshade_dll=d3d11.dll, no blocker" eval '[ "$(sett reshade)/$(st reshade_state reshade_dll reshade_blocker)" = on/on/d3d11.dll/ ] && grep -qx reshade=on "$AD/settings.conf"'
 check "  d3dcompiler_47=native,builtin for Gw2-64.exe" compiler_rule on
 check "  ReShade alone: rundll32.exe gets d3d11 and dxgi native,builtin" rundll on
 check "  the checked ReShade64.dll and the compiler stay in the cache; no installer, zip or temporary file" eval 'same "$SANDBOX/pe/ReShade64.dll" "$CACHE/downloads/reshade/ReShade64.dll" && [ "$(ls -A "$CACHE/downloads/reshade" | LC_ALL=C sort | tr "\n" " ")" = "ReShade64.dll d3dcompiler_47.dll " ] && ! ls -a "$GD" | grep -q gw2om-new || { ls -lA "$CACHE/downloads/reshade" "$GD"; false; }'
@@ -2945,14 +2951,14 @@ check "  off leaves it too" eval '"$G" set reshade off >/dev/null 2>&1 && has "$
 rm -f "$GD/d3dcompiler_47.dll"; mv "$SANDBOX/bin64.keep" "$GD/bin64"
 # a ReShade the app didn't place
 cp "$SANDBOX/pe/reshade-addon.dll" "$GD/d3d11.dll"; before=$(gdsnap)
-check "a ReShade the app didn't place (another build): reshade_state=foreign, reshade_dll=d3d11.dll" [ "$(rsst)/$(st reshade_dll)/$(st reshade)" = foreign/d3d11.dll/off ]
+check "a ReShade the app didn't place (another build): reshade_state=foreign, reshade_dll=d3d11.dll" [ "$(st reshade_state reshade_dll reshade)" = foreign/d3d11.dll/off ]
 check "  set reshade on refused, the file left alone, nothing added" eval '! "$G" set reshade on >"$SANDBOX/rs.txt" 2>&1 && grep -q "^@error The game folder has a ReShade that GW2 on Mac didn.t put there (d3d11.dll)" "$SANDBOX/rs.txt" && [ "$(gdsnap)" = "$before" ]'
 check "  set reshade off: @done, the file left alone" eval '"$G" set reshade off | grep -q "^@done GW2 on Mac didn.t put the ReShade" && same "$SANDBOX/pe/reshade-addon.dll" "$GD/d3d11.dll"'
 g set rawmouse on >/dev/null
 check "  the override is written for it too" compiler_rule on
 check "  set arcdps on refused, naming ReShade" eval '! "$G" set arcdps on >"$SANDBOX/arc.txt" 2>&1 && has "$SANDBOX/arc.txt" "has a ReShade that GW2 on Mac didn.t put there" && same "$SANDBOX/pe/reshade-addon.dll" "$GD/d3d11.dll"'
 mv "$GD/d3d11.dll" "$GD/dxgi.dll"
-check "  as dxgi.dll: foreign as well, reshade_dll=dxgi.dll" [ "$(rsst)/$(st reshade_dll)" = foreign/dxgi.dll ]
+check "  as dxgi.dll: foreign as well, reshade_dll=dxgi.dll" [ "$(st reshade_state reshade_dll)" = foreign/dxgi.dll ]
 rm -f "$GD/dxgi.dll"
 g set rawmouse on >/dev/null
 check "  gone: the override deleted" compiler_rule off
@@ -2974,9 +2980,9 @@ check "dry run of on: places nothing" eval '"$G" set reshade off >/dev/null && G
 # (Play, Repair and the caches)
 g set reshade on >/dev/null 2>&1
 rm -f "$GD/d3d11.dll" "$GD/d3dcompiler_47.dll" "$GD/ReShade.ini"   # (Steam's file check, a new bottle)
-check "the files gone from the game folder: reshade=on, reshade_state=off" [ "$(st reshade)/$(rsst)" = on/off ]
+check "the files gone from the game folder: reshade=on, reshade_state=off" [ "$(st reshade reshade_state)" = on/off ]
 : >"$STANDIN_LOG"
-out=$(GW2_ON_MAC_RESHADE_URL="file://$SANDBOX/nowhere/r.exe" GW2_ON_MAC_COMPILER_URL="file://$SANDBOX/nowhere/c.dll" "$G" play 2>&1); started
+out=$(GW2_ON_MAC_WATCH_GRACE=0 GW2_ON_MAC_RESHADE_URL="file://$SANDBOX/nowhere/r.exe" GW2_ON_MAC_COMPILER_URL="file://$SANDBOX/nowhere/c.dll" "$G" play 2>&1); started
 check "the next Play puts them back from the cache, without a download, and starts the game" eval 'same "$SANDBOX/pe/ReShade64.dll" "$GD/d3d11.dll" && same "$GD/bin64/cef/d3dcompiler_47.dll" "$GD/d3dcompiler_47.dll" && our_ini && ! echo "$out" | grep -q "^@progress" && has "$STANDIN_LOG" "^wine "'
 check "  with the override" compiler_rule on
 watch_done
@@ -3010,7 +3016,7 @@ check "  shaders.txt names the files, the 20 MB one too; no file of Shaders in t
 check "  system-info: ReShade on, 6.8.0 as d3d11.dll, the compiler's sha256, the folder" \
   eval 'grep -qxF "ReShade: on, 6.8.0 as d3d11.dll; arcdps off" "$Z/system-info.txt" && grep -qxF "  d3dcompiler_47.dll next to Gw2-64.exe: sha256 $(sum "$GD/d3dcompiler_47.dll")" "$Z/system-info.txt" && grep -qF "look.ini, in reshade/preset.ini" "$Z/system-info.txt" && has "$Z/system-info.txt" "d3d11.dll addon: ReShade"'
 check "  the session report's ReShade line matches reshade_state and the compiler's sha256" \
-  eval 'grep -qxF "ReShade at the start: $(rsst), $(st reshade_version) as $(st reshade_dll); arcdps $(st arcdps)" "$Z/session-report.txt" && grep -qxF "  d3dcompiler_47.dll next to Gw2-64.exe: sha256 $(sum "$GD/d3dcompiler_47.dll")" "$Z/session-report.txt" && [ "$(rsst)" = on ]'
+  eval 'ST_OUT=$(g status); grep -qxF "ReShade at the start: $(kv "$ST_OUT" reshade_state), $(kv "$ST_OUT" reshade_version) as $(kv "$ST_OUT" reshade_dll); arcdps $(kv "$ST_OUT" arcdps)" "$Z/session-report.txt" && grep -qxF "  d3dcompiler_47.dll next to Gw2-64.exe: sha256 $(sum "$GD/d3dcompiler_47.dll")" "$Z/session-report.txt" && [ "$(kv "$ST_OUT" reshade_state)" = on ]'
 # a preset outside the ReShade folder (an absolute Z:\ path) stays out
 echo "zz secret preset" >"$SANDBOX/secret-preset.ini"
 setpreset "Z:$(winf "$SANDBOX")\\secret-preset.ini"
@@ -3020,7 +3026,7 @@ check "a PresetPath outside the ReShade folder: that file is not collected, syst
 mv -f "$SANDBOX/ReShade.ini.keep" "$RSF/ReShade.ini"; rm -f "$RSF/Shaders/big.bin" "$RSF/ReShade.log" "$PRESET_FILE" "$SANDBOX/secret-preset.ini"
 rm -f "$GD/d3d11.dll" "$GD/d3dcompiler_47.dll" "$GD/ReShade.ini"; rm -rf "$CACHE/downloads/reshade" "$GD/bin64"
 : >"$STANDIN_LOG"
-out=$(g play 2>&1); started
+out=$(GW2_ON_MAC_WATCH_GRACE=0 g play 2>&1); started
 check "Play without the cache: the game starts without ReShade, and Play says why" eval 'echo "$out" | grep -q "^@warn ReShade.s files are not in the cache" && [ ! -e "$GD/d3d11.dll" ] && [ ! -e "$GD/d3dcompiler_47.dll" ] && ! echo "$out" | grep -q "^@progress" && has "$STANDIN_LOG" "^wine "'
 check "  and without the override" compiler_rule off
 watch_done
@@ -3085,9 +3091,9 @@ check "  neither file left, reshade=off, keys off" eval 'none_left && [ "$(sett 
 out=$(g set arcdps on 2>&1); out2=$(g set reshade on 2>&1)
 check "both on: ReShade d3d11.dll, arcdps at the chain path, and @done says ReShade loads arcdps" eval '[ "$(lay)" = "reshade arcdps" ] && echo "$out2" | grep -qx "@done ReShade 6.8.0 is in the game folder as d3d11.dll. It loads the next time the game starts. ReShade loads arcdps itself now, so both load."'
 check "  the ReShade folder's ReShade.ini: EnableProxyLibrary=1, ProxyLibrary=the chain file as C:\\" eval 'grep -qxF "EnableProxyLibrary=1" "$RSF/ReShade.ini" && grep -qxF "ProxyLibrary=$PX" "$RSF/ReShade.ini" && [ "$(keys)" = 1 ] && has "$LOGS/install.log" "ReShade.ini: \[PROXY\] EnableProxyLibrary=1"'
-check "  status: arcdps on at the chain path with no foreign file, reshade_state=on with no blocker" eval '[ "$(st arcdps)/$(arcst)/$(st arcdps_dll)/$(st arcdps_foreign)/$(rsst)/$(st reshade_blocker)/$(st reshade_dll)" = "on/on/$CH//on//d3d11.dll" ]'
+check "  status: arcdps on at the chain path with no foreign file, reshade_state=on with no blocker" eval '[ "$(st arcdps arcdps_state arcdps_dll arcdps_foreign reshade_state reshade_blocker reshade_dll)" = "on/on/$CH//on//d3d11.dll" ]'
 check "  rundll32.exe gets d3d11 and dxgi native,builtin" rundll on
-check "  settings say the same, and addons_layout=together" eval '[ "$(sett arcdps_state)/$(sett arcdps_dll)/$(sett reshade_state)/$(sett reshade)/$(sett addons_layout)" = "on/$CH/on/on/together" ]'
+check "  settings say the same, and addons_layout=together" eval '[ "$(sett arcdps_state arcdps_dll reshade_state reshade addons_layout)" = "on/$CH/on/on/together" ]'
 check "  set arcdps on and set reshade on again: already there, nothing moves" eval '"$G" set arcdps on | grep -qF "already in the game folder ($CH)" && "$G" set reshade on | grep -q "already in the game folder (d3d11.dll)" && [ "$(lay)" = "reshade arcdps" ] && keys_ok'
 out=$(g set reshade off 2>&1)
 check "ReShade off: @done says arcdps is d3d11.dll again; keys off" eval 'echo "$out" | grep -q "^@done ReShade is off: its d3d11.dll is out of the game folder. arcdps is d3d11.dll again." && [ "$(lay)" = "arcdps -" ] && [ "$(keys)" = 0 ]'
@@ -3107,12 +3113,12 @@ nodl() { GW2_ON_MAC_RESHADE_URL="file://$SANDBOX/nowhere/r.exe" GW2_ON_MAC_COMPI
 cp "$RSF/ReShade.ini" "$SANDBOX/rs.ini.keep"
 grep -v -e '^\[PROXY\]' -e '^EnableProxyLibrary=' -e '^ProxyLibrary=' "$SANDBOX/rs.ini.keep" >"$RSF/ReShade.ini"
 : >"$STANDIN_LOG"
-out=$(nodl play 2>&1); started
+out=$(GW2_ON_MAC_WATCH_GRACE=0 nodl play 2>&1); started
 check "keys gone, both files in: the next Play turns them on, and the game starts" eval '[ "$(keys)" = 1 ] && keys_ok && [ "$(lay)" = "reshade arcdps" ] && ! echo "$out" | grep -q "^@progress" && has "$STANDIN_LOG" "^wine "'
 watch_done
 rm -f "$GD/$CH"
 : >"$STANDIN_LOG"
-out=$(nodl play 2>&1); started
+out=$(GW2_ON_MAC_WATCH_GRACE=0 nodl play 2>&1); started
 check "keys on, arcdps gone from the chain path: the next Play turns them off, and the game starts with ReShade" eval '[ "$(keys)" = 0 ] && [ "$(lay)" = "reshade -" ] && has "$STANDIN_LOG" "^wine "'
 watch_done
 
@@ -3138,25 +3144,25 @@ cp "$SANDBOX/rs.ini.keep" "$RSF/ReShade.ini"; g repair >/dev/null 2>&1
 # cache, the keys on; if the newer one is already the chain file, the other goes
 cp "$SANDBOX/pe/arcdps.dll" "$SANDBOX/pe/arcdps-new.dll" && printf 'arcdps build 20261114 (stand-in)\n' >>"$SANDBOX/pe/arcdps-new.dll"
 touch -t 202611010000 "$GD/$CH"; cp "$SANDBOX/pe/arcdps-new.dll" "$GD/d3d11.dll"
-check "arcdps's update over ReShade's d3d11.dll: both arcdps, reshade_state=off" eval '[ "$(lay)" = "arcdps arcdps" ] && [ "$(arcst)/$(st arcdps_foreign)/$(rsst)" = on//off ]'
+check "arcdps's update over ReShade's d3d11.dll: both arcdps, reshade_state=off" eval '[ "$(lay)" = "arcdps arcdps" ] && [ "$(st arcdps_state arcdps_foreign reshade_state)" = on//off ]'
 : >"$STANDIN_LOG"
-out=$(nodl play 2>&1); started
+out=$(GW2_ON_MAC_WATCH_GRACE=0 nodl play 2>&1); started
 check "  the next Play: the newer arcdps at the chain path, ReShade back as d3d11.dll, keys on, the game starts" eval '[ "$(lay)" = "reshade arcdps" ] && same "$SANDBOX/pe/arcdps-new.dll" "$GD/$CH" && keys_ok && has "$STANDIN_LOG" "^wine "'
 check "  the log says what it found and which arcdps stayed" has "$LOGS/install.log" "arcdps: in the game folder as d3d11.dll and $CH (it updated itself); keeping the newer d3d11.dll"
 watch_done
 cp "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll"; touch -t 202611010000 "$GD/d3d11.dll"; cp "$SANDBOX/pe/arcdps-new.dll" "$SANDBOX/pe/arcdps-newer.dll"; printf 'newer\n' >>"$SANDBOX/pe/arcdps-newer.dll"; cp "$SANDBOX/pe/arcdps-newer.dll" "$GD/$CH"
 : >"$STANDIN_LOG"
-out=$(nodl play 2>&1); started
+out=$(GW2_ON_MAC_WATCH_GRACE=0 nodl play 2>&1); started
 check "  an older arcdps as d3d11.dll, the newer at the chain path: Play keeps the chain file, ReShade back" eval '[ "$(lay)" = "reshade arcdps" ] && same "$SANDBOX/pe/arcdps-newer.dll" "$GD/$CH" && keys_ok'
 watch_done
 rm -f "$GD/$CH"; cp "$SANDBOX/pe/arcdps-new.dll" "$GD/d3d11.dll"
 : >"$STANDIN_LOG"
-out=$(nodl play 2>&1); started
+out=$(GW2_ON_MAC_WATCH_GRACE=0 nodl play 2>&1); started
 check "  arcdps only as d3d11.dll (the chain file gone): Play moves it to the chain path, ReShade back" eval '[ "$(lay)" = "reshade arcdps" ] && same "$SANDBOX/pe/arcdps-new.dll" "$GD/$CH" && keys_ok'
 watch_done
 mv "$CACHE/downloads/reshade/ReShade64.dll" "$SANDBOX/rs64.keep"; cp "$SANDBOX/pe/arcdps-new.dll" "$GD/d3d11.dll"
 : >"$STANDIN_LOG"
-out=$(nodl play 2>&1); started
+out=$(GW2_ON_MAC_WATCH_GRACE=0 nodl play 2>&1); started
 check "  without ReShade in the cache: Play says so, arcdps stays as d3d11.dll alone, keys off, the game starts" eval 'echo "$out" | grep -q "^@warn ReShade.s files are not in the cache" && [ "$(lay)" = "arcdps -" ] && keys_ok && has "$STANDIN_LOG" "^wine "'
 watch_done
 mv "$SANDBOX/rs64.keep" "$CACHE/downloads/reshade/ReShade64.dll"; g repair >/dev/null 2>&1
@@ -3165,9 +3171,9 @@ mv "$SANDBOX/rs64.keep" "$CACHE/downloads/reshade/ReShade64.dll"; g repair >/dev
 # the chain path and turns the keys on
 check "  (back to both on)" eval '[ "$(lay)" = "reshade arcdps" ] && keys_ok'
 mv "$GD/$CH" "$GD/dxgi.dll"; rm -rf "$GD/addons/arcdps/chain"; mkdir -p "$GD/addons/arcdps" && echo "the player's arcdps settings" >"$GD/addons/arcdps/arcdps.ini"
-check "arcdps as dxgi.dll next to ReShade (a development build): arcdps on, ReShade on" eval '[ "$(arcst)/$(st arcdps_dll)/$(rsst)" = on/dxgi.dll/on ]'
+check "arcdps as dxgi.dll next to ReShade (a development build): arcdps on, ReShade on" eval '[ "$(st arcdps_state arcdps_dll reshade_state)" = on/dxgi.dll/on ]'
 : >"$STANDIN_LOG"
-out=$(nodl play 2>&1); started
+out=$(GW2_ON_MAC_WATCH_GRACE=0 nodl play 2>&1); started
 check "  the next Play: arcdps at the chain path, no dxgi.dll, keys on, its settings stay, the game starts" eval '[ "$(lay)" = "reshade arcdps" ] && keys_ok && has "$GD/addons/arcdps/arcdps.ini" "the player" && has "$LOGS/install.log" "arcdps: dxgi.dll renamed to $CH" && has "$STANDIN_LOG" "^wine "'
 watch_done
 # Collect Logs with both in, after that session
@@ -3191,7 +3197,7 @@ for at in dxgi.dll "$CH"; do
   rm -f "$GD/$at"
 done
 cp "$SANDBOX/pe/nexus.dll" "$GD/d3d11.dll"; cp "$SANDBOX/pe/arcdps.dll" "$GD/$CH"; before=$(places)
-check "Nexus as d3d11.dll, arcdps at the chain path: ReShade blocked by d3d11.dll alone" eval '[ "$(arcst)/$(st arcdps_foreign)/$(rsst)/$(st reshade_blocker)" = on/d3d11.dll/blocked/d3d11.dll ]'
+check "Nexus as d3d11.dll, arcdps at the chain path: ReShade blocked by d3d11.dll alone" eval '[ "$(st arcdps_state arcdps_foreign reshade_state reshade_blocker)" = on/d3d11.dll/blocked/d3d11.dll ]'
 check "  set reshade on refused, naming d3d11.dll; Repair renames nothing; keys off" eval '! "$G" set reshade on >"$SANDBOX/rs.txt" 2>&1 && has "$SANDBOX/rs.txt" "^@error The game folder has another d3d11.dll (Nexus" && "$G" repair >/dev/null 2>&1 && [ "$(places)" = "$before" ] && [ "$(keys)" != 1 ]'
 rm -f "$GD/d3d11.dll"; rm -rf "$GD/addons"
 g set reshade on >/dev/null 2>&1; cp "$SANDBOX/pe/nexus.dll" "$GD/dxgi.dll"; before=$(places)
@@ -3253,7 +3259,7 @@ touch "$PAUSE"; rm -f "$PAUSE.at"
 # (the app's gw2om.sh itself: killing G would end only the wrapper)
 GW2_ON_MAC_TEST_PAUSE="$PAUSE" GW2_ON_MAC_TEST_PAUSE_AT=arcdps-moved "$GW2OM" set reshade on >"$SANDBOX/rs.txt" 2>&1 & ra=$!
 wait_at; kill -9 $ra 2>/dev/null; wait $ra 2>/dev/null; rm -f "$PAUSE" "$PAUSE.at"
-check "killed after the rename: arcdps at the chain path, ReShade off, keys off" eval '[ "$(lay)" = "- arcdps" ] && [ "$(arcst)/$(rsst)/$(sett reshade)" = on/off/off ] && keys_ok'
+check "killed after the rename: arcdps at the chain path, ReShade off, keys off" eval '[ "$(lay)" = "- arcdps" ] && [ "$(st arcdps_state reshade_state)/$(sett reshade)" = on/off/off ] && keys_ok'
 g set rawmouse on >/dev/null
 check "  arcdps only at the chain path: rundll32.exe gets d3d11 and dxgi native,builtin" rundll on
 check "  Repair moves arcdps back to d3d11.dll" eval '"$G" repair >/dev/null 2>&1 && [ "$(lay)" = "arcdps -" ] && keys_ok'
@@ -3455,7 +3461,7 @@ check "  the session's watcher stopped" sh -c "! kill -0 $wp 2>/dev/null"
 check "its caches are gone" eval '[ ! -e "$CACHE" ] && [ ! -e "$DXMT_CACHE" ]'
 check "the per-user cache folder's dxmt/ stays (another setup's)" other_dxmt_kept
 check "the logs stay" [ -f "$LOGS/install.log" ]
-check "status: not installed" [ "$(st installed)/$(st engine_installed)" = no/no ]
+check "status: not installed" [ "$(st installed engine_installed)" = no/no ]
 rm -rf "$AD"
 fi
 
@@ -3477,7 +3483,7 @@ if [ -f "$SIGNED_PE" ]; then
   : >"$STANDIN_LOG"
   out=$(g install arenanet "$SANDBOX/Gw2Setup-64.exe" 2>&1) && rc=0 || rc=$?
   check "install arenanet exits 0" [ "$rc" = 0 ]
-  check "route=arenanet, stage=waiting_game, no Steam" [ "$(st route)$(st stage)$(st steam)" = arenanetwaiting_gameno ]
+  check "route=arenanet, stage=waiting_game, no Steam" [ "$(st route stage steam)" = arenanet/waiting_game/no ]
   check "ArenaNet's installer started in the bottle" has "$STANDIN_LOG" "Gw2Setup-64.exe"
   GD2="$BOTTLE/drive_c/Program Files/Guild Wars 2"
   mkdir -p "$GD2" && echo "stand-in game" >"$GD2/Gw2-64.exe" && mkfile -n 2g "$GD2/Gw2.dat"
@@ -3533,7 +3539,7 @@ rm -f "$AD/compatdb.rules"
 section "Stop waiting keeps the engine and the bottle"
 g install steam >/dev/null 2>&1
 check "stop-waiting" sh -c "'$G' stop-waiting | grep -q '@done'"
-check "  stage=none, engine and bottle stay" [ "$(st stage)/$(st installed)" = none/yes ]
+check "  stage=none, engine and bottle stay" [ "$(st stage installed)" = none/yes ]
 g uninstall >/dev/null 2>&1
 
 section "Use existing game files (other Wine apps' installs)"
@@ -3687,7 +3693,7 @@ GDI="$STEAM/steamapps/common/Guild Wars 2"
 check "install import (CrossOver's Steam install) exits 0" [ "$rc" = 0 ]
 check "  the phases 1-5 (engine, bottle, Steam, the files, finishing)" [ "$(echo "$out" | grep '^@phase' | tr '\n' ' ')" = "@phase 1 @phase 2 @phase 3 @phase 4 @phase 5 " ]
 check "  cloned: the same disk" has <(echo "$out") "Cloning the game's files"
-check "  route=steam origin=import stage=finished game=yes" [ "$(st route) $(st origin) $(st stage) $(st game)" = "steam import finished yes" ]
+check "  route=steam origin=import stage=finished game=yes" [ "$(st route origin stage game)" = steam/import/finished/yes ]
 check "  the game's files in the bottle's Steam library" eval '[ -f "$GDI/Gw2-64.exe" ] && [ "$(stat -f %z "$GDI/Gw2.dat")" = 2147483648 ] && has "$GDI/bin64/CoherentUI64.dll" bin'
 check "  Steam's record of them, as it was" same "$CX/Program Files (x86)/Steam/steamapps/appmanifest_1284210.acf" "$STEAM/steamapps/appmanifest_1284210.acf"
 check "  Steam installed, not started for an install" eval '[ "$(st steam)" = yes ] && ! grep -q "steam://install" "$STANDIN_LOG"'
@@ -3710,7 +3716,7 @@ backup_kept() { local f; for f in "$BS"/"$APP_FOLDER backup "*/Local.dat; do has
 out=$(gi "$WRAP" 2>&1) && rc=0 || rc=$?
 check "install import of the wrapper's (ArenaNet) into the earlier bottle exits 0" [ "$rc" = 0 ]
 check "  the phases 1-4 (engine, bottle, the files, finishing)" [ "$(echo "$out" | grep '^@phase' | tr '\n' ' ')" = "@phase 1 @phase 2 @phase 3 @phase 4 " ]
-check "  route=arenanet origin=import game=yes, in Program Files" eval '[ "$(st route) $(st origin) $(st game)" = "arenanet import yes" ] && [ "$(st game_dir)" = "$BOTTLE/drive_c/Program Files/Guild Wars 2" ]'
+check "  route=arenanet origin=import game=yes, in Program Files" eval 'ST_OUT=$(g status); [ "$(kv "$ST_OUT" route origin game)" = arenanet/import/yes ] && [ "$(kv "$ST_OUT" game_dir)" = "$BOTTLE/drive_c/Program Files/Guild Wars 2" ]'
 check "  its settings in the bottle" same "$WRS/Local.dat" "$BS/Local.dat"
 check "  its lone ReShade.ini stayed behind, and the summary says so" eval '[ ! -e "$BOTTLE/drive_c/Program Files/Guild Wars 2/ReShade.ini" ] && has <(echo "$out") "^@done .*ReShade stayed behind"'
 check "  the bottle's own kept in a backup folder" backup_kept
@@ -3803,7 +3809,7 @@ old01() { # <steam|arenanet> <arcdps|both> [<settings.conf lines>]
     printf 'route=arenanet\nstage=finished\ngame_dir=%s\ngame_exe=\norigin=download\n' "$g" >"$O1/state"
   fi
   O1GAME=$g
-  echo "stand-in game" >"$g/Gw2-64.exe" && mkfile -n 2g "$g/Gw2.dat"
+  echo "stand-in game" >"$g/Gw2-64.exe" && mkfile -n 1100m "$g/Gw2.dat"
   mkdir -p "$g/addons/arcdps" && echo "[session]" >"$g/addons/arcdps/arcdps.ini"
   cp "$COMP/ui-scale/version.dll" "$g/version.dll" && echo "0.1's" >>"$g/version.dll" && echo "scale=1.5" >"$g/gw2-ui-scale.ini"
   if [ "$2" = arcdps ]; then
@@ -3870,14 +3876,16 @@ nothing_made() { [ -z "$(ad_list)" ]; }
 ini_clean() { ! grep -iqF -e "$(winp "$O1")\\" -e "$(winp "$OC")\\" "$1" && ! grep -iqE "$(winp "$O1" | sed 's/\\/\\\\/g')$" "$1"; }
 # settings_moved: this app's settings.conf as SETTINGS_FROM_01 says for the OLD_SET file, key by key
 settings_moved() {
-  local k how want got
+  local k how want got now defaults
+  # (this app's settings and the defaults, each read once for every key)
+  now=$(g settings) defaults=$(GW2_ON_MAC_ROOT="$SANDBOX/nowhere-root" "$GW2OM" settings)
   printf '%s\n' "$FROM01" | while read -r k how; do
     case " $OLD_SET " in *" $k="*) ;; *) echo "OLD_SET has no $k"; return 1 ;; esac
     want=$(printf '%s\n' $OLD_SET | sed -n "s/^$k=//p")
-    got=$(sett "$k")
+    got=$(kv "$now" "$k")
     case "$how" in
       kept) [ "$got" = "$want" ] || { echo "$k: $got, not $want"; return 1; } ;;
-      default) [ "$got" = "$(GW2_ON_MAC_ROOT="$SANDBOX/nowhere-root" "$GW2OM" settings | sed -n "s/^$k=//p")" ] || { echo "$k: $got, not the default"; return 1; } ;;
+      default) [ "$got" = "$(kv "$defaults" "$k")" ] || { echo "$k: $got, not the default"; return 1; } ;;
       dropped) ! grep -q "^$k=" "$AD/settings.conf" || [ "$k" = gamemode ] || { echo "$k is in settings.conf"; return 1; } ;;
       *) echo "$k: $how?"; return 1 ;;
     esac
@@ -3945,7 +3953,7 @@ mkdir -p "$LOGS" && : >"$LOGS/install.log"
 section "Move GW2 on Mac 0.1's install (install move), the move"
 old01 steam both
 check "status: 0.1's install, to move (the Steam route, nothing of 0.1 runs)" \
-  [ "$(st old_install) $(st move) $(st move_route) $(st move_busy)" = "yes yes steam none" ]
+  [ "$(st old_install move move_route move_busy)" = yes/yes/steam/none ]
 # 0.1's processes, a sleeper at each place 0.1's proc_list counts: its Steam, the game as the Game
 # Mode bundle's copy of the loader, the stock wineserver kept next to mine, and the game through a
 # winetemp link of the loader
@@ -3960,12 +3968,12 @@ for p in "$O1/engine/bin/steam.exe:steam" "$O1/gamemode/GW2.app/Contents/MacOS/G
   sleep 0.3
   out=$(g install move 2>&1) && rc=0 || rc=$?
   check "  $k of 0.1 runs ($(basename "$f")): status says so, the move is refused with why, nothing made" \
-    eval '[ "$(st move_busy)" = "$k" ] && [ -n "$(st move_wait)" ] && [ "$rc" != 0 ] && has <(echo "$out") "^@error $(st move_wait | sed "s/[().]/./g")" && nothing_made'
+    eval 'ST_OUT=$(g status); [ "$(kv "$ST_OUT" move_busy)" = "$k" ] && [ -n "$(kv "$ST_OUT" move_wait)" ] && [ "$rc" != 0 ] && has <(echo "$out") "^@error $(kv "$ST_OUT" move_wait | sed "s/[().]/./g")" && nothing_made'
   kill "$sp" 2>/dev/null; wait "$sp" 2>/dev/null; rm -f "$f"
 done
 out=$(g start-fresh --before-move 2>&1) && rc=0 || rc=$?
 check "Start fresh before the move: the move no longer starts by itself, nothing else made" \
-  eval '[ "$rc" = 0 ] && [ "$(st move) $(st move_record)" = "no skipped" ] && [ "$(ad_list)" = moved-from-0.1 ]'
+  eval '[ "$rc" = 0 ] && [ "$(st move move_record)" = no/skipped ] && [ "$(ad_list)" = moved-from-0.1 ]'
 rm -f "$AD/moved-from-0.1"
 check "  Steam's sentence names 0.1 and says to quit Steam there" \
   eval 'cp "$SANDBOX/sleeper" "$O1/engine/bin/steam.exe" && { "$O1/engine/bin/steam.exe" 30 & sp=$!; sleep 0.3; w=$(st move_wait); kill $sp; wait $sp 2>/dev/null; rm -f "$O1/engine/bin/steam.exe"; [ "$w" = "Steam is running in GW2 on Mac 0.1. Quit Steam there (Steam > Exit), and the move starts." ]; }'
@@ -4029,7 +4037,7 @@ mv "$PF" "$PF.away" && mkdir "$PF"
 if hdiutil create -quiet -size 4g -type SPARSE -fs APFS -volname gw2om-o1 "$SANDBOX/o1vol" >/dev/null 2>&1 &&
   hdiutil attach -quiet -nobrowse -noautoopen -mountpoint "$PF" "$SANDBOX/o1vol.sparseimage" >/dev/null 2>&1; then
   trap 'hdiutil detach -quiet -force "$PF" 2>/dev/null' EXIT
-  rsync -a --exclude Gw2.dat "$PF.away/" "$PF/" && mkfile -n 2g "$PF/Steam/steamapps/common/Guild Wars 2/Gw2.dat"
+  rsync -a --exclude Gw2.dat "$PF.away/" "$PF/" && mkfile -n 1100m "$PF/Steam/steamapps/common/Guild Wars 2/Gw2.dat"
   out=$(g install move 2>&1) && rc=0 || rc=$?
   check "0.1's Steam folder on another volume (a disk image mounted in 0.1's bottle, no link): refused, nothing written" \
     eval '[ "$(st old_install)" = yes ] && [ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac 0.1.s Steam folder is on another disk" && nothing_made && [ "$(logstamp)" = "$LST" ] && [ -f "$PF/Steam/steam.exe" ]'
@@ -4099,7 +4107,7 @@ for p in "TERM move-done" "KILL move-done" "TERM move-retired"; do
   sig=${p% *}
   move_paused "$sig" env GW2_ON_MAC_TEST_PAUSE_AT="${p#* }" "$GW2OM" install move
   check "a move stopped ($p: after its record is written) keeps the move: installed, the game here" \
-    eval '[ "$paused" = yes ] && [ "$rc" = "$([ "$sig" = TERM ] && echo 143 || echo 137)" ] && [ "$(st installed) $(st move_game)" = "yes here" ] && [ ! -e "$AD/move-undo" ] && [ "$(ino "$STEAM")" = "$O1INO" ] && [ -f "$GD/Gw2.dat" ]'
+    eval '[ "$paused" = yes ] && [ "$rc" = "$([ "$sig" = TERM ] && echo 143 || echo 137)" ] && [ "$(st installed move_game)" = yes/here ] && [ ! -e "$AD/move-undo" ] && [ "$(ino "$STEAM")" = "$O1INO" ] && [ -f "$GD/Gw2.dat" ]'
   g rollback >/dev/null 2>&1; g uninstall >/dev/null 2>&1; rm -rf "$AD"
   check "  Rollback, Uninstall: 0.1 as it was" eval 'o1_same && [ "$(ino "$O1ST")" = "$O1INO" ]'
 done
@@ -4109,20 +4117,20 @@ GM="$GD" U="$BOTTLE/drive_c/users/crossover"
 check "install move (Steam, ReShade with arcdps) exits 0, the phases 1-5" \
   eval '[ "$rc" = 0 ] && [ "$(echo "$out" | grep "^@phase" | tr "\n" " ")" = "@phase 1 @phase 2 @phase 3 @phase 4 @phase 5 " ]'
 check "  installed, route=steam origin=move stage=finished game=yes; the move is done and won't start again" \
-  [ "$(st installed) $(st route) $(st origin) $(st stage) $(st game) $(st move) $(st move_record)" = "yes steam move finished yes no moved" ]
+  [ "$(st installed route origin stage game move move_record)" = yes/steam/move/finished/yes/no/moved ]
 check "  every Wine call as crossover, and the bottle's user is crossover" eval 'every_wine_as crossover && [ "$(ls "$BOTTLE/drive_c/users")" = crossover ]'
 check "  0.1's Steam folder renamed into the new bottle in place of Valve's (the same inode, not inside it), gone from 0.1's" \
   eval '[ ! -e "$O1ST" ] && [ "$(ino "$STEAM")" = "$O1INO" ] && [ "$(ino "$GM/Gw2.dat")" = "$GDINO" ] && [ ! -e "$STEAM/Steam" ]'
 check "  in it steam.exe, the login, config, userdata, the record of the game, the game's files" \
-  eval 'has "$STEAM/steam.exe" "0.1.s steam" && has "$STEAM/config/loginusers.vdf" RememberPassword && has "$STEAM/config/config.vdf" "0.1.s config" && has "$STEAM/userdata/12345/config/localconfig.vdf" "0.1.s localconfig" && has "$STEAM/steamapps/appmanifest_1284210.acf" 1284210 && [ "$(stat -f %z "$GM/Gw2.dat")" = 2147483648 ] && has "$GM/Gw2-64.exe" "stand-in game"'
+  eval 'has "$STEAM/steam.exe" "0.1.s steam" && has "$STEAM/config/loginusers.vdf" RememberPassword && has "$STEAM/config/config.vdf" "0.1.s config" && has "$STEAM/userdata/12345/config/localconfig.vdf" "0.1.s localconfig" && has "$STEAM/steamapps/appmanifest_1284210.acf" 1284210 && [ "$(stat -f %z "$GM/Gw2.dat")" = 1153433600 ] && has "$GM/Gw2-64.exe" "stand-in game"'
 check "  no step copied or cloned Steam's or the game's folder (install.log), and no line of gw2om.sh does" \
   eval 'no_cp_of "$O1ST" "$O1GAME" && ! grep -nE "(clone_tree|cp )[^#]*[$][{]?OLD_(STEAM|GAME)" "$APP/Contents/Resources/gw2om.sh"'
 check "  the record names both places; status: the game is here, Rollback names 0.1.4" \
-  eval '[ "$(cat "$AD/moved-from-0.1")" = "$(printf "moved\nold=%s\nnew=%s\ngame=steamapps/common/Guild Wars 2\ninode=%s" "$O1ST" "$STEAM" "$O1INO")" ] && [ "$(st move_game) $(sett move_game) $(sett rollback_version)" = "here here 0.1.4" ] && [ "$(st rollback_dmg)" = https://github.com/jdrly/gw2-on-mac/releases/download/v0.1.4/GW2-on-Mac-0.1.4.dmg ] && [ ! -e "$AD/move-undo" ]'
+  eval 'ST_OUT=$(g status); [ "$(cat "$AD/moved-from-0.1")" = "$(printf "moved\nold=%s\nnew=%s\ngame=steamapps/common/Guild Wars 2\ninode=%s" "$O1ST" "$STEAM" "$O1INO")" ] && [ "$(kv "$ST_OUT" move_game)/$(sett move_game rollback_version)" = here/here/0.1.4 ] && [ "$(kv "$ST_OUT" rollback_dmg)" = https://github.com/jdrly/gw2-on-mac/releases/download/v0.1.4/GW2-on-Mac-0.1.4.dmg ] && [ ! -e "$AD/move-undo" ]'
 check "  the profile's Steam files in place of the new Steam's, and the game's settings folder whole" \
   eval 'same "$O1U/AppData/Local/Steam/local.vdf" "$U/AppData/Local/Steam/local.vdf" && [ ! -e "$U/AppData/Local/Steam/htmlcache.txt" ] && [ ! -e "$U/AppData/Local/Steam/Steam" ] && same "$O1U/AppData/Roaming/Guild Wars 2/Local.dat" "$U/AppData/Roaming/Guild Wars 2/Local.dat" && same "$O1U/AppData/Roaming/Guild Wars 2/GFXSettings.Gw2-64.exe.xml" "$U/AppData/Roaming/Guild Wars 2/GFXSettings.Gw2-64.exe.xml" && has "$U/AppData/Roaming/Guild Wars 2/Screens/gw001.jpg" JPG'
 check "  arcdps at ReShade's chain path, its settings with it; ReShade as d3d11.dll with the compiler and its record" \
-  eval 'same "$SANDBOX/pe/arcdps.dll" "$GM/$ARC_CHAIN" && has "$GM/addons/arcdps/arcdps.ini" session && same "$SANDBOX/pe/ReShade64.dll" "$GM/d3d11.dll" && has "$GM/d3dcompiler_47.dll" "0.1.s compiler" && same "$O1/reshade-compiler" "$AD/reshade-compiler" && [ "$(st arcdps_state) $(st reshade_state)" = "on on" ]'
+  eval 'same "$SANDBOX/pe/arcdps.dll" "$GM/$ARC_CHAIN" && has "$GM/addons/arcdps/arcdps.ini" session && same "$SANDBOX/pe/ReShade64.dll" "$GM/d3d11.dll" && has "$GM/d3dcompiler_47.dll" "0.1.s compiler" && same "$O1/reshade-compiler" "$AD/reshade-compiler" && [ "$(st arcdps_state reshade_state)" = on/on ]'
 check "  0.1's addon files kept apart: its own version.dll and both inis as they were" \
   eval 'has "$AD/0.1-addons/files/version.dll" "0.1.s\$" && has "$AD/0.1-addons/files/ReShade.ini" "BasePath=$(winp "$O1RS" | sed "s/\\\\/\\\\\\\\/g")\$" && has "$AD/0.1-addons/files/gw2-ui-scale.ini" "scale=1.5"'
 check "  the game folder's ReShade.ini names this app's ReShade folder" \
@@ -4146,7 +4154,7 @@ sessions_reset
 SL="$BOTTLE/drive_c/SteamLibrary/steamapps"
 mkdir -p "$SL/common" && mv "$GM" "$SL/common/" && mv "$STEAM/steamapps/appmanifest_1284210.acf" "$SL/" &&
   printf '"libraryfolders"\n{\n\t"1"\n\t{\n\t\t"path"\t\t"C:\\\\SteamLibrary"\n\t}\n}\n' >"$STEAM/steamapps/libraryfolders.vdf"
-check "Steam's game in another library of the bottle: status follows it" [ "$(st game_dir) $(st game)" = "$SL/common/Guild Wars 2 yes" ]
+check "Steam's game in another library of the bottle: status follows it" eval 'ST_OUT=$(g status); [ "$(kv "$ST_OUT" game_dir)" = "$SL/common/Guild Wars 2" ] && [ "$(kv "$ST_OUT" game)" = yes ]'
 out=$(g rollback 2>&1) && rc=0 || rc=$?
 check "  Rollback refuses: the game isn't in the folder that came from 0.1; nothing moved" \
   eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error Guild Wars 2 isn.t in the folder that came from GW2 on Mac 0.1" && [ "$(ino "$STEAM")" = "$O1INO" ] && [ -f "$SL/common/Guild Wars 2/Gw2.dat" ] && [ ! -e "$AD/move-undo" ]'
@@ -4171,7 +4179,7 @@ check "Repair with system.reg gone and the game in the bottle: refused, the game
 mv "$SANDBOX/system.reg" "$BOTTLE/system.reg"
 out=$(g start-fresh --before-move 2>&1) && rc=0 || rc=$?
 check "Start fresh confirmed before the move, with the move finished meanwhile: refused, the install stays" \
-  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error The move from GW2 on Mac 0.1 has finished meanwhile" && [ "$(st installed) $(st move_record)" = "yes moved" ]'
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error The move from GW2 on Mac 0.1 has finished meanwhile" && [ "$(st installed move_record)" = yes/moved ]'
 mv "$AD/moved-from-0.1" "$SANDBOX/record"
 out=$(g start-fresh --moved 2>&1) && rc=0 || rc=$?
 check "Start fresh with the move's record missing: refused, the game stays here" \
@@ -4182,7 +4190,7 @@ check "  Uninstall with the record missing (origin move): refused, the game stay
 cp "$SANDBOX/record" "$AD/moved-from-0.1"
 out=$(g start-fresh --moved 2>&1) && rc=0 || rc=$?
 check "Start fresh: the game goes back first (the same inode, 0.1's addon files), this app's install goes, the move doesn't start by itself again; 0.1 as it was" \
-  eval '[ "$rc" = 0 ] && has <(echo "$out") "^@done .*Guild Wars 2 went back to GW2 on Mac 0.1.s folder first" && [ "$(st installed) $(st move) $(st move_record) $(st old_install)" = "no no skipped yes" ] && [ "$(ad_list)" = "ReShade moved-from-0.1" ] && [ "$(ino "$O1ST")" = "$O1INO" ] && o1_same'
+  eval '[ "$rc" = 0 ] && has <(echo "$out") "^@done .*Guild Wars 2 went back to GW2 on Mac 0.1.s folder first" && [ "$(st installed move move_record old_install)" = no/no/skipped/yes ] && [ "$(ad_list)" = "ReShade moved-from-0.1" ] && [ "$(ino "$O1ST")" = "$O1INO" ] && o1_same'
 rm -rf "$AD"
 
 # a 0.1.3-age settings file (keys missing: 0.1's defaults) with Cooler job workers at 3, arcdps alone
@@ -4191,9 +4199,9 @@ O1SNAP=$(o1snap) O1INO=$(ino "$O1ST")
 out=$(g install move 2>&1) && rc=0 || rc=$?
 check "install move (Steam, arcdps alone, an older settings file with coolworkers=3 and ncpu=99) exits 0" [ "$rc" = 0 ]
 check "  arcdps as d3d11.dll, no ReShade, no ReShade folder made" \
-  eval 'same "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll" && [ "$(st arcdps_state) $(st reshade_state)" = "on off" ] && [ ! -e "$AD/ReShade" ]'
+  eval 'same "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll" && [ "$(st arcdps_state reshade_state)" = on/off ] && [ ! -e "$AD/ReShade" ]'
 check "  the keys the file lacks read as 0.1's defaults (uiscale_cinema on), the rest as kept, ncpu=99 as this Mac's 8; coolworkers dropped" \
-  eval '[ "$(sett fpscap) $(sett uiscale_cinema) $(sett steambg) $(sett fastlocks) $(sett ncpu)" = "60 on on off 8" ] && ! grep -q "^coolworkers=" "$AD/settings.conf"'
+  eval '[ "$(sett fpscap uiscale_cinema steambg fastlocks ncpu)" = 60/on/on/off/8 ] && ! grep -q "^coolworkers=" "$AD/settings.conf"'
 check "  the summary names Cooler job workers, Faster locks and the CPUs" \
   has <(mv_done) "Changed from GW2 on Mac 0.1: Cooler job workers isn.t a setting on this engine; Faster locks is off, this version.s default; CPUs the game sees is 8: 99 isn.t a choice here\."
 c=$(play_cmd)
@@ -4236,17 +4244,17 @@ check "Rollback with 0.1's place taken: refused, nothing changed, the game here"
 rmdir "$O1ST"
 move_paused KILL env GW2_ON_MAC_TEST_PAUSE_AT=rollback-renamed "$GW2OM" rollback
 check "Rollback killed after its rename: the next status renames it in again, the install as it was" \
-  eval '[ "$paused $rc" = "yes 137" ] && [ -e "$O1ST" ] && [ "$(st move_game) $(st game)" = "here yes" ] && [ ! -e "$O1ST" ] && [ "$(ino "$STEAM")" = "$O1INO" ] && [ ! -e "$AD/move-undo" ] && [ "$(gsnap)" = "$GSNAP" ]'
+  eval '[ "$paused $rc" = "yes 137" ] && [ -e "$O1ST" ] && [ "$(st move_game game)" = here/yes ] && [ ! -e "$O1ST" ] && [ "$(ino "$STEAM")" = "$O1INO" ] && [ ! -e "$AD/move-undo" ] && [ "$(gsnap)" = "$GSNAP" ]'
 out=$(g rollback 2>&1) && rc=0 || rc=$?
 check "Rollback: Steam's folder back in 0.1's bottle (the same inode), with the addon files 0.1 had: 0.1 as it was" \
   eval '[ "$rc" = 0 ] && [ "$(ino "$O1ST")" = "$O1INO" ] && o1_same'
 check "  this app stays installed, without Steam and the game; the summary says how to go back to 0.1.4" \
-  eval '[ "$(st installed) $(st steam) $(st game) $(st move_game) $(st move)" = "yes no no 01 no" ] && has <(echo "$out") "^@done Guild Wars 2 is back in GW2 on Mac 0.1.s folder\. To play on it, download GW2 on Mac 0\.1\.4, quit GW2 on Mac, and drag GW2 on Mac 0\.1\.4 to Applications over it\.$"'
+  eval '[ "$(st installed steam game move_game move)" = yes/no/no/01/no ] && has <(echo "$out") "^@done Guild Wars 2 is back in GW2 on Mac 0.1.s folder\. To play on it, download GW2 on Mac 0\.1\.4, quit GW2 on Mac, and drag GW2 on Mac 0\.1\.4 to Applications over it\.$"'
 out=$(g rollback 2>&1) && rc=0 || rc=$?
 check "  a second Rollback changes nothing" eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error There is no game moved from" && o1_same'
 out=$(g move-in 2>&1) && rc=0 || rc=$?
 check "Move in: Steam's folder renamed in again (the same inode), the game ready, arcdps as it was" \
-  eval '[ "$rc" = 0 ] && [ ! -e "$O1ST" ] && [ "$(ino "$STEAM")" = "$O1INO" ] && [ "$(st game) $(st stage) $(st move_game) $(st arcdps_state)" = "yes finished here on" ] && same "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll" && no_cp_of "$O1ST" "$O1GAME"'
+  eval '[ "$rc" = 0 ] && [ ! -e "$O1ST" ] && [ "$(ino "$STEAM")" = "$O1INO" ] && [ "$(st game stage move_game arcdps_state)" = yes/finished/here/on ] && same "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll" && no_cp_of "$O1ST" "$O1GAME"'
 # (the game back in 0.1 before Uninstall, which would remove it with the bottle)
 g rollback >/dev/null 2>&1
 # another volume mounted inside the bottle: Uninstall leaves the bottle (rm -x wouldn't cross into
@@ -4279,14 +4287,14 @@ rmdir "$MNT" 2>/dev/null || true
 sessions_reset
 out=$(g uninstall 2>&1)
 check "uninstall after a move keeps the move's record: no second move by itself" \
-  eval '[ "$(st installed) $(st move) $(st move_record)" = "no no moved" ] && { [ "$(ad_list)" = moved-from-0.1 ] || { echo "    the app folder holds: $(ad_list)"; false; }; }'
+  eval '[ "$(st installed move move_record)" = no/no/moved ] && { [ "$(ad_list)" = moved-from-0.1 ] || { echo "    the app folder holds: $(ad_list)"; false; }; }'
 out=$(g install move 2>&1) && rc=0 || rc=$?
 check "  install move refused with the record there, nothing else made" \
   eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error GW2 on Mac doesn.t move GW2 on Mac 0.1.s install again: it was moved here before" && { [ "$(ad_list)" = moved-from-0.1 ] || { echo "    the app folder holds: $(ad_list)"; false; }; } && o1_same'
 g install steam >/dev/null 2>&1
 out=$(g start-fresh --moved 2>&1) && rc=0 || rc=$?
 check "  Start fresh over an install made after it (not the moved one): refused, the install stays" \
-  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error This install isn.t the one moved from GW2 on Mac 0.1" && [ "$(st installed) $(st move_record)" = "yes moved" ]'
+  eval '[ "$rc" != 0 ] && has <(echo "$out") "^@error This install isn.t the one moved from GW2 on Mac 0.1" && [ "$(st installed move_record)" = yes/moved ]'
 g uninstall >/dev/null 2>&1
 rm -rf "$AD"
 
@@ -4298,20 +4306,20 @@ GA="$BOTTLE/drive_c/Program Files/Guild Wars 2"
 check "install move (ArenaNet, ReShade with arcdps) exits 0, the phases 1-4, no Steam" \
   eval '[ "$rc" = 0 ] && [ "$(echo "$out" | grep "^@phase" | tr "\n" " ")" = "@phase 1 @phase 2 @phase 3 @phase 4 " ] && [ "$(st steam)" = no ] && ! grep -q SteamSetup "$STANDIN_LOG"'
 check "  route=arenanet origin=move game=yes, the game in Program Files" \
-  eval '[ "$(st route) $(st origin) $(st game)" = "arenanet move yes" ] && [ "$(st game_dir)" = "$GA" ] && [ "$(stat -f %z "$GA/Gw2.dat")" = 2147483648 ]'
+  eval 'ST_OUT=$(g status); [ "$(kv "$ST_OUT" route origin game)" = arenanet/move/yes ] && [ "$(kv "$ST_OUT" game_dir)" = "$GA" ] && [ "$(stat -f %z "$GA/Gw2.dat")" = 1153433600 ]'
 check "  the game's settings; no Steam files in the profile" \
   eval 'same "$O1U/AppData/Roaming/Guild Wars 2/Local.dat" "$BOTTLE/drive_c/users/crossover/AppData/Roaming/Guild Wars 2/Local.dat" && [ ! -e "$BOTTLE/drive_c/users/crossover/AppData/Local/Steam" ]'
 check "  arcdps at the chain path, ReShade in, both inis name only this app's folders, the linked one's file too" \
-  eval 'same "$SANDBOX/pe/arcdps.dll" "$GA/$ARC_CHAIN" && [ "$(st arcdps_state) $(st reshade_state)" = "on on" ] && ini_clean "$GA/ReShade.ini" && ini_clean "$AD/ReShade/ReShade.ini" && ini_clean "$AD/ReShade/Mine-settings.ini" && [ -L "$AD/ReShade/ReShade.ini" ] && has "$AD/ReShade/ReShade.ini" "^ProxyLibrary=C:.Program Files.Guild Wars 2.addons.arcdps.chain.d3d11.dll\$"'
+  eval 'same "$SANDBOX/pe/arcdps.dll" "$GA/$ARC_CHAIN" && [ "$(st arcdps_state reshade_state)" = on/on ] && ini_clean "$GA/ReShade.ini" && ini_clean "$AD/ReShade/ReShade.ini" && ini_clean "$AD/ReShade/Mine-settings.ini" && [ -L "$AD/ReShade/ReShade.ini" ] && has "$AD/ReShade/ReShade.ini" "^ProxyLibrary=C:.Program Files.Guild Wars 2.addons.arcdps.chain.d3d11.dll\$"'
 check "  the summary" has <(mv_done) "^Your install moved from GW2 on Mac 0.1: Guild Wars 2 (moved on this disk, no extra space), your game settings, your addons as they were (arcdps, ReShade with your presets, the larger interface) and your settings\..* To play on GW2 on Mac 0\.1 again, choose Rollback to 0\.1\.4 in Settings › Troubleshooting\. Press Play\.$"
 check "  the game folder renamed (the same inode, gone from 0.1's bottle); 0.1's folders as they were but for it" \
   eval '[ ! -e "$O1GAME" ] && [ "$(ino "$GA")" = "$O1INO" ] && o1_rest_same "$O1GAME" && no_cp_of "$O1GAME" && [ "$(sed -n "s/^game=//p" "$AD/moved-from-0.1")" = "" ]'
 out=$(g rollback 2>&1) && rc=0 || rc=$?
 check "Rollback (ArenaNet): the game folder back with 0.1's addon files and its own ReShade.ini, 0.1 as it was" \
-  eval '[ "$rc" = 0 ] && [ "$(ino "$O1GAME")" = "$O1INO" ] && o1_same && [ "$(st installed) $(st game) $(st move_game)" = "yes no 01" ]'
+  eval '[ "$rc" = 0 ] && [ "$(ino "$O1GAME")" = "$O1INO" ] && o1_same && [ "$(st installed game move_game)" = yes/no/01 ]'
 out=$(g move-in 2>&1) && rc=0 || rc=$?
 check "  Move in: the game folder here again, both inis name only this app's folders" \
-  eval '[ "$rc" = 0 ] && [ "$(ino "$GA")" = "$O1INO" ] && [ "$(st game) $(st move_game) $(st reshade_state)" = "yes here on" ] && ini_clean "$GA/ReShade.ini"'
+  eval '[ "$rc" = 0 ] && [ "$(ino "$GA")" = "$O1INO" ] && [ "$(st game move_game reshade_state)" = yes/here/on ] && ini_clean "$GA/ReShade.ini"'
 # a bottle an earlier version made keeps its user's name (the Mac's login there)
 mv "$BOTTLE/drive_c/users/crossover" "$BOTTLE/drive_c/users/$(id -un)x"
 c=$(play_cmd)
@@ -4323,7 +4331,7 @@ check "Uninstall with the moved game in the bottle: refused, Rollback named, not
 mv "$BOTTLE/drive_c/users/$(id -un)x" "$BOTTLE/drive_c/users/crossover"
 g rollback >/dev/null 2>&1; g uninstall >/dev/null 2>&1
 rm -rf "$AD" "$O1" "$OC"
-check "no 0.1 install: status offers no move" [ "$(st old_install) $(st move)" = "no no" ]
+check "no 0.1 install: status offers no move" [ "$(st old_install move)" = no/no ]
 # Uninstall takes a game with the bottle only when no move is recorded: Start fresh's record counts
 # as none only as exactly the one line "skipped" (a NUL in it, say, makes it a move's)
 g install steam >/dev/null 2>&1
@@ -4496,7 +4504,7 @@ check "  a dry run of Play prints that rule, and each line it leaves out with wh
   eval 'echo "$out" | grep -qxF "[dry-run] rule $(dg rules | head -1)" && echo "$out" | grep -qxF "[dry-run] dev-switches.conf leaves out WINE_WIN32U_SETCURSOR=shm ($W32WHY)" && { ! drv || echo "$out" | grep -qxF "[dry-run] dev-switches.conf leaves out WINE_MACDRV_CLIP=changes (my winemac.so doesn'"'"'t have it)"; }'
 check "  and doesn't write the file again" eval '! echo "$out" | grep -q "dev-switches.conf: version"'
 check "status lists the lines in the rule, and those left out" \
-  eval '[ "$(dg status | sed -n "s/^dev_switches=//p")" = "$(dev_expect | tr "\n" " " | sed "s/ \$//")" ] && dg status | sed -n "s/^dev_switches_out=//p" | grep -qF "WINE_WIN32U_PEEK_YIELD=off ($W32WHY)"'
+  eval 'ST_OUT=$(dg status); [ "$(kv "$ST_OUT" dev_switches)" = "$(dev_expect | tr "\n" " " | sed "s/ \$//")" ] && kv "$ST_OUT" dev_switches_out | grep -qF "WINE_WIN32U_PEEK_YIELD=off ($W32WHY)"'
 # The table's WINE_MACDRV_* lines with the staged Mac driver's own record for a moment (#144): each
 # one its switches: line names is in the rule, each other one out, saying why. The stand-in's line
 # is jdrly/wine 472d777's, which names all four; a dev build's names what its commit has
@@ -4671,7 +4679,7 @@ DTREE="$DAD/engine/lib/wine/dxgi/dxmt/aarch64-windows"
 rm -rf "$SANDBOX/dtree.keep" && cp -Rp "$DTREE" "$SANDBOX/dtree.keep"
 for f in "$DTREE"/*.dll; do echo "an earlier build" >"$f"; done
 check "an earlier build of my DXMT fork in the engine: its DXMT_* lines out, saying so" \
-  eval '! dg status | grep "^dev_switches=" | grep -q DXMT_ && dg status | sed -n "s/^dev_switches_out=//p" | grep -q "DXMT_PRESENTER_FREE=1 (my DXMT fork doesn'"'"'t have it)"'
+  eval 'ST_OUT=$(dg status); ! echo "$ST_OUT" | grep "^dev_switches=" | grep -q DXMT_ && kv "$ST_OUT" dev_switches_out | grep -q "DXMT_PRESENTER_FREE=1 (my DXMT fork doesn'"'"'t have it)"'
 dev_files
 check "  DXMT_RENAME_TRIM=600 (jdrly/dxmt#265) among them" \
   eval '! rule_has DXMT_RENAME_TRIM=600 && ! in_status DXMT_RENAME_TRIM && out_status "DXMT_RENAME_TRIM=600 (my DXMT fork doesn'"'"'t have it)"'
@@ -4686,7 +4694,7 @@ v10_dxmt() { # in|out: version 10's four lines each in the rule, status and a dr
 check "  version 10's four lines (jdrly/dxmt#324, #316, #314) among them, status and a dry run of Play saying why" v10_dxmt out
 printf 'x\0DXMT_WARM_JOBS\0' >"$DTREE/d3d11.dll"
 check "  one that has DXMT_WARM_JOBS: that line in, the others out" \
-  eval 'dg status | grep "^dev_switches=" | grep -q DXMT_WARM_JOBS=2 && dg status | sed -n "s/^dev_switches_out=//p" | grep -q "DXMT_PRESENTER_FREE=1 (my DXMT fork doesn'"'"'t have it)"'
+  eval 'ST_OUT=$(dg status); echo "$ST_OUT" | grep "^dev_switches=" | grep -q DXMT_WARM_JOBS=2 && kv "$ST_OUT" dev_switches_out | grep -q "DXMT_PRESENTER_FREE=1 (my DXMT fork doesn'"'"'t have it)"'
 printf 'x\0DXMT_RENAME_TRIM\0' >"$DTREE/d3d11.dll"
 dev_files
 check "  one that has DXMT_RENAME_TRIM: DXMT_RENAME_TRIM=600 in the rule and status" \
@@ -5036,9 +5044,9 @@ check "  raw mouse-look off afterwards stays off" eval 'grep -qx rawmouse=off "$
 # A release build over it (a development build and the release share the folders, ADR 0018): the
 # rows read as their defaults while the dev_version= line is there, and its next write drops the
 # line and writes those defaults
-rsett() { rg settings | sed -n "s/^$1=//p"; }
+rsett() { kv "$(rg settings)" "$@"; }
 check "a release build over it reads the rows at their defaults: fex engine, fast locks off, raw mouse-look on, Debug logging off" \
-  eval 'grep -qx dev_version=2 "$RAD/settings.conf" && grep -qx fex=mine "$RAD/settings.conf" && [ "$(rsett fex)" = engine ] && [ "$(rsett fastlocks)" = off ] && [ "$(rsett rawmouse)" = on ] && [ "$(rsett debug)" = off ] && grep -qx dev_version=2 "$RAD/settings.conf"'
+  eval 'grep -qx dev_version=2 "$RAD/settings.conf" && grep -qx fex=mine "$RAD/settings.conf" && [ "$(rsett fex fastlocks rawmouse debug)" = engine/off/on/off ] && grep -qx dev_version=2 "$RAD/settings.conf"'
 rg set quitsteam off >/dev/null
 check "  its next write: no dev_version line, the rows at their defaults, my change in" \
   eval '! grep -q "^dev_version=" "$RAD/settings.conf" && grep -qx fex=engine "$RAD/settings.conf" && grep -qx fastlocks=off "$RAD/settings.conf" && grep -qx rawmouse=on "$RAD/settings.conf" && grep -qx debug=off "$RAD/settings.conf" && grep -qx quitsteam=off "$RAD/settings.conf"'
