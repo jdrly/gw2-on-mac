@@ -673,13 +673,15 @@ check "  no WINE_COMPATDB, no WINEDLLPATH" eval '! echo "$out" | grep -q -e WINE
 check "  and still nothing created" eval '[ -z "$(ad_list)" ] && [ ! -e "$CACHE" ]'
 
 section "macOS and the engine's checks (nothing is left behind)"
-check "status: macOS 26.3 is below the engine's 26.4" [ "$(GW2_ON_MAC_MACOS=26.3 "$G" status | sed -n 's/^macos_ok=//p')/$(st macos_min)" = no/26.4 ]
-check "  26.4, 26.10 and 27.0 are not (compared as numbers)" [ "$(for v in 26.4 26.10 27.0; do GW2_ON_MAC_MACOS=$v "$G" status | sed -n 's/^macos_ok=//p'; done | tr '\n' /)" = yes/yes/yes/ ]
+check "status: macOS 26.3, 26.4 and 26.4.1 are below the engine's 26.5" \
+  [ "$(for v in 26.3 26.4 26.4.1; do GW2_ON_MAC_MACOS=$v "$G" status | sed -n 's/^macos_ok=//p'; done | tr '\n' /)$(st macos_min)" = no/no/no/26.5 ]
+check "  26.5, 26.5.2, 26.7, 26.10 and 27.0 are not (compared as numbers)" \
+  [ "$(for v in 26.5 26.5.2 26.7 26.10 27.0; do GW2_ON_MAC_MACOS=$v "$G" status | sed -n 's/^macos_ok=//p'; done | tr '\n' /)" = yes/yes/yes/yes/yes/ ]
 out=$(GW2_ON_MAC_MACOS=26.10 GW2_ON_MAC_DRY_RUN=1 g install steam 2>&1) && rc=0 || rc=$?
 check "  a dry-run install on macOS 26.10 goes ahead (no gate)" eval '[ "$rc" = 0 ] && has <(echo "$out") "@phase 4" && [ -z "$(ad_list)" ]'
-out=$(GW2_ON_MAC_MACOS=26.3 g install steam 2>&1) && rc=0 || rc=$?
-check "install on macOS 26.3: refused, naming both versions, nothing created" \
-  eval '[ "$rc" != 0 ] && echo "$out" | grep -qxF "@error $APP_NAME needs macOS 26.4 or later for its Wine engine. This Mac has macOS 26.3. Update macOS in System Settings › General › Software Update, then try again." && [ ! -e "$ENG" ] && [ ! -e "$AD/state" ]'
+out=$(GW2_ON_MAC_MACOS=26.4.1 g install steam 2>&1) && rc=0 || rc=$?
+check "install on macOS 26.4.1: refused, naming both versions, nothing created" \
+  eval '[ "$rc" != 0 ] && echo "$out" | grep -qxF "@error $APP_NAME needs macOS 26.5 or later for its Wine engine. This Mac has macOS 26.4.1. Update macOS in System Settings › General › Software Update, then try again." && [ ! -e "$ENG" ] && [ ! -e "$AD/state" ]'
 # With the checks on (as outside a sandbox), against the stand-in's own files: the real engine's
 # Wine never runs in a sandbox, and these installs stop at the engine
 LOADER_SHA=$(shasum -a 256 "$S/$LOADER" | cut -d' ' -f1)
@@ -3893,18 +3895,18 @@ settings_moved() {
 }
 mv_done() { echo "$out" | sed -n 's/^@done //p'; }
 
-section "Below the engine's macOS nothing is written (macOS 26.3, over 0.1's install)"
+section "Below the engine's macOS nothing is written (macOS 26.4.1, over 0.1's install)"
 # (this app's three folders out of the way, back after this section)
 mv "$LOGS" "$LOGS.aside" 2>/dev/null; mv "$CACHE" "$CACHE.aside" 2>/dev/null
 old01 steam both
 O1SNAP=$(o1snap) O1INO="$(ino "$O1ST") $(ino "$O1GAME") $(ino "$O1B")"
-GATE_ERR="@error $APP_NAME needs macOS 26.4 or later for its Wine engine. This Mac has macOS 26.3. Update macOS in System Settings › General › Software Update, then try again."
+GATE_ERR="@error $APP_NAME needs macOS 26.5 or later for its Wine engine. This Mac has macOS 26.4.1. Update macOS in System Settings › General › Software Update, then try again."
 echo "[Mine]" >"$SANDBOX/gate-preset.ini"
 # every command that writes, each refused with preflight's sentence and nothing else
 gate_out=""
 while IFS= read -r c; do
   # shellcheck disable=SC2086 # (the command and its arguments, one word each)
-  out=$(GW2_ON_MAC_MACOS=26.3 "$G" $c 2>&1 </dev/null) && rc=0 || rc=$?
+  out=$(GW2_ON_MAC_MACOS=26.4.1 "$G" $c 2>&1 </dev/null) && rc=0 || rc=$?
   [ "$rc" != 0 ] && [ "$out" = "$GATE_ERR" ] || gate_out="$gate_out [$c: $rc $out]"
 done <<GATE
 install steam
@@ -3937,8 +3939,8 @@ vmmap
 GATE
 check "every command that writes is refused, with preflight's sentence only" eval '[ -z "$gate_out" ] || { echo "$gate_out"; false; }'
 # (and what only reads answers: status sees 0.1's install and names the last 0.1.x's DMG)
-for c in settings session-status scan rules env; do GW2_ON_MAC_MACOS=26.3 "$G" $c >/dev/null 2>&1; done
-out=$(GW2_ON_MAC_MACOS=26.3 "$G" status 2>&1)
+for c in settings session-status scan rules env; do GW2_ON_MAC_MACOS=26.4.1 "$G" $c >/dev/null 2>&1; done
+out=$(GW2_ON_MAC_MACOS=26.4.1 "$G" status 2>&1)
 V=$(echo "$out" | sed -n 's/^rollback_version=//p')
 check "status answers: macos_ok=no, 0.1's install to move, the last 0.1.x and its DMG" \
   eval 'echo "$out" | grep -qx macos_ok=no && echo "$out" | grep -qx move=yes && echo "$V" | grep -qx "0\.1\.[0-9]*" &&

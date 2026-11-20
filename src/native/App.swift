@@ -280,7 +280,7 @@ final class Installer {
     if !loaded { return "Checking this Mac…" }
     if !appleSilicon { return "\(appName) needs a Mac with Apple silicon." }
     if !macosOK {
-      return "\(appName) needs macOS \(status["macos_min"] ?? "26.4") or later for its Wine engine. This Mac has macOS \(status["macos"] ?? "?")."
+      return "\(appName) needs macOS \(status["macos_min"] ?? "26.5") or later for its Wine engine. This Mac has macOS \(status["macos"] ?? "?")."
     }
     if route == .arenanet {
       switch setupCheck {

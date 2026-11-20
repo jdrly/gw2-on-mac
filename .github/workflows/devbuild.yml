@@ -563,8 +563,8 @@ jobs:
           ### My FEX
           $fex
 
-          ### macOS 26.0 to 26.3
-          This build needs macOS 26.4 or later, as the engine does. Below that it changes nothing and shows one window that downloads [GW2 on Mac $last01](https://github.com/$GITHUB_REPOSITORY/releases/tag/v$last01), the last 0.1.x, which runs there.
+          ### macOS 26.0 to 26.4
+          This build needs macOS 26.5 or later, as the engine does. Below that it changes nothing and shows one window that downloads [GW2 on Mac $last01](https://github.com/$GITHUB_REPOSITORY/releases/tag/v$last01), the last 0.1.x, which runs there.
 
           ### Support
           GW2 on Mac is an unofficial project. ArenaNet and NCSOFT don't make, endorse or support it, and
