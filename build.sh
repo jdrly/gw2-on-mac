@@ -46,7 +46,7 @@ cd "$(dirname "$0")"
 ROOT="$PWD"
 
 # GW2_ON_MAC_VERSION overrides the version for test builds.
-APP_VERSION=${GW2_ON_MAC_VERSION:-0.2.0}
+APP_VERSION=${GW2_ON_MAC_VERSION:-0.2.1}
 # The Dev build workflow's version when it is given none, and the lowest one release.sh --adhoc
 # publishes, so no dev build or release candidate number goes out twice. This script doesn't use it:
 # APP_VERSION above is the release while I prepare it.
