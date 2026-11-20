@@ -5910,10 +5910,14 @@ cmd_play() {
       */other) die "The engine's FEX is neither its own nor mine. Click Repair." ;;
       switch/*) echo "@notice Steam is still running with $(fex_label "$(fex_in_place)"); quit Steam to switch to $(fex_label "$(fex_want)")." ;;
     esac
-    # (KosmicKrisp: never a session on a file that is neither the engine's own nor this app's)
+    # (KosmicKrisp: never a session on a file that is neither the engine's own nor this app's, and
+    # never one on the engine's own while this app carries mine: the engine's own ends the game on
+    # macOS 26, #339. Steam started before the update keeps the engine's files until it quits.)
     case "$(kk_state)/$(kk_file "$KK_PATH")" in
       */other|other/*) die "The engine's KosmicKrisp is neither its own nor mine. Click Repair." ;;
-      switch/*) echo "@notice Steam is still running with $(kk_label "$(kk_file "$KK_PATH")"); quit Steam to switch to $(kk_label "$(kk_want)")." ;;
+      switch/*)
+        [ "$(kk_want)" != mine ] || die "Steam is still running with the engine's own KosmicKrisp, which crashes the game on macOS 26. Quit Steam, then click Play again to put mine in."
+        echo "@notice Steam is still running with $(kk_label "$(kk_file "$KK_PATH")"); quit Steam to switch to $(kk_label "$(kk_want)")." ;;
     esac
   fi
   # A running session keeps the settings it started with: Steam passes its own environment on

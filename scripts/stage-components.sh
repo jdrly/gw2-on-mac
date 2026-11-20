@@ -211,7 +211,7 @@ check_kk() {
   local f
   for f in $KK_FILES $KK_META; do need "$1/$f"; done
   check_engine "$1/VERSION"
-  grep -q "^base: $engine_mesa" "$1/VERSION" || die "$1/VERSION names another base than ENGINE_MESA ($engine_mesa)"
+  grep -Eq "^base: ${engine_mesa}[0-9a-f]{30}( |$)" "$1/VERSION" || die "$1/VERSION names another base than ENGINE_MESA ($engine_mesa)"
   [ -z "${KK_COMMIT:-}" ] || grep -qx "commit: $KK_COMMIT" "$1/VERSION" || die "$1/VERSION is not commit $KK_COMMIT"
   grep -qx "libvulkan_kosmickrisp.dylib: sha256 $(sha "$1/libvulkan_kosmickrisp.dylib")" "$1/VERSION" ||
     die "$1/libvulkan_kosmickrisp.dylib is not the file its VERSION names"
@@ -363,6 +363,9 @@ if [ "${1:-}" = --fetch ] || [ ! -d "$WS" ]; then
   fi
   url="$(lock_get kosmickrisp_url)" sum="$(lock_get kosmickrisp_sha256)"
   if [ -n "$url" ]; then
+    # (the commit the asset's name says, which its VERSION has to name too)
+    KK_COMMIT="${KK_COMMIT:-$(echo "${url##*/}" | sed -n 's/^kosmickrisp-arm64-\([0-9a-f]\{40\}\)\.tar\.xz$/\1/p')}"
+    [ -n "$KK_COMMIT" ] || die "kosmickrisp_url names no kosmickrisp-arm64-<full sha>.tar.xz: $url"
     kk_archive="$(fetch_pinned "$url" "$sum")"
     rm -rf "$P.kk" && mkdir -p "$P.kk"
     tar -xJf "$kk_archive" -C "$P.kk"

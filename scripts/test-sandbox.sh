@@ -2154,6 +2154,23 @@ if drv; then
 else
   skipdrv "set macdrv engine while a session runs"
 fi
+# An update from 0.2.0 while Steam still runs with the engine's own KosmicKrisp (it crashes the game
+# on macOS 26, #339): Play refuses and starts no Wine; once Steam has quit, Play puts mine in
+if kkb; then
+  mv -f "$KKF.engine" "$KKF"
+  mv "$ENG/bin/wineserver" "$ENG/bin/wineserver.heat" && cp "$SANDBOX/sleeper" "$ENG/bin/wineserver"
+  "$ENG/bin/wineserver" 60 & sp=$!
+  sleep 0.3
+  : >"$STANDIN_LOG"; out=$(GW2_ON_MAC_WATCH_GRACE=0 g play 2>&1) && rc=0 || rc=$?
+  check "Play while Steam runs with the engine's own KosmicKrisp: refused, no Wine started" \
+    eval '[ "$rc" != 0 ] && echo "$out" | grep -qxF "@error Steam is still running with the engine'"'"'s own KosmicKrisp, which crashes the game on macOS 26. Quit Steam, then click Play again to put mine in." && ! has "$STANDIN_LOG" "^wine " && kk_is engine && [ "$(st kosmickrisp_ready)" = switch ]'
+  kill $sp 2>/dev/null || true; wait $sp 2>/dev/null || true
+  mv -f "$ENG/bin/wineserver.heat" "$ENG/bin/wineserver"
+  : >"$STANDIN_LOG"; out=$(GW2_ON_MAC_WATCH_GRACE=0 g play 2>&1); started
+  check "  once it has ended, the next Play puts mine in before Wine starts" \
+    eval 'kk_is mine && has "$LOGS/session.env" "^LIB_kosmickrisp=mine $MYKK_COMMIT "'
+  watch_done
+fi
 # A mix of my Mac driver's two files and the engine's own (a switch cut short): Play refuses it
 # while Steam runs, finishes the switch once Steam has quit, and refuses one it can't finish
 if drv; then

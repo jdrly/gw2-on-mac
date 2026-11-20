@@ -1507,8 +1507,9 @@ same way and stages it as from the workspace. My `winemac.so` is the same with `
 `macdrv_sha256=`, my FEX with `fex_url=` and `fex_sha256=`, and my KosmicKrisp with
 `kosmickrisp_url=` and `kosmickrisp_sha256=`. `prebuilt.lock` pins only my KosmicKrisp today. `build.sh` then checks `prebuilt/` like any other.
 
-`--pack <tag>` makes such an archive from `prebuilt/` without `ntdll/`, `macdrv/` and `fex/` and
-writes `prebuilt.lock` for it, keeping its `ntdll_`, `macdrv_` and `fex_` lines; README.md on
+`--pack <tag>` makes such an archive from `prebuilt/` without `ntdll/`, `macdrv/`, `fex/` and
+`kosmickrisp/` and writes `prebuilt.lock` for it, keeping its `ntdll_`, `macdrv_`, `fex_` and
+`kosmickrisp_` lines; README.md on
 `main` says how I publish one.
 
 **In a dev build.** The Dev build workflow ([Releasing](#releasing)) takes neither my workspace nor

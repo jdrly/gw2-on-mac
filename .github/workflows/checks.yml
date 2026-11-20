@@ -399,7 +399,8 @@ jobs:
           [ "$(cd prebuilt/kosmickrisp && find . -type f | LC_ALL=C sort | tr '\n' ' ')" = "./LICENSE.rst ./SHA256SUMS ./VERSION ./libvulkan_kosmickrisp.dylib " ]
           # (its ARM64EC half only: the WoW64 half stays the engine's)
           [ "$(cd prebuilt/fex && find . -type f | LC_ALL=C sort | tr '\n' ' ')" = "./LICENSE ./NOTICES ./SHA256SUMS ./VERSION ./aarch64-unix/libarm64ecfex.so ./aarch64-windows/libarm64ecfex.dll " ]
-          grep -x "commit: $commit" prebuilt/ntdll/VERSION prebuilt/macdrv/VERSION prebuilt/fex/VERSION prebuilt/kosmickrisp/VERSION
+          # (each staged copy's own VERSION: one grep over all would pass on any one of them)
+          for k in ntdll macdrv fex kosmickrisp; do grep -qx "commit: $commit" "prebuilt/$k/VERSION"; done
           grep "^ntdll $commit ntdll.so " prebuilt/STAGED
           grep "^macdrv $commit winemac.so [0-9a-f]* win32u.so " prebuilt/STAGED
           grep "^fex $commit libarm64ecfex.dll " prebuilt/STAGED
