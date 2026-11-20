@@ -231,7 +231,8 @@ jobs:
         run: scripts/stage-components.sh --fetch
 
       # Until prebuilt.lock pins an archive with my arm64 DXMT (jdrly/dxmt#182), my ntdll.so and my
-      # winemac.so (jdrly/wine's arm64-builds) and my FEX (jdrly/FEX's arm64-builds), stand-ins in
+      # winemac.so (jdrly/wine's arm64-builds), my FEX (jdrly/FEX's arm64-builds) and my KosmicKrisp
+      # (jdrly/mesa's arm64-builds), stand-ins in
       # their layout for what it lacks: what the sandbox needs, never a release (scripts/release.sh
       # refuses them)
       - name: Stand-ins for the components prebuilt.lock doesn't pin
@@ -270,8 +271,8 @@ jobs:
           retention-days: 7
 
       # The refusals change the files this job has finished with. A dev build has no archive, my
-      # ntdll.so only with its wine_commit, my winemac.so only with its macdrv_commit and my FEX only
-      # with its fex_commit.
+      # ntdll.so only with its wine_commit, my winemac.so only with its macdrv_commit, my FEX only
+      # with its fex_commit and my KosmicKrisp only with its kosmickrisp_commit.
       - name: build.sh refuses a changed component or an addon older than its source, stage-components.sh a changed archive
         env:
           ARCHIVE: ${{ inputs.components == '' }}
@@ -305,6 +306,13 @@ jobs:
             if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took a FEX that isn't its record's"; exit 1; fi
             grep 'prebuilt/fex does not match its record' "$RUNNER_TEMP/build.txt"
             rm -rf prebuilt/fex && cp -R "$RUNNER_TEMP/fex" prebuilt/fex
+          fi
+          if [ -d prebuilt/kosmickrisp ]; then
+            cp -R prebuilt/kosmickrisp "$RUNNER_TEMP/kosmickrisp"
+            printf x >>prebuilt/kosmickrisp/libvulkan_kosmickrisp.dylib
+            if ./build.sh >"$RUNNER_TEMP/build.txt" 2>&1; then echo "build.sh took a KosmicKrisp that isn't its record's"; exit 1; fi
+            grep 'prebuilt/kosmickrisp does not match its record' "$RUNNER_TEMP/build.txt"
+            rm -rf prebuilt/kosmickrisp && cp -R "$RUNNER_TEMP/kosmickrisp" prebuilt/kosmickrisp
           fi
           cp prebuilt/ui-scale/gw2-ui-scale.ini "$RUNNER_TEMP/gw2-ui-scale.ini"
           printf 'zz_new_setting=1\n' >>addon/ui-scale/gw2-ui-scale.ini
@@ -360,10 +368,23 @@ jobs:
           echo "MIT" >"$fd/files/LICENSE" && echo "notices" >"$fd/files/NOTICES"
           tar -cJf "$fd/fex-arm64-$commit.tar.xz" -C "$fd/files" aarch64-windows aarch64-unix VERSION LICENSE NOTICES
           fx="$fd/fex-arm64-$commit.tar.xz"
-          lock() { # <ntdll sha256> <macdrv sha256> <fex sha256>
-            cat "$RUNNER_TEMP/prebuilt.lock"
+          # My KosmicKrisp as jdrly/mesa's asset kosmickrisp-arm64-<commit>.tar.xz lays it out (the
+          # driver, its ICD manifest, LICENSE.rst, VERSION): a signed dylib for the driver
+          kd="$RUNNER_TEMP/kosmickrisp-asset"
+          mkdir -p "$kd/files"
+          echo 'int gw2om_check;' | clang -x c -dynamiclib -o "$kd/files/libvulkan_kosmickrisp.dylib" -
+          { echo "commit: $commit"; echo "base: d62ee13d1802dd076267611dbbc09cddece95f9c"
+            echo "engine: Mach9 v0.4.0 (wine-v0.4.0-macos-arm64.tar.xz, sha256 $engine_sha)"
+            echo "libvulkan_kosmickrisp.dylib: sha256 $(sum "$kd/files/libvulkan_kosmickrisp.dylib")"; } >"$kd/files/VERSION"
+          echo "Mesa's licences" >"$kd/files/LICENSE.rst" && echo '{"ICD":{}}' >"$kd/files/kosmickrisp_mesa_icd.aarch64.json"
+          tar -cJf "$kd/kosmickrisp-arm64-$commit.tar.xz" -C "$kd/files" libvulkan_kosmickrisp.dylib kosmickrisp_mesa_icd.aarch64.json LICENSE.rst VERSION
+          kx="$kd/kosmickrisp-arm64-$commit.tar.xz"
+          lock() { # <ntdll sha256> <macdrv sha256> <fex sha256> [<kosmickrisp sha256>]
+            # (without prebuilt.lock's own kosmickrisp_ lines, which the fixture's replace)
+            grep -v '^kosmickrisp_' "$RUNNER_TEMP/prebuilt.lock"
             echo "ntdll_url=file://$nt"; echo "ntdll_sha256=$1"; echo "macdrv_url=file://$md"; echo "macdrv_sha256=$2"
             echo "fex_url=file://$fx"; echo "fex_sha256=$3"
+            echo "kosmickrisp_url=file://$kx"; echo "kosmickrisp_sha256=${4:-$(sum "$kx")}"
           }
           cp prebuilt.lock "$RUNNER_TEMP/prebuilt.lock"
           lock "$(sum "$nt")" "$(sum "$md")" "$(sum "$fx")" >prebuilt.lock
@@ -373,12 +394,16 @@ jobs:
           cmp "$RUNNER_TEMP/macdrv-asset/files/win32u.so" prebuilt/macdrv/win32u.so
           cmp "$fd/files/aarch64-windows/libarm64ecfex.dll" prebuilt/fex/aarch64-windows/libarm64ecfex.dll
           cmp "$fd/files/aarch64-unix/libarm64ecfex.so" prebuilt/fex/aarch64-unix/libarm64ecfex.so
+          cmp "$kd/files/libvulkan_kosmickrisp.dylib" prebuilt/kosmickrisp/libvulkan_kosmickrisp.dylib
+          # (the driver, VERSION and the licence: the engine's own ICD manifest stays)
+          [ "$(cd prebuilt/kosmickrisp && find . -type f | LC_ALL=C sort | tr '\n' ' ')" = "./LICENSE.rst ./SHA256SUMS ./VERSION ./libvulkan_kosmickrisp.dylib " ]
           # (its ARM64EC half only: the WoW64 half stays the engine's)
           [ "$(cd prebuilt/fex && find . -type f | LC_ALL=C sort | tr '\n' ' ')" = "./LICENSE ./NOTICES ./SHA256SUMS ./VERSION ./aarch64-unix/libarm64ecfex.so ./aarch64-windows/libarm64ecfex.dll " ]
-          grep -x "commit: $commit" prebuilt/ntdll/VERSION prebuilt/macdrv/VERSION prebuilt/fex/VERSION
+          grep -x "commit: $commit" prebuilt/ntdll/VERSION prebuilt/macdrv/VERSION prebuilt/fex/VERSION prebuilt/kosmickrisp/VERSION
           grep "^ntdll $commit ntdll.so " prebuilt/STAGED
           grep "^macdrv $commit winemac.so [0-9a-f]* win32u.so " prebuilt/STAGED
           grep "^fex $commit libarm64ecfex.dll " prebuilt/STAGED
+          grep "^kosmickrisp $commit libvulkan_kosmickrisp.dylib " prebuilt/STAGED
           lock "$other" "$(sum "$md")" "$(sum "$fx")" >prebuilt.lock
           if scripts/stage-components.sh --fetch >"$RUNNER_TEMP/stage.txt" 2>&1; then echo "stage-components.sh took an ntdll.so archive with another sha256"; exit 1; fi
           grep "ntdll-arm64-$commit.tar.xz does not match the sha256 in prebuilt.lock" "$RUNNER_TEMP/stage.txt"
@@ -388,6 +413,22 @@ jobs:
           lock "$(sum "$nt")" "$(sum "$md")" "$other" >prebuilt.lock
           if scripts/stage-components.sh --fetch >"$RUNNER_TEMP/stage.txt" 2>&1; then echo "stage-components.sh took a FEX archive with another sha256"; exit 1; fi
           grep "fex-arm64-$commit.tar.xz does not match the sha256 in prebuilt.lock" "$RUNNER_TEMP/stage.txt"
+          lock "$(sum "$nt")" "$(sum "$md")" "$(sum "$fx")" "$other" >prebuilt.lock
+          if scripts/stage-components.sh --fetch >"$RUNNER_TEMP/stage.txt" 2>&1; then echo "stage-components.sh took a KosmicKrisp archive with another sha256"; exit 1; fi
+          grep "kosmickrisp-arm64-$commit.tar.xz does not match the sha256 in prebuilt.lock" "$RUNNER_TEMP/stage.txt"
+          # A KosmicKrisp archive whose VERSION names another base, or a dylib that isn't the file
+          # VERSION names, pinned by its own sha256: refused after the download
+          for what in base file; do
+            rm -rf "$kd/odd" && cp -R "$kd/files" "$kd/odd"
+            case "$what" in
+              base) sed -i '' "s/^base: .*/base: 1111111111111111111111111111111111111111/" "$kd/odd/VERSION"; want="names another base than ENGINE_MESA" ;;
+              file) printf x >>"$kd/odd/libvulkan_kosmickrisp.dylib"; want="libvulkan_kosmickrisp.dylib is not the file its VERSION names" ;;
+            esac
+            mkdir -p "$kd/$what" && tar -cJf "$kd/$what/kosmickrisp-arm64-$commit.tar.xz" -C "$kd/odd" libvulkan_kosmickrisp.dylib kosmickrisp_mesa_icd.aarch64.json LICENSE.rst VERSION
+            { lock "$(sum "$nt")" "$(sum "$md")" "$(sum "$fx")" "$(sum "$kd/$what/kosmickrisp-arm64-$commit.tar.xz")" | sed "s|^kosmickrisp_url=.*|kosmickrisp_url=file://$kd/$what/kosmickrisp-arm64-$commit.tar.xz|"; } >prebuilt.lock
+            if scripts/stage-components.sh --fetch >"$RUNNER_TEMP/stage.txt" 2>&1; then echo "stage-components.sh took a KosmicKrisp with another $what"; exit 1; fi
+            grep "$want" "$RUNNER_TEMP/stage.txt"
+          done
           # A FEX archive whose VERSION names another engine or another base, pinned by its own
           # sha256: refused after the download, before anything is staged
           for what in engine base; do

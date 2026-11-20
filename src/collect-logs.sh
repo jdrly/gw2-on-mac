@@ -629,7 +629,7 @@ pin() { sed -n "s/^$1=\([^ ]*\).*/\1/p" "$RES/gw2om.sh"; }
 {
   echo "$APP_NAME logs, collected $(date '+%F %T %z')"
   echo "Versions: $(tr -s '\n' ' ' <"$RES/VERSIONS" 2>/dev/null)"
-  echo "Engine: $(pin ENGINE_NAME), Wine $(pin ENGINE_WINE), FEX $(pin ENGINE_FEX), DXMT $(pin ENGINE_DXMT)"
+  echo "Engine: $(pin ENGINE_NAME), Wine $(pin ENGINE_WINE), FEX $(pin ENGINE_FEX), DXMT $(pin ENGINE_DXMT), Mesa $(pin ENGINE_MESA)"
   echo "Installed: $(m version), route $(m route), engine $(m engine)"
   echo "State: $(tr '\n' ' ' <"$APPDIR/state" 2>/dev/null | sed 's|game_dir=[^ ]*|game_dir=(set)|')"
   E="$APPDIR/engine"
@@ -647,6 +647,12 @@ pin() { sed -n "s/^$1=\([^ ]*\).*/\1/p" "$RES/gw2om.sh"; }
     case "$f" in *.dll) p=ENGINE_FEX_DLL_SHA256 ;; *) p=ENGINE_FEX_SO_SHA256 ;; esac
     echo "  FEX ${f#*/}: $(sha12 "$E/lib/wine/$f")$([ ! -f "$E/lib/wine/$f.engine" ] || echo ", ${f#*/}.engine next to it $(sha12 "$E/lib/wine/$f.engine")") (the engine's own $(pin "$p" | cut -c1-12))"
   done
+  # (KosmicKrisp, the engine's Vulkan driver, and the engine's own next to it while mine is in:
+  # gw2om.sh's KK_FILE; mine is the app's components/kosmickrisp)
+  f=lib/external/libvulkan_kosmickrisp.dylib
+  if [ -f "$E/$f" ] || [ -f "$E/$f.engine" ]; then
+    echo "  KosmicKrisp ${f##*/}: $(sha12 "$E/$f")$([ ! -f "$E/$f.engine" ] || echo ", ${f##*/}.engine next to it $(sha12 "$E/$f.engine")") (the engine's own $(pin ENGINE_KK_SHA256 | cut -c1-12), this app's $([ -f "$RES/components/kosmickrisp/libvulkan_kosmickrisp.dylib" ] && sha12 "$RES/components/kosmickrisp/libvulkan_kosmickrisp.dylib" || echo none))"
+  fi
   echo "Game: $([ -n "$GAME_DIR" ] && [ -f "$GAME_DIR/Gw2-64.exe" ] && echo "installed, Gw2-64.exe $(stat -f '%z bytes, %Sm' "$GAME_DIR/Gw2-64.exe")" || echo "not found")"
   [ -z "$GAME_DIR" ] || echo "  interface addon (version.dll): $([ -f "$GAME_DIR/version.dll" ] && { grep -aq 'gw2-on-mac ui-scale' "$GAME_DIR/version.dll" && echo "$APP_NAME's" || echo "another program's"; } || echo none)"
   # d3d11.dll and dxgi.dll addons (ReShade, arcdps, Nexus), and the file ReShade loads arcdps from:

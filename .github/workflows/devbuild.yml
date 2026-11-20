@@ -7,8 +7,9 @@
 #   plan        the DXMT commit (a full sha on jdrly/dxmt's gw2-on-mac, by default the newest whose
 #               GW2 run for its push ended success, printed with the branch head's state), the Wine
 #               and Mac driver commits (full shas on jdrly/wine's gw2-on-mac, by default none), the
-#               FEX commit (a full sha on jdrly/FEX's gw2-on-mac, by default none) and the version
-#               (by default build.sh's DEV_VERSION)
+#               FEX commit (a full sha on jdrly/FEX's gw2-on-mac, by default none), the KosmicKrisp
+#               commit (a full sha on jdrly/mesa's gw2-on-mac, by default the one prebuilt.lock's
+#               kosmickrisp_url names, or none) and the version (by default build.sh's DEV_VERSION)
 #   components  my DXMT fork's build of that commit: the release asset dxmt-arm64-<commit>.tar.xz of
 #               jdrly/dxmt's arm64-builds, checked against the digest GitHub reports, or else the
 #               artifact dxmt-arm64-<commit> of the fork's GW2 run for it, fetched with this run's
@@ -28,7 +29,12 @@
 #               refuses for another commit, base or engine, a file its VERSION doesn't name or a
 #               libarm64ecfex.so without a valid signature, proved on copies. Without one the app
 #               has no FEX of mine; with one it still starts on the engine's own (the setting fex
-#               is engine until I set it from Terminal).
+#               is engine until I set it from Terminal). With a KosmicKrisp commit, my KosmicKrisp:
+#               the release asset kosmickrisp-arm64-<commit>.tar.xz of jdrly/mesa's arm64-builds,
+#               checked against the digest GitHub reports, which stage-components.sh refuses for
+#               another commit, base or engine, a dylib its VERSION doesn't name or one without a
+#               valid signature, proved on copies. The app puts it into the engine whenever it
+#               carries it (#339).
 #   checks      the Checks workflow's jobs (lint, compatdb, build, sandbox, renders, addon) with those
 #               components and that version. A pull request's dry run runs the sandbox's settings
 #               group alone and no renders.
@@ -38,7 +44,8 @@
 #               job may write to the repository. Its refusals are proved on copies first.
 #
 # Run by hand on arm64: gh workflow run devbuild.yml --ref arm64 [-f dxmt_commit=<sha>]
-# [-f wine_commit=<sha>] [-f macdrv_commit=<sha>] [-f fex_commit=<sha>] [-f version=X.Y.Z-dev.N|X.Y.Z-rc.N]
+# [-f wine_commit=<sha>] [-f macdrv_commit=<sha>] [-f fex_commit=<sha>] [-f kosmickrisp_commit=<sha>]
+# [-f version=X.Y.Z-dev.N|X.Y.Z-rc.N]
 # [-f publish=false]. A pull request that changes the build's scripts or workflows runs it with
 # publish false and no wine_commit, macdrv_commit or fex_commit; a dry run keeps the DMG and the
 # record as an artifact for 7 days. Checks runs every group on the same commit, and renders when
@@ -64,6 +71,10 @@ on:
         default: ""
       fex_commit:
         description: A full sha on jdrly/FEX's gw2-on-mac for my FEX; empty is none (the engine's own)
+        type: string
+        default: ""
+      kosmickrisp_commit:
+        description: A full sha on jdrly/mesa's gw2-on-mac for my KosmicKrisp; empty is the one prebuilt.lock pins, or none
         type: string
         default: ""
       version:
@@ -103,6 +114,8 @@ env:
   WINE_BRANCH: gw2-on-mac
   FEX_REPO: jdrly/FEX
   FEX_BRANCH: gw2-on-mac
+  MESA_REPO: jdrly/mesa
+  MESA_BRANCH: gw2-on-mac
 
 jobs:
   plan:
@@ -113,6 +126,7 @@ jobs:
       wine_commit: ${{ steps.plan.outputs.wine_commit }}
       macdrv_commit: ${{ steps.plan.outputs.macdrv_commit }}
       fex_commit: ${{ steps.plan.outputs.fex_commit }}
+      kosmickrisp_commit: ${{ steps.plan.outputs.kosmickrisp_commit }}
       version: ${{ steps.plan.outputs.version }}
       publish: ${{ steps.plan.outputs.publish }}
     steps:
@@ -120,7 +134,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: The DXMT, Wine, Mac driver and FEX commits and the version
+      - name: The DXMT, Wine, Mac driver, FEX and KosmicKrisp commits and the version
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
@@ -128,6 +142,7 @@ jobs:
           WINE_COMMIT: ${{ inputs.wine_commit }}
           MACDRV_COMMIT: ${{ inputs.macdrv_commit }}
           FEX_COMMIT: ${{ inputs.fex_commit }}
+          KK_COMMIT: ${{ inputs.kosmickrisp_commit }}
           VERSION: ${{ inputs.version }}
           PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
         run: |
@@ -165,6 +180,13 @@ jobs:
           [ -z "$WINE_COMMIT" ] || on_branch wine_commit "$WINE_REPO" "$WINE_BRANCH" "$WINE_COMMIT"
           [ -z "$MACDRV_COMMIT" ] || on_branch macdrv_commit "$WINE_REPO" "$WINE_BRANCH" "$MACDRV_COMMIT"
           [ -z "$FEX_COMMIT" ] || on_branch fex_commit "$FEX_REPO" "$FEX_BRANCH" "$FEX_COMMIT"
+          # Without kosmickrisp_commit: the commit of the asset prebuilt.lock pins, which a release
+          # bundles (none without one)
+          if [ -z "$KK_COMMIT" ]; then
+            KK_COMMIT="$(sed -n 's|^kosmickrisp_url=.*/kosmickrisp-arm64-\([0-9a-f]\{40\}\)\.tar\.xz$|\1|p' prebuilt.lock)"
+            [ -z "$KK_COMMIT" ] || echo "::notice title=KosmicKrisp::$KK_COMMIT, the one prebuilt.lock pins"
+          fi
+          [ -z "$KK_COMMIT" ] || on_branch kosmickrisp_commit "$MESA_REPO" "$MESA_BRANCH" "$KK_COMMIT"
           # (build.sh's DEV_VERSION, not its APP_VERSION, which is a release while one is prepared)
           [ -n "$VERSION" ] || VERSION="$(sed -n 's/^DEV_VERSION=//p' build.sh)"
           # (the forms build.sh's bundle_version takes, but for a plain X.Y.Z)
@@ -181,7 +203,7 @@ jobs:
             echo "::notice title=Version::The tag v$VERSION already exists; a publishing run would refuse this version"
           fi
           { echo "dxmt_commit=$DXMT_COMMIT"; echo "wine_commit=$WINE_COMMIT"; echo "macdrv_commit=$MACDRV_COMMIT"
-            echo "fex_commit=$FEX_COMMIT"; echo "version=$VERSION"; echo "publish=$PUBLISH"; } | tee -a "$GITHUB_OUTPUT"
+            echo "fex_commit=$FEX_COMMIT"; echo "kosmickrisp_commit=$KK_COMMIT"; echo "version=$VERSION"; echo "publish=$PUBLISH"; } | tee -a "$GITHUB_OUTPUT"
 
   components:
     needs: plan
@@ -193,6 +215,7 @@ jobs:
       WINE_COMMIT: ${{ needs.plan.outputs.wine_commit }}
       MACDRV_COMMIT: ${{ needs.plan.outputs.macdrv_commit }}
       FEX_COMMIT: ${{ needs.plan.outputs.fex_commit }}
+      KK_COMMIT: ${{ needs.plan.outputs.kosmickrisp_commit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -322,6 +345,30 @@ jobs:
           grep -E "^(FEX-|commit:|switches:|base:|engine:|aarch64-)" "$dir/VERSION"
           { echo "FEX_FROM=$FEX_REPO $FEX_COMMIT, release asset $url"; echo "FEX_ARCHIVE_SHA256=$sha"; } >>"$GITHUB_ENV"
 
+      # Unpacked where stage-components.sh looks (work/kosmickrisp-arm64/install); with KK_COMMIT
+      # set it stages that build or fails
+      - name: My KosmicKrisp for its commit
+        if: env.KK_COMMIT != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          name="kosmickrisp-arm64-$KK_COMMIT" dl="$RUNNER_TEMP/kosmickrisp" dir=work/kosmickrisp-arm64/install
+          mkdir -p "$dl" "$dir"
+          asset="$(gh api "repos/$MESA_REPO/releases/tags/arm64-builds" \
+            --jq ".assets[] | select(.name == \"$name.tar.xz\") | [.browser_download_url, .digest] | @tsv")" ||
+            fail "Could not read $MESA_REPO's arm64-builds release"
+          [ -n "$asset" ] || fail "$MESA_REPO's arm64-builds has no asset $name.tar.xz"
+          IFS=$'\t' read -r url digest <<<"$asset"
+          [[ $digest == sha256:* ]] || fail "GitHub reports no sha256 for $url"
+          curl -fL --retry 3 --no-progress-meter -o "$dl/$name.tar.xz" "$url"
+          sha="$(shasum -a 256 "$dl/$name.tar.xz" | cut -d' ' -f1)"
+          [ "sha256:$sha" = "$digest" ] || fail "$url is $sha, GitHub reports $digest"
+          tar -xJf "$dl/$name.tar.xz" -C "$dir"
+          find "$dir" -type f | LC_ALL=C sort
+          grep -E "^(commit:|version:|base:|engine:|libvulkan_kosmickrisp\.dylib:)" "$dir/VERSION"
+          { echo "KK_FROM=$MESA_REPO $KK_COMMIT, release asset $url"; echo "KK_ARCHIVE_SHA256=$sha"; } >>"$GITHUB_ENV"
+
       - name: The interface addon
         run: |
           brew install mingw-w64
@@ -403,9 +450,36 @@ jobs:
           c="$(copy)"; codesign --remove-signature "$c/$so"
           sed -i '' "s|^$so: sha256 .*|$so: sha256 $(shasum -a 256 "$c/$so" | cut -d' ' -f1)|" "$c/VERSION"
           refuse "has no valid signature" "$c" "with a libarm64ecfex.so that codesign --verify rejects"
+
+      # The same on copies of my KosmicKrisp
+      - name: stage-components.sh refuses a KosmicKrisp of another commit, base or engine, another file or one without a valid signature
+        if: env.KK_COMMIT != ''
+        run: |
+          zero=0000000000000000000000000000000000000000
+          refuse() { # <message> <dir> <what it took>
+            if GW2_ON_MAC_WORKSPACE="$PWD" KK_BUILD="$2" scripts/stage-components.sh >"$RUNNER_TEMP/stage.txt" 2>&1; then
+              echo "::error::stage-components.sh took a KosmicKrisp build $3"; exit 1
+            fi
+            cat "$RUNNER_TEMP/stage.txt"
+            grep -qF "$1" "$RUNNER_TEMP/stage.txt"
+          }
+          copy() { rm -rf "$RUNNER_TEMP/kk-copy" && cp -R work/kosmickrisp-arm64/install "$RUNNER_TEMP/kk-copy" && echo "$RUNNER_TEMP/kk-copy"; }
+          f=libvulkan_kosmickrisp.dylib
+          c="$(copy)"; sed -i '' "s/^commit: .*/commit: $zero/" "$c/VERSION"
+          refuse "is not commit $KK_COMMIT" "$c" "whose VERSION names another commit"
+          c="$(copy)"; sed -i '' "s/^base: .*/base: $zero/" "$c/VERSION"
+          refuse "names another base than ENGINE_MESA" "$c" "whose VERSION names another base"
+          c="$(copy)"; sed -i '' -E "s/^(engine: .*sha256 )[0-9a-f]{64}/\1$zero${zero:0:24}/" "$c/VERSION"
+          refuse "names another engine than ENGINE_SHA256" "$c" "whose VERSION names another engine"
+          c="$(copy)"; printf x >>"$c/$f"
+          refuse "$f is not the file its VERSION names" "$c" "with a $f that isn't the file its VERSION names"
+          # (VERSION names the unsigned file, so only the signature is wrong)
+          c="$(copy)"; codesign --remove-signature "$c/$f"
+          sed -i '' "s|^$f: sha256 .*|$f: sha256 $(shasum -a 256 "$c/$f" | cut -d' ' -f1)|" "$c/VERSION"
+          refuse "has no valid signature" "$c" "with a $f that codesign --verify rejects"
       - name: Stage
         run: |
-          GW2_ON_MAC_WORKSPACE="$PWD" STAGED_FROM="$DXMT_FROM; ${WINE_FROM:+$WINE_FROM; }${MACDRV_FROM:+$MACDRV_FROM; }${FEX_FROM:+$FEX_FROM; }the addon built on this runner" scripts/stage-components.sh
+          GW2_ON_MAC_WORKSPACE="$PWD" STAGED_FROM="$DXMT_FROM; ${WINE_FROM:+$WINE_FROM; }${MACDRV_FROM:+$MACDRV_FROM; }${FEX_FROM:+$FEX_FROM; }${KK_FROM:+$KK_FROM; }the addon built on this runner" scripts/stage-components.sh
           mkdir -p "$RUNNER_TEMP/components"
           tar -cf "$RUNNER_TEMP/components/prebuilt.tar" prebuilt
           { echo "dxmt $DXMT_COMMIT"
@@ -431,6 +505,13 @@ jobs:
               echo "fex archive sha256 $FEX_ARCHIVE_SHA256"
             else
               echo "fex none: the engine's own FEX"
+            fi
+            if [ -n "$KK_COMMIT" ]; then
+              echo "kosmickrisp $KK_COMMIT"
+              echo "kosmickrisp from $KK_FROM"
+              echo "kosmickrisp archive sha256 $KK_ARCHIVE_SHA256"
+            else
+              echo "kosmickrisp none: the engine's own KosmicKrisp"
             fi
             echo "ui-scale built with $MINGW"; } >"$RUNNER_TEMP/components/components.txt"
           cat "$RUNNER_TEMP/components/components.txt"
@@ -467,6 +548,7 @@ jobs:
       WINE_COMMIT: ${{ needs.plan.outputs.wine_commit }}
       MACDRV_COMMIT: ${{ needs.plan.outputs.macdrv_commit }}
       FEX_COMMIT: ${{ needs.plan.outputs.fex_commit }}
+      KK_COMMIT: ${{ needs.plan.outputs.kosmickrisp_commit }}
       VERSION: ${{ needs.plan.outputs.version }}
       PUBLISH: ${{ needs.plan.outputs.publish }}
     steps:
@@ -534,6 +616,13 @@ jobs:
             else
               fex="None in this build: the engine's own FEX stays in place."
             fi
+            if [ -n "$KK_COMMIT" ]; then
+              kshort="${KK_COMMIT:0:7}"
+              wine="$wine, and my KosmicKrisp at \`$kshort\`"
+              kk="[\`$kshort\`](https://github.com/$MESA_REPO/commit/$KK_COMMIT) of my Mesa fork's \`$MESA_BRANCH\`, in place of the engine's own, which crashes the game on macOS 26 (#339)."
+            else
+              kk="None in this build: the engine's own KosmicKrisp stays in place."
+            fi
             # (the last 0.1.x, which the app's popup below the engine's macOS downloads: ADR 0021)
             last01="$(sed -n 's/^LAST_01=//p' src/gw2om.sh)"
             prev="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isPrerelease \
@@ -562,6 +651,9 @@ jobs:
 
           ### My FEX
           $fex
+
+          ### My KosmicKrisp
+          $kk
 
           ### macOS 26.0 to 26.4
           This build needs macOS 26.5 or later, as the engine does. Below that it changes nothing and shows one window that downloads [GW2 on Mac $last01](https://github.com/$GITHUB_REPOSITORY/releases/tag/v$last01), the last 0.1.x, which runs there.
@@ -595,13 +687,14 @@ jobs:
             if [ -f prebuilt/ntdll/SHA256SUMS ]; then echo "prebuilt/ntdll/SHA256SUMS:"; cat prebuilt/ntdll/SHA256SUMS; echo; fi
             if [ -f prebuilt/macdrv/SHA256SUMS ]; then echo "prebuilt/macdrv/SHA256SUMS:"; cat prebuilt/macdrv/SHA256SUMS; echo; fi
             if [ -f prebuilt/fex/SHA256SUMS ]; then echo "prebuilt/fex/SHA256SUMS:"; cat prebuilt/fex/SHA256SUMS; echo; fi
+            if [ -f prebuilt/kosmickrisp/SHA256SUMS ]; then echo "prebuilt/kosmickrisp/SHA256SUMS:"; cat prebuilt/kosmickrisp/SHA256SUMS; echo; fi
             echo "VERSIONS:"; cat "$app/Contents/Resources/VERSIONS"
           } >"$record"
           echo "BUILD_RECORD=$record" >>"$GITHUB_ENV"
 
       # On a copy of the scripts and the app; a stand-in gh that knows the tag, so nothing reaches
       # GitHub and no token is passed
-      - name: release.sh refuses the stand-in DXMT, ntdll.so, winemac.so and FEX, a version below build.sh's DEV_VERSION and a tag that exists, and says why hdiutil failed
+      - name: release.sh refuses the stand-in DXMT, ntdll.so, winemac.so, FEX and KosmicKrisp, a version below build.sh's DEV_VERSION and a tag that exists, and says why hdiutil failed
         run: |
           copy="$RUNNER_TEMP/copy"
           mkdir -p "$copy" "$RUNNER_TEMP/fake-gh"
@@ -634,6 +727,11 @@ jobs:
           mkdir -p "$n" && echo "stand-in FEX-2610-0-g0000000 (not a build: scripts/stage-components.sh --standin)" >"$n/VERSION"
           refuse "the stand-in FEX" "bundles the stand-in FEX" --adhoc --no-release
           rm -rf "$n" && if [ -d "$RUNNER_TEMP/fex" ]; then cp -R "$RUNNER_TEMP/fex" "$n"; fi
+          n="$copy/dist/$APP_NAME.app/Contents/Resources/components/kosmickrisp"
+          rm -rf "$RUNNER_TEMP/kosmickrisp" && if [ -d "$n" ]; then cp -R "$n" "$RUNNER_TEMP/kosmickrisp"; fi
+          mkdir -p "$n" && echo "stand-in (not a build: scripts/stage-components.sh --standin)" >"$n/VERSION"
+          refuse "the stand-in KosmicKrisp" "bundles the stand-in KosmicKrisp" --adhoc --no-release
+          rm -rf "$n" && if [ -d "$RUNNER_TEMP/kosmickrisp" ]; then cp -R "$RUNNER_TEMP/kosmickrisp" "$n"; fi
           cp build.sh "$RUNNER_TEMP/build.sh"
           sed -i '' 's/^DEV_VERSION=.*/DEV_VERSION=99.0.0-dev.1/' "$copy/build.sh"
           refuse "a version below build.sh's DEV_VERSION" "is lower than build.sh's DEV_VERSION 99.0.0-dev.1" --adhoc --no-release
