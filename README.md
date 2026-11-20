@@ -1545,7 +1545,7 @@ staged, the addon, fonts, art and licences. It
 downloads Sparkle at a pinned version and sha256, and compiles the Icon Composer icon
 `src/AppIcon.icon` with actool into `Assets.car` and a fallback `AppIcon.icns`.
 
-- `GW2_ON_MAC_VERSION` sets the version, 0.2.0 by default. `X.Y.Z-dev.N` makes a development build,
+- `GW2_ON_MAC_VERSION` sets the version, 0.2.1 by default. `X.Y.Z-dev.N` makes a development build,
   as in SWTOR on Mac, and `X.Y.Z-rc.N` a release candidate, N below 1000 in both. A release
   candidate is a development build in everything but its name: the chip says "Release candidate ·
   0.2.0-rc.1" and the release's title "(release candidate)". Its `CFBundleVersion` sorts above
@@ -1813,7 +1813,7 @@ gh release download v0.2.0-dev.5 -R jdrly/gw2-on-mac -p '*.dmg' -D ~/Downloads
 ```
 
 - Without `version` the run takes `DEV_VERSION` from `build.sh`, and never `APP_VERSION`, which is
-  0.2.0 while I prepare that release. A version below `DEV_VERSION` is refused, so a number isn't
+  0.2.1 while I prepare that release. A version below `DEV_VERSION` is refused, so a number isn't
   published twice. `DEV_VERSION` is still 0.2.0-dev.5, so a run without `version` stops at its tag.
 - DXMT is my fork's build of a commit on its `gw2-on-mac`: the release asset
   `dxmt-arm64-<commit>.tar.xz` of jdrly/dxmt's `arm64-builds`, checked against GitHub's digest,
