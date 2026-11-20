@@ -5915,6 +5915,7 @@ cmd_play() {
     # macOS 26, #339. Steam started before the update keeps the engine's files until it quits.)
     case "$(kk_state)/$(kk_file "$KK_PATH")" in
       */other|other/*) die "The engine's KosmicKrisp is neither its own nor mine. Click Repair." ;;
+      switch/none) die "The engine's KosmicKrisp is missing, a switch cut short. Quit Steam, then click Play again to finish it." ;;
       switch/*)
         [ "$(kk_want)" != mine ] || die "Steam is still running with the engine's own KosmicKrisp, which crashes the game on macOS 26. Quit Steam, then click Play again to put mine in."
         echo "@notice Steam is still running with $(kk_label "$(kk_file "$KK_PATH")"); quit Steam to switch to $(kk_label "$(kk_want)")." ;;

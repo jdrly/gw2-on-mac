@@ -364,8 +364,10 @@ if [ "${1:-}" = --fetch ] || [ ! -d "$WS" ]; then
   url="$(lock_get kosmickrisp_url)" sum="$(lock_get kosmickrisp_sha256)"
   if [ -n "$url" ]; then
     # (the commit the asset's name says, which its VERSION has to name too)
-    KK_COMMIT="${KK_COMMIT:-$(echo "${url##*/}" | sed -n 's/^kosmickrisp-arm64-\([0-9a-f]\{40\}\)\.tar\.xz$/\1/p')}"
-    [ -n "$KK_COMMIT" ] || die "kosmickrisp_url names no kosmickrisp-arm64-<full sha>.tar.xz: $url"
+    named="$(echo "${url##*/}" | sed -n 's/^kosmickrisp-arm64-\([0-9a-f]\{40\}\)\.tar\.xz$/\1/p')"
+    [ -n "$named" ] || die "kosmickrisp_url names no kosmickrisp-arm64-<full sha>.tar.xz: $url"
+    [ -z "${KK_COMMIT:-}" ] || [ "$KK_COMMIT" = "$named" ] || die "kosmickrisp_url is commit $named, not KK_COMMIT $KK_COMMIT"
+    KK_COMMIT=$named
     kk_archive="$(fetch_pinned "$url" "$sum")"
     rm -rf "$P.kk" && mkdir -p "$P.kk"
     tar -xJf "$kk_archive" -C "$P.kk"
