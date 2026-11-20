@@ -69,7 +69,7 @@ struct MainView: View {
     // with no way past it but Quit
     .sheet(isPresented: .constant(installer.gated)) {
       RollbackSheet(version: installer.rollbackVersion, dmg: installer.rollbackDMG, isPresented: .constant(true),
-                    gate: .init(macos: installer.status["macos"] ?? "?", needs: installer.status["macos_min"] ?? "26.4",
+                    gate: .init(macos: installer.status["macos"] ?? "?", needs: installer.status["macos_min"] ?? "26.5",
                                 appVersion: installer.appVersion))
         .interactiveDismissDisabled()
     }
@@ -461,7 +461,7 @@ struct ThisMac: View {
               tone: free > 0 ? .good : .off)
     return [
       Check(id: "macOS", icon: "cpu",
-            value: installer.macosOK ? macos : "\(macos) · needs \(s["macos_min"] ?? "26.4")",
+            value: installer.macosOK ? macos : "\(macos) · needs \(s["macos_min"] ?? "26.5")",
             tone: installer.macosOK ? .good : .bad),
       engineCheck,
       // (switch: Settings changed it while Steam ran; the next Play puts it in)

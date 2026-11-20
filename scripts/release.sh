@@ -506,7 +506,7 @@ mkdir -p "$feed"
 cp -c "$UPDATES/$DASHED"-*.dmg "$feed/"
 [ -f "$NOTES" ] && cp "$NOTES" "$feed/$DASHED-$VERSION.md"
 # (--versions: an item for this version only. generate_appcast keeps the newest version of every
-# minimum macOS, so 0.1.x's DMGs, for 26.0, would get an item of their own beside 0.2's for 26.4.
+# minimum macOS, so 0.1.x's DMGs, for 26.0, would get an item of their own beside 0.2's for 26.5.
 # The older DMGs stay the bases of the deltas.)
 "$SPARKLE_BIN/generate_appcast" ${ED_KEY_FILE:+--ed-key-file "$ED_KEY_FILE"} \
   --versions "$(plutil -extract CFBundleVersion raw "$APP/Contents/Info.plist")" \
@@ -529,7 +529,7 @@ rm -rf "$feed"
 xmllint --noout "$OUT/appcast.xml"
 ! grep -q "${APP_NAME// /%20}" "$OUT/appcast.xml" || { echo "appcast.xml still names unrenamed deltas" >&2; exit 1; }
 # One item, and it names the macOS the engine needs, not the app's LSMinimumSystemVersion
-# (feed_min): 0.1.x runs on 26.0, 0.2 needs 26.4
+# (feed_min): 0.1.x runs on 26.0, 0.2 needs 26.5
 feed_min "$OUT/appcast.xml"
 echo "  $OUT/appcast.xml, ${#deltas[@]} delta(s)"
 # generate_appcast skips a delta it couldn't make or that isn't smaller than the DMG, without a word

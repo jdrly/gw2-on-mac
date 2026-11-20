@@ -129,7 +129,7 @@ func installer(_ state: String) -> Installer {
     "macdrv": "mine", "macdrv_ready": "yes", "macdrv_file": "mine", "macdrv_commit": "d831f808236c", "macdrv_release": "11.21",
     "macdrv_build": "d831f808236c",
     "fex": "engine", "fex_ready": "yes", "fex_file": "engine", "fex_commit": "597e7ccbedd", "fex_build": "bff3f7c3686b",
-    "macos": "27.2", "macos_min": "26.4", "macos_ok": "yes",
+    "macos": "27.2", "macos_min": "26.5", "macos_ok": "yes",
     "arch": "arm64", "installed": "yes", "installed_version": "0.2.0-dev.2", "engine_installed": "yes", "graphics": "yes",
     "gamemode": "engine", "route": "steam", "steam": "yes", "game": "yes", "stage": "finished",
     "disk_free": "412000000000", "disk_needed": "75000000000", "busy": "none", "uiscale": "off",
@@ -409,8 +409,8 @@ func renderAll(_ dir: URL, exports: URL?) async {
       exit(1)
     }
   }
-  // below the engine's macOS (status macos_ok=no, from 26.0 to 26.3) the window is gated, and the
-  // popup's Download opens the DMG of gw2om.sh's LAST_01 as status reports it; at 26.4, 26.10, 27.0
+  // below the engine's macOS (status macos_ok=no, from 26.0 to 26.4) the window is gated, and the
+  // popup's Download opens the DMG of gw2om.sh's LAST_01 as status reports it; at 26.5, 26.10, 27.0
   // (macos_ok=yes) and before the first status, not (a model check)
   do {
     let sh = (try? String(contentsOf: Brand.resources.appendingPathComponent("gw2om.sh"), encoding: .utf8)) ?? ""
@@ -653,7 +653,7 @@ func renderAll(_ dir: URL, exports: URL?) async {
     for downloaded in [false, true] {
       let gateSheet = RollbackSheet(version: "0.1.4",
         dmg: URL(string: "https://github.com/jdrly/gw2-on-mac/releases/download/v0.1.4/GW2-on-Mac-0.1.4.dmg"),
-        isPresented: .constant(true), gate: .init(macos: "26.3", needs: "26.4", appVersion: "0.2.0"), downloaded: downloaded)
+        isPresented: .constant(true), gate: .init(macos: "26.4.1", needs: "26.5", appVersion: "0.2.0"), downloaded: downloaded)
       write(await render(gateSheet, size: CGSize(width: 460, height: downloaded ? 230 : 190), dark: dark, chrome: false),
             dir.appendingPathComponent("sheet-macos-gate-\(downloaded ? "steps" : "download")-\(dark ? "dark" : "light").png"))
     }

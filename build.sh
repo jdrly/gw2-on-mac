@@ -29,7 +29,7 @@
 # ships, but for its DXMT tree, its ntdll.so and its winemac.so (mine, the engine's own kept next
 # to each), and its FEX after `set fex mine`. Steam and the game come from Valve or ArenaNet.
 #
-# Built with the macOS 27 SDK (Xcode 27) for macOS 26.0 and later, as 0.1.x: below 26.4, what the
+# Built with the macOS 27 SDK (Xcode 27) for macOS 26.0 and later, as 0.1.x: below 26.5, what the
 # engine's loader needs (gw2om.sh's MACOS_MIN), the app opens only to say so (docs/adr/0021).
 #
 #   ./build.sh                   build into dist/, ad-hoc signed

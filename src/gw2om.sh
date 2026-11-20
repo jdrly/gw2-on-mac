@@ -234,10 +234,11 @@ ENGINE_FEX_SO_SHA256=0a3e7ea4b76a3acc634993ec98f2ef7e4d52b3806a871856e8f80809957
 # another wineserver protocol.
 ENGINE_PIN_SHA256=$ENGINE_SHA256
 ENGINE_0_3_1_SHA256=90aff9a897ed0ff9aac44d0e06f0aecd3ee985afb38037f3f915451e51fa974e
-# The loader's entitlements need macOS 26.4 (wine.app's own Info.plist says so too). The one place
-# that says it: the app itself opens on 26.0 (build.sh) and gates itself below this (macos_gate), and
-# the update feed's item names this value (scripts/release.sh reads it from this line).
-MACOS_MIN=26.4
+# The engine's loader needs macOS 26.5. Its minos and wine.app's Info.plist say 26.4, but it imports
+# posix_spawnattr_set_4k_page_size_np, which 26.4.1's libSystem lacks, and dyld stops it (#337). The
+# one place that says it: the app itself opens on 26.0 (build.sh) and gates itself below this
+# (macos_gate), and the update feed's item names this value (scripts/release.sh reads it from this line).
+MACOS_MIN=26.5
 # Valve's Steam installer, from Valve's CDN (Valve updates it in place: not pinned, its sha256
 # goes to the log)
 STEAM_SETUP_URL=https://cdn.akamai.steamstatic.com/client/installer/SteamSetup.exe

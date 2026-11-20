@@ -46,11 +46,12 @@ is for building, testing and releasing the app.
 
 ## What you need
 
-- A Mac with Apple silicon and macOS 26.4 or later. The engine's loader needs 26.4. On macOS 26.0
-  to 26.3, take [GW2 on Mac 0.1.4](https://github.com/jdrly/gw2-on-mac/releases/tag/v0.1.4), the
-  last 0.1.x, which runs there. 0.1.x offers no update there and stays as it is. If you open 0.2
-  there anyway, it shows one window that says so and downloads 0.1.4's DMG. It changes nothing on
-  the Mac, an install of 0.1.x included, and the window closes only with Quit.
+- A Mac with Apple silicon and macOS 26.5 or later. The engine's loader needs a function that
+  macOS 26.4.1 doesn't have. On macOS 26.0 to 26.4, take
+  [GW2 on Mac 0.1.4](https://github.com/jdrly/gw2-on-mac/releases/tag/v0.1.4), the last 0.1.x,
+  which runs there. 0.1.x offers no update there and stays as it is. If you open 0.2 there anyway,
+  it shows one window that says so and downloads 0.1.4's DMG. It changes nothing on the Mac, an
+  install of 0.1.x included, and the window closes only with Quit.
 - No Rosetta. Wine, its Mac driver and DXMT run as arm64 code, and FEX runs the game's and Steam's
   x86_64 code inside Wine.
 - About 75 GB of free space for the game, plus about 3 GB for the engine and Steam. The install
@@ -1400,8 +1401,8 @@ and how long `vmmap` took, which is the longest the game can have stood still.
 ## Building
 
 You need Xcode 27, for the macOS 27 SDK. The app targets macOS 26.0, as 0.1.x does, so that it
-opens below the engine's 26.4 and says why it can't run there (ADR 0021). The engine's minimum is
-`MACOS_MIN` in `src/gw2om.sh`, and nothing else says 26.4.
+opens below the engine's 26.5 and says why it can't run there (ADR 0021). The engine's minimum is
+`MACOS_MIN` in `src/gw2om.sh`, and the code reads it from there.
 
 ```sh
 scripts/stage-components.sh    # copy my DXMT fork, my ntdll.so, winemac.so and FEX and the addon into prebuilt/
@@ -1735,7 +1736,7 @@ delta updates and checks it with `scripts/check-appcast.swift`.
   unless that record is `HEAD` as is, on `origin/arm64` (`RELEASE_BRANCH`), and the tag is free.
 - The feed needs an app built with `GW2_ON_MAC_FEED_URL` and `GW2_ON_MAC_ED_PUBLIC_KEY`.
 - `--sign-only` and `--no-notarize` run locally without touching GitHub.
-- The appcast's item names the macOS the engine needs, `src/gw2om.sh`'s `MACOS_MIN` (26.4), as
+- The appcast's item names the macOS the engine needs, `src/gw2om.sh`'s `MACOS_MIN` (26.5), as
   `sparkle:minimumSystemVersion`, or the script stops. Sparkle on an older macOS then offers
   nothing. `generate_appcast` writes the app's `LSMinimumSystemVersion` there, the macOS the app
   opens on, and the script replaces it. `--feed-min <appcast.xml>` does only that step, on that
