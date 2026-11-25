@@ -40,8 +40,9 @@
 # frames are DXMT's (frames= on its GPU lines, summed over the session) for the whole run, and the
 # game thread's select requests in the blocks for an interval: GW2 polls its socket once a frame.
 # Without either the report gives no frame column.
-# With Debug logging the game's rule has FEX_PROFILESTATS=1, and my ntdll.so puts FEX's counters of
-# a block's thread into the block, one line after "requests thread" (the format is in
+# With Debug logging, my ntdll.so and a FEX of mine that names the slot fix, the game's rule has
+# FEX_PROFILESTATS=1 (ADR 0024), and my ntdll.so puts FEX's counters of a block's thread into the
+# block, one line after "requests thread" (the format is in
 # jdrly/gw2-on-mac#111): "fex jit_ms <ms> jit <n> miss <n> rlock_ms <ms> wlock_ms <ms> smc <n>
 # sigbus <n> float <n> signal_ms <ms> dcache_hit <n> dcache_miss <n> dcache_ms <ms>", the change
 # since that thread's last block, more names maybe after those; or "fex has no slot of <n>"; or
