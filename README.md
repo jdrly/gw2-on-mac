@@ -364,7 +364,7 @@ chosen, and the main window's *Engine* and *Graphics* checks name the files in p
 | Mouse | Raw mouse-look | `rawmouse` | on | kept | on, the game's raw input is the mouse's own counts from GameController; off, it is the pointer's movement, see below |
 | | Mouse-look speed | `mousespeed` | 1× | kept | a factor on the mouse's own counts, from 0.5× to 3×, which my `winemac.so` applies before the game gets them (`WINE_MACDRV_MOUSE_SCALE`). The game's own camera settings apply on top. Greyed while *Raw mouse-look* is off, while the engine's own `winemac.so` is chosen, or while my file in this app doesn't have the switch |
 | Updates | Check automatically | `updates` | on | kept | Sparkle checks for new versions. Off in development builds, which have no update feed |
-| Troubleshooting | Debug logging | `debug` | off | kept | DXMT's log at `debug` and Wine's errors, for a bug report, at some cost in performance. With my `winemac.so`, also its `macsurface` lines for `Gw2-64.exe`. FEX's messages too, and with my `ntdll.so` FEX's counters. On in development builds |
+| Troubleshooting | Debug logging | `debug` | off | kept | DXMT's log at `debug` and Wine's errors, for a bug report, at some cost in performance. With my `winemac.so`, also its `macsurface` lines for `Gw2-64.exe`. FEX's messages too, and with my `ntdll.so` and a FEX of mine that names the slot fix, FEX's counters. On in development builds |
 
 *From 0.1* is what a move from GW2 on Mac 0.1 does with each setting (`SETTINGS_FROM_01` in
 `gw2om.sh`). 0.1's `settings.conf` has no version line and writes every key, so a value there is
@@ -1021,7 +1021,10 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   without the line doesn't get it. Any other entry whose variable the file's `VERSION`
   doesn't list on its `switches:` line stays out. Debug logging adds `WINE_HEAT_COUNT=1` and
   `WINE_HEAT_LOG` with the logs folder, where my file writes `heat-<pid>.log` every 5 seconds,
-  and `FEX_PROFILESTATS=1`, which makes FEX keep its counters per thread for my file to read.
+  and, while my FEX is in place, `FEX_PROFILESTATS=1`, which makes FEX keep its counters per
+  thread for my file to read. That needs my FEX's `VERSION` to name `profilestats-slots` on its
+  `fixes:` line. The engine's own FEX has slots for 35 threads on macOS, and its 37th thread
+  faults with the variable set (#344, ADR 0024).
   They cost FEX a timer read at the start and end of each compile and each locked lookup, which
   is why they ride on Debug logging. Debug logging also adds `FEX_SILENTLOG=0` with either
   `ntdll.so`, so FEX's own messages go to `wine.log`. That is more than the line about hardware
