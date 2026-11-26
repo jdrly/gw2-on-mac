@@ -4958,11 +4958,12 @@ check "  a version-9 file with #DXMT_DRAIN_SPLITS=1: the other three added, the 
   eval 'grep -qxF "dev-switches.conf: version $DEVVER, switched on: DXMT_PRESENT_SKIP_NIL=1 DXMT_REFRESH_REQUERY=1 DXMT_STEADY_SLEEP=1; out of the list: $GONE10 $GONE11 $GONE13" "$SANDBOX/v9play.txt" && [ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && [ "$(grep -c DXMT_DRAIN_SPLITS "$DEVF")" = 1 ] && grep -qx "#DXMT_DRAIN_SPLITS=1" "$DEVF" && ! grep -q DXMT_DRAIN_SPLITS "$SANDBOX/dev-rules.txt" "$SANDBOX/dev-status.txt"'
 cp "$SANDBOX/devf.full" "$DEVF"
 # A file at version 11, before version 12's rows (jdrly/dxmt#358, #343): both added at the end, on,
-# each under its comment, nothing else changes, and nothing left the list
+# each under its comment, nothing else changes, and only version 13's old WINE_HEAT_SPIN line left
+# the list (this file has the new one)
 drop_rows "$SANDBOX/devf.full" DXMT_MTL4_PRESENT_FENCES FEX_RETURNLOOKUPOUTOFLINE | sed 's/^version=.*/version=11/' >"$SANDBOX/devf.v11old"
 cp "$SANDBOX/devf.v11old" "$DEVF"
 GW2_ON_MAC_DRY_RUN=1 dg play >"$SANDBOX/v11play.txt" 2>&1
-check "a file at version 11: Play would add the two lines of version 12, and say nothing left the list (dry run)" \
+check "a file at version 11: Play would add the two lines of version 12, and say version 13's old WINE_HEAT_SPIN line left the list (dry run)" \
   eval '[ "$(grep -c -e "^DXMT_MTL4_PRESENT_FENCES=" -e "^FEX_RETURNLOOKUPOUTOFLINE=" "$DEVF")" = 0 ] && grep -qxF "dev-switches.conf: version $DEVVER, switched on: $V12ON; out of the list: $GONE13" "$SANDBOX/v11play.txt"'
 dg repair >/dev/null 2>&1
 n=$(wc -l <"$DEVF" | tr -d ' ')
@@ -4974,8 +4975,8 @@ check "  updated: the table's version, the two lines at the end, each under a co
 cp "$SANDBOX/devf.full" "$DEVF"
 # A file at version 12, which has WINE_HEAT_SPIN's old value under the comment that build wrote
 # (here at the end, #368): as written, the line and its comment go and the new value comes at the
-# end under its own comment. A value I changed stays, and one I commented out stays as it is: no
-# line comes for either.
+# end under its own comment. A value I changed stays, one I commented out stays as it is, and one I
+# deleted stays deleted: no line comes for any of them.
 drop_rows "$SANDBOX/devf.full" WINE_HEAT_SPIN | sed 's/^version=.*/version=12/' >"$SANDBOX/devf.v12rest"
 v12_spin() { # <line>: the file as a version-12 build would have it, <line> last under its comment
   { cat "$SANDBOX/devf.v12rest"; echo
@@ -4993,8 +4994,8 @@ sed 1d "$SANDBOX/devf.v12rest" >"$SANDBOX/devf.v12keep"
 tail -3 "$DEVF" >"$SANDBOX/devf.added"
 check "  updated: the old line, its comment and the empty line above them gone, the new one at the end under its comment, the rest as it was" \
   eval '[ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && same "$SANDBOX/devf.v12keep" "$SANDBOX/devf.v12new" && added_ok "$SANDBOX/devf.added" "my ntdll.so|#14,#45,#368|WINE_HEAT_SPIN=lock=20:game+halfworkers,event=30:game"'
-for hand in WINE_HEAT_SPIN=lock=50:game "#$GONE13"; do
-  v12_spin "$hand"
+for hand in WINE_HEAT_SPIN=lock=50:game "#$GONE13" "no line"; do
+  if [ "$hand" = "no line" ]; then cp "$SANDBOX/devf.v12rest" "$DEVF"; else v12_spin "$hand"; fi
   sed 1d "$DEVF" >"$SANDBOX/devf.v12hand"
   GW2_ON_MAC_DRY_RUN=1 dg play >"$SANDBOX/v12play.txt" 2>&1
   dg repair >/dev/null 2>&1
