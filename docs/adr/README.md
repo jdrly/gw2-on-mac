@@ -4,7 +4,7 @@ One decision per file. The files go by number, not by date. 0001 to 0011 record 
 wrote them down on 2026-11-17, after 0012 and 0013 had landed, and kept their numbers below
 those two. Their dates don't follow their numbers. A new decision takes the next free number.
 
-0001, 0002 and 0014 are about 0.1.x and live on `main`. 0003 to 0010, 0012, 0013 and 0015 to 0022
+0001, 0002 and 0014 are about 0.1.x and live on `main`. 0003 to 0010, 0012, 0013 and 0015 to 0024
 are about the 0.2 line on this branch, `arm64`. 0011 is on both. The two branches share one set of
 numbers, so a number taken on one is not used on the other.
 
@@ -33,3 +33,4 @@ numbers, so a number taken on one is not used on the other.
 | [0021](0021-0.2-opens-on-macos-26.0-and-gates-itself.md) | 2026-11-19 | 0.2 opens on macOS 26.0. Below the engine's 26.5 it shows one popup that downloads the last 0.1.x's DMG, writes nothing, and starts no Sparkle. |
 | [0022](0022-a-pull-requests-dry-run-runs-settings-alone.md) | 2026-11-19 | A pull request's Dev build dry run runs the sandbox's `settings` group alone and no `renders`. Checks runs the rest on the same commit, and a dev build I dispatch runs everything. |
 | [0023](0023-0.2-ships-kosmickrisp-from-my-mesa-fork.md) | 2026-11-20 | 0.2 ships KosmicKrisp from my Mesa fork, which never asks Metal for `sparseBufferTier`. The app puts it into the engine whenever it carries it, with no setting, the engine's own kept next to it. |
+| [0024](0024-fex-counters-only-with-my-fex-that-names-the-slot-fix.md) | 2026-11-26 | Debug logging turns on FEX's counters (`FEX_PROFILESTATS=1`) only with my `ntdll.so` and my FEX in place, that FEX naming `profilestats-slots` on its `VERSION`'s `fixes:` line. The engine's own FEX faults at its 37th thread with them. |

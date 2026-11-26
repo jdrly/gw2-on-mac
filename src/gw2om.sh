@@ -1273,11 +1273,13 @@ switch_version() { if [ "$(switch_lib "$1")" = macdrv ]; then echo "$COMP/macdrv
 # heat_entries: the entries for the game's rule, one a line and already through cdb_value (a
 # newline in the logs folder's path can't split one): the switches that are on and whose file is
 # mine and, with Debug logging and my ntdll.so, its counters (WINE_HEAT_COUNT), which it writes to
-# the logs folder as heat-<pid>.log every 5 s, and FEX's counters (FEX_PROFILESTATS=1: FEX keeps
-# them per thread, my ntdll.so reads them; each costs FEX a timer read around every compile and
-# locked lookup). None of a file while the engine's own is in place. With Debug logging, whichever
-# ntdll.so, FEX_SILENTLOG=0 too: FEX's messages go to wine.log, where the session report looks for
-# "FEX: Using hardware TSO".
+# the logs folder as heat-<pid>.log every 5 s, and, with my FEX in place too, FEX's counters
+# (FEX_PROFILESTATS=1: FEX keeps them per thread, my ntdll.so reads them; each costs FEX a timer
+# read around every compile and locked lookup). FEX_PROFILESTATS needs my FEX's VERSION to name
+# profilestats-slots on its fixes: line: the engine's own FEX has slots for 35 threads on macOS,
+# and its 37th thread faults (#344). None of a file while the engine's own is in place. With
+# Debug logging, whichever ntdll.so, FEX_SILENTLOG=0 too: FEX's messages go to wine.log, where the
+# session report looks for "FEX: Using hardware TSO".
 heat_entries() {
   local k e v wine macdrv fex
   wine=$(lib_in_use wine) macdrv=$(lib_in_use macdrv) fex=$(fex_in_use)
@@ -1296,7 +1298,10 @@ heat_entries() {
     cdb_value "$e"; echo
   done
   [ "$(setting debug)" = on ] || return 0
-  if [ "$wine" = mine ]; then echo WINE_HEAT_COUNT=1; echo "WINE_HEAT_LOG=$(cdb_value "$LOGS")"; echo FEX_PROFILESTATS=1; fi
+  if [ "$wine" = mine ]; then
+    echo WINE_HEAT_COUNT=1; echo "WINE_HEAT_LOG=$(cdb_value "$LOGS")"
+    if [ "$fex" = mine ] && fex_fixed profilestats-slots; then echo FEX_PROFILESTATS=1; fi
+  fi
   echo FEX_SILENTLOG=0
 }
 # FEX's switches, one row per setting: "<setting> <entry> <needs>", built like HEAT_SWITCHES (an
@@ -2065,6 +2070,8 @@ fex_file() {
 fex_prof_id() {
   sed -n 's/^libarm64ecfex\.dll: build id \([0-9a-f]\{32\}\) age \([0-9]\{1,\}\), SizeOfImage \(0x[0-9a-f]\{1,\}\)$/\1:\2:\3/p' "$FEX_COMP/VERSION" 2>/dev/null | head -1
 }
+# fex_fixed <id>: my FEX's VERSION names the fix on its fixes: line (jdrly/FEX ADR 0011)
+fex_fixed() { in_list "$1" "$(sed -n 's/^fixes://p' "$FEX_COMP/VERSION" 2>/dev/null | head -1)"; }
 # fex_want: the FEX the setting asks for (engine without my build in the app)
 fex_want() { if fex_bundled && [ "$(setting fex)" = mine ]; then echo mine; else echo engine; fi; }
 # fex_in_place: the FEX in the engine: mine or engine when all three files are, other when one is

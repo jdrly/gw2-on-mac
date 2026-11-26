@@ -942,10 +942,11 @@ check "  it says which" has <(echo "$out") "^DXMT: the engine's own DXMT (athei/
 check "  warming, MetalFX, Metal and Vsync greyed with the reason; set warm, set metal and set vsync refused" \
   eval 'SET_OUT=$(g settings); [ "$(kv "$SET_OUT" warm_state)" = "off:Needs my DXMT fork, and the engine'"'"'s own DXMT is chosen." ] && [ "$(kv "$SET_OUT" metalfx_state)" = "$(kv "$SET_OUT" warm_state)" ] && [ "$(kv "$SET_OUT" metal_state)" = "$(kv "$SET_OUT" warm_state)" ] && [ "$(kv "$SET_OUT" vsync_state)" = "$(kv "$SET_OUT" warm_state)" ] && ! "$G" set warm off >/dev/null 2>&1 && ! "$G" set metal 4 >/dev/null 2>&1 && ! "$G" set vsync off >/dev/null 2>&1'
 check "  none of the fork's variables in the environment" sh -c "! '$G' env | grep -qE 'DXMT_(CACHE_DIR|WARM|DEPENDENCY_COMPRESSION|SUBSAMPLE|STATS)'"
-# (after the heat entries exactly FEX's that Debug logging adds: FEX_PROFILESTATS only with my
-# ntdll.so in place, FEX_SILENTLOG with either, neither with Debug logging off)
+# (after the heat entries exactly FEX's that Debug logging adds: FEX_SILENTLOG with either
+# ntdll.so, nothing with Debug logging off. The engine's own FEX is in place here, so never
+# FEX_PROFILESTATS, #344)
 fex_tail=""
-if [ "$(sett debug)" = on ]; then ! ntdll_is mine || fex_tail=";env=FEX_PROFILESTATS=1"; fex_tail="$fex_tail;env=FEX_SILENTLOG=0"; fi
+[ "$(sett debug)" != on ] || fex_tail=";env=FEX_SILENTLOG=0"
 check "  the game's shader cache: the engine's DXMT's own" has <(g rules) "^exe=Gw2-64.exe;env=DXMT_SHADER_CACHE_PATH=$DXMT_CACHE_ENGINE\(;env=WINE_HEAT_[^;]*\)*$fex_tail$"
 check "  wine.app untouched" [ "$(wineapp_sums "$ENG")" = "$(wineapp_sums "$S")" ]
 out=$(g set dxmt fork 2>&1) && rc=0 || rc=$?
@@ -1477,7 +1478,28 @@ if mine; then
   check "job wakes on: WINE_HEAT_WAKE=one,skip for the game, unset for CefHost.exe" rules_are jobwakes
   check "  a dry run of Play prints the game's rule with it" eval '[ "$(dry_rule)" = "$(g rules | head -1)" ]'
   g set debug on >/dev/null
-  check "  with Debug logging: the counters too, written to the logs folder, and FEX's counters and messages" rules_are jobwakes-debug
+  check "  with Debug logging: the counters too, written to the logs folder, and FEX's messages; not FEX's counters, with the engine's own FEX (#344)" rules_are jobwakes-debug
+  # (FEX's counters, FEX_PROFILESTATS=1, only with my FEX in place and profilestats-slots on its
+  # VERSION's fixes: line: the engine's own FEX faults at its 37th thread with it on macOS (#344).
+  # No line, an empty one or one without it is no. The staged VERSION back after; a
+  # WINE_HEAT_PROF_FEX the staged files may add is left out of the comparison)
+  if fexb; then
+    cp "$COMP/fex/VERSION" "$SANDBOX/fex-VERSION.fixes"
+    fex_fixes() { { grep -v '^fixes:' "$SANDBOX/fex-VERSION.fixes"; [ "$1" = none ] || echo "fixes:${1#-}"; } >"$COMP/fex/VERSION"; }
+    fex_fixes " profilestats-slots"
+    check "  my FEX in the app naming profilestats-slots, the engine's own in place: still no FEX_PROFILESTATS" rules_are jobwakes-debug
+    g set fex mine >/dev/null
+    check "  and my FEX in place, its VERSION naming profilestats-slots: FEX's counters too, FEX_PROFILESTATS=1 before FEX_SILENTLOG=0, unset for CefHost.exe" \
+      eval '[ "$(g rules | sed "s|$H|/Users/me|g; s/;env=WINE_HEAT_PROF_FEX=[^;]*//")" = "$(cat "$FIX/jobwakes-debug-fex.rules")" ]'
+    check "  a dry run of Play prints the game's rule with it" eval '[ "$(dry_rule)" = "$(g rules | head -1)" ]'
+    for fx in none - " other-fix"; do
+      fex_fixes "$fx"
+      check "  my FEX whose VERSION has $([ "$fx" = none ] && echo "no fixes: line" || { [ "$fx" = - ] && echo "an empty fixes: line" || echo "a fixes: line without it"; }): no FEX_PROFILESTATS" \
+        eval '! g rules | grep -q FEX_PROFILESTATS && g rules | head -1 | grep -q ";env=WINE_HEAT_LOG=[^;]*;env=FEX_SILENTLOG=0$"'
+    done
+    cp "$SANDBOX/fex-VERSION.fixes" "$COMP/fex/VERSION"
+    g set fex engine >/dev/null
+  fi
   g set debug off >/dev/null
   check "  Debug logging off again: neither of FEX's variables" eval 'rules_are jobwakes && ! g rules | grep -q FEX_'
   g set jobwakes off >/dev/null; g set eventpool on >/dev/null
@@ -1531,7 +1553,7 @@ if drv; then
   check "  a dry run of Play prints the game's rule with it" eval 'echo "$out" | grep -qxF "[dry-run] rule $(g rules | head -1)" && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;.*;env=WINE_MACDRV_SURFACE=copy,skip$"'
   if mine; then
     g set wine mine >/dev/null; g set jobwakes on >/dev/null; g set debug on >/dev/null
-    check "  with my ntdll.so, job wakes and Debug logging: both files' switches in the table's order, then the counters" rules_are launcherframes-jobwakes-debug
+    check "  with my ntdll.so, job wakes and Debug logging: both files' switches in the table's order, then the counters (not FEX's, with the engine's own FEX)" rules_are launcherframes-jobwakes-debug
     g set debug off >/dev/null; g set jobwakes off >/dev/null; g set wine engine >/dev/null
   fi
   g set launcherframes off >/dev/null
