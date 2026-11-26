@@ -4976,7 +4976,7 @@ cp "$SANDBOX/devf.full" "$DEVF"
 # A file at version 12, which has WINE_HEAT_SPIN's old value under the comment that build wrote
 # (here at the end, #368): as written, the line and its comment go and the new value comes at the
 # end under its own comment. A value I changed stays, one I commented out stays as it is, and one I
-# deleted stays deleted: no line comes for any of them.
+# deleted stays deleted: no line comes for any of them, nor with a line of mine beside the old one.
 drop_rows "$SANDBOX/devf.full" WINE_HEAT_SPIN | sed 's/^version=.*/version=12/' >"$SANDBOX/devf.v12rest"
 v12_spin() { # <line>: the file as a version-12 build would have it, <line> last under its comment
   { cat "$SANDBOX/devf.v12rest"; echo
@@ -5002,6 +5002,12 @@ for hand in WINE_HEAT_SPIN=lock=50:game "#$GONE13" "no line"; do
   check "  a version-12 file with $hand: nothing switched on, the file as it was but its version" \
     eval 'grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: $GONE13" "$SANDBOX/v12play.txt" && [ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && [ "$(sed 1d "$DEVF")" = "$(cat "$SANDBOX/devf.v12hand")" ]'
 done
+v12_spin "$GONE13
+WINE_HEAT_SPIN=lock=50:game"
+GW2_ON_MAC_DRY_RUN=1 dg play >"$SANDBOX/v12play.txt" 2>&1
+dg repair >/dev/null 2>&1
+check "  a version-12 file with the old line and a WINE_HEAT_SPIN=lock=50:game of mine after it: nothing switched on, the old line and its comment gone, mine kept last" \
+  eval 'grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: $GONE13" "$SANDBOX/v12play.txt" && [ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && [ "$(sed 1d "$DEVF")" = "$(sed 1d "$SANDBOX/devf.v12rest"; echo WINE_HEAT_SPIN=lock=50:game)" ]'
 cp "$SANDBOX/devf.full" "$DEVF"
 # A file at version 2 or 1: nothing is added, since version 3's DXMT_MTL4_ALLOCATOR_POOL left the
 # table at version 9 and the file names every later row. Play says which lines left the list.

@@ -1479,11 +1479,13 @@ dev_update() {
   v=$(dev_file_version)
   [ "$v" -lt "$DEV_SWITCHES_VERSION" ] || return 0
   # (#368: the variables whose line, as the table wrote it, left the table since the file's
-  # version; a row of the table for one of them is its new value)
+  # version, where the file has no other line for them, on or commented out; a row of the table for
+  # one of them is its new value)
   [ ! -f "$DEV_FILE" ] || replaced=$(GONE_ROWS="$DEV_GONE" awk -v v="$v" '
     BEGIN { n = split(ENVIRON["GONE_ROWS"], r, "\n")
-            for (i = 1; i <= n; i++) if (split(r[i], f, " ") >= 4 && f[1] + 0 > v + 0) want[f[3]] = 1 }
-    $0 in want { k = $0; sub(/=.*/, "", k); print k }' "$DEV_FILE")
+            for (i = 1; i <= n; i++) if (split(r[i], f, " ") >= 4 && f[1] + 0 > v + 0) { k = f[3]; sub(/=.*/, "", k); line[k] = f[3] } }
+    { for (k in line) if ($0 == line[k]) hit[k] = 1; else if ($0 ~ ("^[#[:space:]]*" k "=")) other[k] = 1 }
+    END { for (k in hit) if (!(k in other)) print k }' "$DEV_FILE")
   # (the rows newer than the file whose variable it doesn't name, not even commented out, and the
   # rows that replace a line dev_gone takes out)
   added=$(printf '%s\n' "$DEV_SWITCHES" | while read -r since piece ref played entry text; do
