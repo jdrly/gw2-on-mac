@@ -1390,7 +1390,7 @@ fex_entries() {
 # rule as one entry (hf_join), and while a rule of compatdb.local for Gw2-64.exe sets it
 # (local_hostfeatures), that rule replaces them: they stay out, saying what to write there instead.
 DEV_SWITCHES="
-1 wine #14,#45 unplayed WINE_HEAT_SPIN=lock=20:game,event=30:game,sem=5:game the Faster locks row's two spins, and the job workers spin 5 µs on their semaphore before they sleep. While this line is here, its value replaces the row's.
+13 wine #14,#45,#368 unplayed WINE_HEAT_SPIN=lock=20:game+halfworkers,event=30:game the Faster locks row's two spins, and every other job worker spins before a lock sleep too, so one session compares the two halves: each thread's row in the heat log says spin 1 or spin 0. Needs my ntdll.so from jdrly/wine#59 on: an older one doesn't know the scope and leaves the lock spin off. While this line is here, its value replaces the row's.
 1 macdrv #62 unplayed WINE_MACDRV_VIEW=changes a window's view frame goes to the main thread only when it changed
 1 macdrv #62 unplayed WINE_MACDRV_CLIP=changes ClipCursor doesn't call the main thread for the rectangle it applied last
 1 macdrv #62 unplayed WINE_MACDRV_CALL=quiet after a call to the main thread, the event pipe holds a byte only if an event waits
@@ -1429,6 +1429,9 @@ DEV_SWITCHES="
 # Version 9: my DXMT fork has jdrly/dxmt#153, #154 and #204 on by default, and =0 turns each off.
 # Version 10: my DXMT fork has jdrly/dxmt#271's wait on by default (jdrly/dxmt#332), and =next turns
 # it off. Version 11: my FEX has #161's and #162's lookups on by default (#266), and =0 turns each off.
+# Version 13: WINE_HEAT_SPIN's line takes a new value (#368). Its old line as the table wrote it goes,
+# and dev_update adds the new one at the end. Mine with another value stays, and one I commented out
+# stays as it is, so no new line comes.
 DEV_GONE="
 4 jdrly/dxmt#227 DXMT_MTL4_PRESENT=mtl3 mtl4
 8 jdrly/dxmt#157 DXMT_PRESENT_QUEUE=pace -
@@ -1440,6 +1443,7 @@ DEV_GONE="
 10 jdrly/dxmt#271 DXMT_MTL4_SHOWN_WAIT=write next
 11 #161 FEX_DISPATCHERL1LOOKUP=1 0
 11 #162 FEX_ENTRYHEADERLOOKUP=1 0
+13 #14,#45 WINE_HEAT_SPIN=lock=20:game,event=30:game,sem=5:game -
 "
 DEV_SWITCHES_VERSION=$(printf '%s\n' "$DEV_SWITCHES" "$DEV_GONE" | awk 'NF && $1 > v { v = $1 } END { print v + 0 }')
 # dev_piece_label <piece>: what the file and the log call it
@@ -1467,17 +1471,20 @@ dev_file_version() {
 # dev-switches.conf written, or brought up to the table's version (the header above DEV_SWITCHES)
 dev_update() {
   [ -n "$DEV_ON" ] || return 0
-  local v since piece ref played entry text added="" gone=""
+  local v since piece ref played entry text added="" gone="" kept=""
   if [ "$(dev_version)" -lt "$DEV_ROWS_VERSION" ]; then
     say "Development build: the switch rows on, once: $(printf '%s\n' "$DEV_ROWS" | awk -v v="$(dev_version)" 'NF && $1 > v { for (i = 2; i <= NF; i++) { printf "%s%s", s, $i; s = " " } }')"
     write_settings
   fi
   v=$(dev_file_version)
   [ "$v" -lt "$DEV_SWITCHES_VERSION" ] || return 0
-  # (the rows newer than the file whose variable it doesn't name, not even commented out)
+  # (the rows newer than the file whose variable it doesn't name, not even commented out, once
+  # dev_gone has taken out the lines that left the table: a row with a new value replaces its old
+  # line, #368)
+  [ ! -f "$DEV_FILE" ] || kept=$(dev_gone "$v" <"$DEV_FILE")
   added=$(printf '%s\n' "$DEV_SWITCHES" | while read -r since piece ref played entry text; do
     [ -n "$since" ] && [ "$since" -gt "$v" ] || continue
-    dev_names "$entry" || echo "$entry"
+    dev_names "$entry" <<<"$kept" || echo "$entry"
   done)
   # (the rows taken out of the table since the file's version, for an existing file)
   [ ! -f "$DEV_FILE" ] || gone=$(printf '%s\n' "$DEV_GONE" | awk -v v="$v" 'NF && $1 > v { print $3 }')
@@ -1489,7 +1496,8 @@ dev_update() {
       echo "# the game has run with it (played or unplayed). A line I comment out (#) or delete is off. The"
       echo "# game gets every line left, while the file that reads it is in place and has the switch. A"
       echo "# newer build adds its new switches at the end, on. It changes a line here only when its"
-      echo "# switch leaves the list: a line as the build wrote it goes, a line I commented out stays off."
+      echo "# switch leaves the list or takes a new value: a line as the build wrote it goes (a new value"
+      echo "# comes at the end), a line I commented out stays off."
     elif grep -q '^version=' "$DEV_FILE"; then
       sed "s/^version=.*/version=$DEV_SWITCHES_VERSION/" "$DEV_FILE" | dev_gone "$v"
     else
@@ -1505,19 +1513,18 @@ dev_update() {
   } | put "$DEV_FILE" 644
   say "dev-switches.conf: version $DEV_SWITCHES_VERSION, switched on: $(printf '%s' "${added:-nothing}" | tr '\n' ' ')${gone:+; out of the list: $(printf '%s' "$gone" | tr '\n' ' ')}"
 }
-# dev_names <entry of a row>: dev-switches.conf has a line for the entry's variable, on or commented
-# out. For FEX_HOSTFEATURES only a line with one of the row's features, enabled or disabled, counts:
+# dev_names <entry of a row>: the dev-switches.conf on stdin has a line for the entry's variable, on
+# or commented out. For FEX_HOSTFEATURES only a line with one of the row's features, enabled or disabled, counts:
 # a line of mine with other items (enableafp) isn't a choice about AVX.
 dev_names() {
-  [ -f "$DEV_FILE" ] || return 1
-  if [ "${1%%=*}" != FEX_HOSTFEATURES ]; then grep -qE "^[#[:space:]]*${1%%=*}=" "$DEV_FILE"; return; fi
+  if [ "${1%%=*}" != FEX_HOSTFEATURES ]; then grep -qE "^[#[:space:]]*${1%%=*}="; return; fi
   awk -v row="${1#*=}" '
     BEGIN { n = split(row, r, ","); for (i = 1; i <= n; i++) { k = r[i]; sub(/^(enable|disable)/, "", k); want[k] = 1 } }
     /^[#[:space:]]*FEX_HOSTFEATURES=/ {
       v = $0; sub(/^[^=]*=/, "", v); n = split(v, it, ",")
       for (i = 1; i <= n; i++) { k = it[i]; sub(/^(enable|disable)/, "", k); if (k in want) f = 1 }
     }
-    END { exit !f }' "$DEV_FILE"
+    END { exit !f }'
 }
 # hf_join <value>...: FEX_HOSTFEATURES values (comma lists; an argument can hold several, one a line)
 # as one, their items in order. Of two items for one feature (enableX, disableX) the later stays: FEX

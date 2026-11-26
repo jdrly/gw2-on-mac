@@ -1092,6 +1092,13 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   so a return site is 4 instructions instead of 12, and a return the call-return stack predicted
   no longer branches over the lookup. It goes in only
   while my FEX is in place and its `VERSION` names it.
+  Version 13 gives `WINE_HEAT_SPIN` a new value (#368), `lock=20:game+halfworkers,event=30:game`:
+  every other job worker spins before a lock sleep as well, so one session compares the two
+  halves, and the `sem` spin goes. The old line as the table wrote it goes with its comment, and
+  the new one comes at the end under its own. One I changed or commented out stays as it is, and
+  no new line comes. An update now looks for the variables a file names after it took out the
+  lines that left the table. The value needs my `ntdll.so` from jdrly/wine#59 on: an older one
+  doesn't know the scope and leaves the lock spin off.
   A row whose variable a line of the file sets, *Faster locks* with the file's
   `WINE_HEAT_SPIN`, is greyed while that line is there, since the file's entry wins. A line of the table goes in only while the file of mine that
   reads it is in place and has the switch: the `switches:` line of my `ntdll.so`'s,
@@ -1726,7 +1733,9 @@ Without one, those checks are skipped. It covers:
   commented-out one kept off with `=next`), a file at version 10 updated (version 11's two FEX
   lines gone, a commented-out one kept off with `=0`), version 12's `DXMT_MTL4_PRESENT_FENCES` in
   and out (and still in at Metal 3) and `FEX_RETURNLOOKUPOUTOFLINE` in and out (out with the
-  engine's own FEX), a file at version 11 updated (both added), neither in a release, a line
+  engine's own FEX), a file at version 11 updated (both added), a file at version 12 updated
+  (`WINE_HEAT_SPIN`'s old line replaced by the new one at the end, a changed or commented-out one
+  kept and no new line), neither in a release, a line
   commented out or added, the engine's own DXMT, a second start
   that changes nothing, an update that adds a newer switch and keeps the rest, a row turned off
   that stays off, a release that writes no file and reads none, and a release's install updated
