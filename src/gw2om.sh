@@ -1390,7 +1390,7 @@ fex_entries() {
 # rule as one entry (hf_join), and while a rule of compatdb.local for Gw2-64.exe sets it
 # (local_hostfeatures), that rule replaces them: they stay out, saying what to write there instead.
 DEV_SWITCHES="
-1 wine #14,#45 unplayed WINE_HEAT_SPIN=lock=20:game,event=30:game,sem=5:game the Faster locks row's two spins, and the job workers spin 5 µs on their semaphore before they sleep. While this line is here, its value replaces the row's.
+1 wine #14,#45,#368 unplayed WINE_HEAT_SPIN=lock=20:game+halfworkers,event=30:game the Faster locks row's two spins, and every other job worker spins before a lock sleep too, so one session compares the two halves: each thread's row in the heat log says spin 1 or spin 0. Needs my ntdll.so from jdrly/wine#59 on: an older one doesn't know the scope and leaves the lock spin off. While this line is here, its value replaces the row's.
 1 macdrv #62 unplayed WINE_MACDRV_VIEW=changes a window's view frame goes to the main thread only when it changed
 1 macdrv #62 unplayed WINE_MACDRV_CLIP=changes ClipCursor doesn't call the main thread for the rectangle it applied last
 1 macdrv #62 unplayed WINE_MACDRV_CALL=quiet after a call to the main thread, the event pipe holds a byte only if an event waits
@@ -1429,6 +1429,9 @@ DEV_SWITCHES="
 # Version 9: my DXMT fork has jdrly/dxmt#153, #154 and #204 on by default, and =0 turns each off.
 # Version 10: my DXMT fork has jdrly/dxmt#271's wait on by default (jdrly/dxmt#332), and =next turns
 # it off. Version 11: my FEX has #161's and #162's lookups on by default (#266), and =0 turns each off.
+# Version 13: WINE_HEAT_SPIN's line takes a new value (#368). Its old line as the table wrote it goes,
+# and dev_update adds the row's new value at the end. Mine with another value stays, one I commented
+# out stays as it is, and one I deleted stays deleted: no new line comes for any of them.
 DEV_GONE="
 4 jdrly/dxmt#227 DXMT_MTL4_PRESENT=mtl3 mtl4
 8 jdrly/dxmt#157 DXMT_PRESENT_QUEUE=pace -
@@ -1440,6 +1443,7 @@ DEV_GONE="
 10 jdrly/dxmt#271 DXMT_MTL4_SHOWN_WAIT=write next
 11 #161 FEX_DISPATCHERL1LOOKUP=1 0
 11 #162 FEX_ENTRYHEADERLOOKUP=1 0
+13 #14,#45 WINE_HEAT_SPIN=lock=20:game,event=30:game,sem=5:game -
 "
 DEV_SWITCHES_VERSION=$(printf '%s\n' "$DEV_SWITCHES" "$DEV_GONE" | awk 'NF && $1 > v { v = $1 } END { print v + 0 }')
 # dev_piece_label <piece>: what the file and the log call it
@@ -1467,16 +1471,27 @@ dev_file_version() {
 # dev-switches.conf written, or brought up to the table's version (the header above DEV_SWITCHES)
 dev_update() {
   [ -n "$DEV_ON" ] || return 0
-  local v since piece ref played entry text added="" gone=""
+  local v since piece ref played entry text added="" gone="" replaced=""
   if [ "$(dev_version)" -lt "$DEV_ROWS_VERSION" ]; then
     say "Development build: the switch rows on, once: $(printf '%s\n' "$DEV_ROWS" | awk -v v="$(dev_version)" 'NF && $1 > v { for (i = 2; i <= NF; i++) { printf "%s%s", s, $i; s = " " } }')"
     write_settings
   fi
   v=$(dev_file_version)
   [ "$v" -lt "$DEV_SWITCHES_VERSION" ] || return 0
-  # (the rows newer than the file whose variable it doesn't name, not even commented out)
+  # (#368: the variables whose line, as the table wrote it, left the table since the file's
+  # version, where the file has no other line for them, on or commented out; a row of the table for
+  # one of them is its new value)
+  [ ! -f "$DEV_FILE" ] || replaced=$(GONE_ROWS="$DEV_GONE" awk -v v="$v" '
+    BEGIN { n = split(ENVIRON["GONE_ROWS"], r, "\n")
+            for (i = 1; i <= n; i++) if (split(r[i], f, " ") >= 4 && f[1] + 0 > v + 0) { k = f[3]; sub(/=.*/, "", k); line[k] = f[3] } }
+    { for (k in line) if ($0 == line[k]) hit[k] = 1; else if ($0 ~ ("^[#[:space:]]*" k "=")) other[k] = 1 }
+    END { for (k in hit) if (!(k in other)) print k }' "$DEV_FILE")
+  # (the rows newer than the file whose variable it doesn't name, not even commented out, and the
+  # rows that replace a line dev_gone takes out)
   added=$(printf '%s\n' "$DEV_SWITCHES" | while read -r since piece ref played entry text; do
-    [ -n "$since" ] && [ "$since" -gt "$v" ] || continue
+    [ -n "$since" ] || continue
+    if in_list "${entry%%=*}" "$replaced"; then echo "$entry"; continue; fi
+    [ "$since" -gt "$v" ] || continue
     dev_names "$entry" || echo "$entry"
   done)
   # (the rows taken out of the table since the file's version, for an existing file)
@@ -1489,7 +1504,8 @@ dev_update() {
       echo "# the game has run with it (played or unplayed). A line I comment out (#) or delete is off. The"
       echo "# game gets every line left, while the file that reads it is in place and has the switch. A"
       echo "# newer build adds its new switches at the end, on. It changes a line here only when its"
-      echo "# switch leaves the list: a line as the build wrote it goes, a line I commented out stays off."
+      echo "# switch leaves the list or takes a new value: a line as the build wrote it goes (a new value"
+      echo "# comes at the end), a line I commented out stays off."
     elif grep -q '^version=' "$DEV_FILE"; then
       sed "s/^version=.*/version=$DEV_SWITCHES_VERSION/" "$DEV_FILE" | dev_gone "$v"
     else
