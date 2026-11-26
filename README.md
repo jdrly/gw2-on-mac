@@ -1053,8 +1053,9 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   has every switch of my forks that is off by default, at the value that turns its new behaviour
   on, apart from diagnostics, anything that can cap the frame rate below 60 (DXMT's lower thread
   priorities and `DXMT_BG_POLICY=occlusion` among them), values only I can choose and the rows'
-  own variables. A DXMT line that acts on one Metal only, `DXMT_DRAIN_SPLITS` on Metal 3, stays in
-  with the *Metal* row at the other, where it does nothing.
+  own variables. A DXMT line that acts on one Metal only, `DXMT_DRAIN_SPLITS` on Metal 3 or
+  `DXMT_MTL4_PRESENT_FENCES` on Metal 4, stays in with the *Metal* row at the other, where it does
+  nothing.
   `DXMT_MTL4_LAYER_SET` (jdrly/dxmt#226) stays out: I turn that one on by hand, never with
   another present switch, so a change in play has one cause. `DXMT_MTL4_PRESENT=mtl3` left the
   table at version 4, since the rule has it at Metal 4 now. Version 4 changes a file of an older
@@ -1083,6 +1084,14 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   which version 5 added, because my FEX has both on by default now (#266). A line as the table
   wrote it goes with its comment. One I commented out becomes `NAME=0` under a comment, so it
   stays off.
+  Version 12 adds two lines. `DXMT_MTL4_PRESENT_FENCES=1` (jdrly/dxmt#358) acts at Metal 4, where
+  the rule presents through a Metal 3 command buffer (`DXMT_MTL4_PRESENT=mtl3`): an empty Metal 4
+  encoder each frame carries the present's fences, so the next frame's work waits for what the
+  present waited for. It's the candidate for the aerodrome's flashing and GPU hang.
+  `FEX_RETURNLOOKUPOUTOFLINE=1` (#343) moves the L1 lookup of a guest return after the unit's code,
+  so a return site is 4 instructions instead of 12, and a return the call-return stack predicted
+  no longer branches over the lookup. It goes in only
+  while my FEX is in place and its `VERSION` names it.
   A row whose variable a line of the file sets, *Faster locks* with the file's
   `WINE_HEAT_SPIN`, is greyed while that line is there, since the file's entry wins. A line of the table goes in only while the file of mine that
   reads it is in place and has the switch: the `switches:` line of my `ntdll.so`'s,
@@ -1715,7 +1724,10 @@ Without one, those checks are skipped. It covers:
   at version 8 updated (version 9's three lines gone, a commented-out one kept off), a file at
   version 9 with `DXMT_MTL4_SHOWN_WAIT=write` updated (the line gone, a changed one kept, a
   commented-out one kept off with `=next`), a file at version 10 updated (version 11's two FEX
-  lines gone, a commented-out one kept off with `=0`), a line commented out or added, the engine's own DXMT, a second start
+  lines gone, a commented-out one kept off with `=0`), version 12's `DXMT_MTL4_PRESENT_FENCES` in
+  and out (and still in at Metal 3) and `FEX_RETURNLOOKUPOUTOFLINE` in and out (out with the
+  engine's own FEX), a file at version 11 updated (both added), neither in a release, a line
+  commented out or added, the engine's own DXMT, a second start
   that changes nothing, an update that adds a newer switch and keeps the rest, a row turned off
   that stays off, a release that writes no file and reads none, and a release's install updated
   by a development build
