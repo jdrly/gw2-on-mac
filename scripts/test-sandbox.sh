@@ -5111,16 +5111,18 @@ check "  dev-switches.conf there by hand: the rules, status and a dry run of Pla
   eval '[ "$(rg rules)" = "$rules_before" ] && [ -z "$(rg status | sed -n "s/^dev_switches=//p")" ] && ! GW2_ON_MAC_DRY_RUN=1 rg play 2>&1 | grep -q -e MY_OWN_SWITCH -e "dev-switches.conf"'
 rm -f "$RDEVF"
 # (version 12's two lines in a release: a tree that names DXMT_MTL4_PRESENT_FENCES, my FEX with a
-# record that names FEX_RETURNLOOKUPOUTOFLINE, and dev-switches.conf there by hand; then all back)
+# record that names FEX_RETURNLOOKUPOUTOFLINE, and dev-switches.conf there by hand; then all back.
+# The FEX setting first: setting it puts the engine's files in place, the DXMT tree too)
+if fexb; then rg set fex mine >/dev/null 2>&1; dev_switches_line fex FEX_INITIALCODEBUFFERMB FEX_RETURNLOOKUPOUTOFLINE; fi
 printf 'x\0DXMT_MTL4_PRESENT\0DXMT_MTL4_PRESENT_FENCES\0' >"$RTREE/d3d11.dll"
 cp "$DEVF" "$RDEVF"
-if fexb; then rg set fex mine >/dev/null 2>&1; dev_switches_line fex FEX_INITIALCODEBUFFERMB FEX_RETURNLOOKUPOUTOFLINE; fi
 rg rules >"$SANDBOX/rel-rules.txt" 2>&1
+rg status >"$SANDBOX/rel-status.txt" 2>&1
 check "  with a tree that names DXMT_MTL4_PRESENT_FENCES, my FEX whose record names FEX_RETURNLOOKUPOUTOFLINE, and the file there: neither in the rules, DXMT_MTL4_PRESENT=mtl3 still there" \
-  eval 'sed -n 1p "$SANDBOX/rel-rules.txt" | grep -qE ";env=DXMT_MTL4_PRESENT=mtl3(;|\$)" && ! grep -q -e DXMT_MTL4_PRESENT_FENCES -e FEX_RETURNLOOKUPOUTOFLINE "$SANDBOX/rel-rules.txt"'
-if fexb; then dev_switches_line fex FEX_INITIALCODEBUFFERMB; rg set fex engine >/dev/null 2>&1; fi
+  eval 'sed -n 1p "$SANDBOX/rel-rules.txt" | grep -qE ";env=DXMT_MTL4_PRESENT=mtl3(;|\$)" && { ! fexb || grep -qx fex_file=mine "$SANDBOX/rel-status.txt"; } && ! grep -q -e DXMT_MTL4_PRESENT_FENCES -e FEX_RETURNLOOKUPOUTOFLINE "$SANDBOX/rel-rules.txt"'
 rm -f "$RDEVF"
 rm -rf "$RTREE" && cp -Rp "$SANDBOX/rtree.keep" "$RTREE"
+if fexb; then dev_switches_line fex FEX_INITIALCODEBUFFERMB; rg set fex engine >/dev/null 2>&1; fi
 # (the sampler in a release too: my FEX chosen, its record naming FEX_ENTRYHEADERLOOKUP, and
 # WINE_HEAT_PROF=on in compatdb.local; then all back)
 if fexb; then

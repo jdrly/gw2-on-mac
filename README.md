@@ -1086,7 +1086,8 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   encoder each frame carries the present's fences, so the next frame's work waits for what the
   present waited for. It's the candidate for the aerodrome's flashing and GPU hang.
   `FEX_RETURNLOOKUPOUTOFLINE=1` (#343) moves the L1 lookup of a guest return after the unit's code,
-  so a return the call-return stack predicted is 4 instructions instead of 12. It goes in only
+  so a return site is 4 instructions instead of 12, and a return the call-return stack predicted
+  no longer branches over the lookup. It goes in only
   while my FEX is in place and its `VERSION` names it.
   A row whose variable a line of the file sets, *Faster locks* with the file's
   `WINE_HEAT_SPIN`, is greyed while that line is there, since the file's entry wins. A line of the table goes in only while the file of mine that

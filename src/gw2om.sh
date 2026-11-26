@@ -1409,7 +1409,7 @@ DEV_SWITCHES="
 10 dxmt jdrly/dxmt#314 unplayed DXMT_REFRESH_REQUERY=1 the swap chain reads the monitor's refresh rate again after exclusive fullscreen and for a fullscreen mode of 0 Hz, instead of assuming 60 Hz
 10 dxmt jdrly/dxmt#314 unplayed DXMT_STEADY_SLEEP=1 the frame limiter and the background throttle keep their deadlines on QueryPerformanceCounter and sleep for what is left, so a wall clock that steps back can't lengthen a sleep
 12 dxmt jdrly/dxmt#358 unplayed DXMT_MTL4_PRESENT_FENCES=1 only with the Metal row at Metal 4, where the game's rule presents through a Metal 3 command buffer (DXMT_MTL4_PRESENT=mtl3), nothing on Metal 3: an empty Metal 4 encoder each frame carries the present's fence waits and update, so the next frame's work waits for what the present waited for. The candidate for the aerodrome's flashing and GPU hang.
-12 fex #343 unplayed FEX_RETURNLOOKUPOUTOFLINE=1 a guest return's L1 lookup goes after the unit's code, so a return the call-return stack predicted is 4 instructions instead of 12
+12 fex #343 unplayed FEX_RETURNLOOKUPOUTOFLINE=1 a guest return's L1 lookup goes after the unit's code, so a return site is 4 instructions instead of 12 and a return the call-return stack predicted no longer branches over the lookup
 "
 # Rows taken out of the table, "<version> <issue> <NAME=value> <off value>". dev_update brings a file
 # older than <version> up to it (dev_gone): the line as the table wrote it goes, with the comment and
