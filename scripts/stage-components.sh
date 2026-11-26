@@ -78,7 +78,7 @@
 # checks and the sandbox until prebuilt.lock pins the real ones. build.sh takes them;
 # scripts/release.sh refuses them.
 # Their VERSIONs' switches: lines are the real builds' (jdrly/wine 472d7774368, jdrly/FEX
-# c2e25accebc), so a pull request's sandbox reads the switches a dev build's does: when a build
+# a4aa2cd5a59), so a pull request's sandbox reads the switches a dev build's does: when a build
 # drops or adds one, these lines change with it.
 #
 #   scripts/stage-components.sh [--fetch | --pack <tag> | --standin]
@@ -300,7 +300,7 @@ if [ "${1:-}" = --standin ]; then
     { echo "stand-in FEX-2610-0-g0000000 (not a build: scripts/stage-components.sh --standin)"
       echo "commit: 0000000000000000000000000000000000000000"
       echo "$engine_line"
-      echo "switches: FEX_DISPATCHERL1LOOKUP FEX_ENTRYCOMPILELOCK FEX_ENTRYHEADERLOOKUP FEX_HARDWARETSOSYSCALLS FEX_INITIALCODEBUFFERMB FEX_LEA32BITADDS FEX_SIGNEXTENDINGLOADS FEX_HOSTFEATURES=disableavx"
+      echo "switches: FEX_CONDBACKEDGESUSPEND FEX_DISPATCHERL1LOOKUP FEX_ENTRYCOMPILELOCK FEX_ENTRYHEADERLOOKUP FEX_HARDWARETSOSYSCALLS FEX_INITIALCODEBUFFERMB FEX_LEA32BITADDS FEX_RETURNLOOKUPOUTOFLINE FEX_SIGNEXTENDINGLOADS FEX_TRAPFLAGINDIRECTBRANCHES FEX_HOSTFEATURES=disableavx"
       for f in $FEX_FILES; do echo "$f: sha256 $(sha "$P/fex.new/$f")"; done
       echo "libarm64ecfex.dll: build id 0123456789abcdef0123456789abcdef age 1, SizeOfImage 0x426000"; } >"$P/fex.new/VERSION"
     record "$P/fex.new"
