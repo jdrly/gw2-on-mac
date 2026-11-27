@@ -315,7 +315,9 @@ that reads the key as its new default until the next write keeps it. Version 1 r
 `fastlocks` to `off`. Before it, the arm64 line wrote `on` into every file while its row was
 greyed, so no file held a choice of mine. Version 2 resets `dxmt`, `wine` and `macdrv` to `fork`,
 `mine` and `mine`, because their rows left Settings with it, and a bottle on the engine's own
-files would have had no row to show it. A key `settings.conf` still has but the app no longer
+files would have had no row to show it. Version 3 resets `fastlocks` to its new default, `on`
+([ADR 0027](docs/adr/0027-faster-locks-is-on-by-default.md)). 0.2.0 and 0.2.1 wrote `off` into every
+file, so an `off` chosen there reads `on` too, once. An `off` set after that stays. A key `settings.conf` still has but the app no longer
 knows, such as `coolworkers` or `gamemode` (whose row left in #269), is read by nothing and gone
 at the next write.
 
@@ -350,7 +352,7 @@ chosen, and the main window's *Engine* and *Graphics* checks name the files in p
 | | CPUs the game sees | `ncpu` | 8 | kept | from 2 up to your Mac's logical CPUs, or all. The game starts one job worker per CPU, minus one |
 | | Job wakes | `jobwakes` | on | new | a job the game hands out wakes one sleeping worker, and none when no worker sleeps (`WINE_HEAT_WAKE=one,skip`). Greyed while the engine's own `ntdll.so` is chosen |
 | | Event pool | `eventpool` | on | new | closed events are kept and handed out again, without a request to the Wine server (`WINE_HEAT_EVPOOL=1`). Greyed while the engine's own `ntdll.so` is chosen |
-| | Faster locks | `fastlocks` | off | reset to off | short spins before the game thread sleeps on a busy lock, a job group or an event (`WINE_HEAT_SPIN=lock=20:game,event=30:game`). Experimental. It stays off until a session of mine shows more hits than misses (#105). Greyed while the engine's own `ntdll.so` is chosen |
+| | Faster locks | `fastlocks` | on | reset to on | short spins before the game thread sleeps on a busy lock, a job group or an event (`WINE_HEAT_SPIN=lock=20:game,event=30:game`). On since every session of mine from dev.13 on showed more hits than misses (#105, [ADR 0027](docs/adr/0027-faster-locks-is-on-by-default.md)). Greyed while the engine's own `ntdll.so` is chosen |
 | Interface | Larger interface | `uiscale` | off | kept | my interface addon, see below |
 | | Interface Size "Larger" | `uiscale_size` | 1.75 | kept | the addon's scale: 1.5, 1.75, 1.8 or 2.0 |
 | | Small text in Cronos | `uiscale_sans` | on | kept | chat, the tracker and labels have no larger font, so the addon draws them in Cronos at the larger size |
@@ -371,8 +373,8 @@ chosen, and the main window's *Engine* and *Graphics* checks name the files in p
 what 0.1 ran with, chosen or not. A kept key means the same here and keeps 0.1's value. A key 0.1's
 file lacks, from a release older than the key, reads as 0.1's default: *Cinematic dialogue* was on
 there and is off here. A value this version doesn't take, such as a CPU count above this Mac's,
-reads as this version's default. *Faster locks* resets to off: on 0.1 it was a spin in CrossOver's
-msync, here it is another port with its own default. 0.1's *Game Mode* has no row here, since the
+reads as this version's default. *Faster locks* starts at this version's default, on. On 0.1 it was
+a spin in CrossOver's msync, here it is another port with its own default. 0.1's *Game Mode* has no row here, since the
 engine's loader is a Game Mode app, and 0.1's *Cooler job workers* has none on this line
 ([ADR 0006](docs/adr/0006-0.2-has-no-cooler-job-workers.md)), so both are dropped. *Mouse-look speed* keeps its value, though here it scales the mouse's own
 counts and on 0.1 the pointer's speed, so the camera may turn at another speed. Settings that are
