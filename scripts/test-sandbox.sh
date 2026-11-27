@@ -5317,18 +5317,20 @@ cp "$DEVF" "$RDEVF"
 check "  dev-switches.conf there by hand: the rules, status and a dry run of Play don't read it" \
   eval '[ "$(rg rules)" = "$rules_before" ] && [ -z "$(rg status | sed -n "s/^dev_switches=//p")" ] && ! GW2_ON_MAC_DRY_RUN=1 rg play 2>&1 | grep -q -e MY_OWN_SWITCH -e "dev-switches.conf"'
 rm -f "$RDEVF"
-# (a release's rule with a tree that names DXMT_MTL4_PRESENT_FENCES, my FEX with a record that names
-# FEX_INITIALCODEBUFFERMB and version 12's FEX_RETURNLOOKUPOUTOFLINE, and dev-switches.conf there by
-# hand: the present's fences and the first code buffer go in, as in every build (docs/adr/0028),
-# the file's line doesn't; at Metal 3 no fences, with the engine's own FEX no code buffer; then all
-# back. The FEX setting first: setting it puts the engine's files in place, the DXMT tree too)
+# (a release's rule with a tree that names DXMT_MTL4_PRESENT_FENCES and my FEX with a record that
+# names FEX_INITIALCODEBUFFERMB and version 12's FEX_RETURNLOOKUPOUTOFLINE, no dev-switches.conf: the
+# present's fences and the first code buffer go in, as in every build (docs/adr/0028), version 12's
+# line doesn't; the same rule with the file there by hand; at Metal 3 no fences, with the engine's
+# own FEX no code buffer; then all back. The FEX setting first: setting it puts the engine's files
+# in place, the DXMT tree too)
 if fexb; then rg set fex mine >/dev/null 2>&1; dev_switches_line fex FEX_INITIALCODEBUFFERMB FEX_RETURNLOOKUPOUTOFLINE; fi
 printf 'x\0DXMT_MTL4_PRESENT\0DXMT_MTL4_PRESENT_FENCES\0' >"$RTREE/d3d11.dll"
-cp "$DEVF" "$RDEVF"
 rg rules >"$SANDBOX/rel-rules.txt" 2>&1
 rg status >"$SANDBOX/rel-status.txt" 2>&1
-check "  with a tree that names DXMT_MTL4_PRESENT_FENCES, my FEX whose record names FEX_INITIALCODEBUFFERMB and FEX_RETURNLOOKUPOUTOFLINE, and the file there: DXMT_MTL4_PRESENT_FENCES=1 right after DXMT_MTL4_PRESENT=mtl3 and FEX_INITIALCODEBUFFERMB=128, unset for CefHost.exe; no FEX_RETURNLOOKUPOUTOFLINE" \
+check "  with a tree that names DXMT_MTL4_PRESENT_FENCES, my FEX whose record names FEX_INITIALCODEBUFFERMB and FEX_RETURNLOOKUPOUTOFLINE, and no dev-switches.conf: DXMT_MTL4_PRESENT_FENCES=1 right after DXMT_MTL4_PRESENT=mtl3 and FEX_INITIALCODEBUFFERMB=128, unset for CefHost.exe; no FEX_RETURNLOOKUPOUTOFLINE" \
   eval 'sed -n 1p "$SANDBOX/rel-rules.txt" | grep -qE ";env=DXMT_MTL4_PRESENT=mtl3;env=DXMT_MTL4_PRESENT_FENCES=1(;|\$)" && sed -n 2p "$SANDBOX/rel-rules.txt" | grep -qE ";env=DXMT_MTL4_PRESENT=;env=DXMT_MTL4_PRESENT_FENCES=(;|\$)" && { ! fexb || { grep -qx fex_file=mine "$SANDBOX/rel-status.txt" && sed -n 1p "$SANDBOX/rel-rules.txt" | grep -qE ";env=FEX_INITIALCODEBUFFERMB=128(;|\$)" && sed -n 2p "$SANDBOX/rel-rules.txt" | grep -qE ";env=FEX_INITIALCODEBUFFERMB=(;|\$)"; }; } && ! grep -q FEX_RETURNLOOKUPOUTOFLINE "$SANDBOX/rel-rules.txt"'
+cp "$DEVF" "$RDEVF"
+check "  the same rule with the file there by hand" eval '[ "$(rg rules 2>&1)" = "$(cat "$SANDBOX/rel-rules.txt")" ]'
 rg set metal 3 >/dev/null
 rg rules >"$SANDBOX/rel-rules.txt" 2>&1
 check "  at Metal 3: no DXMT_MTL4_PRESENT and no DXMT_MTL4_PRESENT_FENCES" eval '! grep -q DXMT_MTL4_PRESENT "$SANDBOX/rel-rules.txt"'

@@ -29,7 +29,8 @@ So the game's rule has both, in release and development builds alike (#379).
 - With my FEX in place the rule has `FEX_INITIALCODEBUFFERMB=128` after FEX's other entries, and
   `CefHost.exe`'s rule unsets it. With `fex=engine` it isn't there. Steam keeps FEX's 16 MB, as
   before.
-- Each entry still needs the build in place to have its switch, as its dev line did. The fences
+- Each entry still needs the build in place to have its switch, as its dev line did, and each is
+  gated on its own: the fences on Metal 4 and the tree, the code buffer on my FEX. The fences
   need my DXMT fork's tree in the engine to name `DXMT_MTL4_PRESENT_FENCES`, and the code buffer
   needs my FEX's `VERSION` to name `FEX_INITIALCODEBUFFERMB` on its `switches:` line. My fork's
   `gw2-on-mac`, which my builds stage, has the fences since jdrly/dxmt#358, and the FEX
@@ -43,7 +44,11 @@ So the game's rule has both, in release and development builds alike (#379).
   each line as that build wrote it, with its comment. A line I changed stays, and since the file's
   lines come after the rule's entries, it wins. A line I commented out becomes
   `DXMT_MTL4_PRESENT_FENCES=0` or `FEX_INITIALCODEBUFFERMB=16` under a comment, so it stays off.
-  16 is FEX's own first size, and FEX logs an error for any number but 16, 32, 64 and 128.
+  16 is FEX's own first size, and FEX logs an error for any number but 16, 32, 64 and 128. A line I
+  deleted leaves nothing to keep, so the new default goes in, as it did for `DXMT_MTL4_PRESENT=mtl3`
+  at version 4.
+- A line kept or written this way goes in as it is, like every line that left the table, whatever
+  FEX or DXMT is in place. Neither the engine's FEX nor a tree without the switch reads it.
 
 ## Alternatives I rejected
 
