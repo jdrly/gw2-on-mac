@@ -1425,7 +1425,7 @@ DEV_SWITCHES="
 10 dxmt jdrly/dxmt#314 unplayed DXMT_REFRESH_REQUERY=1 the swap chain reads the monitor's refresh rate again after exclusive fullscreen and for a fullscreen mode of 0 Hz, instead of assuming 60 Hz
 10 dxmt jdrly/dxmt#314 unplayed DXMT_STEADY_SLEEP=1 the frame limiter and the background throttle keep their deadlines on QueryPerformanceCounter and sleep for what is left, so a wall clock that steps back can't lengthen a sleep
 12 fex #343 unplayed FEX_RETURNLOOKUPOUTOFLINE=1 a guest return's L1 lookup goes after the unit's code, so a return site is 4 instructions instead of 12 and a return the call-return stack predicted no longer branches over the lookup
-17 dxmt jdrly/dxmt#366 unplayed DXMT_PSO_TABLE=1 only while DXMT_PSO_MRU is on, my fork's default: each context keeps 64 recent pipelines in a table by the key's hash instead of comparing its last 4 in turn, so fewer pipeline changes take the device cache's lock
+17 dxmt jdrly/dxmt#366 unplayed DXMT_PSO_TABLE=1 only while DXMT_PSO_MRU is on, my fork's default: each context keeps its recent pipelines in 64 slots indexed by the key's hash instead of comparing its last 4 in turn, and a hit there doesn't take the device cache's lock
 "
 # Rows taken out of the table, "<version> <issue> <NAME=value> <off value>". dev_update brings a file
 # older than <version> up to it (dev_gone): the line as the table wrote it goes, with the comment and

@@ -5302,12 +5302,13 @@ cp "$DEVF" "$SANDBOX/devf.v17"
 out=$(dg repair 2>&1)
 check "  updated: the table's version, the line at the end under a comment naming my DXMT fork, its issue and unplayed, the rest as it was; the next Repair adds nothing" \
   eval '[ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && same "$SANDBOX/devf.v16rest" "$SANDBOX/devf.v16new" && added_ok "$SANDBOX/devf.added" "my DXMT fork|jdrly/dxmt#366|DXMT_PSO_TABLE=1" && same "$DEVF" "$SANDBOX/devf.v17" && ! echo "$out" | grep -q "switched on"'
-printf 'x\0DXMT_PSO_TABLE\0' >"$DTREE/d3d11.dll"
+# (the tree's DLL after each Repair, which puts the engine's files back)
 for hand in DXMT_PSO_TABLE=0 '#DXMT_PSO_TABLE=1'; do
   sed -e 's/^version=.*/version=16/' -e "s/^DXMT_PSO_TABLE=1\$/$hand/" "$SANDBOX/devf.now16" >"$DEVF"
   sed 1d "$DEVF" >"$SANDBOX/devf.v16hand"
   GW2_ON_MAC_DRY_RUN=1 dg play >"$SANDBOX/v16play.txt" 2>&1
   dg repair >/dev/null 2>&1
+  printf 'x\0DXMT_PSO_TABLE\0' >"$DTREE/d3d11.dll"
   dev_files
   if [ "$hand" = DXMT_PSO_TABLE=0 ]; then inrule='rule_has DXMT_PSO_TABLE=0 && ! rule_has DXMT_PSO_TABLE=1'; else inrule='! grep -q DXMT_PSO_TABLE "$SANDBOX/dev-rules.txt"'; fi
   check "  a version-16 file with $hand: nothing switched on, the file as it was but its version, and the rule as the line says" \

@@ -1140,10 +1140,11 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   `DXMT_MTL4_PRESENT_FENCES=0`, stays and still wins. One I commented out becomes
   `DXMT_MTL4_PRESENT_FENCES=0` or `FEX_INITIALCODEBUFFERMB=16` (FEX's own size) under a comment, so
   it stays off. One I deleted leaves nothing to keep, so the rule's entry goes in.
-  Version 17 adds `DXMT_PSO_TABLE=1` (jdrly/dxmt#366): each context keeps 64 recent pipelines in
-  a table by the key's hash instead of comparing its last 4 in turn. In busy Lion's Arch the 4
-  find 1,006 of 2,295 pipeline changes a frame, and 1,280 take the device cache's lock. It acts
-  only while `DXMT_PSO_MRU` is on, my DXMT fork's default.
+  Version 17 adds `DXMT_PSO_TABLE=1` (jdrly/dxmt#366): each context keeps its recent pipelines in
+  64 slots indexed by the key's hash instead of comparing its last 4 in turn, and a hit there
+  doesn't take the device cache's lock. In busy Lion's Arch the 4 find 1,006 of 2,295 pipeline
+  changes a frame, and 1,280 take the device cache's lock. It acts only while `DXMT_PSO_MRU` is on,
+  my DXMT fork's default.
   A row whose variable a line of the file sets, *Faster locks* with the file's
   `WINE_HEAT_SPIN`, is greyed while that line is there, since the file's entry wins. A line of the table goes in only while the file of mine that
   reads it is in place and has the switch: the `switches:` line of my `ntdll.so`'s,
