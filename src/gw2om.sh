@@ -1171,7 +1171,9 @@ cdb_value() {
 #   env                DXMT's shader cache in the app's cache folder (dxmt_cache: my fork's, or
 #                      the engine's DXMT's own), with my fork in place the Metal it draws with
 #                      (DXMT_METAL4=0 for Metal 3, =1 for Metal 4: the Metal row; the engine's
-#                      DXMT doesn't read it) and at Metal 4 its present (metal_present), with Vsync
+#                      DXMT doesn't read it) and at Metal 4 its present (metal_present) with the
+#                      present's fences (DXMT_MTL4_PRESENT_FENCES=1, while the tree names them,
+#                      jdrly/dxmt#358, docs/adr/0028), with Vsync
 #                      off DXMT_DISPLAY_SYNC=0 (my fork's display sync is on without it), then the
 #                      switches of my ntdll.so and my Mac
 #                      driver (heat_entries), then FEX's (fex_entries), then, in a development
@@ -1187,7 +1189,7 @@ cdb_value() {
 # #209). A line of compatdb.local comes after the rules (write_rules), so its DXMT_METAL4 wins
 # over the row's.
 rules_text() {
-  local game="exe=Gw2-64.exe" cef="exe=CefHost.exe" rundll="" entries="" removed="" e metal="" present="" sync=""
+  local game="exe=Gw2-64.exe" cef="exe=CefHost.exe" rundll="" entries="" removed="" e metal="" present="" fences="" sync=""
   [ "$(setting rawmouse)" = on ] || game="$game;gcmouse=false"
   if [ "$(setting hud)" = on ]; then game="$game;metal_hud=true" cef="$cef;metal_hud=false"; fi
   arcdps_state
@@ -1203,6 +1205,9 @@ rules_text() {
   if [ "$(dxmt_in_use)" = fork ]; then
     if [ "$(setting metal)" = 4 ]; then metal=DXMT_METAL4=1; else metal=DXMT_METAL4=0; fi
     present=$(metal_present | sed -n 's/^in //p')
+    if [ -n "$present" ]; then
+      case "$NL$(dxmt_names)$NL" in *"${NL}DXMT_MTL4_PRESENT_FENCES$NL"*) fences=DXMT_MTL4_PRESENT_FENCES=1 ;; esac
+    fi
     [ "$(setting vsync)" = on ] || sync=DXMT_DISPLAY_SYNC=0
   fi
   while IFS= read -r e; do
@@ -1210,6 +1215,7 @@ rules_text() {
   done <<EOF
 $metal
 $present
+$fences
 $sync
 $(heat_entries)
 $(fex_entries)
@@ -1337,7 +1343,11 @@ fex_switch_state() {
   else echo "off:My FEX in this app (jdrly/FEX $(fex_commit | cut -c1-11)) doesn't have this switch."
   fi
 }
-# fex_entries: the entries of FEX_SWITCHES for the game's rule, one a line, through cdb_value
+# fex_entries: the entries of FEX_SWITCHES for the game's rule, one a line, through cdb_value, then
+# FEX_INITIALCODEBUFFERMB=128 while my FEX is in place and its record names the switch: the first
+# code buffer is 128 MB instead of FEX's 16, so GW2 doesn't throw its translations away twice in the
+# first minutes of a session (#112, docs/adr/0028). It has no setting, and the engine's own FEX gets
+# nothing.
 fex_entries() {
   local k e n v fex
   fex=$(fex_in_use)
@@ -1347,6 +1357,7 @@ fex_entries() {
     [ "$n" != fork ] || { [ "$fex" = mine ] && fex_in_version "$e"; } || continue
     cdb_value "$e"; echo
   done
+  if [ "$fex" = mine ] && fex_in_version FEX_INITIALCODEBUFFERMB; then echo FEX_INITIALCODEBUFFERMB=128; fi
 }
 
 # --- dev-switches.conf: a development build's switches (DEV_ON)
@@ -1385,10 +1396,11 @@ fex_entries() {
 # DXMT_STENCIL_PFV), and the rows' own variables. A row whose variable a line of the file sets is
 # greyed while the line is there (dev_sets): the file's entry comes later in the rule and wins. A fork's issues are
 # jdrly/<fork>#n, the app's #n. Unplayed: no session of the game has run with it. A DXMT switch
-# that acts on one Metal only (DXMT_DRAIN_SPLITS on Metal 3, DXMT_MTL4_PRESENT_FENCES on Metal 4 with
-# the rule's DXMT_MTL4_PRESENT=mtl3) stays in with the Metal row at the other,
+# that acts on one Metal only (DXMT_DRAIN_SPLITS on Metal 3) stays in with the Metal row at the other,
 # where it does nothing, so my lines last through a switch of Metal; its comment says so. DXMT_MTL4_PRESENT=mtl3 left the table at
-# version 4: the game's rule has it at Metal 4 in every build (metal_present). DXMT_MTL4_LAYER_SET
+# version 4: the game's rule has it at Metal 4 in every build (metal_present). DXMT_MTL4_PRESENT_FENCES=1
+# and FEX_INITIALCODEBUFFERMB=128 left it at version 16: the rule has them in every build too
+# (rules_text, fex_entries). DXMT_MTL4_LAYER_SET
 # (jdrly/dxmt#226), a diagnostic for the same stutter, stays out: I turn it on by hand, so a change
 # in play has one cause. My ntdll.so's other changes
 # have no line: #99's counts act only with WINE_HEAT_COUNT=1, which Debug logging sets; the app sets
@@ -1401,7 +1413,6 @@ fex_entries() {
 # (local_hostfeatures), that rule replaces them: they stay out, saying what to write there instead.
 DEV_SWITCHES="
 1 wine #14,#45,#370 unplayed WINE_HEAT_SPIN=lock=20:game,event=30:game the Faster locks row's two spins, on the game thread only. The job workers stay out of the lock spin (docs/adr/0026). While this line is here, its value replaces the row's.
-1 fex #112 unplayed FEX_INITIALCODEBUFFERMB=128 the first code buffer is 128 MB instead of 16
 1 fex #113 unplayed FEX_HARDWARETSOSYSCALLS=keep the hardware memory ordering stays on through Wine's system calls
 1 fexany #47 unplayed FEX_DYNAMICL1CACHE=0 a fixed L1 lookup cache instead of the dynamic one (16 MB of address space a thread). Hung once at process start on the runner (jdrly/FEX run 43315659403, #132): if a development build doesn't start, take this line out first.
 1 dxmt jdrly/dxmt#159 unplayed DXMT_WARM_JOBS=2 with Shader warming, two speculative jobs at once while Metal's cache is cold
@@ -1413,7 +1424,6 @@ DEV_SWITCHES="
 10 dxmt jdrly/dxmt#316 unplayed DXMT_DRAIN_SPLITS=1 only with the Metal row at Metal 3, nothing on Metal 4: at teardown the drain also waits for the split-off command buffers of chunks not yet retired, so it frees nothing they still use
 10 dxmt jdrly/dxmt#314 unplayed DXMT_REFRESH_REQUERY=1 the swap chain reads the monitor's refresh rate again after exclusive fullscreen and for a fullscreen mode of 0 Hz, instead of assuming 60 Hz
 10 dxmt jdrly/dxmt#314 unplayed DXMT_STEADY_SLEEP=1 the frame limiter and the background throttle keep their deadlines on QueryPerformanceCounter and sleep for what is left, so a wall clock that steps back can't lengthen a sleep
-12 dxmt jdrly/dxmt#358 unplayed DXMT_MTL4_PRESENT_FENCES=1 only with the Metal row at Metal 4, where the game's rule presents through a Metal 3 command buffer (DXMT_MTL4_PRESENT=mtl3), nothing on Metal 3: an empty Metal 4 encoder each frame carries the present's fence waits and update, so the next frame's work waits for what the present waited for. The candidate for the aerodrome's flashing and GPU hang.
 12 fex #343 unplayed FEX_RETURNLOOKUPOUTOFLINE=1 a guest return's L1 lookup goes after the unit's code, so a return site is 4 instructions instead of 12 and a return the call-return stack predicted no longer branches over the lookup
 "
 # Rows taken out of the table, "<version> <issue> <NAME=value> <off value>". dev_update brings a file
@@ -1438,6 +1448,9 @@ DEV_SWITCHES="
 # Version 15: the topics my forks drop on 2026-11-27 (#373): my Wine fork's macdrv-calls and win32u
 # (jdrly/wine#60, with my win32u.so), my FEX's entry-compile-lock and codegen-cuts, and my DXMT
 # fork's DXMT_PRESENTER_FREE. Each leaves my fork, so a line I commented out stays as it is.
+# Version 16: DXMT_MTL4_PRESENT_FENCES=1 and FEX_INITIALCODEBUFFERMB=128, which the game's rule has in
+# every build now (#379, docs/adr/0028). =0 turns the fences off, and 16 is FEX's own first code
+# buffer (another number logs an error and means 16).
 DEV_GONE="
 4 jdrly/dxmt#227 DXMT_MTL4_PRESENT=mtl3 mtl4
 8 jdrly/dxmt#157 DXMT_PRESENT_QUEUE=pace -
@@ -1461,6 +1474,8 @@ DEV_GONE="
 15 #165 FEX_ENTRYCOMPILELOCK=1 -
 15 #164 FEX_LEA32BITADDS=1 -
 15 #164 FEX_SIGNEXTENDINGLOADS=1 -
+16 jdrly/dxmt#358 DXMT_MTL4_PRESENT_FENCES=1 0
+16 #112 FEX_INITIALCODEBUFFERMB=128 16
 "
 DEV_SWITCHES_VERSION=$(printf '%s\n' "$DEV_SWITCHES" "$DEV_GONE" | awk 'NF && $1 > v { v = $1 } END { print v + 0 }')
 # dev_piece_label <piece>: what the file and the log call it
