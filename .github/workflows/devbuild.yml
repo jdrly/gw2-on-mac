@@ -28,8 +28,7 @@
 #               arm64-builds, checked against the digest GitHub reports, which stage-components.sh
 #               refuses for another commit, base or engine, a file its VERSION doesn't name or a
 #               libarm64ecfex.so without a valid signature, proved on copies. Without one the app
-#               has no FEX of mine; with one it still starts on the engine's own (the setting fex
-#               is engine until I set it from Terminal). With a KosmicKrisp commit, my KosmicKrisp:
+#               has no FEX of mine; with one it starts on it (docs/adr/0025). With a KosmicKrisp commit, my KosmicKrisp:
 #               the release asset kosmickrisp-arm64-<commit>.tar.xz of jdrly/mesa's arm64-builds,
 #               checked against the digest GitHub reports, which stage-components.sh refuses for
 #               another commit, base or engine, a dylib its VERSION doesn't name or one without a
@@ -612,7 +611,7 @@ jobs:
             if [ -n "$FEX_COMMIT" ]; then
               fshort="${FEX_COMMIT:0:7}"
               wine="$wine, and my FEX at \`$fshort\` next to the engine's own"
-              fex="[\`$fshort\`](https://github.com/$FEX_REPO/commit/$FEX_COMMIT) of my FEX fork's \`$FEX_BRANCH\`, next to the engine's own. The game keeps the engine's own FEX until \`gw2om.sh set fex mine\` from Terminal."
+              fex="[\`$fshort\`](https://github.com/$FEX_REPO/commit/$FEX_COMMIT) of my FEX fork's \`$FEX_BRANCH\`, next to the engine's own. The game starts on it, and \`gw2om.sh set fex engine\` from Terminal switches back."
             else
               fex="None in this build: the engine's own FEX stays in place."
             fi

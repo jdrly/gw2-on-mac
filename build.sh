@@ -15,7 +15,7 @@
 #                                      its build has one, the same; only if staged), which it puts
 #                                      into the engine next to the engine's own, fex/ (my FEX,
 #                                      jdrly/FEX, built for the engine; only if staged), which it
-#                                      puts there after `set fex mine`, kosmickrisp/ (my
+#                                      puts there unless `fex` is `engine`, kosmickrisp/ (my
 #                                      KosmicKrisp, the Vulkan driver from jdrly/mesa, built for the
 #                                      engine; only if staged), which it puts into the engine next
 #                                      to the engine's own, and
@@ -30,7 +30,7 @@
 # The Wine engine is not bundled: gw2om.sh downloads athei's Mach9 release at install time (an arm64
 # Wine with FEX and his DXMT build; pinned URL, size and sha256 in src/gw2om.sh) and uses it as it
 # ships, but for its DXMT tree, its ntdll.so and its winemac.so (mine, the engine's own kept next
-# to each), its FEX after `set fex mine`, and its KosmicKrisp. Steam and the game come from Valve or
+# to each), its FEX unless `fex` is `engine`, and its KosmicKrisp. Steam and the game come from Valve or
 # ArenaNet.
 #
 # Built with the macOS 27 SDK (Xcode 27) for macOS 26.0 and later, as 0.1.x: below 26.5, what the
@@ -371,8 +371,8 @@ Not included in this app: the Wine engine, athei's Mach9 ($ENGINE_NAME: Wine wit
 FEX, DXMT, Mesa, vkd3d-proton, GStreamer and the rest its release page lists, each under its own
 licence), is downloaded at install time from $ENGINE_URL
 and used as it ships, but for its DXMT tree, its ntdll.so, its winemac.so, its FEX and its
-KosmicKrisp: components/dxmt, components/ntdll, components/macdrv and components/kosmickrisp go
-there, and components/fex once I choose it, the engine's own next to each. Its sources and that list: https://github.com/athei/mach9/releases.
+KosmicKrisp: components/dxmt, components/ntdll, components/macdrv, components/fex and
+components/kosmickrisp go there, the engine's own next to each. Its sources and that list: https://github.com/athei/mach9/releases.
 Steam comes from Valve, Guild Wars 2 from Valve (Steam) or ArenaNet.
 ReShade (by crosire, BSD-3-Clause), two effect packs and, when the game has none, Microsoft's
 d3dcompiler_47.dll are downloaded from their publishers only when the ReShade switch is turned on:

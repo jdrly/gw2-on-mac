@@ -292,7 +292,7 @@ package() {
   ditto "$SRC" "$APP"
   xattr -cr "$APP"
 
-  local fw stage
+  local fw stage fex pinned low
   ! grep -q '^stand-in' "$APP/Contents/Resources/components/dxmt/VERSION" ||
     { echo "The app bundles the stand-in DXMT (scripts/stage-components.sh --standin); stage the real one" >&2; exit 1; }
   ! grep -q '^stand-in' "$APP/Contents/Resources/components/ntdll/VERSION" 2>/dev/null ||
@@ -301,6 +301,22 @@ package() {
     { echo "The app bundles the stand-in winemac.so (scripts/stage-components.sh --standin); stage the real one or none" >&2; exit 1; }
   ! grep -q '^stand-in' "$APP/Contents/Resources/components/fex/VERSION" 2>/dev/null ||
     { echo "The app bundles the stand-in FEX (scripts/stage-components.sh --standin); stage the real one or none" >&2; exit 1; }
+  # From 0.2.2 on a release starts on my FEX (docs/adr/0025), so it has to carry it, of the commit
+  # prebuilt.lock pins. Development builds and release candidates may go without.
+  case "$VERSION" in
+    *-*) ;;
+    *) low="$(printf '%s\n' 0.2.2 "$VERSION" | sort -V | head -1)"
+       [ -n "$low" ] || { echo "Could not compare $VERSION with 0.2.2" >&2; exit 1; }
+       if [ "$low" = 0.2.2 ]; then
+         fex="$APP/Contents/Resources/components/fex"
+         pinned="$(sed -n 's|^fex_url=.*/fex-arm64-\([0-9a-f]\{40\}\)\.tar\.xz$|\1|p' prebuilt.lock)"
+         [ -n "$pinned" ] || { echo "prebuilt.lock pins no FEX of mine (fex_url=…/fex-arm64-<commit>.tar.xz), which a release from 0.2.2 on carries" >&2; exit 1; }
+         [ -f "$fex/aarch64-windows/libarm64ecfex.dll" ] && [ -f "$fex/aarch64-unix/libarm64ecfex.so" ] ||
+           { echo "$VERSION is a release from 0.2.2 on, which starts on my FEX, and the app bundles none: unpack jdrly/FEX's fex-arm64-$pinned.tar.xz (prebuilt.lock's fex_url) into the workspace's work/fex-arm64/install, then run scripts/stage-components.sh and ./build.sh again" >&2; exit 1; }
+         grep -qx "commit: $pinned" "$fex/VERSION" ||
+           { echo "The app bundles my FEX of another commit than prebuilt.lock's $pinned: unpack fex-arm64-$pinned.tar.xz (prebuilt.lock's fex_url) into the workspace's work/fex-arm64/install, then run scripts/stage-components.sh and ./build.sh again, or pin this one" >&2; exit 1; }
+       fi ;;
+  esac
   ! grep -q '^stand-in' "$APP/Contents/Resources/components/kosmickrisp/VERSION" 2>/dev/null ||
     { echo "The app bundles the stand-in KosmicKrisp (scripts/stage-components.sh --standin); stage the real one or none" >&2; exit 1; }
   if [ "$MODE" = --adhoc ]; then
