@@ -30,7 +30,8 @@ The event half is about even, 1.4 hits to a miss in dev.23-long, with more misse
 sessions. #105's rule names the lock counters, and I keep the event spin in the row's value as it
 ran in every one of those sessions.
 
-The worker spin of 2026-11-27 changes none of this: only the game thread spins (ADR 0026, #370).
+The worker spin of 2026-11-27 changes none of this: the job workers stay out of the spin (ADR 0026,
+#370).
 So *Faster locks* is on by default in a release (#372).
 
 ## Consequences
