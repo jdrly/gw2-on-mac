@@ -1101,9 +1101,9 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   Version 14 takes the job workers back out (#370, ADR 0026): the line is
   `lock=20:game,event=30:game` again, the *Faster locks* row's own spins on the game thread. With
   every worker spinning, the workers' CPU a job was the same as without the spin, and the game
-  thread slept 2.5 times as long on the locks they share. Version 13's line goes as version 13's
-  went, and a file still at version 12 loses version 12's line the same way: each old value has
-  its own row in the list of lines taken out. My Wine fork keeps the `halfworkers` scope, which
+  thread slept 2.5 times as long on the locks they share. Version 13's line goes the way version
+  12's went at version 13, and a file still at version 12 loses version 12's line the same way:
+  each old value has its own row in the list of lines taken out. My Wine fork keeps the `halfworkers` scope, which
   does nothing while no line names it.
   A row whose variable a line of the file sets, *Faster locks* with the file's
   `WINE_HEAT_SPIN`, is greyed while that line is there, since the file's entry wins. A line of the table goes in only while the file of mine that
