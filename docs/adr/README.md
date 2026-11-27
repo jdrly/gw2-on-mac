@@ -4,7 +4,7 @@ One decision per file. The files go by number, not by date. 0001 to 0011 record 
 wrote them down on 2026-11-17, after 0012 and 0013 had landed, and kept their numbers below
 those two. Their dates don't follow their numbers. A new decision takes the next free number.
 
-0001, 0002 and 0014 are about 0.1.x and live on `main`. 0003 to 0010, 0012, 0013 and 0015 to 0027
+0001, 0002 and 0014 are about 0.1.x and live on `main`. 0003 to 0010, 0012, 0013 and 0015 to 0028
 are about the 0.2 line on this branch, `arm64`. 0011 is on both. The two branches share one set of
 numbers, so a number taken on one is not used on the other.
 
@@ -37,3 +37,4 @@ numbers, so a number taken on one is not used on the other.
 | [0025](0025-releases-start-on-my-fex-from-0.2.2.md) | 2026-11-26 | From 0.2.2 a release starts on my FEX, the commit `prebuilt.lock` pins, if 0.2.2-dev.4, the dev build with that FEX, plays as well as 0.2.1. `fex` defaults to `mine`, reset once over 0.2.1's files, and `release.sh` refuses a release without that FEX. |
 | [0026](0026-the-job-workers-stay-out-of-the-lock-spin.md) | 2026-11-27 | A dev build's `WINE_HEAT_SPIN` line spins the game thread only. Spinning the job workers moved their lock cost onto the game thread, and my Wine fork keeps the `halfworkers` scope unused. |
 | [0027](0027-faster-locks-is-on-by-default.md) | 2026-11-27 | *Faster locks* is on by default in a release. Every session since dev.13 meets #105's rule, and a `settings.conf` from 0.2.0 or 0.2.1 reads on once. |
+| [0028](0028-the-present-fences-and-the-128-mb-code-buffer-are-on-in-every-build.md) | 2026-11-27 | The game's rule has `DXMT_MTL4_PRESENT_FENCES=1` at Metal 4 and `FEX_INITIALCODEBUFFERMB=128` with my FEX in every build, each while the build in place has the switch. Both left the dev table at version 16. |

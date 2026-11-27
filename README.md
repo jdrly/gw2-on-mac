@@ -886,7 +886,9 @@ FEX's options are `FEX_*` variables, and a rule's `env=` sets them for the game.
 `fork` for an option only my FEX has and `any` for one the engine's FEX has too. An entry goes into
 the game's rule while its setting isn't off and, for `fork`, while my FEX is in place and its
 `VERSION`'s `switches:` line names the variable. A setting whose FEX is missing is greyed with the
-reason, and `set` refuses it. The table is empty: each switch of mine adds its row.
+reason, and `set` refuses it. The table is empty: each switch of mine adds its row. One option has
+no setting: with my FEX in place, the game's rule has `FEX_INITIALCODEBUFFERMB=128` whenever its
+`VERSION` names it (ADR 0028).
 
 A build of the app without my FEX has no `components/fex`. `set fex mine` is refused with "This
 build carries no FEX of mine", and the engine's files are never touched.
@@ -1004,6 +1006,13 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   goes in only while my fork's tree in the engine names the switch, read from its DLLs as for
   `dev-switches.conf`'s DXMT lines below. Otherwise `status` prints the entry and why it stays out
   as `metal_present_out=`, and `metal_present=` when it's in. `CefHost.exe` gets it removed.
+- `DXMT_MTL4_PRESENT_FENCES=1` comes right after it, in every build, while the same tree names
+  that switch too (jdrly/dxmt#358, [ADR 0028](docs/adr/0028-the-present-fences-and-the-128-mb-code-buffer-are-on-in-every-build.md)).
+  The present through a Metal 3 command buffer encoded no fences but stayed in the fence chain, so
+  Metal 4's waits on it ordered nothing. With the switch an empty Metal 4 encoder each frame carries
+  the present's fences, so the next frame's work waits for what the present waited for. It's the
+  candidate fix for the texture flashing at the Lion's Arch aerodrome on macOS 27 and the GPU hang
+  on macOS 26. At Metal 3 there is no such present, so it stays out. `CefHost.exe` gets it removed.
 - `DXMT_DISPLAY_SYNC=0` follows while my fork is active and *Vsync* is off. My fork reads it in the
   game's process, once per swap chain (`d3d11_swapchain.cpp`), and its display sync is on without
   it. Display sync acts only on a present with a sync interval, which the game asks for while its
@@ -1048,7 +1057,11 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   its value after that, and nothing at 1 or while *Raw mouse-look* is off. An entry whose variable
   the driver's `VERSION` doesn't list on its `switches:` line stays out, as for my `ntdll.so`.
 - The `FEX_*` entries are rows of `FEX_SWITCHES` ([My FEX](#my-fex)), after all of the above, and
-  `CefHost.exe`'s rule unsets each. The table is empty today.
+  `CefHost.exe`'s rule unsets each. The table is empty today. Then, while my FEX is in place and its
+  `VERSION` names it, `FEX_INITIALCODEBUFFERMB=128` (#112, ADR 0028): FEX's first code buffer is
+  128 MB instead of 16. At 16 MB GW2 throws its translations away twice in the first minutes of
+  every session. At 128 MB the buffer never moved in 20 session reports, and held 57.8 MB at most.
+  It has no setting, and the engine's own FEX gets nothing. `CefHost.exe`'s rule unsets it.
 - In a development build, the lines of `dev-switches.conf` in the app's folder come next, one
   `env=` field each, and `CefHost.exe`'s rule unsets each. The file has one `NAME=value` a line,
   with a comment above it: the piece that reads it, its issue, and `played` or `unplayed` (whether
@@ -1059,9 +1072,8 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   has every switch of my forks that is off by default, at the value that turns its new behaviour
   on, apart from diagnostics, anything that can cap the frame rate below 60 (DXMT's lower thread
   priorities and `DXMT_BG_POLICY=occlusion` among them), values only I can choose and the rows'
-  own variables. A DXMT line that acts on one Metal only, `DXMT_DRAIN_SPLITS` on Metal 3 or
-  `DXMT_MTL4_PRESENT_FENCES` on Metal 4, stays in with the *Metal* row at the other, where it does
-  nothing.
+  own variables. A DXMT line that acts on one Metal only, `DXMT_DRAIN_SPLITS` on Metal 3, stays in
+  with the *Metal* row at the other, where it does nothing.
   `DXMT_MTL4_LAYER_SET` (jdrly/dxmt#226) stays out: I turn that one on by hand, never with
   another present switch, so a change in play has one cause. `DXMT_MTL4_PRESENT=mtl3` left the
   table at version 4, since the rule has it at Metal 4 now. Version 4 changes a file of an older
@@ -1093,7 +1105,8 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   Version 12 adds two lines. `DXMT_MTL4_PRESENT_FENCES=1` (jdrly/dxmt#358) acts at Metal 4, where
   the rule presents through a Metal 3 command buffer (`DXMT_MTL4_PRESENT=mtl3`): an empty Metal 4
   encoder each frame carries the present's fences, so the next frame's work waits for what the
-  present waited for. It's the candidate for the aerodrome's flashing and GPU hang.
+  present waited for. It's the candidate for the aerodrome's flashing and GPU hang. It left the
+  table at version 16.
   `FEX_RETURNLOOKUPOUTOFLINE=1` (#343) moves the L1 lookup of a guest return after the unit's code,
   so a return site is 4 instructions instead of 12, and a return the call-return stack predicted
   no longer branches over the lookup. It goes in only
@@ -1121,6 +1134,12 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   FEX topics, and one swap chain for the presenter. A line as the table wrote it goes
   with its comment. One I changed or commented out stays as it is, and does nothing once my fork
   no longer has the switch. No line of the table is my Mac driver's or my `win32u.so`'s now.
+  Version 16 takes out `DXMT_MTL4_PRESENT_FENCES=1` and `FEX_INITIALCODEBUFFERMB=128` (#379, ADR
+  0028), because the game's rule has both in every build now, before the file's lines. A line as
+  the table wrote it goes with its comment. One I changed, such as `FEX_INITIALCODEBUFFERMB=64` or
+  `DXMT_MTL4_PRESENT_FENCES=0`, stays and still wins. One I commented out becomes
+  `DXMT_MTL4_PRESENT_FENCES=0` or `FEX_INITIALCODEBUFFERMB=16` (FEX's own size) under a comment, so
+  it stays off.
   A row whose variable a line of the file sets, *Faster locks* with the file's
   `WINE_HEAT_SPIN`, is greyed while that line is there, since the file's entry wins. A line of the table goes in only while the file of mine that
   reads it is in place and has the switch: the `switches:` line of my `ntdll.so`'s,
@@ -1754,13 +1773,16 @@ Without one, those checks are skipped. It covers:
   at version 8 updated (version 9's three lines gone, a commented-out one kept off), a file at
   version 9 with `DXMT_MTL4_SHOWN_WAIT=write` updated (the line gone, a changed one kept, a
   commented-out one kept off with `=next`), a file at version 10 updated (version 11's two FEX
-  lines gone, a commented-out one kept off with `=0`), version 12's `DXMT_MTL4_PRESENT_FENCES` in
-  and out (and still in at Metal 3) and `FEX_RETURNLOOKUPOUTOFLINE` in and out (out with the
-  engine's own FEX), a file at version 11 updated (both added), a file at version 12 or 13
+  lines gone, a commented-out one kept off with `=0`), `DXMT_MTL4_PRESENT_FENCES=1` as the rule's own
+  entry at Metal 4 (none at Metal 3) and `FEX_INITIALCODEBUFFERMB=128` as the rule's own with my
+  FEX, version 12's `FEX_RETURNLOOKUPOUTOFLINE` in and out (out with the
+  engine's own FEX), a file at version 11 updated (its line added), a file at version 12 or 13
   updated (`WINE_HEAT_SPIN`'s line as that build wrote it replaced by version 14's at the end, a
   changed, commented-out or deleted one kept so and no new line), a file at version 14 updated
-  (the ten lines of the dropped topics gone, a changed, commented-out or deleted one kept so),
-  neither in a release, a line
+  (the ten lines of the dropped topics gone, a changed, commented-out or deleted one kept so), a
+  file at version 15 updated (the fences' and the code buffer's lines gone, a changed one kept and
+  winning, a commented-out one kept off with `=0` or `=16`), both in a release's rule and version
+  12's FEX line not, a line
   commented out or added, the engine's own DXMT, a second start
   that changes nothing, an update that adds a newer switch and keeps the rest, a row turned off
   that stays off, a release that writes no file and reads none, and a release's install updated
