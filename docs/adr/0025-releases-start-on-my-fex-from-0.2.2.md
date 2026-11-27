@@ -9,8 +9,10 @@ first switch rows (ADR 0009), and the counters' fix needs it too (ADR 0024).
 
 ## Decision
 
-From 0.2.2 on, a release starts on my FEX, if 0.2.2-dev.1 plays as well as 0.2.1. The pull
-request that does it merges only after I have played that build.
+From 0.2.2 on, a release starts on my FEX, if the dev build with the pinned FEX, 0.2.2-dev.4,
+plays as well as 0.2.1. The workspace's ADR 0015 named dev.1. The pin moved after it (below), so
+the build I play is the first one with that FEX. The pull request that does it merges only after
+I have played that build.
 
 - `fex` defaults to `mine`. It takes effect only in a build that carries my FEX
   (`components/fex`). A build without one keeps the engine's own, as before.
@@ -21,8 +23,10 @@ request that does it merges only after I have played that build.
 - `fex=mine` leaves the development build's switch rows (`DEV_ROWS`), whose value is now the
   default. A release reads those rows at their defaults over a development build's file, so with
   `fex` still among them it would drop a `fex=engine` I set in a development build.
-- `prebuilt.lock` pins the FEX 0.2.2-dev.1 carries, `jdrly/FEX` `537a2281c` (`fex_url=`,
-  `fex_sha256=`), as it pins my KosmicKrisp (ADR 0023). `scripts/stage-components.sh --fetch`
+- `prebuilt.lock` pins my FEX (`fex_url=`, `fex_sha256=`), as it pins my KosmicKrisp (ADR 0023):
+  first `jdrly/FEX` `537a2281c`, the FEX 0.2.2-dev.1 carries, then `9085ab554ec`, which 0.2.2-dev.4
+  carries: the same series after the drops of jdrly/FEX#28 (suspend-fix) and #29
+  (entry-compile-lock, codegen-cuts and singlestep-fix). `scripts/stage-components.sh --fetch`
   stages it with the refusals it already has for my FEX.
 - `scripts/release.sh` refuses a release from 0.2.2 on whose app carries no FEX of mine, or one of
   another commit than the pin, before it signs anything. I build releases on my Mac, where
@@ -37,13 +41,12 @@ request that does it merges only after I have played that build.
   release never reads that file. Each needs a row or a default of its own to reach a player.
 - A 0.2.1 player who ran `set fex engine` from Terminal gets my FEX once. The key has no row in
   Settings, and the file can't tell that choice from the default.
-- Each new FEX commit for a release is a new pin in `prebuilt.lock`. The drop of `suspend-fix`
-  (jdrly/FEX) makes one.
+- Each new FEX commit for a release is a new pin in `prebuilt.lock`, as `9085ab554ec` was.
 - The Dev build still takes my FEX only with `fex_commit`. Without it, a dev build has none.
 - Checks now stage my real FEX instead of the stand-in, and the sandbox's fresh installs end on
   it.
 
-## If 0.2.2-dev.1 doesn't play as well as 0.2.1
+## If 0.2.2-dev.4 doesn't play as well as 0.2.1
 
 The pull request doesn't merge, and 0.2.2 ships as 0.2.1 did, on the engine's own FEX. I file
 what I saw against my FEX fork first.

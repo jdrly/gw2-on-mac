@@ -14,5 +14,5 @@ file=gw2-on-mac-components-2026-11-16.tar.xz
 sha256=f89e06724e26ac886e6ac634e99f1aad2f5c87b50872a4d48d403b303cd9709f
 kosmickrisp_url=https://github.com/jdrly/mesa/releases/download/arm64-builds/kosmickrisp-arm64-9d08aebd96a01203d1a086fbbbfdf5e5e8db6d75.tar.xz
 kosmickrisp_sha256=4bc3d7c4ea5c06ef0398da7a65410fc44257329dba3197d78fcc6cd6ac551a47
-fex_url=https://github.com/jdrly/FEX/releases/download/arm64-builds/fex-arm64-537a2281c8245ae12a6d9b67101b629226dc0410.tar.xz
-fex_sha256=559d12942afde82a2f75d4b7183cd8461a869c0390f071b95f074ff2805d4a07
+fex_url=https://github.com/jdrly/FEX/releases/download/arm64-builds/fex-arm64-9085ab554ece21175466940e7e9c199469ab9b7d.tar.xz
+fex_sha256=9464359791da41254a4ab29fe4329ba2507107291572e034f2f79f226fb4de05
