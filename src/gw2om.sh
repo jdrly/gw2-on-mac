@@ -7,10 +7,9 @@
 # my Mac driver's (components/macdrv), the engine's own kept next to each (`set dxmt engine`, `set
 # wine engine` and `set macdrv engine` switch back, for comparisons from Terminal; the Settings
 # window has no row for them). A fourth,
-# my FEX (components/fex), goes in only after `set fex mine` from Terminal, the engine's own kept
-# next to it too; a development build sets it once, with every other switch of mine (DEV_ROWS,
-# dev-switches.conf). A fifth, my KosmicKrisp (components/kosmickrisp, the engine's Vulkan driver
-# built from my Mesa fork, #339), goes in whenever the app carries it, with no setting: the
+# my FEX (components/fex), goes in too when the app carries it, the engine's own kept next to it
+# (`set fex engine` switches back; docs/adr/0025). A fifth, my KosmicKrisp (components/kosmickrisp,
+# the engine's Vulkan driver built from my Mesa fork, #339), goes in whenever the app carries it, with no setting: the
 # engine's own crashes the game on macOS 26. Nothing goes inside wine.app.
 #
 #   gw2om.sh status            KEY=VALUE lines describing this Mac (what the window shows)
@@ -803,7 +802,7 @@ apply_registry() {
 # The keys are 0.1.x's, so settings.conf reads the same on both lines, and dxmt (fork: my DXMT
 # fork; engine: the engine's own, to compare), wine (mine: my ntdll.so; engine: the engine's own),
 # macdrv (mine: my winemac.so, and my win32u.so when its build has one; engine: the engine's own),
-# fex (mine: my FEX; engine: the engine's own, the default), and jobwakes, launcherframes and
+# fex (mine: my FEX, the default; engine: the engine's own), and jobwakes, launcherframes and
 # eventpool (rows of HEAT_SWITCHES, as fastlocks is), and metal (3 or 4: the Metal my DXMT fork
 # draws with, DXMT_METAL4 in the game's rule; 4 by default, and in a file without the key, with its
 # frames presented through a Metal 3 command buffer, metal_present), and vsync (on: my DXMT fork's
@@ -829,10 +828,13 @@ SETTING_KEYS="retina fpscap vsync metal metalfx hud warm fastlocks ncpu uiscale 
 # bottle stays on the engine's files with no row that shows it. A later set from Terminal stays.
 # Version 3: fastlocks starts on (#372, docs/adr/0027). 0.2.0 and 0.2.1 wrote off into every file,
 # and an off chosen there reads on too, once; an off set after it stays.
+# Version 4: fex to mine, once, as releases start on my FEX from 0.2.2 (docs/adr/0025). Until then
+# every file said fex=engine, the default, and a set from Terminal can't be told from it.
 SETTINGS_RESETS="
 1 fastlocks
 2 dxmt wine macdrv
 3 fastlocks
+4 fex
 "
 SETTINGS_VERSION=$(printf '%s\n' "$SETTINGS_RESETS" | awk 'NF { v = $1 } END { print v + 0 }')
 # What a move from 0.1.x (install move, move_settings) does with each of 0.1.x's settings, one row
@@ -873,14 +875,15 @@ reshade kept off ReShade
 # SETTINGS_RESETS does for defaults: a row of DEV_ROWS, "<version> <key>=<value> ...", reads as
 # that value in a file older than <version> (or without the line), and the next write of the file
 # (dev_update, set, Install, Repair) keeps it and writes this version, so a row I turn off
-# afterwards stays off. fex=mine takes effect only in a build that carries my FEX (fex_want). A
+# afterwards stays off. fex left row 1 when mine became its default (docs/adr/0025), so a
+# release keeps a fex=engine I set in a development build. A
 # development build and the release share the app's folders, so a release build that finds a
 # dev_version= line reads the keys of DEV_ROWS as their defaults, and its next write drops the line
 # with those values (dev_dropped). A development build after it turns them on again. The switches
 # without a row are in dev-switches.conf (DEV_SWITCHES). Row 2: Debug logging, whose default is
 # already on in a development build, also over a file that says off (a diagnostic build).
 DEV_ROWS="
-1 jobwakes=on eventpool=on fastlocks=on launcherframes=on warm=on metalfx=on rawmouse=on fex=mine
+1 jobwakes=on eventpool=on fastlocks=on launcherframes=on warm=on metalfx=on rawmouse=on
 2 debug=on
 "
 DEV_ROWS_VERSION=$(printf '%s\n' "$DEV_ROWS" | awk 'NF { v = $1 } END { print v + 0 }')
@@ -925,7 +928,7 @@ setting_default() {
     launchopts) echo "" ;;
     dxmt) echo fork ;;
     wine|macdrv) echo mine ;;
-    fex) echo engine ;;
+    fex) echo mine ;;
     metal) echo 4 ;;
   esac
 }
@@ -2071,7 +2074,7 @@ lib_switch() {
 # which the DLL loads by name and calls by index, so the two come from one build. My build has the
 # DLL once (components/fex/aarch64-windows/libarm64ecfex.dll), and both names get it. Its WoW64
 # half (xtajit.dll, Steam's i386 code) stays the engine's. The setting fex (mine|engine) starts at
-# engine: my FEX goes in only after `set fex mine`. As for unix_lib's files, each engine's own
+# mine (docs/adr/0025), and `set fex engine` takes my FEX out. As for unix_lib's files, each engine's own
 # file moves aside once as <file>.engine, and only when its sha256 is the pin's; mine is copied in
 # from the components, only while no session runs or starts (apply_engine_files). The three can't
 # change in one step: a switch copies all three of mine first ($f.new), then renames back to back.

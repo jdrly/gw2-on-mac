@@ -226,6 +226,51 @@ jobs:
           grep -F "Set GW2_ON_MAC_PUBLISH=1 to publish" "$d/release.txt"
           [ ! -e "$d/called" ]
 
+      # From 0.2.2 on a release starts on my FEX (docs/adr/0025): release.sh --sign-only refuses one
+      # whose app carries none, or another commit than prebuilt.lock pins, before it signs anything,
+      # on a fixture app in a copy of the files it reads. With the pinned FEX, and for a release
+      # before 0.2.2, a release candidate or a dev build, it goes on to the signing, which fails
+      # here on the fixture.
+      - name: release.sh refuses a release from 0.2.2 on without the FEX prebuilt.lock pins
+        run: |
+          d="$RUNNER_TEMP/release-fex"
+          mkdir -p "$d/scripts" "$d/src"
+          cp scripts/release.sh "$d/scripts/" && cp src/gw2om.sh "$d/src/" && cp build.sh prebuilt.lock "$d/"
+          a="$d/dist/$(sed -n 's/^APP_NAME="\(.*\)"$/\1/p' src/gw2om.sh).app/Contents"
+          pinned="$(sed -n 's|^fex_url=.*/fex-arm64-\([0-9a-f]\{40\}\)\.tar\.xz$|\1|p' prebuilt.lock)"
+          [ -n "$pinned" ]
+          run() { # <version> <FEX commit, or none>: what release.sh --sign-only says on an app of <version>
+            local c="$a/Resources/components"
+            rm -rf "$d/dist" "$d/release"
+            mkdir -p "$c/dxmt"
+            echo "commit: 1111111111111111111111111111111111111111" >"$c/dxmt/VERSION"
+            printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>%s</string></dict></plist>\n' "$1" >"$a/Info.plist"
+            if [ "$2" != none ]; then
+              mkdir -p "$c/fex/aarch64-windows" "$c/fex/aarch64-unix"
+              echo dll >"$c/fex/aarch64-windows/libarm64ecfex.dll" && echo so >"$c/fex/aarch64-unix/libarm64ecfex.so"
+              echo "commit: $2" >"$c/fex/VERSION"
+            fi
+            if IDENTITY=- "$d/scripts/release.sh" --sign-only 2>&1; then echo "release.sh: status 0"; else echo "release.sh: status $?"; fi
+          }
+          refused() { # <version> <FEX commit, or none> <what release.sh says>
+            out="$(run "$1" "$2")"
+            if ! grep -qF "$3" <<<"$out" || ! grep -qx "release.sh: status 1" <<<"$out" || grep -q "signing nested code" <<<"$out"; then
+              echo "$out"; echo "::error::release.sh didn't refuse $1 with FEX $2"; exit 1
+            fi
+          }
+          for v in 0.2.2 0.2.10 0.3.0; do
+            refused "$v" none "$v is a release from 0.2.2 on, which starts on my FEX, and the app bundles none"
+          done
+          refused 0.2.2 2222222222222222222222222222222222222222 "The app bundles my FEX of another commit than prebuilt.lock's $pinned"
+          for vf in "0.2.2:$pinned" 0.2.1:none 0.2.2-rc.1:none 0.2.2-dev.1:none; do
+            out="$(run "${vf%:*}" "${vf#*:}")"
+            if grep -qE "my FEX|FEX of mine" <<<"$out" || ! grep -q "signing nested code" <<<"$out"; then
+              echo "$out"; echo "::error::release.sh stopped before signing $vf"; exit 1
+            fi
+          done
+          grep -v '^fex_' prebuilt.lock >"$d/prebuilt.lock"
+          refused 0.2.2 "$pinned" "prebuilt.lock pins no FEX of mine"
+
       - name: Fetch the components
         if: inputs.components == ''
         run: scripts/stage-components.sh --fetch
@@ -380,8 +425,8 @@ jobs:
           tar -cJf "$kd/kosmickrisp-arm64-$commit.tar.xz" -C "$kd/files" libvulkan_kosmickrisp.dylib kosmickrisp_mesa_icd.aarch64.json LICENSE.rst VERSION
           kx="$kd/kosmickrisp-arm64-$commit.tar.xz"
           lock() { # <ntdll sha256> <macdrv sha256> <fex sha256> [<kosmickrisp sha256>]
-            # (without prebuilt.lock's own kosmickrisp_ lines, which the fixture's replace)
-            grep -v '^kosmickrisp_' "$RUNNER_TEMP/prebuilt.lock"
+            # (without prebuilt.lock's own fex_ and kosmickrisp_ lines, which the fixture's replace)
+            grep -v -e '^fex_' -e '^kosmickrisp_' "$RUNNER_TEMP/prebuilt.lock"
             echo "ntdll_url=file://$nt"; echo "ntdll_sha256=$1"; echo "macdrv_url=file://$md"; echo "macdrv_sha256=$2"
             echo "fex_url=file://$fx"; echo "fex_sha256=$3"
             echo "kosmickrisp_url=file://$kx"; echo "kosmickrisp_sha256=${4:-$(sum "$kx")}"

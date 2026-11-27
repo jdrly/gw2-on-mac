@@ -101,8 +101,9 @@ drvsays() { # mine|engine: the line the switch to that set logs
   else echo "winemac.so and win32u.so: the engine's own winemac.so and win32u.so (athei/wine $ENGINE_WINE) are in the engine"
   fi
 }
-# My FEX (components/fex): in the app or not. The setting fex starts at engine either way, so the
-# engine's own FEX is in place until a check sets fex mine
+# My FEX (components/fex): in the app or not. The setting fex starts at mine (docs/adr/0025), so my
+# FEX goes in at the install when the app has it. The Settings section then sets fex engine, so the
+# checks after it start from the engine's own FEX, until a check sets fex mine
 if [ -f "$COMP/fex/aarch64-windows/libarm64ecfex.dll" ]; then MYFEX=yes; else MYFEX=no; fi
 MYFEX_COMMIT="$(sed -n 's/^commit: //p' "$COMP/fex/VERSION" 2>/dev/null || true)"
 ENGINE_FEX=597e7ccbedd
@@ -362,9 +363,15 @@ fex_is() {
 }
 
 # (the engine as it ships: every file the stand-in's, minus the SDK, plus the app's record of the
-# archive; nothing of the app's in it but its DXMT trees, ntdll.so, winemac.so, win32u.so and
-# KosmicKrisp, which dxgi_is, ntdll_is, winemac_is, win32u_is and kk_is check)
-engine_diff() { diff -rq -x dxgi -x 'ntdll.so*' -x 'winemac.so*' -x 'win32u.so*' -x 'libvulkan_kosmickrisp.dylib*' "$S" "$ENG" 2>&1 | sed -e "s|$S|S|g" -e "s|$ENG|E|g" | LC_ALL=C sort | tr '\n' '|'; }
+# archive; nothing of the app's in it but its DXMT trees, ntdll.so, winemac.so, win32u.so, FEX's
+# three files and KosmicKrisp, which dxgi_is, ntdll_is, winemac_is, win32u_is, fex_is and kk_is check)
+engine_diff() {
+  diff -rq -x dxgi -x 'ntdll.so*' -x 'winemac.so*' -x 'win32u.so*' -x 'xtajit64.dll*' -x 'libarm64ecfex.*' -x 'libvulkan_kosmickrisp.dylib*' "$S" "$ENG" 2>&1 | sed -e "s|$S|S|g" -e "s|$ENG|E|g" | LC_ALL=C sort | tr '\n' '|'
+  # (FEX's three files as settings.conf asks, since the diff leaves them out)
+  fex_as_set || printf 'FEX not as settings.conf asks|'
+}
+# fex_as_set: fex_is mine when the app has my FEX and fex is mine, fex_is engine otherwise
+fex_as_set() { if fexb && [ "$(sett fex)" = mine ]; then fex_is mine; else fex_is engine; fi; }
 SDK_DIFF="Only in E: .gw2om-source|Only in S/lib/wine: tests|Only in S/lib/wine: x86_64-windows|Only in S/share: man|Only in S: include|"
 # the game's folder in the bottle
 GD="$STEAM/steamapps/common/Guild Wars 2"
@@ -388,6 +395,7 @@ fixture_install() {
   g set metal 3 >/dev/null                   # The game's compatdb rules
   g set debug off >/dev/null                 # The game's compatdb rules
   ! mine || g set fastlocks off >/dev/null   # The game's compatdb rules
+  ! fexb || g set fex engine >/dev/null      # Settings
   # (Collect Logs: Steam's config/ is where the session checks write loginusers.vdf)
   mkdir -p "$STEAM/config" "$STEAM/logs" "$BOTTLE/drive_c/users/$BUSER/AppData/Roaming/Guild Wars 2"
 }
@@ -681,7 +689,11 @@ if drv; then
 else
   check "  with the engine's own winemac.so (this app has none of mine)" has <(echo "$out") "^\[dry-run\] the engine's own winemac.so (athei/wine $ENGINE_WINE) in the engine$"
 fi
-check "  with the engine's own FEX (fex=engine by default)" has <(echo "$out") "^\[dry-run\] the engine's own FEX (athei/FEX $ENGINE_FEX) in the engine$"
+if fexb; then
+  check "  with my FEX for the engine (fex=mine by default)" has <(echo "$out") "^\[dry-run\] my FEX (jdrly/FEX ${MYFEX_COMMIT:0:11}) in the engine$"
+else
+  check "  with the engine's own FEX (this app has none of mine)" has <(echo "$out") "^\[dry-run\] the engine's own FEX (athei/FEX $ENGINE_FEX) in the engine$"
+fi
 check "  with the rules file and no WINE_COMPATDB" eval 'echo "$out" | grep -qxF "[dry-run]   WINE_COMPATDB_FILE=$AD/compatdb.rules" && ! echo "$out" | grep -q "WINE_COMPATDB="'
 check "dry-run creates nothing" eval '[ -z "$(ad_list)" ] && [ ! -e "$CACHE" ]'
 check "fresh status: not installed" [ "$(st installed)" = no ]
@@ -760,10 +772,15 @@ else
   check "no winemac.so of mine in this app: the engine's own stays in place" winemac_is engine
   check "  status names it and the engine's Wine" [ "$(st macdrv_ready macdrv_file macdrv_commit macdrv_build macdrv_release)" = "yes/engine/$ENGINE_WINE//" ]
 fi
-check "the engine's own FEX in place (fex=engine by default), nothing next to it" fex_is engine
-check "  status names it and the engine's FEX commit, and my build's commit in this app" \
-  [ "$(st fex fex_ready fex_file fex_commit fex_build)" = "engine/yes/engine/$ENGINE_FEX/$MYFEX_COMMIT" ]
-check "  the install says nothing of FEX (nothing switched)" eval '! echo "$out" | grep -q "^FEX:"'
+if fexb; then
+  check "my FEX in place (fex=mine by default), the engine's own next to each of its three files as <file>.engine" fex_is mine
+  check "  status names it and its commit" [ "$(st fex fex_ready fex_file fex_commit fex_build)" = "mine/yes/mine/$MYFEX_COMMIT/$MYFEX_COMMIT" ]
+  check "  the install says so" has <(echo "$out") "^FEX: my FEX (jdrly/FEX ${MYFEX_COMMIT:0:11}) is in the engine, the engine's own kept next to each of its three files as <file>.engine$"
+else
+  check "no FEX of mine in this app: the engine's own stays in place, nothing next to it" fex_is engine
+  check "  status names it and the engine's FEX commit" [ "$(st fex fex_ready fex_file fex_commit fex_build)" = "mine/yes/engine/$ENGINE_FEX/" ]
+  check "  the install says nothing of FEX (nothing switched)" eval '! echo "$out" | grep -q "^FEX:"'
+fi
 if kkb; then
   check "my KosmicKrisp in the engine, the engine's own next to it as libvulkan_kosmickrisp.dylib.engine" kk_is mine
   check "  status names it and its commit" [ "$(st kosmickrisp_ready kosmickrisp_file kosmickrisp_commit kosmickrisp_build)" = "yes/mine/$MYKK_COMMIT/$MYKK_COMMIT" ]
@@ -827,8 +844,8 @@ check "DXMT's cache folder" [ -d "$DXMT_CACHE" ]
 section "Settings"
 check "defaults: warm on, fastlocks on, ncpu 8, uiscale off, cinematic dialogue off" \
   [ "$(sett warm fastlocks ncpu uiscale uiscale_cinema)" = on/on/8/off/off ]
-check "  settings.conf of a fresh install: settings_version=3, fastlocks on, dxmt fork, wine and macdrv mine, fex engine" \
-  eval 'grep -qx settings_version=3 "$AD/settings.conf" && grep -qx fastlocks=on "$AD/settings.conf" && grep -qx dxmt=fork "$AD/settings.conf" && grep -qx wine=mine "$AD/settings.conf" && grep -qx macdrv=mine "$AD/settings.conf" && grep -qx fex=engine "$AD/settings.conf"'
+check "  settings.conf of a fresh install: settings_version=4, fastlocks on, dxmt fork, wine, macdrv and fex mine" \
+  eval 'grep -qx settings_version=4 "$AD/settings.conf" && grep -qx fastlocks=on "$AD/settings.conf" && grep -qx dxmt=fork "$AD/settings.conf" && grep -qx wine=mine "$AD/settings.conf" && grep -qx macdrv=mine "$AD/settings.conf" && grep -qx fex=mine "$AD/settings.conf"'
 
 check "default: Steam in the background on" [ "$(sett steambg)" = on ]
 check "default: Quit Steam when the game quits on" [ "$(sett quitsteam)" = on ]
@@ -863,6 +880,16 @@ else
   check "  with their reasons; set macdrv engine, set launcherframes on and set mousespeed 1.5 refused" \
     eval 'SET_OUT=$(g settings); [ "$(kv "$SET_OUT" macdrv_state)" = "off:This build of the app has no Mac driver of mine." ] && [ "$(kv "$SET_OUT" launcherframes_state)" = "off:Needs my Mac driver, which this build of the app doesn'"'"'t have." ] && [ "$(kv "$SET_OUT" mousespeed_state)" = "$(kv "$SET_OUT" launcherframes_state)" ] && ! "$G" set macdrv engine >/dev/null 2>&1 && ! "$G" set launcherframes on >/dev/null 2>&1 && ! "$G" set mousespeed 1.5 >/dev/null 2>&1'
 fi
+# fex: mine by default, ok with my FEX in the app. The checks after these start from the engine's
+# own FEX (set fex engine here, and in fixture_install), as they did before mine was the default;
+# a release's checks of the default and of a saved engine are with the release's install
+if fexb; then
+  check "  fex=mine by default, ok" [ "$(sett fex fex_state)" = mine/ok ]
+  g set fex engine >/dev/null
+  check "  set fex engine: the engine's own FEX, saved in settings.conf" eval 'fex_is engine && [ "$(sett fex)" = engine ] && grep -qx fex=engine "$AD/settings.conf"'
+else
+  check "  fex=mine by default, greyed: no FEX of mine in this app" [ "$(sett fex fex_state)" = "mine/off:This build carries no FEX of mine." ]
+fi
 # settings.conf's version (SETTINGS_RESETS): a file from before version 3, as 0.2.0 and 0.2.1
 # wrote it, holds fastlocks=off; it reads on, the default since version 3, and the game's rule has
 # the spin (with my ntdll.so in place). The next write keeps on
@@ -872,8 +899,8 @@ out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
 check "a settings.conf at settings_version 2 (0.2.1's) with fastlocks=off: fastlocks reads on, its spin in the game's rule" \
   eval 'SET_OUT=$(g settings); [ "$(kv "$SET_OUT" fastlocks)" = on ] && { ! mine || { g rules | head -1 | grep -q ";env=WINE_HEAT_SPIN=lock=20:game,event=30:game" && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;.*;env=WINE_HEAT_SPIN=lock=20:game,event=30:game"; }; }'
 g set hud on >/dev/null; g set hud off >/dev/null
-check "  the next write keeps that and writes settings_version=3" \
-  eval 'grep -qx settings_version=3 "$AD/settings.conf" && grep -qx fastlocks=on "$AD/settings.conf"'
+check "  the next write keeps that and writes settings_version=4" \
+  eval 'grep -qx settings_version=4 "$AD/settings.conf" && grep -qx fastlocks=on "$AD/settings.conf"'
 # (a file from before version 1 holds the fastlocks=on and coolworkers=3 the arm64 line wrote while
 # both rows were greyed, or an off; coolworkers, no longer a key, is read by nothing. gamemode=on,
 # which every file had until the key left in #269, the same)
@@ -882,8 +909,8 @@ printf 'coolworkers=3\ngamemode=on\n' >>"$AD/settings.conf"
 check "a settings.conf without settings_version, fastlocks=off, coolworkers=3 and gamemode=on: fastlocks reads on" \
   eval 'SET_OUT=$(g settings); [ "$(kv "$SET_OUT" fastlocks)" = on ] && ! echo "$SET_OUT" | grep -q -e coolworkers -e "^gamemode"'
 g set hud on >/dev/null; g set hud off >/dev/null
-check "  the next write keeps that, writes settings_version=3 and leaves coolworkers and gamemode out" \
-  eval 'grep -qx settings_version=3 "$AD/settings.conf" && grep -qx fastlocks=on "$AD/settings.conf" && ! grep -q -e coolworkers -e gamemode "$AD/settings.conf"'
+check "  the next write keeps that, writes settings_version=4 and leaves coolworkers and gamemode out" \
+  eval 'grep -qx settings_version=4 "$AD/settings.conf" && grep -qx fastlocks=on "$AD/settings.conf" && ! grep -q -e coolworkers -e gamemode "$AD/settings.conf"'
 # a file at version 1 with the engine's own DXMT, ntdll.so and winemac.so chosen, from the rows
 # version 2 took out of the window: fork, mine and mine, once
 cp "$SANDBOX/settings.fresh" "$AD/settings.conf"
@@ -892,17 +919,17 @@ echo coolworkers=off >>"$AD/settings.conf"
 check "settings_version=1 with dxmt, wine and macdrv engine and a coolworkers line: read fork, mine, mine" \
   [ "$(sett dxmt wine macdrv)/$(st graphics)" = fork/mine/mine/yes ]
 g set hud on >/dev/null; g set hud off >/dev/null
-check "  the next write keeps them, writes settings_version=3 and leaves coolworkers out" \
-  eval 'grep -qx settings_version=3 "$AD/settings.conf" && grep -qx dxmt=fork "$AD/settings.conf" && grep -qx wine=mine "$AD/settings.conf" && grep -qx macdrv=mine "$AD/settings.conf" && ! grep -q coolworkers "$AD/settings.conf"'
-sed -i '' 's/^dxmt=.*/dxmt=engine/' "$AD/settings.conf"
+check "  the next write keeps them, writes settings_version=4 and leaves coolworkers out" \
+  eval 'grep -qx settings_version=4 "$AD/settings.conf" && grep -qx dxmt=fork "$AD/settings.conf" && grep -qx wine=mine "$AD/settings.conf" && grep -qx macdrv=mine "$AD/settings.conf" && ! grep -q coolworkers "$AD/settings.conf"'
+sed -i '' -e 's/^settings_version=.*/settings_version=3/' -e 's/^dxmt=.*/dxmt=engine/' "$AD/settings.conf"
 g set hud on >/dev/null; g set hud off >/dev/null
 check "  only once: dxmt=engine in a file at version 3 stays through later writes" \
-  eval '[ "$(sett dxmt)" = engine ] && grep -qx dxmt=engine "$AD/settings.conf" && grep -qx settings_version=3 "$AD/settings.conf"'
+  eval '[ "$(sett dxmt)" = engine ] && grep -qx dxmt=engine "$AD/settings.conf" && grep -qx settings_version=4 "$AD/settings.conf"'
 cp "$SANDBOX/settings.fresh" "$AD/settings.conf"
 if mine; then
   g set fastlocks off >/dev/null; g set hud on >/dev/null; g set hud off >/dev/null
-  check "  set fastlocks off in a file at version 3: stays off through later writes" \
-    eval '[ "$(sett fastlocks)" = off ] && grep -qx fastlocks=off "$AD/settings.conf" && grep -qx settings_version=3 "$AD/settings.conf"'
+  check "  set fastlocks off in a file at version 4: stays off through later writes" \
+    eval '[ "$(sett fastlocks)" = off ] && grep -qx fastlocks=off "$AD/settings.conf" && grep -qx settings_version=4 "$AD/settings.conf"'
   g set fastlocks on >/dev/null
 fi
 check "  rawmouse ok" [ "$(sett rawmouse_state)" = ok ]
@@ -926,7 +953,9 @@ g set metal 3 >/dev/null
 sed -i '' 's/^settings_version=.*/settings_version=1/' "$AD/settings.conf"
 check "  metal=3 in a file at settings_version 1 reads 3" [ "$(sett metal)" = 3 ]
 g set hud on >/dev/null; g set hud off >/dev/null
-check "  and stays 3 through later writes" eval '[ "$(sett metal)" = 3 ] && grep -qx metal=3 "$AD/settings.conf" && grep -qx settings_version=3 "$AD/settings.conf"'
+check "  and stays 3 through later writes" eval '[ "$(sett metal)" = 3 ] && grep -qx metal=3 "$AD/settings.conf" && grep -qx settings_version=4 "$AD/settings.conf"'
+# (that write read fex as reset, mine, at version 1: back to the engine's own, set above)
+! fexb || g set fex engine >/dev/null
 out=$(g set coolworkers 5 2>&1) && rc=0 || rc=$?
 check "set coolworkers 5: refused as an unknown setting" eval '[ "$rc" = 2 ] && [ "$out" = "@error Unknown setting: coolworkers=5" ]'
 out=$(g set gamemode off 2>&1) && rc=0 || rc=$?
@@ -1612,16 +1641,16 @@ else
   sed -i '' -e 's/^launcherframes=.*/launcherframes=off/' -e 's/^mousespeed=.*/mousespeed=1/' "$AD/settings.conf"
 fi
 ! mine || g set wine mine >/dev/null
-# A home with odd characters, in a fresh root: its settings.conf (the engine's ntdll.so, Debug logging off,
-# at settings_version 2 so wine=engine isn't reset, and Metal 3, so no tree's names count) is all there is in it
+# A home with odd characters, in a fresh root: its settings.conf (the engine's ntdll.so and FEX, Debug
+# logging off, at settings_version 4 so neither is reset, and Metal 3, so no tree's names count) is all there is in it
 ODD="$SANDBOX/a%b;c$(printf '\t')d é"
 ODD_CONF="$ODD/home/Library/Application Support/$APP_FOLDER/settings.conf"
-mkdir -p "${ODD_CONF%/*}" && printf 'settings_version=2\nwine=engine\ndebug=off\nmetal=3\n' >"$ODD_CONF"
+mkdir -p "${ODD_CONF%/*}" && printf 'settings_version=4\nwine=engine\nfex=engine\ndebug=off\nmetal=3\n' >"$ODD_CONF"
 odd_rules_are() { GW2_ON_MAC_ROOT="$ODD" "$G" rules | sed "s|$SANDBOX/a%25b%3Bc%09d é/home|/Users/a%25b%3Bc%09d é|g" | cmp -s - "$FIX/$1.rules"; }
 odd_only_conf() { [ "$(cd "$ODD" && find . | LC_ALL=C sort | tr '\n' '|')" = ".|./home|./home/Library|./home/Library/Application Support|./home/Library/Application Support/$APP_FOLDER|./home/Library/Application Support/$APP_FOLDER/settings.conf|" ]; }
 check "a home with %, ; and a tab: escaped as %XX, the é as it is" eval 'odd_rules_are escaped && odd_only_conf'
 if mine; then
-  printf 'settings_version=3\njobwakes=on\neventpool=off\nfastlocks=off\ndebug=on\nmetal=3\n' >"$ODD_CONF"
+  printf 'settings_version=4\nfex=engine\njobwakes=on\neventpool=off\nfastlocks=off\ndebug=on\nmetal=3\n' >"$ODD_CONF"
   check "  with job wakes and Debug logging on: the logs folder escaped the same way" eval 'odd_rules_are escaped-heat && odd_only_conf'
 fi
 rm -rf "$ODD"
@@ -1666,7 +1695,7 @@ else
   check "  and which winemac.so: the engine's own, no WINE_MACDRV_* in the rules" \
     eval '[ "$(sed -n "s/^LIB_macdrv=//p" "$LOGS/session.env")" = "winemac.so engine $ENGINE_WINE $GW2_ON_MAC_ENGINE_WINEMAC_SHA256" ] && ! grep -q WINE_MACDRV_ "$LOGS/session.env"'
 fi
-check "  and which FEX: the engine's own (fex=engine by default)" eval '[ "$(sed -n "s/^LIB_fex=//p" "$LOGS/session.env")" = engine ]'
+check "  and which FEX: the engine's own (fex=engine, set in Settings)" eval '[ "$(sed -n "s/^LIB_fex=//p" "$LOGS/session.env")" = engine ]'
 check "  and which KosmicKrisp: $(kkb && echo mine || echo "the engine's own"), with its commit and the sha256 of the file in the engine" \
   eval '[ "$(sed -n "s/^LIB_kosmickrisp=//p" "$LOGS/session.env")" = "$(kkb && echo "mine $MYKK_COMMIT" || echo "engine $ENGINE_MESA") $(shasum -a 256 "$KKF" | cut -d" " -f1)" ]'
 
@@ -4526,7 +4555,7 @@ OUTEX=FEX_HARDWARETSOSYSCALLS=keep
 if fexb; then OUTWHY="my FEX doesn't have it"; else OUTWHY="my FEX isn't in the engine"; fi
 rows_on() { # <settings.conf>: the rows of a development build on, once (dev_version=2)
   local k
-  for k in dev_version=2 debug=on jobwakes=on eventpool=on fastlocks=on launcherframes=on warm=on metalfx=on rawmouse=on fex=mine; do
+  for k in dev_version=2 debug=on jobwakes=on eventpool=on fastlocks=on launcherframes=on warm=on metalfx=on rawmouse=on; do
     grep -qx "$k" "$1" || return 1
   done
 }
@@ -5181,8 +5210,28 @@ cp "$SANDBOX/devf.now15" "$DEVF"
 
 # A release: no file, its defaults; a file there anyway changes nothing
 out=$(rg install steam 2>&1) && rc=0 || rc=$?
-check "a release's install: no dev-switches.conf, the rows at their defaults, no dev_version" \
-  eval '[ "$rc" = 0 ] && [ ! -e "$RDEVF" ] && grep -qx fastlocks=on "$RAD/settings.conf" && grep -qx launcherframes=off "$RAD/settings.conf" && grep -qx fex=engine "$RAD/settings.conf" && ! grep -q "^dev_version=" "$RAD/settings.conf"'
+check "a release's install: no dev-switches.conf, the rows at their defaults (fex mine), no dev_version" \
+  eval '[ "$rc" = 0 ] && [ ! -e "$RDEVF" ] && grep -qx fastlocks=on "$RAD/settings.conf" && grep -qx launcherframes=off "$RAD/settings.conf" && grep -qx fex=mine "$RAD/settings.conf" && ! grep -q "^dev_version=" "$RAD/settings.conf"'
+# (from 0.2.2 on a release starts on my FEX when it carries it, and keeps the engine's own once I
+# set it: docs/adr/0025)
+if fexb; then
+  check "  my FEX in the engine after a release's install, the engine's own next to each file" \
+    eval 'echo "$out" | grep -q "^FEX: my FEX (jdrly/FEX ${MYFEX_COMMIT:0:11}) is in the engine" && [ "$(kv "$(rg status)" fex_file)" = mine ] && FW="$RAD/engine/lib/wine" fex_is mine'
+  # An update from 0.2.1: its settings.conf says fex=engine at settings_version 2, as 0.2.1 wrote
+  # every file, with the engine's own FEX in place
+  rg set fex engine >/dev/null
+  sed -i '' 's/^settings_version=.*/settings_version=2/' "$RAD/settings.conf"
+  check "an update from 0.2.1 (settings_version=2, fex=engine, the engine's own FEX): fex reads mine, waiting for the switch" \
+    eval 'grep -qx fex=engine "$RAD/settings.conf" && [ "$(kv "$(rg settings)" fex)" = mine ] && [ "$(kv "$(rg status)" fex_file)/$(kv "$(rg status)" fex_ready)" = engine/switch ]'
+  out=$(rg repair 2>&1) && rc=0 || rc=$?
+  check "  the next Repair puts my FEX in and writes fex=mine at settings_version 4" \
+    eval '[ "$rc" = 0 ] && [ "$(kv "$(rg status)" fex_file)" = mine ] && grep -qx fex=mine "$RAD/settings.conf" && grep -qx settings_version=4 "$RAD/settings.conf" && echo "$out" | grep -q "^FEX: my FEX (jdrly/FEX ${MYFEX_COMMIT:0:11}) is in the engine"'
+  rg set fex engine >/dev/null
+  out=$(rg repair 2>&1) && rc=0 || rc=$?
+  check "a saved fex=engine stays through Repair: the engine's own FEX, fex=engine at settings_version 4" \
+    eval '[ "$rc" = 0 ] && [ "$(kv "$(rg status)" fex_file)" = engine ] && [ "$(kv "$(rg settings)" fex)" = engine ] && grep -qx fex=engine "$RAD/settings.conf" && grep -qx settings_version=4 "$RAD/settings.conf"'
+  rg set fex mine >/dev/null
+fi
 # (Metal 4's present in a release too: the release's tree given a DLL that names it, and back)
 RTREE="$RAD/engine/lib/wine/dxgi/dxmt/aarch64-windows"
 rm -rf "$SANDBOX/rtree.keep" && cp -Rp "$RTREE" "$SANDBOX/rtree.keep"
@@ -5234,17 +5283,19 @@ check "  a second start changes nothing" eval 'same "$RDEVF" "$SANDBOX/rdevf.kee
 dgr set rawmouse off >/dev/null
 dgr repair >/dev/null 2>&1
 check "  raw mouse-look off afterwards stays off" eval 'grep -qx rawmouse=off "$RAD/settings.conf"'
+# (and the engine's own FEX chosen there: fex is no row, so the release keeps it)
+if fexb; then dgr set fex engine >/dev/null; RFEX=engine; else RFEX=mine; fi
 # A release build over it (a development build and the release share the folders, ADR 0018): the
 # rows read as their defaults while the dev_version= line is there, and its next write drops the
 # line and writes those defaults (fastlocks=off in the file, as I may have set it there: on, the
 # release's default)
 rsett() { kv "$(rg settings)" "$@"; }
 sed -i '' 's/^fastlocks=.*/fastlocks=off/' "$RAD/settings.conf"
-check "a release build over it reads the rows at their defaults: fex engine, fast locks on, raw mouse-look on, Debug logging off" \
-  eval 'grep -qx dev_version=2 "$RAD/settings.conf" && grep -qx fex=mine "$RAD/settings.conf" && [ "$(rsett fex fastlocks rawmouse debug)" = engine/on/on/off ] && grep -qx dev_version=2 "$RAD/settings.conf"'
+check "a release build over it reads the rows at their defaults (fast locks on, raw mouse-look on, Debug logging off) and fex as set there, $RFEX" \
+  eval 'grep -qx dev_version=2 "$RAD/settings.conf" && grep -qx fastlocks=off "$RAD/settings.conf" && [ "$(rsett fex fastlocks rawmouse debug)" = $RFEX/on/on/off ] && grep -qx dev_version=2 "$RAD/settings.conf"'
 rg set quitsteam off >/dev/null
 check "  its next write: no dev_version line, the rows at their defaults, my change in" \
-  eval '! grep -q "^dev_version=" "$RAD/settings.conf" && grep -qx fex=engine "$RAD/settings.conf" && grep -qx fastlocks=on "$RAD/settings.conf" && grep -qx rawmouse=on "$RAD/settings.conf" && grep -qx debug=off "$RAD/settings.conf" && grep -qx quitsteam=off "$RAD/settings.conf"'
+  eval '! grep -q "^dev_version=" "$RAD/settings.conf" && grep -qx fex=$RFEX "$RAD/settings.conf" && grep -qx fastlocks=on "$RAD/settings.conf" && grep -qx rawmouse=on "$RAD/settings.conf" && grep -qx debug=off "$RAD/settings.conf" && grep -qx quitsteam=off "$RAD/settings.conf"'
 dgr repair >/dev/null 2>&1
 check "  a development build after it turns the rows on again" rows_on "$RAD/settings.conf"
 mkdir -p "$SANDBOX/relzip"

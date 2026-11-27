@@ -28,8 +28,8 @@
 #                       the fork's commit, the engine's FEX commit it starts from, the engine's
 #                       tarball and the files as built; "switches:" the FEX_* options my commits
 #                       add), LICENSE and NOTICES, and SHA256SUMS, the record this script writes.
-#                       gw2om.sh puts it into the engine after `set fex mine`, the engine's own
-#                       kept next to it. Its WoW64 half is not staged. Optional, as ntdll/ is.
+#                       gw2om.sh puts it into the engine unless `fex` is `engine`, the engine's
+#                       own kept next to it. Its WoW64 half is not staged. Optional, as ntdll/ is.
 #   prebuilt/kosmickrisp/  my KosmicKrisp (jdrly/mesa, MIT and the licences Mesa lists), the engine's
 #                       Vulkan driver built for this line's engine (#339): libvulkan_kosmickrisp.dylib,
 #                       VERSION (its "commit:", "base:", "engine:" and "libvulkan_kosmickrisp.dylib:

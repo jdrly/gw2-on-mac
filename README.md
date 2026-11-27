@@ -8,7 +8,7 @@ Metal through my DXMT fork, built for this engine, which the app puts into the e
 and every Wine process loads my builds of Wine's `ntdll.so` and of its Mac driver, `winemac.so`,
 which have switches for the game. The engine's own DXMT, `ntdll.so` and `winemac.so` stay next to
 them, and a setting switches back to each. A build can also carry my build of FEX, which goes in
-only when I choose it from Terminal, and my build of KosmicKrisp, the engine's Vulkan driver, which
+too unless I switch back from Terminal (a release from 0.2.2 on always carries it), and my build of KosmicKrisp, the engine's Vulkan driver, which
 goes in whenever the build carries it: the engine's own crashes the game on macOS 26. It changes
 nothing you already have installed.
 
@@ -317,15 +317,17 @@ greyed, so no file held a choice of mine. Version 2 resets `dxmt`, `wine` and `m
 `mine` and `mine`, because their rows left Settings with it, and a bottle on the engine's own
 files would have had no row to show it. Version 3 resets `fastlocks` to its new default, `on`
 ([ADR 0027](docs/adr/0027-faster-locks-is-on-by-default.md)). 0.2.0 and 0.2.1 wrote `off` into every
-file, so an `off` chosen there reads `on` too, once. An `off` set after that stays. A key `settings.conf` still has but the app no longer
+file, so an `off` chosen there reads `on` too, once. An `off` set after that stays. Version 4
+resets `fex` to `mine`, as releases start on my FEX from 0.2.2: until then every file said
+`engine`, the default then. A key `settings.conf` still has but the app no longer
 knows, such as `coolworkers` or `gamemode` (whose row left in #269), is read by nothing and gone
 at the next write.
 
 A development build starts with every switch on, since I debug from everything on backwards. Once,
 by a line `dev_version=` in `settings.conf` (`DEV_ROWS` in `gw2om.sh`, read the way
 `SETTINGS_RESETS` is), it turns on *Job wakes*, *Event pool*, *Faster locks*, *Launcher frames*,
-*Shader warming*, *MetalFX for Subsample*, *Raw mouse-look* and `fex=mine`, which takes effect in a
-build that carries my FEX. Version 2 turns on *Debug logging*, also over a `settings.conf` that
+*Shader warming*, *MetalFX for Subsample* and *Raw mouse-look*. Row 1 had `fex=mine` too until
+`mine` became the default, so a release now keeps a `fex=engine` I set in a development build. Version 2 turns on *Debug logging*, also over a `settings.conf` that
 says off; a release from before that row, such as 0.2.0, keeps it on. A row I turn off afterwards
 stays off. The switches without a row are in
 `dev-switches.conf` ([The game's environment](#the-games-environment)), which a release never reads.
@@ -335,7 +337,7 @@ again.
 
 Four keys have no row: `dxmt`, `wine` and `macdrv` pick my DXMT fork, my `ntdll.so` and my
 `winemac.so` (`fork`, `mine`, `mine`) or the engine's own (`engine`), and `fex` picks my FEX
-(`mine`) or the engine's own (`engine`, the default). They are for my comparisons from Terminal,
+(`mine`, the default) or the engine's own (`engine`). They are for my comparisons from Terminal,
 with `gw2om.sh set`. The rows that need one of my files are greyed while the engine's own is
 chosen, and the main window's *Engine* and *Graphics* checks name the files in place.
 
@@ -593,7 +595,7 @@ nothing in `/Applications` besides itself.
 
 | Path | What | Uninstall |
 |---|---|---|
-| `~/Library/Application Support/GW2 on Mac arm64/engine/` | the Wine engine as it ships, without its SDK, about 1 GB, with my DXMT fork's tree in `lib/wine/dxgi/dxmt` and my `ntdll.so` and `winemac.so` (with `win32u.so` when my driver's build has one) in `lib/wine/aarch64-unix`, and after `set fex mine` my FEX's three files, the engine's own next to each | removed |
+| `~/Library/Application Support/GW2 on Mac arm64/engine/` | the Wine engine as it ships, without its SDK, about 1 GB, with my DXMT fork's tree in `lib/wine/dxgi/dxmt` and my `ntdll.so` and `winemac.so` (with `win32u.so` when my driver's build has one) in `lib/wine/aarch64-unix`, and my FEX's three files unless `fex` is `engine`, the engine's own next to each | removed |
 | `…/GW2 on Mac arm64/bottle/` | the game's Wine prefix with Steam, the game's files and the game's settings. About 75 GB, or no extra space for a clone of files on the same disk or a game moved from 0.1 | removed, with the game |
 | `…/GW2 on Mac arm64/settings.conf`, `state`, `install-manifest.json`, `dxmt.conf`, `compatdb.rules`, `compatdb.local`, `dev-switches.conf`, `session`, `session.req`, `reshade-compiler` | settings, install state, what was installed, DXMT's options, the game's compatdb rules and my own, a development build's switches, the current game session and its lock, the sha256 of the compiler the app put next to `Gw2-64.exe` | removed |
 | `…/GW2 on Mac arm64/ReShade/` | ReShade's settings, log, presets, shaders, textures and screenshots | kept |
@@ -847,8 +849,10 @@ them comes from my FEX fork, jdrly/FEX, and is in the app as `components/fex`: t
 the app puts in under both names, and the `.so`. The i386 half, `xtajit.dll`, which Steam's
 processes use, stays the engine's.
 
-The setting `fex` starts at `engine`: my FEX goes in only after `gw2om.sh set fex mine` from
-Terminal, and `gw2om.sh set fex engine` takes it out again. There is no row in the Settings window.
+The setting `fex` starts at `mine`, so a build that carries my FEX puts it in at the install,
+and `gw2om.sh set fex engine` from Terminal takes it out again
+([ADR 0025](docs/adr/0025-releases-start-on-my-fex-from-0.2.2.md)). There is no row in the
+Settings window.
 The swap works as for my `ntdll.so`, while no session runs or starts: each of the engine's own
 files goes aside as `<file>.engine` once, and only when its sha256 is the pin's, `cd6803d9…` for
 both DLL names and `0a3e7ea4…` for the `.so`. Three files in two folders can't change in one step,
@@ -1542,7 +1546,9 @@ sha256 before it unpacks anything. My `ntdll.so` is a download of its own: with 
 `ntdll_sha256=` in `prebuilt.lock`, the script fetches jdrly/wine's asset, checks its sha256 the
 same way and stages it as from the workspace. My `winemac.so` is the same with `macdrv_url=` and
 `macdrv_sha256=`, my FEX with `fex_url=` and `fex_sha256=`, and my KosmicKrisp with
-`kosmickrisp_url=` and `kosmickrisp_sha256=`. `prebuilt.lock` pins only my KosmicKrisp today. `build.sh` then checks `prebuilt/` like any other.
+`kosmickrisp_url=` and `kosmickrisp_sha256=`. `prebuilt.lock` pins my FEX and my KosmicKrisp today. A
+release from 0.2.2 on carries the FEX it pins: `scripts/release.sh` refuses one without it or with
+another commit ([ADR 0025](docs/adr/0025-releases-start-on-my-fex-from-0.2.2.md)). `build.sh` then checks `prebuilt/` like any other.
 
 `--pack <tag>` makes such an archive from `prebuilt/` without `ntdll/`, `macdrv/`, `fex/` and
 `kosmickrisp/` and writes `prebuilt.lock` for it, keeping its `ntdll_`, `macdrv_`, `fex_` and
@@ -1559,8 +1565,8 @@ its files came from into the first line of `prebuilt/STAGED`. With a Wine commit
 fork's `ntdll.so` asset into `work/ntdll-arm64/install` and stages it with `WINE_COMMIT` set;
 without one a dev build has none. A Mac driver commit does the same for `winemac.so`, into
 `work/macdrv-arm64/install` with `MACDRV_COMMIT`, and a FEX commit for my FEX, from jdrly/FEX's
-`arm64-builds` into `work/fex-arm64/install` with `FEX_COMMIT`. A dev build with my FEX still
-starts on the engine's own: `fex` is `engine` until I set it.
+`arm64-builds` into `work/fex-arm64/install` with `FEX_COMMIT`. A dev build with my FEX starts on
+it.
 
 **The engine's source** is athei's: [athei/mach9](https://github.com/athei/mach9) and the
 repositories its release page lists, each under its own licence. The app doesn't bundle any of it,
@@ -1874,8 +1880,7 @@ gh release download v0.2.0-dev.5 -R jdrly/gw2-on-mac -p '*.dmg' -D ~/Downloads
   separate inputs, so a build can carry my `ntdll.so` or my Mac driver without the other.
 - My FEX comes only with `fex_commit`, a commit on my FEX fork's `gw2-on-mac`: the release asset
   `fex-arm64-<commit>.tar.xz` of jdrly/FEX's `arm64-builds`, checked against GitHub's digest.
-  Without it the app has no FEX of mine. With it the app still starts on the engine's own FEX until
-  `gw2om.sh set fex mine`.
+  Without it the app has no FEX of mine. With it the app starts on my FEX.
 - My KosmicKrisp comes with `kosmickrisp_commit`, a commit on my Mesa fork's `gw2-on-mac`, or
   without it the one `prebuilt.lock` pins: the release asset `kosmickrisp-arm64-<commit>.tar.xz`
   of jdrly/mesa's `arm64-builds`, checked against GitHub's digest and refused on copies as my FEX

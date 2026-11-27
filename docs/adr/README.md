@@ -4,8 +4,8 @@ One decision per file. The files go by number, not by date. 0001 to 0011 record 
 wrote them down on 2026-11-17, after 0012 and 0013 had landed, and kept their numbers below
 those two. Their dates don't follow their numbers. A new decision takes the next free number.
 
-0001, 0002 and 0014 are about 0.1.x and live on `main`. 0003 to 0010, 0012, 0013, 0015 to 0024, 0026
-and 0027 are about the 0.2 line on this branch, `arm64`. 0011 is on both. The two branches share one set of
+0001, 0002 and 0014 are about 0.1.x and live on `main`. 0003 to 0010, 0012, 0013 and 0015 to 0027
+are about the 0.2 line on this branch, `arm64`. 0011 is on both. The two branches share one set of
 numbers, so a number taken on one is not used on the other.
 
 | File | Decided | One line |
@@ -34,5 +34,6 @@ numbers, so a number taken on one is not used on the other.
 | [0022](0022-a-pull-requests-dry-run-runs-settings-alone.md) | 2026-11-19 | A pull request's Dev build dry run runs the sandbox's `settings` group alone and no `renders`. Checks runs the rest on the same commit, and a dev build I dispatch runs everything. |
 | [0023](0023-0.2-ships-kosmickrisp-from-my-mesa-fork.md) | 2026-11-20 | 0.2 ships KosmicKrisp from my Mesa fork, which never asks Metal for `sparseBufferTier`. The app puts it into the engine whenever it carries it, with no setting, the engine's own kept next to it. |
 | [0024](0024-fex-counters-only-with-my-fex-that-names-the-slot-fix.md) | 2026-11-26 | Debug logging turns on FEX's counters (`FEX_PROFILESTATS=1`) only with my `ntdll.so` and my FEX in place, that FEX naming `profilestats-slots` on its `VERSION`'s `fixes:` line. The engine's own FEX faults at its 37th thread with them. |
+| [0025](0025-releases-start-on-my-fex-from-0.2.2.md) | 2026-11-26 | From 0.2.2 a release starts on my FEX, the commit `prebuilt.lock` pins, if 0.2.2-dev.1 plays as well as 0.2.1. `fex` defaults to `mine`, reset once over 0.2.1's files, and `release.sh` refuses a release without that FEX. |
 | [0026](0026-the-job-workers-stay-out-of-the-lock-spin.md) | 2026-11-27 | A dev build's `WINE_HEAT_SPIN` line spins the game thread only. Spinning the job workers moved their lock cost onto the game thread, and my Wine fork keeps the `halfworkers` scope unused. |
 | [0027](0027-faster-locks-is-on-by-default.md) | 2026-11-27 | *Faster locks* is on by default in a release. Every session since dev.13 meets #105's rule, and a `settings.conf` from 0.2.0 or 0.2.1 reads on once. |
