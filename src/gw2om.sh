@@ -1390,7 +1390,7 @@ fex_entries() {
 # rule as one entry (hf_join), and while a rule of compatdb.local for Gw2-64.exe sets it
 # (local_hostfeatures), that rule replaces them: they stay out, saying what to write there instead.
 DEV_SWITCHES="
-1 wine #14,#45,#368 unplayed WINE_HEAT_SPIN=lock=20:game+halfworkers,event=30:game the Faster locks row's two spins, and every other job worker spins before a lock sleep too, so one session compares the two halves: each thread's row in the heat log says spin 1 or spin 0. Needs my ntdll.so from jdrly/wine#59 on: an older one doesn't know the scope and leaves the lock spin off. While this line is here, its value replaces the row's.
+1 wine #14,#45,#370 unplayed WINE_HEAT_SPIN=lock=20:game,event=30:game the Faster locks row's two spins, on the game thread only. The job workers stay out of the lock spin (docs/adr/0026). While this line is here, its value replaces the row's.
 1 macdrv #62 unplayed WINE_MACDRV_VIEW=changes a window's view frame goes to the main thread only when it changed
 1 macdrv #62 unplayed WINE_MACDRV_CLIP=changes ClipCursor doesn't call the main thread for the rectangle it applied last
 1 macdrv #62 unplayed WINE_MACDRV_CALL=quiet after a call to the main thread, the event pipe holds a byte only if an event waits
@@ -1432,6 +1432,9 @@ DEV_SWITCHES="
 # Version 13: WINE_HEAT_SPIN's line takes a new value (#368). Its old line as the table wrote it goes,
 # and dev_update adds the row's new value at the end. Mine with another value stays, one I commented
 # out stays as it is, and one I deleted stays deleted: no new line comes for any of them.
+# Version 14: WINE_HEAT_SPIN's line goes back to the row's two spins (#370, docs/adr/0026), the same
+# way. A variable can have more than one row here, one for each value it left, so a file at version
+# 12 loses version 12's line too.
 DEV_GONE="
 4 jdrly/dxmt#227 DXMT_MTL4_PRESENT=mtl3 mtl4
 8 jdrly/dxmt#157 DXMT_PRESENT_QUEUE=pace -
@@ -1444,6 +1447,7 @@ DEV_GONE="
 11 #161 FEX_DISPATCHERL1LOOKUP=1 0
 11 #162 FEX_ENTRYHEADERLOOKUP=1 0
 13 #14,#45 WINE_HEAT_SPIN=lock=20:game,event=30:game,sem=5:game -
+14 #14,#45,#368 WINE_HEAT_SPIN=lock=20:game+halfworkers,event=30:game -
 "
 DEV_SWITCHES_VERSION=$(printf '%s\n' "$DEV_SWITCHES" "$DEV_GONE" | awk 'NF && $1 > v { v = $1 } END { print v + 0 }')
 # dev_piece_label <piece>: what the file and the log call it
@@ -1483,8 +1487,8 @@ dev_update() {
   # one of them is its new value)
   [ ! -f "$DEV_FILE" ] || replaced=$(GONE_ROWS="$DEV_GONE" awk -v v="$v" '
     BEGIN { n = split(ENVIRON["GONE_ROWS"], r, "\n")
-            for (i = 1; i <= n; i++) if (split(r[i], f, " ") >= 4 && f[1] + 0 > v + 0) { k = f[3]; sub(/=.*/, "", k); line[k] = f[3] } }
-    { for (k in line) if ($0 == line[k]) hit[k] = 1; else if ($0 ~ ("^[#[:space:]]*" k "=")) other[k] = 1 }
+            for (i = 1; i <= n; i++) if (split(r[i], f, " ") >= 4 && f[1] + 0 > v + 0) { k = f[3]; sub(/=.*/, "", k); gone[f[3]] = k; name[k] = 1 } }
+    { if ($0 in gone) hit[gone[$0]] = 1; else for (k in name) if ($0 ~ ("^[#[:space:]]*" k "=")) other[k] = 1 }
     END { for (k in hit) if (!(k in other)) print k }' "$DEV_FILE")
   # (the rows newer than the file whose variable it doesn't name, not even commented out, and the
   # rows that replace a line dev_gone takes out)
@@ -1572,22 +1576,23 @@ dev_gone() {
       n = split(ENVIRON["GONE_ROWS"], r, "\n")
       for (i = 1; i <= n; i++) {
         if (split(r[i], f, " ") < 4 || f[1] + 0 <= v + 0) continue
-        k = f[3]; sub(/=.*/, "", k); line[k] = f[3]; ref[k] = f[2]; off[k] = f[4]; since[k] = f[1]
+        m++; k = f[3]; sub(/=.*/, "", k); key[m] = k; line[m] = f[3]; ref[m] = f[2]; off[m] = f[4]; since[m] = f[1]
       }
     }
     { l[NR] = $0 }
     END {
       for (i = 1; i <= NR; i++) if (match(l[i], /^[A-Za-z_][A-Za-z0-9_]*=/)) on[substr(l[i], 1, RLENGTH - 1)] = 1
       for (i = 1; i <= NR; i++) {
-        for (k in line) {
-          if (l[i] == line[k]) {
+        for (j = 1; j <= m; j++) {
+          k = key[j]
+          if (l[i] == line[j]) {
             drop[i] = 1
-            if (i > 1 && index(l[i - 1], "# ") == 1 && index(l[i - 1], "(" ref[k] ")")) {
+            if (i > 1 && index(l[i - 1], "# ") == 1 && index(l[i - 1], "(" ref[j] ")")) {
               drop[i - 1] = 1
               if (i > 2 && l[i - 2] == "") drop[i - 2] = 1
             }
-          } else if (off[k] != "-" && !(k in on) && l[i] ~("^[[:space:]]*#[#[:space:]]*" k "=")) {
-            l[i] = "# Commented out before version " since[k] ". " line[k] " is on without this line now, so this keeps it off. Take this line out to turn it on.\n" k "=" off[k]
+          } else if (off[j] != "-" && !(k in on) && l[i] ~("^[[:space:]]*#[#[:space:]]*" k "=")) {
+            l[i] = "# Commented out before version " since[j] ". " line[j] " is on without this line now, so this keeps it off. Take this line out to turn it on.\n" k "=" off[j]
             on[k] = 1
           }
         }
