@@ -1738,8 +1738,8 @@ Without one, those checks are skipped. It covers:
   each line whose file has the switch and none whose file hasn't, status, `session.env`, the log
   and the session report, `FEX_ENTRYHEADERLOOKUP=0` in the rule with each of the sampler's lines,
   in `dev-switches.conf` or `compatdb.local` (a line of mine turning it on left out, none with the
-  engine's own FEX, and in a release too), version 6's four FEX lines and `DXMT_RENAME_TRIM` in and
-  out, `FEX_HOSTFEATURES` joined with a line of mine, `enableavx` after `disableavx`, and out under
+  engine's own FEX, and in a release too), version 6's `FEX_HOSTFEATURES` and `DXMT_RENAME_TRIM` in
+  and out, `FEX_HOSTFEATURES` joined with a line of mine, `enableavx` after `disableavx`, and out under
   a `compatdb.local` rule for the game but not one for another program, a file at version 5
   updated (with a `FEX_HOSTFEATURES` line of mine, and with AVX already decided there), version
   10's four DXMT lines in and out (in a dry run of Play's rule too, with no `DXMT_MTL4_SHOWN_WAIT`),
