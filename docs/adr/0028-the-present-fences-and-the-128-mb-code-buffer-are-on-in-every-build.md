@@ -34,9 +34,9 @@ So the game's rule has both, in release and development builds alike (#379).
   need my DXMT fork's tree in the engine to name `DXMT_MTL4_PRESENT_FENCES`, and the code buffer
   needs my FEX's `VERSION` to name `FEX_INITIALCODEBUFFERMB` on its `switches:` line. My fork's
   `gw2-on-mac`, which my builds stage, has the fences since jdrly/dxmt#358, and the FEX
-  `prebuilt.lock` pins has the code buffer. An older build of mine gets neither entry. That is
-  narrower than #379's "whenever the rule sets Metal 4 with `mtl3`" and "whenever the game runs my
-  FEX", and with today's builds it changes nothing.
+  `prebuilt.lock` pins has the code buffer. An older build of mine without a switch doesn't get its
+  entry. That is narrower than #379's "whenever the rule sets Metal 4 with `mtl3`" and "whenever the
+  game runs my FEX", and with today's builds it changes nothing.
 - Neither has a setting or a row in Settings. A `compatdb.local` line of mine comes last and wins,
   in a release too. `FEX_INITIALCODEBUFFERMB=16` or `DXMT_MTL4_PRESENT_FENCES=0` there turns one
   off.
@@ -47,8 +47,8 @@ So the game's rule has both, in release and development builds alike (#379).
   16 is FEX's own first size, and FEX logs an error for any number but 16, 32, 64 and 128. A line I
   deleted leaves nothing to keep, so the new default goes in, as it did for `DXMT_MTL4_PRESENT=mtl3`
   at version 4.
-- A line kept or written this way goes in as it is, like every line that left the table, whatever
-  FEX or DXMT is in place. Neither the engine's FEX nor a tree without the switch reads it.
+- A line kept or written this way goes in as it is, as a line of mine that isn't in the table does,
+  whatever FEX or DXMT is in place. Neither the engine's FEX nor a tree without the switch reads it.
 
 ## Alternatives I rejected
 
