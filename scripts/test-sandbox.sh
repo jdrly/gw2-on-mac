@@ -387,6 +387,7 @@ fixture_install() {
   g set uiscale_sans off >/dev/null          # The larger interface (addon)
   g set metal 3 >/dev/null                   # The game's compatdb rules
   g set debug off >/dev/null                 # The game's compatdb rules
+  ! mine || g set fastlocks off >/dev/null   # The game's compatdb rules
   # (Collect Logs: Steam's config/ is where the session checks write loginusers.vdf)
   mkdir -p "$STEAM/config" "$STEAM/logs" "$BOTTLE/drive_c/users/$BUSER/AppData/Roaming/Guild Wars 2"
 }
@@ -824,10 +825,10 @@ check "stage=finished" [ "$(st stage)" = finished ]
 check "DXMT's cache folder" [ -d "$DXMT_CACHE" ]
 
 section "Settings"
-check "defaults: warm on, fastlocks off, ncpu 8, uiscale off, cinematic dialogue off" \
-  [ "$(sett warm fastlocks ncpu uiscale uiscale_cinema)" = on/off/8/off/off ]
-check "  settings.conf of a fresh install: settings_version=2, fastlocks off, dxmt fork, wine and macdrv mine, fex engine" \
-  eval 'grep -qx settings_version=2 "$AD/settings.conf" && grep -qx fastlocks=off "$AD/settings.conf" && grep -qx dxmt=fork "$AD/settings.conf" && grep -qx wine=mine "$AD/settings.conf" && grep -qx macdrv=mine "$AD/settings.conf" && grep -qx fex=engine "$AD/settings.conf"'
+check "defaults: warm on, fastlocks on, ncpu 8, uiscale off, cinematic dialogue off" \
+  [ "$(sett warm fastlocks ncpu uiscale uiscale_cinema)" = on/on/8/off/off ]
+check "  settings.conf of a fresh install: settings_version=3, fastlocks on, dxmt fork, wine and macdrv mine, fex engine" \
+  eval 'grep -qx settings_version=3 "$AD/settings.conf" && grep -qx fastlocks=on "$AD/settings.conf" && grep -qx dxmt=fork "$AD/settings.conf" && grep -qx wine=mine "$AD/settings.conf" && grep -qx macdrv=mine "$AD/settings.conf" && grep -qx fex=engine "$AD/settings.conf"'
 
 check "default: Steam in the background on" [ "$(sett steambg)" = on ]
 check "default: Quit Steam when the game quits on" [ "$(sett quitsteam)" = on ]
@@ -844,8 +845,8 @@ fexb || OFF="${OFF}fex "
 check "  off: ${OFF:-none}" \
   [ "$(g settings | sed -n 's/^\([a-z_]*\)_state=off:.*/\1/p' | tr '\n' ' ')" = "$OFF" ]
 if mine; then
-  check "  wine=mine, jobwakes and eventpool on and fastlocks off by default, all ok" \
-    [ "$(sett wine wine_state jobwakes jobwakes_state eventpool eventpool_state fastlocks fastlocks_state)" = mine/ok/on/ok/on/ok/off/ok ]
+  check "  wine=mine, jobwakes, eventpool and fastlocks on by default, all ok" \
+    [ "$(sett wine wine_state jobwakes jobwakes_state eventpool eventpool_state fastlocks fastlocks_state)" = mine/ok/on/ok/on/ok/on/ok ]
 else
   check "  with their reasons; set wine engine and set jobwakes, eventpool and fastlocks refused" \
     eval 'SET_OUT=$(g settings); [ "$(kv "$SET_OUT" wine_state)" = "off:This build of the app has no Wine build of mine." ] && [ "$(kv "$SET_OUT" jobwakes_state)" = "off:Needs my Wine build, which this build of the app doesn'"'"'t have." ] && [ "$(kv "$SET_OUT" eventpool_state)" = "$(kv "$SET_OUT" jobwakes_state)" ] && [ "$(kv "$SET_OUT" fastlocks_state)" = "$(kv "$SET_OUT" jobwakes_state)" ] && ! "$G" set wine engine >/dev/null 2>&1 && ! "$G" set jobwakes off >/dev/null 2>&1 && ! "$G" set eventpool off >/dev/null 2>&1 && ! "$G" set fastlocks on >/dev/null 2>&1'
@@ -862,21 +863,27 @@ else
   check "  with their reasons; set macdrv engine, set launcherframes on and set mousespeed 1.5 refused" \
     eval 'SET_OUT=$(g settings); [ "$(kv "$SET_OUT" macdrv_state)" = "off:This build of the app has no Mac driver of mine." ] && [ "$(kv "$SET_OUT" launcherframes_state)" = "off:Needs my Mac driver, which this build of the app doesn'"'"'t have." ] && [ "$(kv "$SET_OUT" mousespeed_state)" = "$(kv "$SET_OUT" launcherframes_state)" ] && ! "$G" set macdrv engine >/dev/null 2>&1 && ! "$G" set launcherframes on >/dev/null 2>&1 && ! "$G" set mousespeed 1.5 >/dev/null 2>&1'
 fi
-# settings.conf's version (SETTINGS_RESETS): a file from before version 1 holds the fastlocks=on
-# and coolworkers=3 the arm64 line wrote while both rows were greyed; fastlocks reads off, and
-# coolworkers, no longer a key, is read by nothing. gamemode=on, which every file had until the key
-# left in #269, the same
+# settings.conf's version (SETTINGS_RESETS): a file from before version 3, as 0.2.0 and 0.2.1
+# wrote it, holds fastlocks=off; it reads on, the default since version 3, and the game's rule has
+# the spin (with my ntdll.so in place). The next write keeps on
 cp "$AD/settings.conf" "$SANDBOX/settings.fresh"
-sed -i '' -e '/^settings_version=/d' -e 's/^fastlocks=.*/fastlocks=on/' "$AD/settings.conf"
-printf 'coolworkers=3\ngamemode=on\n' >>"$AD/settings.conf"
+sed -i '' -e 's/^settings_version=.*/settings_version=2/' -e 's/^fastlocks=.*/fastlocks=off/' "$AD/settings.conf"
 out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
-check "a settings.conf without settings_version, fastlocks=on, coolworkers=3 and gamemode=on: fastlocks reads off" \
-  eval 'SET_OUT=$(g settings); [ "$(kv "$SET_OUT" fastlocks)" = off ] && ! echo "$SET_OUT" | grep -q -e coolworkers -e "^gamemode" && ! g rules | grep -q WINE_HEAT_SPIN && ! echo "$out" | grep -q WINE_HEAT_SPIN'
+check "a settings.conf at settings_version 2 (0.2.1's) with fastlocks=off: fastlocks reads on, its spin in the game's rule" \
+  eval 'SET_OUT=$(g settings); [ "$(kv "$SET_OUT" fastlocks)" = on ] && { ! mine || { g rules | head -1 | grep -q ";env=WINE_HEAT_SPIN=lock=20:game,event=30:game" && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;.*;env=WINE_HEAT_SPIN=lock=20:game,event=30:game"; }; }'
 g set hud on >/dev/null; g set hud off >/dev/null
-check "  the next write keeps that, writes settings_version=2 and leaves coolworkers and gamemode out" \
-  eval 'grep -qx settings_version=2 "$AD/settings.conf" && grep -qx fastlocks=off "$AD/settings.conf" && ! grep -q -e coolworkers -e gamemode "$AD/settings.conf"'
-sed -i '' -e 's/^settings_version=.*/settings_version=0/' -e 's/^fastlocks=.*/fastlocks=on/' "$AD/settings.conf"
-check "  settings_version=0 and fastlocks=on: reads off" [ "$(sett fastlocks)" = off ]
+check "  the next write keeps that and writes settings_version=3" \
+  eval 'grep -qx settings_version=3 "$AD/settings.conf" && grep -qx fastlocks=on "$AD/settings.conf"'
+# (a file from before version 1 holds the fastlocks=on and coolworkers=3 the arm64 line wrote while
+# both rows were greyed, or an off; coolworkers, no longer a key, is read by nothing. gamemode=on,
+# which every file had until the key left in #269, the same)
+sed -i '' -e '/^settings_version=/d' -e 's/^fastlocks=.*/fastlocks=off/' "$AD/settings.conf"
+printf 'coolworkers=3\ngamemode=on\n' >>"$AD/settings.conf"
+check "a settings.conf without settings_version, fastlocks=off, coolworkers=3 and gamemode=on: fastlocks reads on" \
+  eval 'SET_OUT=$(g settings); [ "$(kv "$SET_OUT" fastlocks)" = on ] && ! echo "$SET_OUT" | grep -q -e coolworkers -e "^gamemode"'
+g set hud on >/dev/null; g set hud off >/dev/null
+check "  the next write keeps that, writes settings_version=3 and leaves coolworkers and gamemode out" \
+  eval 'grep -qx settings_version=3 "$AD/settings.conf" && grep -qx fastlocks=on "$AD/settings.conf" && ! grep -q -e coolworkers -e gamemode "$AD/settings.conf"'
 # a file at version 1 with the engine's own DXMT, ntdll.so and winemac.so chosen, from the rows
 # version 2 took out of the window: fork, mine and mine, once
 cp "$SANDBOX/settings.fresh" "$AD/settings.conf"
@@ -885,18 +892,18 @@ echo coolworkers=off >>"$AD/settings.conf"
 check "settings_version=1 with dxmt, wine and macdrv engine and a coolworkers line: read fork, mine, mine" \
   [ "$(sett dxmt wine macdrv)/$(st graphics)" = fork/mine/mine/yes ]
 g set hud on >/dev/null; g set hud off >/dev/null
-check "  the next write keeps them, writes settings_version=2 and leaves coolworkers out" \
-  eval 'grep -qx settings_version=2 "$AD/settings.conf" && grep -qx dxmt=fork "$AD/settings.conf" && grep -qx wine=mine "$AD/settings.conf" && grep -qx macdrv=mine "$AD/settings.conf" && ! grep -q coolworkers "$AD/settings.conf"'
+check "  the next write keeps them, writes settings_version=3 and leaves coolworkers out" \
+  eval 'grep -qx settings_version=3 "$AD/settings.conf" && grep -qx dxmt=fork "$AD/settings.conf" && grep -qx wine=mine "$AD/settings.conf" && grep -qx macdrv=mine "$AD/settings.conf" && ! grep -q coolworkers "$AD/settings.conf"'
 sed -i '' 's/^dxmt=.*/dxmt=engine/' "$AD/settings.conf"
 g set hud on >/dev/null; g set hud off >/dev/null
-check "  only once: dxmt=engine in a file at version 2 stays through later writes" \
-  eval '[ "$(sett dxmt)" = engine ] && grep -qx dxmt=engine "$AD/settings.conf" && grep -qx settings_version=2 "$AD/settings.conf"'
+check "  only once: dxmt=engine in a file at version 3 stays through later writes" \
+  eval '[ "$(sett dxmt)" = engine ] && grep -qx dxmt=engine "$AD/settings.conf" && grep -qx settings_version=3 "$AD/settings.conf"'
 cp "$SANDBOX/settings.fresh" "$AD/settings.conf"
 if mine; then
-  g set fastlocks on >/dev/null; g set hud on >/dev/null; g set hud off >/dev/null
-  check "  set fastlocks on in a file with the line: stays on through later writes" \
-    eval '[ "$(sett fastlocks)" = on ] && grep -qx fastlocks=on "$AD/settings.conf" && grep -qx settings_version=2 "$AD/settings.conf"'
-  g set fastlocks off >/dev/null
+  g set fastlocks off >/dev/null; g set hud on >/dev/null; g set hud off >/dev/null
+  check "  set fastlocks off in a file at version 3: stays off through later writes" \
+    eval '[ "$(sett fastlocks)" = off ] && grep -qx fastlocks=off "$AD/settings.conf" && grep -qx settings_version=3 "$AD/settings.conf"'
+  g set fastlocks on >/dev/null
 fi
 check "  rawmouse ok" [ "$(sett rawmouse_state)" = ok ]
 g set rawmouse off >/dev/null
@@ -919,7 +926,7 @@ g set metal 3 >/dev/null
 sed -i '' 's/^settings_version=.*/settings_version=1/' "$AD/settings.conf"
 check "  metal=3 in a file at settings_version 1 reads 3" [ "$(sett metal)" = 3 ]
 g set hud on >/dev/null; g set hud off >/dev/null
-check "  and stays 3 through later writes" eval '[ "$(sett metal)" = 3 ] && grep -qx metal=3 "$AD/settings.conf" && grep -qx settings_version=2 "$AD/settings.conf"'
+check "  and stays 3 through later writes" eval '[ "$(sett metal)" = 3 ] && grep -qx metal=3 "$AD/settings.conf" && grep -qx settings_version=3 "$AD/settings.conf"'
 out=$(g set coolworkers 5 2>&1) && rc=0 || rc=$?
 check "set coolworkers 5: refused as an unknown setting" eval '[ "$rc" = 2 ] && [ "$out" = "@error Unknown setting: coolworkers=5" ]'
 out=$(g set gamemode off 2>&1) && rc=0 || rc=$?
@@ -1447,7 +1454,7 @@ check "  without the sandbox's table (the app's, empty): no FEX_* entry" eval 'r
 if mine; then
   # dry_rule: the game's rule a dry run of Play prints, which has to be the rules' first line
   dry_rule() { GW2_ON_MAC_DRY_RUN=1 g play 2>&1 | sed -n 's/^\[dry-run\] rule \(exe=Gw2-64\.exe;.*\)/\1/p'; }
-  g set wine mine >/dev/null; g set jobwakes off >/dev/null; g set eventpool off >/dev/null
+  g set wine mine >/dev/null; g set jobwakes off >/dev/null; g set eventpool off >/dev/null; g set fastlocks off >/dev/null
   check "my ntdll.so, every switch off: no WINE_HEAT_* entry, not even WINE_HEAT_MSYNC_UNREG (#105)" rules_are off
   check "  a dry run of Play prints the same rule" eval '[ "$(dry_rule)" = "$(g rules | head -1)" ]'
   # (with my FEX in place too: the FEX my ntdll.so's sampler may read, from my FEX's VERSION, only
@@ -1614,7 +1621,7 @@ odd_rules_are() { GW2_ON_MAC_ROOT="$ODD" "$G" rules | sed "s|$SANDBOX/a%25b%3Bc%
 odd_only_conf() { [ "$(cd "$ODD" && find . | LC_ALL=C sort | tr '\n' '|')" = ".|./home|./home/Library|./home/Library/Application Support|./home/Library/Application Support/$APP_FOLDER|./home/Library/Application Support/$APP_FOLDER/settings.conf|" ]; }
 check "a home with %, ; and a tab: escaped as %XX, the é as it is" eval 'odd_rules_are escaped && odd_only_conf'
 if mine; then
-  printf 'jobwakes=on\neventpool=off\ndebug=on\nmetal=3\n' >"$ODD_CONF"
+  printf 'settings_version=3\njobwakes=on\neventpool=off\nfastlocks=off\ndebug=on\nmetal=3\n' >"$ODD_CONF"
   check "  with job wakes and Debug logging on: the logs folder escaped the same way" eval 'odd_rules_are escaped-heat && odd_only_conf'
 fi
 rm -rf "$ODD"
@@ -1629,7 +1636,8 @@ check "dry-run play: the bottle's user, the engine's variables, the app's files,
 check "  none of 0.1.x's Wine variables in the environment (my ntdll.so's switches are in the rules)" \
   eval '! echo "$out" | sed -n "s/^\[dry-run\]   //p" | grep -qE "WINE_HEAT_|ROSETTA_X87_PATH|WINEDLLPATH|WINE_COMPATDB=|MTL_HUD"'
 cp "$SANDBOX/settings.keep" "$AD/settings.conf"
-# (job wakes and the event pool on again, their defaults, for the sessions below)
+# (job wakes and the event pool on again, their defaults, for the sessions below; fast locks stays
+# off, as the checks of my ntdll.so's switches leave it)
 ! mine || { g set jobwakes on >/dev/null; g set eventpool on >/dev/null; }
 
 section "Play"
@@ -3857,7 +3865,7 @@ GW2_ON_MAC_RESHADE_DLL_SHA256="$(shasum -a 256 "$SANDBOX/pe/ReShade64.dll" | cut
 export GW2_ON_MAC_RESHADE_DLL_SHA256
 # every one of 0.1.4's keys off its default (reshade on, with the "both" layout), and the values a
 # move gives them here (SETTINGS_FROM_01: kept, this version's default, or dropped)
-OLD_SET="retina=off fpscap=40 metalfx=on hud=on warm=off coolworkers=3 fastlocks=on ncpu=2 uiscale=on uiscale_size=2.0 uiscale_sans=off uiscale_cinema=off gamemode=off launchopts=-maploadinfo rawmouse=off mousespeed=1.5 updates=off debug=on steambg=off quitsteam=off reshade=on"
+OLD_SET="retina=off fpscap=40 metalfx=on hud=on warm=off coolworkers=3 fastlocks=off ncpu=2 uiscale=on uiscale_size=2.0 uiscale_sans=off uiscale_cinema=off gamemode=off launchopts=-maploadinfo rawmouse=off mousespeed=1.5 updates=off debug=on steambg=off quitsteam=off reshade=on"
 FROM01=$(sed -n '/^SETTINGS_FROM_01="$/,/^"$/p' "$APP/Contents/Resources/gw2om.sh" | awk 'NF >= 2 { print $1, $2 }')
 old01() { # <steam|arenanet> <arcdps|both> [<settings.conf lines>]
   local g k
@@ -4221,7 +4229,7 @@ check "  the settings, key by key as SETTINGS_FROM_01 says, at this version; Vsy
   eval 'settings_moved && grep -q "^settings_version=" "$AD/settings.conf" && ! grep -q -e "^coolworkers=" -e "^gamemode=" "$AD/settings.conf" && [ "$(sett vsync)" = on ]'
 check "  no DXMT or ReShade cache of 0.1's came along" eval '[ -z "$(find "$CACHE" -type f \( -name shaders.bin -o -name effect.bin \) 2>/dev/null)" ]'
 check "  the summary: what came along, what changed, Steam's login, 0.1 as it was" \
-  eval 'has <(mv_done) "^Your install moved from GW2 on Mac 0.1: Steam with Guild Wars 2 in its library (moved on this disk, no extra space), your game settings, your addons as they were (arcdps, ReShade with your presets, the larger interface) and your settings\. Changed from GW2 on Mac 0\.1: Cooler job workers isn.t a setting on this engine; Faster locks is off, this version.s default; Game Mode is always on here\. Steam may ask you to sign in once\. To play on GW2 on Mac 0\.1 again, choose Rollback to 0\.1\.4 in Settings › Troubleshooting\. Press Play\.$" || { mv_done; false; }'
+  eval 'has <(mv_done) "^Your install moved from GW2 on Mac 0.1: Steam with Guild Wars 2 in its library (moved on this disk, no extra space), your game settings, your addons as they were (arcdps, ReShade with your presets, the larger interface) and your settings\. Changed from GW2 on Mac 0\.1: Cooler job workers isn.t a setting on this engine; Faster locks is on, this version.s default; Game Mode is always on here\. Steam may ask you to sign in once\. To play on GW2 on Mac 0\.1 again, choose Rollback to 0\.1\.4 in Settings › Troubleshooting\. Press Play\.$" || { mv_done; false; }'
 check "  0.1's folders as they were, but for the Steam folder" o1_rest_same "$O1ST"
 c=$(play_cmd)
 check "  Play: Steam as crossover" eval 'every_wine_as crossover && [[ "$c" == *"steam.exe -applaunch 1284210"* ]]'
@@ -4278,9 +4286,9 @@ check "install move (Steam, arcdps alone, an older settings file with coolworker
 check "  arcdps as d3d11.dll, no ReShade, no ReShade folder made" \
   eval 'same "$SANDBOX/pe/arcdps.dll" "$GD/d3d11.dll" && [ "$(st arcdps_state reshade_state)" = on/off ] && [ ! -e "$AD/ReShade" ]'
 check "  the keys the file lacks read as 0.1's defaults (uiscale_cinema on), the rest as kept, ncpu=99 as this Mac's 8; coolworkers dropped" \
-  eval '[ "$(sett fpscap uiscale_cinema steambg fastlocks ncpu)" = 60/on/on/off/8 ] && ! grep -q "^coolworkers=" "$AD/settings.conf"'
-check "  the summary names Cooler job workers, Faster locks and the CPUs" \
-  has <(mv_done) "Changed from GW2 on Mac 0.1: Cooler job workers isn.t a setting on this engine; Faster locks is off, this version.s default; CPUs the game sees is 8: 99 isn.t a choice here\."
+  eval '[ "$(sett fpscap uiscale_cinema steambg fastlocks ncpu)" = 60/on/on/on/8 ] && ! grep -q "^coolworkers=" "$AD/settings.conf"'
+check "  the summary names Cooler job workers and the CPUs, not Faster locks, on as 0.1's default was" \
+  has <(mv_done) "Changed from GW2 on Mac 0.1: Cooler job workers isn.t a setting on this engine; CPUs the game sees is 8: 99 isn.t a choice here\."
 c=$(play_cmd)
 check "  the first Play shows Steam's window though Steam remembers a login" \
   eval '[[ "$c" == *"steam.exe -applaunch 1284210"* && "$c" != *-silent* ]] && [ "$(st origin)" = moved ]'
@@ -4572,6 +4580,13 @@ if mine; then
     eval '[ "$(dg settings | sed -n "s/^fastlocks_state=//p")" = "off:Set in dev-switches.conf (WINE_HEAT_SPIN). Take its line out there to use this row." ] && ! dg set fastlocks off >/dev/null 2>&1'
   sed -i '' 's/^WINE_HEAT_SPIN=/#WINE_HEAT_SPIN=/' "$DEVF"
   check "  that line commented out: the row works again" eval '[ "$(dg settings | sed -n "s/^fastlocks_state=//p")" = ok ]'
+  # (an off I set after the rows went on, in a file from before SETTINGS_RESETS' version 3: a
+  # choice, so no reset to the new default)
+  cp "$DAD/settings.conf" "$SANDBOX/dsettings.keep"
+  sed -i '' -e 's/^settings_version=.*/settings_version=2/' -e 's/^fastlocks=.*/fastlocks=off/' "$DAD/settings.conf"
+  check "  fastlocks=off at settings_version 2 with dev_version=2: stays off, the spin out of the rule" \
+    eval 'grep -qx dev_version=2 "$DAD/settings.conf" && [ "$(dg settings | sed -n "s/^fastlocks=//p")" = off ] && ! dg rules | grep -q WINE_HEAT_SPIN'
+  cp "$SANDBOX/dsettings.keep" "$DAD/settings.conf"
   sed -i '' 's/^#WINE_HEAT_SPIN=/WINE_HEAT_SPIN=/' "$DEVF"
 fi
 if fexb; then
@@ -5168,7 +5183,7 @@ cp "$SANDBOX/devf.now11" "$DEVF"
 # A release: no file, its defaults; a file there anyway changes nothing
 out=$(rg install steam 2>&1) && rc=0 || rc=$?
 check "a release's install: no dev-switches.conf, the rows at their defaults, no dev_version" \
-  eval '[ "$rc" = 0 ] && [ ! -e "$RDEVF" ] && grep -qx fastlocks=off "$RAD/settings.conf" && grep -qx launcherframes=off "$RAD/settings.conf" && grep -qx fex=engine "$RAD/settings.conf" && ! grep -q "^dev_version=" "$RAD/settings.conf"'
+  eval '[ "$rc" = 0 ] && [ ! -e "$RDEVF" ] && grep -qx fastlocks=on "$RAD/settings.conf" && grep -qx launcherframes=off "$RAD/settings.conf" && grep -qx fex=engine "$RAD/settings.conf" && ! grep -q "^dev_version=" "$RAD/settings.conf"'
 # (Metal 4's present in a release too: the release's tree given a DLL that names it, and back)
 RTREE="$RAD/engine/lib/wine/dxgi/dxmt/aarch64-windows"
 rm -rf "$SANDBOX/rtree.keep" && cp -Rp "$RTREE" "$SANDBOX/rtree.keep"
@@ -5222,13 +5237,15 @@ dgr repair >/dev/null 2>&1
 check "  raw mouse-look off afterwards stays off" eval 'grep -qx rawmouse=off "$RAD/settings.conf"'
 # A release build over it (a development build and the release share the folders, ADR 0018): the
 # rows read as their defaults while the dev_version= line is there, and its next write drops the
-# line and writes those defaults
+# line and writes those defaults (fastlocks=off in the file, as I may have set it there: on, the
+# release's default)
 rsett() { kv "$(rg settings)" "$@"; }
-check "a release build over it reads the rows at their defaults: fex engine, fast locks off, raw mouse-look on, Debug logging off" \
-  eval 'grep -qx dev_version=2 "$RAD/settings.conf" && grep -qx fex=mine "$RAD/settings.conf" && [ "$(rsett fex fastlocks rawmouse debug)" = engine/off/on/off ] && grep -qx dev_version=2 "$RAD/settings.conf"'
+sed -i '' 's/^fastlocks=.*/fastlocks=off/' "$RAD/settings.conf"
+check "a release build over it reads the rows at their defaults: fex engine, fast locks on, raw mouse-look on, Debug logging off" \
+  eval 'grep -qx dev_version=2 "$RAD/settings.conf" && grep -qx fex=mine "$RAD/settings.conf" && [ "$(rsett fex fastlocks rawmouse debug)" = engine/on/on/off ] && grep -qx dev_version=2 "$RAD/settings.conf"'
 rg set quitsteam off >/dev/null
 check "  its next write: no dev_version line, the rows at their defaults, my change in" \
-  eval '! grep -q "^dev_version=" "$RAD/settings.conf" && grep -qx fex=engine "$RAD/settings.conf" && grep -qx fastlocks=off "$RAD/settings.conf" && grep -qx rawmouse=on "$RAD/settings.conf" && grep -qx debug=off "$RAD/settings.conf" && grep -qx quitsteam=off "$RAD/settings.conf"'
+  eval '! grep -q "^dev_version=" "$RAD/settings.conf" && grep -qx fex=engine "$RAD/settings.conf" && grep -qx fastlocks=on "$RAD/settings.conf" && grep -qx rawmouse=on "$RAD/settings.conf" && grep -qx debug=off "$RAD/settings.conf" && grep -qx quitsteam=off "$RAD/settings.conf"'
 dgr repair >/dev/null 2>&1
 check "  a development build after it turns the rows on again" rows_on "$RAD/settings.conf"
 mkdir -p "$SANDBOX/relzip"

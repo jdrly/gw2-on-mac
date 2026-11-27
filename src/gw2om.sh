@@ -827,9 +827,12 @@ SETTING_KEYS="retina fpscap vsync metal metalfx hud warm fastlocks ncpu uiscale 
 # removed: write_settings leaves out a line whose key isn't in SETTING_KEYS.) Version 2: dxmt, wine
 # and macdrv back to fork, mine and mine, once, as their rows leave the Settings window, so no
 # bottle stays on the engine's files with no row that shows it. A later set from Terminal stays.
+# Version 3: fastlocks starts on (#372, docs/adr/0027). 0.2.0 and 0.2.1 wrote off into every file,
+# and an off chosen there reads on too, once; an off set after it stays.
 SETTINGS_RESETS="
 1 fastlocks
 2 dxmt wine macdrv
+3 fastlocks
 "
 SETTINGS_VERSION=$(printf '%s\n' "$SETTINGS_RESETS" | awk 'NF { v = $1 } END { print v + 0 }')
 # What a move from 0.1.x (install move, move_settings) does with each of 0.1.x's settings, one row
@@ -839,7 +842,7 @@ SETTINGS_VERSION=$(printf '%s\n' "$SETTINGS_RESETS" | awk 'NF { v = $1 } END { p
 # such setting here. 0.1.x's settings.conf has no version line and every key in it, chosen or not
 # (main's write_settings), so a kept value is what 0.1.x ran with. Keys of this version that 0.1.x
 # doesn't have start at their defaults (vsync, #269). fastlocks: 0.1.x's default was on, a spin in CrossOver's
-# msync; here it is another port, off by default (#45, #105). gamemode: always on here, the
+# msync; here it is another port, with its own default, on since #372. gamemode: always on here, the
 # engine's loader is a Game Mode app. coolworkers: none here (docs/adr/0006). mousespeed is a factor
 # on GameController's counts here, on the pointer's speed there: the same choice in Settings.
 SETTINGS_FROM_01="
@@ -912,8 +915,8 @@ CPU_MAX="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 8)"
 UI_SCALES="1.5 1.75 1.8 2.0"
 setting_default() {
   case "$1" in
-    retina|vsync|warm|uiscale_sans|rawmouse|updates|steambg|quitsteam|jobwakes|eventpool) echo on ;;
-    metalfx|hud|uiscale|uiscale_cinema|launcherframes|fastlocks|reshade) echo off ;;
+    retina|vsync|warm|uiscale_sans|rawmouse|updates|steambg|quitsteam|jobwakes|eventpool|fastlocks) echo on ;;
+    metalfx|hud|uiscale|uiscale_cinema|launcherframes|reshade) echo off ;;
     mousespeed) echo 1 ;;
     debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
     fpscap) echo off ;;
@@ -943,10 +946,13 @@ setting_valid() { # <key> <value>
     *) false ;;
   esac
 }
-# setting_reset <key>: settings.conf is older than a reset of <key>'s default (SETTINGS_RESETS)
+# setting_reset <key>: settings.conf is older than a reset of <key>'s default (SETTINGS_RESETS).
+# Never for a key of DEV_ROWS in a development build: there the file is older than the row, which
+# dev_row reads, or holds the row's value or a choice of mine
 setting_reset() {
   local v
   in_list "$1" "$SETTINGS_RESETS" || return 1
+  [ -z "$DEV_ON" ] || ! in_list "$1" "$DEV_ROW_KEYS" || return 1
   v=$(sed -n 's/^settings_version=//p' "$SETTINGS" | tail -1)
   case "$v" in ''|*[!0-9]*) v=0 ;; esac
   printf '%s\n' "$SETTINGS_RESETS" | awk -v k="$1" -v v="$v" 'NF && $1 > v { for (i = 2; i <= NF; i++) if ($i == k) f = 1 } END { exit !f }'
