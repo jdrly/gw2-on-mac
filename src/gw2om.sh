@@ -1358,7 +1358,8 @@ fex_entries() {
 #           names none)
 #   macdrv  my winemac.so, the same
 #   win32u  my win32u.so, which comes in the same build as my winemac.so, when that build has one,
-#           and on its switches: line: in place only with my winemac.so, as one set (unix_lib)
+#           and on its switches: line: in place only with my winemac.so, as one set (unix_lib).
+#           Since version 15 (#373) no row is a macdrv or win32u one
 #   fex     my FEX, its VERSION's switches: line (fex_in_version)
 #   fexany  FEX's own option, which the engine's FEX has too: always
 #   dxmt    my DXMT fork. Its build carries no record of its switches: the app looks for the
@@ -1397,22 +1398,12 @@ fex_entries() {
 # (local_hostfeatures), that rule replaces them: they stay out, saying what to write there instead.
 DEV_SWITCHES="
 1 wine #14,#45,#370 unplayed WINE_HEAT_SPIN=lock=20:game,event=30:game the Faster locks row's two spins, on the game thread only. The job workers stay out of the lock spin (docs/adr/0026). While this line is here, its value replaces the row's.
-1 macdrv #62 unplayed WINE_MACDRV_VIEW=changes a window's view frame goes to the main thread only when it changed
-1 macdrv #62 unplayed WINE_MACDRV_CLIP=changes ClipCursor doesn't call the main thread for the rectangle it applied last
-1 macdrv #62 unplayed WINE_MACDRV_CALL=quiet after a call to the main thread, the event pipe holds a byte only if an event waits
-1 macdrv #62 unplayed WINE_MACDRV_DRAIN=fionread ProcessEvents asks the event pipe for its byte count instead of polling it
-1 win32u #61 unplayed WINE_WIN32U_SETCURSOR=shm SetCursor answers a repeated cursor from shared memory
-1 win32u #61 unplayed WINE_WIN32U_PEEK_YIELD=off an empty PeekMessage doesn't yield
 1 fex #112 unplayed FEX_INITIALCODEBUFFERMB=128 the first code buffer is 128 MB instead of 16
 1 fex #113 unplayed FEX_HARDWARETSOSYSCALLS=keep the hardware memory ordering stays on through Wine's system calls
 1 fexany #47 unplayed FEX_DYNAMICL1CACHE=0 a fixed L1 lookup cache instead of the dynamic one (16 MB of address space a thread). Hung once at process start on the runner (jdrly/FEX run 43315659403, #132): if a development build doesn't start, take this line out first.
-1 dxmt jdrly/dxmt#185 unplayed DXMT_PRESENTER_FREE=1 a swap chain's presenter is freed with its last reference
 1 dxmt jdrly/dxmt#159 unplayed DXMT_WARM_JOBS=2 with Shader warming, two speculative jobs at once while Metal's cache is cold
 1 dxmt jdrly/dxmt#147 unplayed DXMT_SKIP_SAME_SRV=1 SetShaderResources skips a slot that already holds the incoming view
 1 dxmt jdrly/dxmt#73 unplayed DXMT_COMPILE_DEMAND=1 the compile service's declared policy (Shader warming turns it on too)
-6 fex #164 unplayed FEX_LEA32BITADDS=1 lea with a 32-bit destination computes its address with 32-bit adds, one instruction instead of two
-6 fex #164 unplayed FEX_SIGNEXTENDINGLOADS=1 movsx and movsxd from memory load and sign-extend in one instruction when the load needs no TSO emulation, which hardware TSO turns off
-6 fex #165 unplayed FEX_ENTRYCOMPILELOCK=1 threads that miss on the same entry at once compile it once, and FEX's pool allocators read the CPU's counter for their clock instead of QueryPerformanceCounter
 6 fex #118 unplayed FEX_HOSTFEATURES=disableavx the game sees no AVX, AVX2, BMI, FMA or F16C and takes its SSE paths. Another FEX_HOSTFEATURES line here joins this one. A compatdb.local rule for Gw2-64.exe that sets FEX_HOSTFEATURES replaces them, and status says what to write there instead. If the game crashes at start or in play, take this line out first.
 6 dxmt jdrly/dxmt#265 unplayed DXMT_RENAME_TRIM=600 every 2 s, the rename queues give back the allocations the GPU finished with more than 600 sequence ids (about 10 s) ago
 10 dxmt jdrly/dxmt#324 unplayed DXMT_PRESENT_SKIP_NIL=1 a present whose layer gave no drawable (nextDrawable timed out, or the drawable size is zero) is skipped: no pass, no wait and no present call, instead of the nil going to Metal
@@ -1441,6 +1432,9 @@ DEV_SWITCHES="
 # Version 14: WINE_HEAT_SPIN's line goes back to the row's two spins (#370, docs/adr/0026), the same
 # way. A variable can have more than one row here, one for each value it left, so a file at version
 # 12 loses version 12's line too.
+# Version 15: the topics my forks drop on 2026-11-27 (#373): my Wine fork's macdrv-calls and win32u
+# (jdrly/wine#60, with my win32u.so), my FEX's entry-compile-lock and codegen-cuts, and my DXMT
+# fork's DXMT_PRESENTER_FREE. Each leaves my fork, so a line I commented out stays as it is.
 DEV_GONE="
 4 jdrly/dxmt#227 DXMT_MTL4_PRESENT=mtl3 mtl4
 8 jdrly/dxmt#157 DXMT_PRESENT_QUEUE=pace -
@@ -1454,6 +1448,16 @@ DEV_GONE="
 11 #162 FEX_ENTRYHEADERLOOKUP=1 0
 13 #14,#45 WINE_HEAT_SPIN=lock=20:game,event=30:game,sem=5:game -
 14 #14,#45,#368 WINE_HEAT_SPIN=lock=20:game+halfworkers,event=30:game -
+15 #62 WINE_MACDRV_VIEW=changes -
+15 #62 WINE_MACDRV_CLIP=changes -
+15 #62 WINE_MACDRV_CALL=quiet -
+15 #62 WINE_MACDRV_DRAIN=fionread -
+15 #61 WINE_WIN32U_SETCURSOR=shm -
+15 #61 WINE_WIN32U_PEEK_YIELD=off -
+15 jdrly/dxmt#185 DXMT_PRESENTER_FREE=1 -
+15 #165 FEX_ENTRYCOMPILELOCK=1 -
+15 #164 FEX_LEA32BITADDS=1 -
+15 #164 FEX_SIGNEXTENDINGLOADS=1 -
 "
 DEV_SWITCHES_VERSION=$(printf '%s\n' "$DEV_SWITCHES" "$DEV_GONE" | awk 'NF && $1 > v { v = $1 } END { print v + 0 }')
 # dev_piece_label <piece>: what the file and the log call it

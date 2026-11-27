@@ -834,8 +834,8 @@ on. While Steam still runs, Play says to quit it. When one of the engine's own f
 `win32u_bundled` (`yes` when this app's build has one) and `win32u_file` (the engine's
 `win32u.so` now: `mine`, `engine`, `other` or `none`). A driver build without `win32u.so`
 installs `winemac.so` alone and puts the engine's own `win32u.so` back if an earlier build of
-mine left its own there. Its switches are `WINE_WIN32U_*` entries, gated by the same `switches:`
-line of the driver's `VERSION`.
+mine left its own there. My Wine fork stops building `win32u.so` with jdrly/wine#60, and its two
+`WINE_WIN32U_*` switches left the development list at version 15 (#373).
 
 ### My FEX
 
@@ -1107,11 +1107,21 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   12's went at version 13, and a file still at version 12 loses version 12's line the same way:
   each old value has its own row in the list of lines taken out. My Wine fork keeps the `halfworkers` scope, which
   does nothing while no line names it.
+  Version 15 takes out the lines of the topics my forks drop on 2026-11-27 (#373): my Mac driver's
+  `WINE_MACDRV_VIEW`, `WINE_MACDRV_CLIP`, `WINE_MACDRV_CALL` and `WINE_MACDRV_DRAIN`
+  (`macdrv-calls`), my `win32u.so`'s `WINE_WIN32U_SETCURSOR` and `WINE_WIN32U_PEEK_YIELD`
+  (`win32u`, jdrly/wine#60), my FEX's `FEX_ENTRYCOMPILELOCK` (`entry-compile-lock`),
+  `FEX_LEA32BITADDS` and `FEX_SIGNEXTENDINGLOADS` (`codegen-cuts`), and my DXMT fork's
+  `DXMT_PRESENTER_FREE`. GW2 gave them almost nothing to do: no cursor request in 20.5 s of
+  profile, 0.6 ms a second of the game thread for the Mac driver's calls, no effect found for the
+  FEX topics, and one swap chain for the presenter. A line as the table wrote it goes
+  with its comment. One I changed or commented out stays as it is, and does nothing once my fork
+  no longer has the switch. No line of the table is my Mac driver's or my `win32u.so`'s now.
   A row whose variable a line of the file sets, *Faster locks* with the file's
   `WINE_HEAT_SPIN`, is greyed while that line is there, since the file's entry wins. A line of the table goes in only while the file of mine that
   reads it is in place and has the switch: the `switches:` line of my `ntdll.so`'s,
   `winemac.so`'s or FEX's `VERSION` (a `VERSION` without that line names none). My `win32u.so`'s
-  lines need it in place with my `winemac.so`, as one set. My DXMT fork's build has no such
+  lines, none since version 15, needed it in place with my `winemac.so`, as one set. My DXMT fork's build has no such
   record: the app looks for the name in the DLLs of the fork's tree in the engine, where each
   switch it reads is a string. That tree can be an earlier build while Steam still runs with it.
   `FEX_DYNAMICL1CACHE` is FEX's own and goes in with either FEX. While the rule can start my
@@ -1650,8 +1660,7 @@ Without one, those checks are skipped. It covers:
   none: both in and both back byte for byte, a switch cut short after each of its renames finished
   by the next, Play refusing a mix while Steam runs and finishing it once Steam has quit, a mix it
   can't finish refused until Repair, a driver build without `win32u.so` putting the engine's own
-  back, and the `WINE_WIN32U_*` lines of `dev-switches.conf` in a dry run of Play only while my
-  `win32u.so` is in place
+  back
 - raw mouse-look's registry values, which go to `Gw2-64.exe` only and never set `PhysicalKeyboard`,
   and registry writes waiting while a session holds the lock
 - arcdps on and off from a stand-in deltaconnected.com, set by `GW2_ON_MAC_ARCDPS_URL` to a
@@ -1729,8 +1738,8 @@ Without one, those checks are skipped. It covers:
   each line whose file has the switch and none whose file hasn't, status, `session.env`, the log
   and the session report, `FEX_ENTRYHEADERLOOKUP=0` in the rule with each of the sampler's lines,
   in `dev-switches.conf` or `compatdb.local` (a line of mine turning it on left out, none with the
-  engine's own FEX, and in a release too), version 6's four FEX lines and `DXMT_RENAME_TRIM` in and
-  out, `FEX_HOSTFEATURES` joined with a line of mine, `enableavx` after `disableavx`, and out under
+  engine's own FEX, and in a release too), version 6's `FEX_HOSTFEATURES` and `DXMT_RENAME_TRIM` in
+  and out, `FEX_HOSTFEATURES` joined with a line of mine, `enableavx` after `disableavx`, and out under
   a `compatdb.local` rule for the game but not one for another program, a file at version 5
   updated (with a `FEX_HOSTFEATURES` line of mine, and with AVX already decided there), version
   10's four DXMT lines in and out (in a dry run of Play's rule too, with no `DXMT_MTL4_SHOWN_WAIT`),
@@ -1743,7 +1752,9 @@ Without one, those checks are skipped. It covers:
   and out (and still in at Metal 3) and `FEX_RETURNLOOKUPOUTOFLINE` in and out (out with the
   engine's own FEX), a file at version 11 updated (both added), a file at version 12 or 13
   updated (`WINE_HEAT_SPIN`'s line as that build wrote it replaced by version 14's at the end, a
-  changed, commented-out or deleted one kept so and no new line), neither in a release, a line
+  changed, commented-out or deleted one kept so and no new line), a file at version 14 updated
+  (the ten lines of the dropped topics gone, a changed, commented-out or deleted one kept so),
+  neither in a release, a line
   commented out or added, the engine's own DXMT, a second start
   that changes nothing, an update that adds a newer switch and keeps the rest, a row turned off
   that stays off, a release that writes no file and reads none, and a release's install updated
