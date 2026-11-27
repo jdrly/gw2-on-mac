@@ -870,7 +870,7 @@ cp "$AD/settings.conf" "$SANDBOX/settings.fresh"
 sed -i '' -e 's/^settings_version=.*/settings_version=2/' -e 's/^fastlocks=.*/fastlocks=off/' "$AD/settings.conf"
 out=$(GW2_ON_MAC_DRY_RUN=1 g play 2>&1)
 check "a settings.conf at settings_version 2 (0.2.1's) with fastlocks=off: fastlocks reads on, its spin in the game's rule" \
-  eval 'SET_OUT=$(g settings); [ "$(kv "$SET_OUT" fastlocks)" = on ] && { [ "$(kv "$SET_OUT" fastlocks_state)" != ok ] || { g rules | head -1 | grep -q ";env=WINE_HEAT_SPIN=lock=20:game,event=30:game" && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;.*;env=WINE_HEAT_SPIN=lock=20:game,event=30:game"; }; }'
+  eval 'SET_OUT=$(g settings); [ "$(kv "$SET_OUT" fastlocks)" = on ] && { ! mine || { g rules | head -1 | grep -q ";env=WINE_HEAT_SPIN=lock=20:game,event=30:game" && echo "$out" | grep -q "^\[dry-run\] rule exe=Gw2-64.exe;.*;env=WINE_HEAT_SPIN=lock=20:game,event=30:game"; }; }'
 g set hud on >/dev/null; g set hud off >/dev/null
 check "  the next write keeps that and writes settings_version=3" \
   eval 'grep -qx settings_version=3 "$AD/settings.conf" && grep -qx fastlocks=on "$AD/settings.conf"'
@@ -4580,6 +4580,13 @@ if mine; then
     eval '[ "$(dg settings | sed -n "s/^fastlocks_state=//p")" = "off:Set in dev-switches.conf (WINE_HEAT_SPIN). Take its line out there to use this row." ] && ! dg set fastlocks off >/dev/null 2>&1'
   sed -i '' 's/^WINE_HEAT_SPIN=/#WINE_HEAT_SPIN=/' "$DEVF"
   check "  that line commented out: the row works again" eval '[ "$(dg settings | sed -n "s/^fastlocks_state=//p")" = ok ]'
+  # (an off I set after the rows went on, in a file from before SETTINGS_RESETS' version 3: a
+  # choice, so no reset to the new default)
+  cp "$DAD/settings.conf" "$SANDBOX/dsettings.keep"
+  sed -i '' -e 's/^settings_version=.*/settings_version=2/' -e 's/^fastlocks=.*/fastlocks=off/' "$DAD/settings.conf"
+  check "  fastlocks=off at settings_version 2 with dev_version=2: stays off, the spin out of the rule" \
+    eval 'grep -qx dev_version=2 "$DAD/settings.conf" && [ "$(dg settings | sed -n "s/^fastlocks=//p")" = off ] && ! dg rules | grep -q WINE_HEAT_SPIN'
+  cp "$SANDBOX/dsettings.keep" "$DAD/settings.conf"
   sed -i '' 's/^#WINE_HEAT_SPIN=/WINE_HEAT_SPIN=/' "$DEVF"
 fi
 if fexb; then
@@ -5230,8 +5237,10 @@ dgr repair >/dev/null 2>&1
 check "  raw mouse-look off afterwards stays off" eval 'grep -qx rawmouse=off "$RAD/settings.conf"'
 # A release build over it (a development build and the release share the folders, ADR 0018): the
 # rows read as their defaults while the dev_version= line is there, and its next write drops the
-# line and writes those defaults
+# line and writes those defaults (fastlocks=off in the file, as I may have set it there: on, the
+# release's default)
 rsett() { kv "$(rg settings)" "$@"; }
+sed -i '' 's/^fastlocks=.*/fastlocks=off/' "$RAD/settings.conf"
 check "a release build over it reads the rows at their defaults: fex engine, fast locks on, raw mouse-look on, Debug logging off" \
   eval 'grep -qx dev_version=2 "$RAD/settings.conf" && grep -qx fex=mine "$RAD/settings.conf" && [ "$(rsett fex fastlocks rawmouse debug)" = engine/on/on/off ] && grep -qx dev_version=2 "$RAD/settings.conf"'
 rg set quitsteam off >/dev/null

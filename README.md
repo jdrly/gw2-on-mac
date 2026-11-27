@@ -352,7 +352,7 @@ chosen, and the main window's *Engine* and *Graphics* checks name the files in p
 | | CPUs the game sees | `ncpu` | 8 | kept | from 2 up to your Mac's logical CPUs, or all. The game starts one job worker per CPU, minus one |
 | | Job wakes | `jobwakes` | on | new | a job the game hands out wakes one sleeping worker, and none when no worker sleeps (`WINE_HEAT_WAKE=one,skip`). Greyed while the engine's own `ntdll.so` is chosen |
 | | Event pool | `eventpool` | on | new | closed events are kept and handed out again, without a request to the Wine server (`WINE_HEAT_EVPOOL=1`). Greyed while the engine's own `ntdll.so` is chosen |
-| | Faster locks | `fastlocks` | on | reset to on | short spins before the game thread sleeps on a busy lock, a job group or an event (`WINE_HEAT_SPIN=lock=20:game,event=30:game`). On since every session of mine from dev.13 on showed more hits than misses (#105, [ADR 0027](docs/adr/0027-faster-locks-is-on-by-default.md)). Greyed while the engine's own `ntdll.so` is chosen |
+| | Faster locks | `fastlocks` | on | reset to on | short spins before the game thread sleeps on a busy lock, a job group or an event (`WINE_HEAT_SPIN=lock=20:game,event=30:game`). On since every session of mine from dev.13 on showed more lock-spin hits than misses on the game thread (#105, [ADR 0027](docs/adr/0027-faster-locks-is-on-by-default.md)). Greyed while the engine's own `ntdll.so` is chosen |
 | Interface | Larger interface | `uiscale` | off | kept | my interface addon, see below |
 | | Interface Size "Larger" | `uiscale_size` | 1.75 | kept | the addon's scale: 1.5, 1.75, 1.8 or 2.0 |
 | | Small text in Cronos | `uiscale_sans` | on | kept | chat, the tracker and labels have no larger font, so the addon draws them in Cronos at the larger size |

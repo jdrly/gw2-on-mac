@@ -247,7 +247,7 @@ func installer(_ state: String) -> Installer {
     st = st.merging(["origin": "move", "old_install": "no", "move": "no", "move_record": "moved", "move_game": "here"]) { $1 }
     i.phase = .succeeded(.move, "Your install moved from GW2 on Mac 0.1: Steam with Guild Wars 2 in its library (moved on this disk, no extra space), "
                          + "your game settings, your addons as they were (arcdps, ReShade with your presets) and your settings. "
-                         + "Changed from GW2 on Mac 0.1: Faster locks is off, this version's default. Steam may ask you to sign in once. "
+                         + "Changed from GW2 on Mac 0.1: Faster locks is on, this version's default. Steam may ask you to sign in once. "
                          + "To play on GW2 on Mac 0.1 again, choose Rollback to 0.1.4 in Settings › Troubleshooting. Press Play.")
   case "rolled-back", "moving-in":
     // after Rollback: installed, the game back in 0.1's folder; then Move it in again running
@@ -312,7 +312,7 @@ func session(_ state: String) -> Installer.LaunchSession {
 func settings(_ extra: [String: String] = [:]) -> GameSettings {
   let s = GameSettings()
   s.preview(["installed": "yes", "running": "no", "retina": "on", "fpscap": "off", "vsync": "on", "metal": "4", "metalfx": "off", "hud": "off",
-             "warm": "on", "fastlocks": "off", "ncpu": "8", "uiscale": "off", "uiscale_addon": "off",
+             "warm": "on", "fastlocks": "on", "ncpu": "8", "uiscale": "off", "uiscale_addon": "off",
              "uiscale_size": "1.75", "uiscale_sans": "on", "uiscale_cinema": "off", "launchopts": "",
              "route": "steam", "updates": "off", "debug": "off", "steambg": "on", "quitsteam": "on", "cpus": "12",
              "steam_login": "no", "rawmouse": "on", "mousespeed": "1", "dxmt": "fork", "wine": "mine", "jobwakes": "on",

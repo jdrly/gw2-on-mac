@@ -946,10 +946,13 @@ setting_valid() { # <key> <value>
     *) false ;;
   esac
 }
-# setting_reset <key>: settings.conf is older than a reset of <key>'s default (SETTINGS_RESETS)
+# setting_reset <key>: settings.conf is older than a reset of <key>'s default (SETTINGS_RESETS).
+# Never for a key of DEV_ROWS in a development build: there the file is older than the row, which
+# dev_row reads, or holds the row's value or a choice of mine
 setting_reset() {
   local v
   in_list "$1" "$SETTINGS_RESETS" || return 1
+  [ -z "$DEV_ON" ] || ! in_list "$1" "$DEV_ROW_KEYS" || return 1
   v=$(sed -n 's/^settings_version=//p' "$SETTINGS" | tail -1)
   case "$v" in ''|*[!0-9]*) v=0 ;; esac
   printf '%s\n' "$SETTINGS_RESETS" | awk -v k="$1" -v v="$v" 'NF && $1 > v { for (i = 2; i <= NF; i++) if ($i == k) f = 1 } END { exit !f }'

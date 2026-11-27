@@ -16,7 +16,10 @@ clause against dev.23-long, which ran 48 minutes on my M5 Max with Debug logging
 | Lock spin hits and misses, the session | none | 3,543,852 and 77,457 |
 | Time spinning a second | 0 | 5.3 ms |
 
-The job workers stay out of it, as `:game` means: their lock and event spins are 0. dev.10 ran the
+The job workers stay out of it, as `:game` means. Their event spins are 0, and their lock spins have
+no hit and one miss on six of the seven in those 48 minutes. The frames are grade B: dev.23-long held
+a median of 60 in every band, but the evening it's compared with had the spin too, and no session
+since dev.10 ran without it on the same build. dev.10 ran the
 row's own value on Mach9 0.3.1, with 891,594 hits against 29,334 misses and a median of 60 fps.
 #45 asked for under 50 ms of spinning a second, and the sessions show 4 to 13. The one profile of
 this engine without the spin, 0.2.1's trace, has the lock sleep call at 25 ms of the game thread's
@@ -42,7 +45,8 @@ So *Faster locks* is on by default in a release (#372).
 - The row still needs my `ntdll.so`. With the engine's own it stays greyed and the spin stays out of
   the rule.
 - A dev build already had the row on (`DEV_ROWS`), and its `dev-switches.conf` line has the row's
-  value. Nothing changes there.
+  value. A dev build never resets a key of `DEV_ROWS`. Its file is either older than the row, which
+  turns it on, or holds the row's on or an off I set afterwards.
 - My Wine fork's `docs/gw2/SERIES.md` still says the `spins` row waits for #105's session and is
   "never a default", and its ADR 0005 still says *Fast locks* is off on 0.2. That's a follow-up in
   the fork. This decision changes no Wine code.
