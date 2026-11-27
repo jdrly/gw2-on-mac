@@ -1144,7 +1144,10 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   64 slots indexed by the key's hash instead of comparing its last 4 in turn, and a hit there
   doesn't take the device cache's lock. In busy Lion's Arch the 4 find 1,006 of 2,295 pipeline
   changes a frame, and 1,280 take the device cache's lock. It acts only while `DXMT_PSO_MRU` is on,
-  my DXMT fork's default.
+  my DXMT fork's default. It left the table at version 18.
+  Version 18 takes `DXMT_PSO_TABLE=1` out, because my DXMT fork drops it (jdrly/dxmt#370): the
+  table saved about 0.02 ms a frame. A line as the table wrote it goes with its comment. One I
+  changed or commented out stays as it is, and does nothing once my fork no longer has the switch.
   A row whose variable a line of the file sets, *Faster locks* with the file's
   `WINE_HEAT_SPIN`, is greyed while that line is there, since the file's entry wins. A line of the table goes in only while the file of mine that
   reads it is in place and has the switch: the `switches:` line of my `ntdll.so`'s,
@@ -1786,10 +1789,9 @@ Without one, those checks are skipped. It covers:
   changed, commented-out or deleted one kept so and no new line), a file at version 14 updated
   (the ten lines of the dropped topics gone, a changed, commented-out or deleted one kept so), a
   file at version 15 updated (the fences' and the code buffer's lines gone, a changed one kept and
-  winning, a commented-out one kept off with `=0` or `=16`), version 17's `DXMT_PSO_TABLE` in and
-  out, a file at version 16 updated (its line added once, a changed or commented-out one kept so
-  and no new line), both in a release's rule and version 12's FEX line and version 17's DXMT line
-  not, a line
+  winning, a commented-out one kept off with `=0` or `=16`), a file at version 17 updated
+  (`DXMT_PSO_TABLE`'s line gone, a changed, commented-out or deleted one kept so, and none in the
+  rule with a tree that names it), both in a release's rule and version 12's FEX line not, a line
   commented out or added, the engine's own DXMT, a second start
   that changes nothing, an update that adds a newer switch and keeps the rest, a row turned off
   that stays off, a release that writes no file and reads none, and a release's install updated

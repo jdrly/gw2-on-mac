@@ -1425,7 +1425,6 @@ DEV_SWITCHES="
 10 dxmt jdrly/dxmt#314 unplayed DXMT_REFRESH_REQUERY=1 the swap chain reads the monitor's refresh rate again after exclusive fullscreen and for a fullscreen mode of 0 Hz, instead of assuming 60 Hz
 10 dxmt jdrly/dxmt#314 unplayed DXMT_STEADY_SLEEP=1 the frame limiter and the background throttle keep their deadlines on QueryPerformanceCounter and sleep for what is left, so a wall clock that steps back can't lengthen a sleep
 12 fex #343 unplayed FEX_RETURNLOOKUPOUTOFLINE=1 a guest return's L1 lookup goes after the unit's code, so a return site is 4 instructions instead of 12 and a return the call-return stack predicted no longer branches over the lookup
-17 dxmt jdrly/dxmt#366 unplayed DXMT_PSO_TABLE=1 only while DXMT_PSO_MRU is on, my fork's default: each context keeps its recent pipelines in 64 slots indexed by the key's hash instead of comparing its last 4 in turn, and a hit there doesn't take the device cache's lock
 "
 # Rows taken out of the table, "<version> <issue> <NAME=value> <off value>". dev_update brings a file
 # older than <version> up to it (dev_gone): the line as the table wrote it goes, with the comment and
@@ -1452,6 +1451,9 @@ DEV_SWITCHES="
 # Version 16: DXMT_MTL4_PRESENT_FENCES=1 and FEX_INITIALCODEBUFFERMB=128, which the game's rule has in
 # every build now (#379, docs/adr/0028). =0 turns the fences off, and 16 is FEX's own first code
 # buffer (another number logs an error and means 16).
+# Version 18: DXMT_PSO_TABLE=1, which version 17 added and my DXMT fork drops (jdrly/dxmt#370): its
+# table saved about 0.02 ms a frame (jdrly/dxmt#366). It leaves my fork, so a line I commented out
+# stays as it is.
 DEV_GONE="
 4 jdrly/dxmt#227 DXMT_MTL4_PRESENT=mtl3 mtl4
 8 jdrly/dxmt#157 DXMT_PRESENT_QUEUE=pace -
@@ -1477,6 +1479,7 @@ DEV_GONE="
 15 #164 FEX_SIGNEXTENDINGLOADS=1 -
 16 jdrly/dxmt#358 DXMT_MTL4_PRESENT_FENCES=1 0
 16 #112 FEX_INITIALCODEBUFFERMB=128 16
+18 jdrly/dxmt#366 DXMT_PSO_TABLE=1 -
 "
 DEV_SWITCHES_VERSION=$(printf '%s\n' "$DEV_SWITCHES" "$DEV_GONE" | awk 'NF && $1 > v { v = $1 } END { print v + 0 }')
 # dev_piece_label <piece>: what the file and the log call it
