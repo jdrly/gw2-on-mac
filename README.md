@@ -1097,8 +1097,14 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   halves, and the `sem` spin goes. The old line as the table wrote it goes with its comment, and
   the new one comes at the end under its own. One I changed or commented out stays as it is, one I
   deleted stays deleted, and no new line comes for them. The row keeps its version 1, so a file
-  without the line gets the new value only when the update takes the old line out. The value needs my `ntdll.so` from jdrly/wine#59 on: an older one
-  doesn't know the scope and leaves the lock spin off.
+  without the line gets the new value only when the update takes the old line out.
+  Version 14 takes the job workers back out (#370, ADR 0026): the line is
+  `lock=20:game,event=30:game` again, the *Faster locks* row's own spins on the game thread. With
+  every worker spinning, the workers' CPU a job was the same as without the spin, and the game
+  thread slept 2.5 times as long on the locks they share. Version 13's line goes as version 13's
+  went, and a file still at version 12 loses version 12's line the same way: each old value has
+  its own row in the list of lines taken out. My Wine fork keeps the `halfworkers` scope, which
+  does nothing while no line names it.
   A row whose variable a line of the file sets, *Faster locks* with the file's
   `WINE_HEAT_SPIN`, is greyed while that line is there, since the file's entry wins. A line of the table goes in only while the file of mine that
   reads it is in place and has the switch: the `switches:` line of my `ntdll.so`'s,
@@ -1733,9 +1739,9 @@ Without one, those checks are skipped. It covers:
   commented-out one kept off with `=next`), a file at version 10 updated (version 11's two FEX
   lines gone, a commented-out one kept off with `=0`), version 12's `DXMT_MTL4_PRESENT_FENCES` in
   and out (and still in at Metal 3) and `FEX_RETURNLOOKUPOUTOFLINE` in and out (out with the
-  engine's own FEX), a file at version 11 updated (both added), a file at version 12 updated
-  (`WINE_HEAT_SPIN`'s old line replaced by the new one at the end, a changed, commented-out or
-  deleted one kept so and no new line), neither in a release, a line
+  engine's own FEX), a file at version 11 updated (both added), a file at version 12 or 13
+  updated (`WINE_HEAT_SPIN`'s line as that build wrote it replaced by version 14's at the end, a
+  changed, commented-out or deleted one kept so and no new line), neither in a release, a line
   commented out or added, the engine's own DXMT, a second start
   that changes nothing, an update that adds a newer switch and keeps the rest, a row turned off
   that stays off, a release that writes no file and reads none, and a release's install updated
