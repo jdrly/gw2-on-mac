@@ -1789,9 +1789,10 @@ Without one, those checks are skipped. It covers:
   changed, commented-out or deleted one kept so and no new line), a file at version 14 updated
   (the ten lines of the dropped topics gone, a changed, commented-out or deleted one kept so), a
   file at version 15 updated (the fences' and the code buffer's lines gone, a changed one kept and
-  winning, a commented-out one kept off with `=0` or `=16`), a file at version 17 updated
-  (`DXMT_PSO_TABLE`'s line gone, a changed, commented-out or deleted one kept so, and none in the
-  rule with a tree that names it), both in a release's rule and version 12's FEX line not, a line
+  winning, a commented-out one kept off with `=0` or `=16`), no `DXMT_PSO_TABLE` in a fresh
+  file or the rule with a tree that names it, a file at version 17 updated (`DXMT_PSO_TABLE`'s line
+  gone, a changed, commented-out or deleted one kept so), both in a release's rule and version 12's
+  FEX line not, a line
   commented out or added, the engine's own DXMT, a second start
   that changes nothing, an update that adds a newer switch and keeps the rest, a row turned off
   that stays off, a release that writes no file and reads none, and a release's install updated
