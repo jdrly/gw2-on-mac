@@ -1140,6 +1140,10 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   `DXMT_MTL4_PRESENT_FENCES=0`, stays and still wins. One I commented out becomes
   `DXMT_MTL4_PRESENT_FENCES=0` or `FEX_INITIALCODEBUFFERMB=16` (FEX's own size) under a comment, so
   it stays off. One I deleted leaves nothing to keep, so the rule's entry goes in.
+  Version 17 adds `DXMT_PSO_TABLE=1` (jdrly/dxmt#366): each context keeps 64 recent pipelines in
+  a table by the key's hash instead of comparing its last 4 in turn. In busy Lion's Arch the 4
+  find 1,006 of 2,295 pipeline changes a frame, and 1,280 take the device cache's lock. It acts
+  only while `DXMT_PSO_MRU` is on, my DXMT fork's default.
   A row whose variable a line of the file sets, *Faster locks* with the file's
   `WINE_HEAT_SPIN`, is greyed while that line is there, since the file's entry wins. A line of the table goes in only while the file of mine that
   reads it is in place and has the switch: the `switches:` line of my `ntdll.so`'s,
@@ -1781,8 +1785,10 @@ Without one, those checks are skipped. It covers:
   changed, commented-out or deleted one kept so and no new line), a file at version 14 updated
   (the ten lines of the dropped topics gone, a changed, commented-out or deleted one kept so), a
   file at version 15 updated (the fences' and the code buffer's lines gone, a changed one kept and
-  winning, a commented-out one kept off with `=0` or `=16`), both in a release's rule and version
-  12's FEX line not, a line
+  winning, a commented-out one kept off with `=0` or `=16`), version 17's `DXMT_PSO_TABLE` in and
+  out, a file at version 16 updated (its line added once, a changed or commented-out one kept so
+  and no new line), both in a release's rule and version 12's FEX line and version 17's DXMT line
+  not, a line
   commented out or added, the engine's own DXMT, a second start
   that changes nothing, an update that adds a newer switch and keeps the rest, a row turned off
   that stays off, a release that writes no file and reads none, and a release's install updated
