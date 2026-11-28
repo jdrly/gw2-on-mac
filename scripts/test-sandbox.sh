@@ -4798,11 +4798,11 @@ if fexb; then
   dev_switches_line fex FEX_INITIALCODEBUFFERMB
   # Version 19's four FEX lines (#391, #392, #395, #389): out while my FEX's record doesn't name
   # them, in once it does, out with the engine's own FEX though the record still names them
-  v19_fex() { # in|<why>: each of them in the rule and status and unset for CefHost.exe, or out of both, status saying <why>
+  v19_fex() { # in|<why>: each of them in the rule and status and unset for CefHost.exe, or at no value in either rule nor in status, status saying <why>
     local e
     for e in $V19ON; do
       if [ "$1" = in ]; then rule_has "$e" && in_word "$e" && ! out_status "${e%%=*}" && sed -n 2p "$SANDBOX/dev-rules.txt" | grep -qE ";env=${e%%=*}=(;|\$)" || return 1
-      else ! rule_has "$e" && ! in_status "${e%%=*}" && out_status "$e ($1)" || return 1; fi
+      else ! grep -q "env=${e%%=*}=" "$SANDBOX/dev-rules.txt" && ! in_status "${e%%=*}" && out_status "$e ($1)" || return 1; fi
     done
   }
   dev_files
