@@ -1425,6 +1425,10 @@ DEV_SWITCHES="
 10 dxmt jdrly/dxmt#314 unplayed DXMT_REFRESH_REQUERY=1 the swap chain reads the monitor's refresh rate again after exclusive fullscreen and for a fullscreen mode of 0 Hz, instead of assuming 60 Hz
 10 dxmt jdrly/dxmt#314 unplayed DXMT_STEADY_SLEEP=1 the frame limiter and the background throttle keep their deadlines on QueryPerformanceCounter and sleep for what is left, so a wall clock that steps back can't lengthen a sleep
 12 fex #343 unplayed FEX_RETURNLOOKUPOUTOFLINE=1 a guest return's L1 lookup goes after the unit's code, so a return site is 4 instructions instead of 12 and a return the call-return stack predicted no longer branches over the lookup
+19 fex #391 unplayed FEX_GUESTADDRESSLITERALS=1 a guest address above 4 GB, such as a return address or a [rip + ...] address, is one ldr of a literal after the unit's code instead of three moves (four where code caching pads them)
+19 fex #392 unplayed FEX_EXITFPCRCHECK=afp an exit from FEX's code into native code reads FPCR to clear AH and NEP only while AFP is in use. Without AFP nothing sets them, so the exit skips the read and the tests. FEX_EXITFPCRCHECK=always is FEX's default, the read at every exit.
+19 fex #395 unplayed FEX_FOLDBRANCHPASTMARKERS=1 a compare with zero and the jz or jnz after it fold into one cbz or cbnz across the guest-opcode marker and TEST's flag invalidation, when the flags are dead after the jump
+19 fex #389 unplayed FEX_SKIPRETURNSITESUSPENDCHECK=1 a block that a call earlier in the same unit returns to doesn't poll the suspend doorbell, since the callee's entry polled it. Every other entry point keeps its poll, and the checks on backward jumps stay as they are. An accepted risk (jdrly/FEX's ADR 0016): if the game hangs in SuspendThread, take this line out first.
 "
 # Rows taken out of the table, "<version> <issue> <NAME=value> <off value>". dev_update brings a file
 # older than <version> up to it (dev_gone): the line as the table wrote it goes, with the comment and

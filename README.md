@@ -1148,6 +1148,15 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   Version 18 takes `DXMT_PSO_TABLE=1` out, because my DXMT fork drops it (jdrly/dxmt#370): the
   table saved about 0.02 ms a frame. A line as the table wrote it goes with its comment. One I
   changed or commented out stays as it is, and does nothing once my fork no longer has the switch.
+  Version 19 adds four lines of my FEX from the hot-code study of 2026-11-27, each going in only while
+  my FEX is in place and its `VERSION` names it. `FEX_GUESTADDRESSLITERALS=1` (#391): a guest
+  address above 4 GB is one `ldr` of a literal after the unit's code instead of three moves.
+  `FEX_EXITFPCRCHECK=afp` (#392): an exit into native code reads FPCR only while AFP is in use;
+  `always`, FEX's default, reads it at every exit. `FEX_FOLDBRANCHPASTMARKERS=1` (#395): a compare
+  with zero folds into its `jz` or `jnz` across the guest-opcode marker.
+  `FEX_SKIPRETURNSITESUSPENDCHECK=1` (#389): a block that a call returns to doesn't poll the
+  suspend doorbell, since the callee's entry did. That one carries an accepted risk (jdrly/FEX's
+  ADR 0016): if the game hangs in `SuspendThread`, it's the first line to take out.
   A row whose variable a line of the file sets, *Faster locks* with the file's
   `WINE_HEAT_SPIN`, is greyed while that line is there, since the file's entry wins. A line of the table goes in only while the file of mine that
   reads it is in place and has the switch: the `switches:` line of my `ntdll.so`'s,
@@ -1791,8 +1800,10 @@ Without one, those checks are skipped. It covers:
   file at version 15 updated (the fences' and the code buffer's lines gone, a changed one kept and
   winning, a commented-out one kept off with `=0` or `=16`), no `DXMT_PSO_TABLE` in a fresh
   file or the rule with a tree that names it, a file at version 17 updated (`DXMT_PSO_TABLE`'s line
-  gone, a changed, commented-out or deleted one kept so), both in a release's rule and version 12's
-  FEX line not, a line
+  gone, a changed, commented-out or deleted one kept so), version 19's four FEX lines in and out
+  (out with the engine's own FEX), a file at version 18 updated (the four added, and with a
+  changed and a commented-out one of them, both kept so and the other two added), both in a
+  release's rule and the FEX lines of versions 12 and 19 not, a line
   commented out or added, the engine's own DXMT, a second start
   that changes nothing, an update that adds a newer switch and keeps the rest, a row turned off
   that stays off, a release that writes no file and reads none, and a release's install updated
