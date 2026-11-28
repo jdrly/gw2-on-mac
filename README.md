@@ -1157,6 +1157,14 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   `FEX_SKIPRETURNSITESUSPENDCHECK=1` (#389): a block that a call returns to doesn't poll the
   suspend doorbell, since the callee's entry did. That one carries an accepted risk (jdrly/FEX's
   ADR 0016): if the game hangs in `SuspendThread`, it's the first line to take out.
+  Version 20 adds `FEX_ABIFLAGS=both` (#390), going in only while my FEX is in place and its
+  `VERSION` names it: a call or a return in `Gw2-64.exe`'s own `.text` leaves the arithmetic flags
+  dead, as the Windows x64 ABI allows, so FEX drops the flag work only that exit would have read.
+  In the game's busy code that's 27,350 of 1,088,837 host instructions, three in every epilogue
+  of the form `add rsp, N; pop; ret`. `ret` or `call` does only one of the two. It carries an accepted risk (jdrly/FEX's ADR 0017): a
+  routine that hands a flag across a call or a return would branch wrong. The scan of the game
+  build of 2026-11-24 found none and has to run again on each new one, so after a game update it's
+  the first line to take out.
   A row whose variable a line of the file sets, *Faster locks* with the file's
   `WINE_HEAT_SPIN`, is greyed while that line is there, since the file's entry wins. A line of the table goes in only while the file of mine that
   reads it is in place and has the switch: the `switches:` line of my `ntdll.so`'s,
@@ -1802,8 +1810,10 @@ Without one, those checks are skipped. It covers:
   file or the rule with a tree that names it, a file at version 17 updated (`DXMT_PSO_TABLE`'s line
   gone, a changed, commented-out or deleted one kept so), version 19's four FEX lines in and out
   (out with the engine's own FEX), a file at version 18 updated (the four added, and with a
-  changed and a commented-out one of them, both kept so and the other two added), both in a
-  release's rule and the FEX lines of versions 12 and 19 not, a line
+  changed and a commented-out one of them, both kept so and the other two added), version 20's
+  `FEX_ABIFLAGS` in and out (out with the engine's own FEX), a file at version 19 updated (the
+  line added, and a changed or a commented-out one kept so), both in a release's rule and the FEX
+  lines of versions 12, 19 and 20 not, a line
   commented out or added, the engine's own DXMT, a second start
   that changes nothing, an update that adds a newer switch and keeps the rest, a row turned off
   that stays off, a release that writes no file and reads none, and a release's install updated

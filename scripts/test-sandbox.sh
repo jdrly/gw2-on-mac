@@ -4548,6 +4548,8 @@ GONE15="WINE_MACDRV_VIEW=changes WINE_MACDRV_CLIP=changes WINE_MACDRV_CALL=quiet
 GONE18="DXMT_PSO_TABLE=1"
 # Version 19's rows of DEV_SWITCHES, in the table's order: my FEX's four switches of 2026-11-28
 V19ON="FEX_GUESTADDRESSLITERALS=1 FEX_EXITFPCRCHECK=afp FEX_FOLDBRANCHPASTMARKERS=1 FEX_SKIPRETURNSITESUSPENDCHECK=1"
+# Version 20's row of DEV_SWITCHES: my FEX's FEX_ABIFLAGS (#390)
+V20ON="FEX_ABIFLAGS=both"
 # (since version 15 no row is my Mac driver's or my win32u.so's)
 table_pieces() { local p; [ "$DEVVER" -ge 1 ] || return 1; for p in wine fex fexany dxmt; do printf '%s\n' "$DEVTABLE" | grep -q "^$p " || return 1; done; ! printf '%s\n' "$DEVTABLE" | grep -q -e "^macdrv " -e "^win32u "; }
 check "the table has switches of each piece but my Mac driver and my win32u.so, which have none" table_pieces
@@ -4796,23 +4798,27 @@ if fexb; then
     eval '! rule_has "$RLO" && ! in_status FEX_RETURNLOOKUPOUTOFLINE && out_status "$RLO (my FEX isn'"'"'t in the engine)"'
   dg set fex mine >/dev/null 2>&1
   dev_switches_line fex FEX_INITIALCODEBUFFERMB
-  # Version 19's four FEX lines (#391, #392, #395, #389): out while my FEX's record doesn't name
-  # them, in once it does, out with the engine's own FEX though the record still names them
-  v19_fex() { # in|<why>: each of them in the rule and status and unset for CefHost.exe, or at no value in either rule nor in status, status saying <why>
+  # Version 19's four FEX lines (#391, #392, #395, #389) and version 20's (#390): out while my FEX's
+  # record doesn't name them, in once it does, out with the engine's own FEX though the record still
+  # names them
+  fex_lines() { # <entries> in|<why>: each of them in the rule and status and unset for CefHost.exe, or at no value in either rule nor in status, status saying <why>
     local e
-    for e in $V19ON; do
-      if [ "$1" = in ]; then rule_has "$e" && in_word "$e" && ! out_status "${e%%=*}" && sed -n 2p "$SANDBOX/dev-rules.txt" | grep -qE ";env=${e%%=*}=(;|\$)" || return 1
-      else ! grep -q "env=${e%%=*}=" "$SANDBOX/dev-rules.txt" && ! in_status "${e%%=*}" && out_status "$e ($1)" || return 1; fi
+    for e in $1; do
+      if [ "$2" = in ]; then rule_has "$e" && in_word "$e" && ! out_status "${e%%=*}" && sed -n 2p "$SANDBOX/dev-rules.txt" | grep -qE ";env=${e%%=*}=(;|\$)" || return 1
+      else ! grep -q "env=${e%%=*}=" "$SANDBOX/dev-rules.txt" && ! in_status "${e%%=*}" && out_status "$e ($2)" || return 1; fi
     done
   }
   dev_files
-  check "my FEX's record without version 19's four switches: their lines out, saying so" v19_fex "my FEX doesn't have it"
-  dev_switches_line fex FEX_INITIALCODEBUFFERMB FEX_GUESTADDRESSLITERALS FEX_EXITFPCRCHECK FEX_FOLDBRANCHPASTMARKERS FEX_SKIPRETURNSITESUSPENDCHECK
+  check "my FEX's record without version 19's four switches: their lines out, saying so" fex_lines "$V19ON" "my FEX doesn't have it"
+  check "  nor version 20's FEX_ABIFLAGS: its line out, saying so" fex_lines "$V20ON" "my FEX doesn't have it"
+  dev_switches_line fex FEX_INITIALCODEBUFFERMB FEX_GUESTADDRESSLITERALS FEX_EXITFPCRCHECK FEX_FOLDBRANCHPASTMARKERS FEX_SKIPRETURNSITESUSPENDCHECK FEX_ABIFLAGS
   dev_files
-  check "  one that names them: each in the game's rule and status, unset for CefHost.exe" v19_fex in
+  check "  one that names them: each in the game's rule and status, unset for CefHost.exe" fex_lines "$V19ON" in
+  check "  and FEX_ABIFLAGS the same" fex_lines "$V20ON" in
   dg set fex engine >/dev/null 2>&1
   dev_files
-  check "  the engine's own FEX: each out, saying so" v19_fex "my FEX isn't in the engine"
+  check "  the engine's own FEX: each out, saying so" fex_lines "$V19ON" "my FEX isn't in the engine"
+  check "  and FEX_ABIFLAGS out, saying so" fex_lines "$V20ON" "my FEX isn't in the engine"
   dg set fex mine >/dev/null 2>&1
   dev_switches_line fex FEX_INITIALCODEBUFFERMB
 else
@@ -4820,6 +4826,7 @@ else
   skipfex "FEX_HOSTFEATURES in and out of the rule, with my own lines and compatdb.local"
   skipfex "version 12's FEX_RETURNLOOKUPOUTOFLINE in and out of the rule"
   skipfex "version 19's four FEX lines in and out of the rule"
+  skipfex "version 20's FEX_ABIFLAGS in and out of the rule"
 fi
 sed -i '' 's/^FEX_DYNAMICL1CACHE=/#FEX_DYNAMICL1CACHE=/' "$DEVF"
 echo "MY_OWN_SWITCH=1" >>"$DEVF"
@@ -4981,7 +4988,7 @@ drop_rows "$DEVF" FEX_HOSTFEATURES DXMT_RENAME_TRIM | sed 's/^version=.*/version
 cp "$SANDBOX/devf.v5old" "$DEVF"
 GW2_ON_MAC_DRY_RUN=1 dg play >"$SANDBOX/v5play.txt" 2>&1
 check "a file at version 5: Play would add the two lines of version 6 (dry run)" \
-  eval '[ "$DEVVER" = 19 ] && [ "$(grep -c -e "^FEX_HOSTFEATURES=" -e "^DXMT_RENAME_TRIM=" "$DEVF")" = 0 ] && grep -qxF "dev-switches.conf: version $DEVVER, switched on: $V5ON; out of the list: $GONE8 $GONE9 $GONE10 $GONE11 $GONE13 $GONE14 $GONE15 $GONE16 $GONE18" "$SANDBOX/v5play.txt"'
+  eval '[ "$DEVVER" = 20 ] && [ "$(grep -c -e "^FEX_HOSTFEATURES=" -e "^DXMT_RENAME_TRIM=" "$DEVF")" = 0 ] && grep -qxF "dev-switches.conf: version $DEVVER, switched on: $V5ON; out of the list: $GONE8 $GONE9 $GONE10 $GONE11 $GONE13 $GONE14 $GONE15 $GONE16 $GONE18" "$SANDBOX/v5play.txt"'
 dg repair >/dev/null 2>&1
 n=$(wc -l <"$DEVF" | tr -d ' ')
 awk -v n="$n" 'NR > 1 && NR <= n - 6' "$DEVF" >"$SANDBOX/devf.v5new"
@@ -5063,6 +5070,31 @@ tail -6 "$DEVF" >"$SANDBOX/devf.added"
 check "  a version-18 file with FEX_EXITFPCRCHECK=always and #FEX_SKIPRETURNSITESUSPENDCHECK=1: the other two added, both lines of mine as they were" \
   eval 'grep -qxF "dev-switches.conf: version $DEVVER, switched on: FEX_GUESTADDRESSLITERALS=1 FEX_FOLDBRANCHPASTMARKERS=1" "$SANDBOX/v18play.txt" && [ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && same "$SANDBOX/devf.v18hand" "$SANDBOX/devf.v18new" && added_ok "$SANDBOX/devf.added" "my FEX|#391|FEX_GUESTADDRESSLITERALS=1" "my FEX|#395|FEX_FOLDBRANCHPASTMARKERS=1" && [ "$(grep -c -e FEX_EXITFPCRCHECK -e FEX_SKIPRETURNSITESUSPENDCHECK "$DEVF")" = 2 ]'
 cp "$SANDBOX/devf.full" "$DEVF"
+# A file at version 19, before version 20's row (#390): FEX_ABIFLAGS added at the end, on, under
+# its comment, nothing else changes, and nothing left the list. With a line of mine for it, changed
+# to ret or commented out: it stays as it is and nothing comes
+drop_rows "$SANDBOX/devf.full" FEX_ABIFLAGS | sed 's/^version=.*/version=19/' >"$SANDBOX/devf.v19old"
+cp "$SANDBOX/devf.v19old" "$DEVF"
+GW2_ON_MAC_DRY_RUN=1 dg play >"$SANDBOX/v19play.txt" 2>&1
+check "a file at version 19: Play would add version 20's FEX_ABIFLAGS, and say nothing left the list (dry run)" \
+  eval '[ "$(grep -c "^FEX_ABIFLAGS=" "$DEVF")" = 0 ] && grep -qxF "dev-switches.conf: version $DEVVER, switched on: $V20ON" "$SANDBOX/v19play.txt"'
+dg repair >/dev/null 2>&1
+n=$(wc -l <"$DEVF" | tr -d ' ')
+awk -v n="$n" 'NR > 1 && NR <= n - 3' "$DEVF" >"$SANDBOX/devf.v19new"
+sed 1d "$SANDBOX/devf.v19old" >"$SANDBOX/devf.v19rest"
+tail -3 "$DEVF" >"$SANDBOX/devf.added"
+check "  updated: the table's version, the line at the end under a comment naming my FEX, its issue and unplayed, the rest as it was" \
+  eval '[ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && same "$SANDBOX/devf.v19rest" "$SANDBOX/devf.v19new" && added_ok "$SANDBOX/devf.added" "my FEX|#390|FEX_ABIFLAGS=both"'
+for hand in FEX_ABIFLAGS=ret '#FEX_ABIFLAGS=both'; do
+  { cat "$SANDBOX/devf.v19old"; echo "$hand"; } >"$DEVF"
+  sed 1d "$DEVF" >"$SANDBOX/devf.v19hand"
+  GW2_ON_MAC_DRY_RUN=1 dg play >"$SANDBOX/v19play.txt" 2>&1
+  dg repair >/dev/null 2>&1
+  sed 1d "$DEVF" >"$SANDBOX/devf.v19new"
+  check "  a version-19 file with $hand: nothing added, the line as it was" \
+    eval 'grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing" "$SANDBOX/v19play.txt" && [ "$(head -1 "$DEVF")" = "version=$DEVVER" ] && same "$SANDBOX/devf.v19hand" "$SANDBOX/devf.v19new" && [ "$(grep -c FEX_ABIFLAGS "$DEVF")" = 1 ]'
+done
+cp "$SANDBOX/devf.full" "$DEVF"
 # A file at version 12 or 13, which has WINE_HEAT_SPIN's line as that build wrote it, under its
 # comment (here at the end, #368, #370): as written, the line and its comment go and version 14's
 # value comes at the end under its own comment. Version 12's line goes from a file at version 12
@@ -5115,7 +5147,7 @@ for old in 2 1; do
   sed 1d "$DEVF" >"$SANDBOX/devf.v$old"
   out=$(GW2_ON_MAC_DRY_RUN=1 dg play 2>&1)
   check "a file at version $old: Play would switch nothing on and say what left the list (dry run)" \
-    eval '[ "$DEVVER" = 19 ] && echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: DXMT_MTL4_PRESENT=mtl3 $GONE8 $GONE9 $GONE10 $GONE11 $GONE13 $GONE14 $GONE15 $GONE16 $GONE18"'
+    eval '[ "$DEVVER" = 20 ] && echo "$out" | grep -qxF "dev-switches.conf: version $DEVVER, switched on: nothing; out of the list: DXMT_MTL4_PRESENT=mtl3 $GONE8 $GONE9 $GONE10 $GONE11 $GONE13 $GONE14 $GONE15 $GONE16 $GONE18"'
   dg repair >/dev/null 2>&1
   sed 1d "$DEVF" >"$SANDBOX/devf.v${old}new"
   check "  updated: the table's version, the rest as it was" \
@@ -5399,17 +5431,17 @@ check "  dev-switches.conf there by hand: the rules, status and a dry run of Pla
   eval '[ "$(rg rules)" = "$rules_before" ] && [ -z "$(rg status | sed -n "s/^dev_switches=//p")" ] && ! GW2_ON_MAC_DRY_RUN=1 rg play 2>&1 | grep -q -e MY_OWN_SWITCH -e "dev-switches.conf"'
 rm -f "$RDEVF"
 # (a release's rule with a tree that names DXMT_MTL4_PRESENT_FENCES and my FEX with a record that
-# names FEX_INITIALCODEBUFFERMB, version 12's FEX_RETURNLOOKUPOUTOFLINE and version 19's four, no
+# names FEX_INITIALCODEBUFFERMB, version 12's FEX_RETURNLOOKUPOUTOFLINE, version 19's four and version 20's FEX_ABIFLAGS, no
 # dev-switches.conf: the present's fences and the first code buffer go in, as in every build
-# (docs/adr/0028), the five lines of the table don't; the same rule with the file there by hand; at Metal 3 no fences, with the engine's
+# (docs/adr/0028), the six lines of the table don't; the same rule with the file there by hand; at Metal 3 no fences, with the engine's
 # own FEX no code buffer; then all back. The FEX setting first: setting it puts the engine's files
 # in place, the DXMT tree too)
-if fexb; then rg set fex mine >/dev/null 2>&1; dev_switches_line fex FEX_INITIALCODEBUFFERMB FEX_RETURNLOOKUPOUTOFLINE FEX_GUESTADDRESSLITERALS FEX_EXITFPCRCHECK FEX_FOLDBRANCHPASTMARKERS FEX_SKIPRETURNSITESUSPENDCHECK; fi
+if fexb; then rg set fex mine >/dev/null 2>&1; dev_switches_line fex FEX_INITIALCODEBUFFERMB FEX_RETURNLOOKUPOUTOFLINE FEX_GUESTADDRESSLITERALS FEX_EXITFPCRCHECK FEX_FOLDBRANCHPASTMARKERS FEX_SKIPRETURNSITESUSPENDCHECK FEX_ABIFLAGS; fi
 printf 'x\0DXMT_MTL4_PRESENT\0DXMT_MTL4_PRESENT_FENCES\0' >"$RTREE/d3d11.dll"
 rg rules >"$SANDBOX/rel-rules.txt" 2>&1
 rg status >"$SANDBOX/rel-status.txt" 2>&1
-check "  with a tree that names DXMT_MTL4_PRESENT_FENCES, my FEX whose record names FEX_INITIALCODEBUFFERMB and FEX_RETURNLOOKUPOUTOFLINE, and no dev-switches.conf: DXMT_MTL4_PRESENT_FENCES=1 right after DXMT_MTL4_PRESENT=mtl3 and FEX_INITIALCODEBUFFERMB=128, unset for CefHost.exe; no FEX_RETURNLOOKUPOUTOFLINE and none of version 19's four" \
-  eval 'sed -n 1p "$SANDBOX/rel-rules.txt" | grep -qE ";env=DXMT_MTL4_PRESENT=mtl3;env=DXMT_MTL4_PRESENT_FENCES=1(;|\$)" && sed -n 2p "$SANDBOX/rel-rules.txt" | grep -qE ";env=DXMT_MTL4_PRESENT=;env=DXMT_MTL4_PRESENT_FENCES=(;|\$)" && { ! fexb || { grep -qx fex_file=mine "$SANDBOX/rel-status.txt" && sed -n 1p "$SANDBOX/rel-rules.txt" | grep -qE ";env=FEX_INITIALCODEBUFFERMB=128(;|\$)" && sed -n 2p "$SANDBOX/rel-rules.txt" | grep -qE ";env=FEX_INITIALCODEBUFFERMB=(;|\$)"; }; } && ! grep -q -e FEX_RETURNLOOKUPOUTOFLINE -e FEX_GUESTADDRESSLITERALS -e FEX_EXITFPCRCHECK -e FEX_FOLDBRANCHPASTMARKERS -e FEX_SKIPRETURNSITESUSPENDCHECK "$SANDBOX/rel-rules.txt"'
+check "  with a tree that names DXMT_MTL4_PRESENT_FENCES, my FEX whose record names FEX_INITIALCODEBUFFERMB and FEX_RETURNLOOKUPOUTOFLINE, and no dev-switches.conf: DXMT_MTL4_PRESENT_FENCES=1 right after DXMT_MTL4_PRESENT=mtl3 and FEX_INITIALCODEBUFFERMB=128, unset for CefHost.exe; no FEX_RETURNLOOKUPOUTOFLINE, none of version 19's four and no FEX_ABIFLAGS" \
+  eval 'sed -n 1p "$SANDBOX/rel-rules.txt" | grep -qE ";env=DXMT_MTL4_PRESENT=mtl3;env=DXMT_MTL4_PRESENT_FENCES=1(;|\$)" && sed -n 2p "$SANDBOX/rel-rules.txt" | grep -qE ";env=DXMT_MTL4_PRESENT=;env=DXMT_MTL4_PRESENT_FENCES=(;|\$)" && { ! fexb || { grep -qx fex_file=mine "$SANDBOX/rel-status.txt" && sed -n 1p "$SANDBOX/rel-rules.txt" | grep -qE ";env=FEX_INITIALCODEBUFFERMB=128(;|\$)" && sed -n 2p "$SANDBOX/rel-rules.txt" | grep -qE ";env=FEX_INITIALCODEBUFFERMB=(;|\$)"; }; } && ! grep -q -e FEX_RETURNLOOKUPOUTOFLINE -e FEX_GUESTADDRESSLITERALS -e FEX_EXITFPCRCHECK -e FEX_FOLDBRANCHPASTMARKERS -e FEX_SKIPRETURNSITESUSPENDCHECK -e FEX_ABIFLAGS "$SANDBOX/rel-rules.txt"'
 cp "$DEVF" "$RDEVF"
 check "  the same rule with the file there by hand" eval '[ "$(rg rules 2>&1)" = "$(cat "$SANDBOX/rel-rules.txt")" ]'
 rg set metal 3 >/dev/null
