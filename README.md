@@ -1160,8 +1160,8 @@ exe=CefHost.exe;metal_hud=false;env=DXMT_SHADER_CACHE_PATH=
   Version 20 adds `FEX_ABIFLAGS=both` (#390), going in only while my FEX is in place and its
   `VERSION` names it: a call or a return in `Gw2-64.exe`'s own `.text` leaves the arithmetic flags
   dead, as the Windows x64 ABI allows, so FEX drops the flag work only that exit would have read.
-  In the game's busy code that's 27,350 of 1,088,837 host instructions, three in every epilogue.
-  `ret` or `call` does only one of the two. It carries an accepted risk (jdrly/FEX's ADR 0017): a
+  In the game's busy code that's 27,350 of 1,088,837 host instructions, three in every epilogue
+  of the form `add rsp, N; pop; ret`. `ret` or `call` does only one of the two. It carries an accepted risk (jdrly/FEX's ADR 0017): a
   routine that hands a flag across a call or a return would branch wrong. The scan of the game
   build of 2026-11-24 found none and has to run again on each new one, so after a game update it's
   the first line to take out.
